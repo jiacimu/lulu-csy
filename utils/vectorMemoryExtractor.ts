@@ -13,6 +13,7 @@ import { CharacterProfile, VectorMemory, APIConfig } from '../types';
 import { EmbeddingService, getEmbeddingConfig } from './embeddingService';
 import { DB } from './db';
 import { extractHormoneSnapshot, computeSalience } from './hormoneDynamics';
+import { tryBackendExtraction, tryBackendCallExtraction, pushMemories } from './backendClient';
 import { MindSnapshotExtractor } from './mindSnapshotExtractor';
 
 // Module-level concurrency lock: one extraction per character at a time
@@ -417,12 +418,35 @@ export const VectorMemoryExtractor = {
         extractingChars.add(charId);
         console.log(`🧠 [VectorExtract] Starting auto-extract for ${charSnapshot.name} (${newMsgs.length} new)`);
 
-        // Track the last successfully processed window's timestamp
-        // so error recovery only skips what was actually processed.
+        // ========== Backend-First Extraction ==========
+        try {
+            const backendMsgs = newMsgs.map(m => ({
+                role: m.role, content: m.content, type: m.type,
+                timestamp: m.timestamp || Date.now(),
+                id: m.id,
+            }));
+            const handled = await tryBackendExtraction(
+                charId, charSnapshot.name, backendMsgs, subApiConfig,
+            );
+            if (handled) {
+                console.log('🔗 [VectorExtract] Backend handled extraction, updating lastExtractAt');
+                const lastTs = newMsgs[newMsgs.length - 1]?.timestamp || Date.now();
+                const freshChar = (await DB.getAllCharacters()).find(c => c.id === charId);
+                if (freshChar) {
+                    freshChar.vectorMemoryLastExtractAt = lastTs;
+                    await DB.saveCharacter(freshChar);
+                }
+                extractingChars.delete(charId);
+                return;
+            }
+        } catch {
+            // Silent fallthrough to local pipeline
+        }
+
+        // ========== Local Pipeline (Fallback) ==========
         let lastProcessedTimestamp = lastExtractAt;
 
         try {
-            // Load vector cache once for the entire batch to avoid repeated full-table scans in isDuplicate.
             const allMems = await DB.getAllVectorMemories(charId);
             const vectorCache = new Map<string, number[]>(allMems.map(m => [m.id, m.vector]));
             console.log(`🧠 [VectorExtract] Loaded vector cache: ${vectorCache.size} memories`);
@@ -450,10 +474,19 @@ export const VectorMemoryExtractor = {
                     if (memId) newMemIds.push(memId);
                 }
 
-                // 情感基因溯源：对新记忆回填激素快照（fire-and-forget）
+                // 情感刻印：对新记忆回填激素快照（fire-and-forget）
                 if (newMemIds.length > 0 && subApiConfig) {
+                    // backfillNewMemories will auto-push to cloud after completion
                     VectorMemoryExtractor.backfillNewMemories(newMemIds, charSnapshot.name, subApiConfig)
                         .catch(e => console.warn('🧬 [AutoBackfill] Non-fatal:', e));
+                } else if (newMemIds.length > 0) {
+                    // ☁️ No sub-API → no hormone backfill, but still push memories to cloud
+                    DB.getVectorMemoriesByIds(newMemIds).then(mems => {
+                        if (mems.length > 0) {
+                            pushMemories(charId, mems)
+                                .catch(e => console.warn('☁️ [CloudSync] Auto-push (no sub-API) failed:', e));
+                        }
+                    }).catch(() => {});
                 }
 
                 // Mark this window as successfully processed
@@ -579,10 +612,16 @@ export const VectorMemoryExtractor = {
                     }
                 }
 
-                // 情感基因溯源：每个窗口的新记忆回填（fire-and-forget）
+                // 情感刻印：每个窗口的新记忆回填（fire-and-forget）
                 if (windowMemIds.length > 0 && subApiConfig && !signal?.aborted) {
+                    // backfillNewMemories will auto-push to cloud after completion
                     VectorMemoryExtractor.backfillNewMemories(windowMemIds, charName, subApiConfig)
                         .catch(e => console.warn('🧬 [BatchBackfill] Non-fatal:', e));
+                } else if (windowMemIds.length > 0 && !signal?.aborted) {
+                    // ☁️ No sub-API → push without hormone data
+                    DB.getVectorMemoriesByIds(windowMemIds).then(mems => {
+                        if (mems.length > 0) pushMemories(charId, mems).catch(() => {});
+                    }).catch(() => {});
                 }
             } catch (err: any) {
                 // AbortError is expected when user cancels — don't log as error
@@ -705,10 +744,16 @@ export const VectorMemoryExtractor = {
                     }
                 }
 
-                // 情感基因溯源（fire-and-forget）
+                // 情感刻印（fire-and-forget）
                 if (callMemIds.length > 0 && subApiConfig) {
+                    // backfillNewMemories will auto-push to cloud after completion
                     VectorMemoryExtractor.backfillNewMemories(callMemIds, charName, subApiConfig)
                         .catch(e => console.warn('🧬 [CallBackfill] Non-fatal:', e));
+                } else if (callMemIds.length > 0) {
+                    // ☁️ No sub-API → push without hormone data
+                    DB.getVectorMemoriesByIds(callMemIds).then(mems => {
+                        if (mems.length > 0) pushMemories(charId, mems).catch(() => {});
+                    }).catch(() => {});
                 }
 
                 // 窗口间延迟
@@ -842,12 +887,29 @@ export const VectorMemoryExtractor = {
         try {
             const memories = await DB.getVectorMemoriesByIds(memoryIds);
             const needBackfill = memories.filter(m => !m.hormoneSnapshot && m.sourceMessageIds?.length);
-            if (needBackfill.length === 0) return;
+            if (needBackfill.length === 0) {
+                // No hormone backfill needed, but still push the memories to cloud
+                if (memories.length > 0) {
+                    const charId = memories[0].charId;
+                    pushMemories(charId, memories)
+                        .catch(e => console.warn('☁️ [CloudSync] Auto-push failed (no backfill):', e));
+                }
+                return;
+            }
 
             console.log(`🧬 [AutoBackfill] Starting for ${needBackfill.length} new memories...`);
             await VectorMemoryExtractor.backfillHormoneSnapshots(
                 needBackfill, charName, subApiConfig,
             );
+
+            // ☁️ 星图锚定：情感刻印完成后，将完整记忆晶体静默推送到云端
+            const charId = memories[0]?.charId;
+            if (charId) {
+                // Re-read finalized memories (with hormone snapshots) from DB
+                const finalizedMemories = await DB.getVectorMemoriesByIds(memoryIds);
+                pushMemories(charId, finalizedMemories)
+                    .catch(e => console.warn('☁️ [CloudSync] Auto-push failed:', e));
+            }
         } catch (err) {
             console.error('🧬 [AutoBackfill] Error:', err);
         }

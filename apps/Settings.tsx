@@ -7,8 +7,8 @@ import type { SettingsPanel } from './settings/SettingsMenu';
 // Lazy load each settings panel for optimal performance
 const ApiSettings = React.lazy(() => import('./settings/ApiSettings'));
 const SubApiSettings = React.lazy(() => import('./settings/SubApiSettings'));
-const RealtimeSettings = React.lazy(() => import('./settings/RealtimeSettings'));
-const TtsSettings = React.lazy(() => import('./settings/TtsSettings'));
+const RealtimeSettings = React.lazy(() => import('./settings/realtime'));
+const TtsSettings = React.lazy(() => import('./settings/tts'));
 const SttSettings = React.lazy(() => import('./settings/SttSettings'));
 const EmbeddingSettings = React.lazy(() => import('./settings/EmbeddingSettings'));
 const DataSettings = React.lazy(() => import('./settings/DataSettings'));

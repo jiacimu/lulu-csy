@@ -72,4 +72,29 @@ export interface FullBackupData {
 
     // Vector Memory Data
     vectorMemories?: VectorMemory[];
+
+    // Scheduled Messages (delayed send)
+    scheduledMessages?: {
+        id: string;
+        charId: string;
+        content: string;
+        dueAt: number;
+        createdAt: number;
+        metadata?: any;
+    }[];
+
+    // Letters (信件)
+    letters?: any[];
+
+    // Extra localStorage config (sub API, embedding, agent, zhaixinglou, etc.)
+    extraLocalStorageConfig?: Record<string, string>;
+
+    // ─── Original SullyOS compatibility fields ───
+    songs?: any[];                  // Songwriting app
+    appearancePresets?: any[];       // Appearance presets
+    studyApiConfig?: any;           // Study room API config
+    studyTutorPresets?: any[];      // Study tutor presets
+    quizSessions?: any[];           // Quiz / Practice book
+    guidebookSessions?: any[];      // 攻略本 sessions
+    lifeSimState?: any;             // 模拟人生 state
 }

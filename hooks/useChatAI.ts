@@ -14,6 +14,7 @@ import { processXhsActions } from './xhsProcessor';
 import { VectorMemoryExtractor } from '../utils/vectorMemoryExtractor';
 import { MindSnapshotExtractor } from '../utils/mindSnapshotExtractor';
 import { EventExtractor } from '../utils/eventExtractor';
+import { extractThinking, stripCoTResidual } from '../utils/thinkingExtractor';
 
 interface UseChatAIProps {
     char: CharacterProfile | undefined;
@@ -274,10 +275,32 @@ mode 可选值：
                 fullMessages.push({ role: 'system', content: `[Reminder: 每句话必须用 <翻译><原文>...</原文><译文>...</译文></翻译> 标签包裹。一句一个标签。绝对不能省略。]` });
             }
 
-            // 3. API Call (safe parsing: prevents "Unexpected token <" on HTML error pages)
+            // 3. API Call — when deep immersion mode is on and model is Gemini,
+            // request native thinking via thinking_config. Otherwise, plain call.
+            const isGeminiModel = /gemini/i.test(apiConfig.model || '');
+            const wantNativeThinking = !!(apiConfig.useGeminiJailbreak && isGeminiModel);
+
+            // 3.0 Prefill injection — force CoT <thinking> start (always-on)
+            const usePrefill = true;
+            if (usePrefill) {
+                fullMessages.push({ role: 'assistant', content: '<thinking>\n' });
+                console.log('🧩 [Prefill] Injected <thinking> prefill assistant message');
+            }
+
+            const requestBody: Record<string, any> = {
+                model: apiConfig.model,
+                messages: fullMessages,
+                temperature: 0.85,
+                stream: false,
+            };
+            if (wantNativeThinking && !usePrefill) {
+                // Gemini 2.5+ native thinking: tokens budget (8k gives decent CoT depth)
+                // Skip when prefill is active — prefill forces text-embedded thinking instead
+                requestBody.thinking = { type: 'enabled', budget_tokens: 8000 };
+            }
             let data = await safeFetchJson(`${baseUrl}/chat/completions`, {
                 method: 'POST', headers,
-                body: JSON.stringify({ model: apiConfig.model, messages: fullMessages, temperature: 0.85, stream: false })
+                body: JSON.stringify(requestBody)
             });
             updateTokenUsage(data, historyMsgCount, 'initial');
 
@@ -295,14 +318,40 @@ mode 可选值：
                 throw new Error(`AI 生成了空白内容。可能是触发了风控拦截，或者超出了该模型的上下文窗口上限${hint}。请尝试清理聊天上下文或更换更大上下文的模型。`);
             }
 
+            // 4.0 Extract thinking chain — try native Gemini thinking field first,
+            // then fall back to <thinking>/<think> tag extraction for DeepSeek/Qwen3.
+            // Gemini returns thinking in message.reasoning_content or via content_parts.
+            const nativeThinking: string = (
+                data.choices[0]?.message?.reasoning_content ||
+                data.choices[0]?.message?.thinking ||
+                ''
+            );
+
+            // 4.0a Prefill reconstruction — restore the <thinking> opening tag
+            // ONLY if we used prefill AND the model didn't use the native reasoning channel.
+            // (If nativeThinking exists, the text content is pure message, no need to pollute it)
+            if (usePrefill && !nativeThinking && !aiContent.includes('<thinking>') && !aiContent.includes('<think>')) {
+                aiContent = '<thinking>\n' + aiContent;
+                console.log('🧩 [Prefill] Reconstructed <thinking> tag onto response (Fallback mode)');
+            }
+
+            console.log(`🧠 [ThinkingDebug] useGeminiJailbreak=${apiConfig.useGeminiJailbreak} wantNativeThinking=${wantNativeThinking} | raw length=${aiContent.length} | nativeThinking length=${nativeThinking.length} | has <thinking>=${aiContent.includes('<thinking>')} | has <think>=${aiContent.includes('<think>')}`);
+            console.log(`🧠 [ThinkingDebug] RAW AI OUTPUT (first 500 chars):`, aiContent.substring(0, 500));
+
+            // Extract embedded text thinking if present
+            const extracted = extractThinking(aiContent);
+            // Prefer native thinking field; fall back to text-embedded tags
+            const thinkingContent = nativeThinking.trim() || extracted.thinking || '';
+            
+            // ALWAYS use the extracted content, which safely strips all thinking tags.
+            // This prevents the tag leak when nativeThinking is true, and fixes unclosed tag leaks.
+            aiContent = extracted.content;
+
+            // CLEAN UP prefixes and timestamps LAST, so the regex anchors correctly
+            // at the start of the string (now that <thinking> is gone!)
             aiContent = ChatParser.cleanAiSecondPass(aiContent);
 
-            // 4.1 Strip <thinking> CoT content (from cot_protocol)
-            // Guards against 3 failure modes: complete tags, unclosed tag, all-in-thinking
-            const preThinkingContent = aiContent;
-            aiContent = aiContent.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').trim();
-            aiContent = aiContent.replace(/<thinking>[\s\S]*/gi, '').trim();
-            if (!aiContent) aiContent = preThinkingContent.replace(/<\/?thinking>/gi, '').trim();
+            console.log(`🧠 [ThinkingDebug] final thinkingContent length=${thinkingContent.length}, preview:`, thinkingContent.substring(0, 200));
 
             // 5. Handle Recall (Loop if needed)
             const recallMatch = aiContent.match(/\[\[RECALL:\s*(\d{4})[-/年](\d{1,2})\]\]/);
@@ -949,6 +998,7 @@ mode 可选值：
                 const hasTranslationTags = /<翻译>\s*<原文>[\s\S]*?<\/原文>\s*<译文>[\s\S]*?<\/译文>\s*<\/翻译>/.test(aiContent);
 
                 let globalMsgIndex = 0;
+                let firstSavedMsgId: number | null = null;
                 let notificationPlayed = false;
                 const playFirstNotification = () => {
                     if (notificationPlayed) { haptic.light(); return; }
@@ -1076,7 +1126,8 @@ mode 可选值：
                         }
                     } else {
                         // Normal text message
-                        await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: cleanChunk, replyTo: replyData });
+                        const savedId = await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: cleanChunk, replyTo: replyData });
+                        if (firstSavedMsgId === null) firstSavedMsgId = savedId;
                         setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
                         playFirstNotification();
                         saved++;
@@ -1237,6 +1288,12 @@ mode 可选值：
                     }
                 }
 
+                // 9. Attach thinking chain metadata to the first saved message
+                if (thinkingContent && firstSavedMsgId !== null) {
+                    await DB.updateMessageMetadata(firstSavedMsgId, { thinking: thinkingContent });
+                    // Refresh messages to pick up the updated metadata
+                    setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
+                }
             } else {
                 // If content was empty (e.g. only actions), just refresh
                 setMessages(await DB.getRecentMessagesByCharId(char.id, 200));

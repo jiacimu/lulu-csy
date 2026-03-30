@@ -650,7 +650,7 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
                     <>
                         {/* Batch Operations */}
                         <div className="bg-white/60 backdrop-blur-md rounded-3xl p-4 border border-white shadow-sm space-y-3">
-                            <h4 className="text-[11px] font-bold text-slate-700 tracking-widest uppercase">存档清洗与提取</h4>
+                            <h4 className="text-[11px] font-bold text-slate-700 tracking-widest uppercase">存档沉淀与提取</h4>
                             <div className="space-y-2">
                                 <p className="text-[10px] text-slate-500 font-medium">1. 增量补充向量记忆 (消耗 Token)</p>
                                 <div className="flex items-center justify-between gap-2 bg-slate-50/50 p-2 rounded-2xl border border-white">
@@ -668,7 +668,7 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
                             <div className="pt-2 border-t border-slate-100/50 flex justify-between items-center">
                                 <p className="text-[10px] text-slate-500 font-medium">2. 迁移传统日志 (免 Token)</p>
                                 <button onClick={handleImportMemories} disabled={isBatching} className="py-1 px-3 rounded-xl text-[10px] font-bold text-slate-700 bg-white border border-slate-200 active:scale-95 transition-all shadow-sm hover:bg-slate-50 disabled:opacity-50">
-                                    一键清洗导入
+                                    一键沉淀导入
                                 </button>
                             </div>
                             <div className="pt-2 border-t border-slate-100/50 flex justify-between items-center">

@@ -1,6 +1,7 @@
 
 import { DB } from './db';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { stripCoTResidual } from './thinkingExtractor';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Bilingual Marker — single source of truth for the %%BILINGUAL%% system
@@ -140,10 +141,13 @@ export const ChatParser = {
      * Called after every API completion (initial + re-calls from search/diary/xhs).
      */
     cleanAiSecondPass: (text: string): string => {
-        return text
+        let result = text
             .replace(/\[\d{4}[-/年]\d{1,2}[-/月]\d{1,2}.*?\]/g, '')
             .replace(/^[\w\u4e00-\u9fa5]+:\s*/, '')
             .replace(/\[(?:你|User|用户|System)\s*发送了表情包[:：]\s*(.*?)\]/g, '[[SEND_EMOJI: $1]]');
+        // Strip any CoT protocol residual that leaked through (e.g. from Gemini native thinking)
+        result = stripCoTResidual(result);
+        return result;
     },
 
     /**

@@ -19,6 +19,7 @@ import { useVoiceTts } from '../hooks/useVoiceTts';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { CloudStt, SttNotConfiguredError } from '../utils/cloudStt';
 import { haptic } from '../utils/haptics';
+import { BackendAgentManager } from '../utils/autonomousAgent';
 
 const Chat: React.FC = () => {
     const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, closeApp, openApp, customThemes, removeCustomTheme, addToast, userProfile, lastMsgTimestamp, groups, clearUnread, realtimeConfig, ttsConfig, sttConfig } = useOS();
@@ -394,6 +395,9 @@ const Chat: React.FC = () => {
 
         await DB.saveMessage(msgPayload);
         haptic.medium();
+
+        // Notify backend agent that user replied (resets consecutiveIgnored)
+        BackendAgentManager.notifyUserReplied(char.id).catch(() => {});
 
         // Detect XHS link in user text and create xhs_card via MCP
         if (type === 'text') {
@@ -1078,6 +1082,12 @@ const Chat: React.FC = () => {
         return e.categoryId === activeCategory;
     }), [emojis, activeCategory, hiddenCategoryIds]);
 
+    // All visible emojis (cross-category) for auto-suggest while typing
+    const allVisibleEmojis = useMemo(() => emojis.filter(e => {
+        if (e.categoryId && hiddenCategoryIds.has(e.categoryId)) return false;
+        return true;
+    }), [emojis, hiddenCategoryIds]);
+
     // Memoize ChatInputArea callbacks
     const handleSendCallback = useCallback(() => handleSendText(), [char, input, replyTarget]);
     const handleCharSelectCallback = useCallback((id: string) => { setActiveCharacterId(id); setShowPanel('none'); }, []);
@@ -1250,6 +1260,8 @@ const Chat: React.FC = () => {
                     updateCharacter(char.id, { customStatusTemplates: [tpl] });
                     addToast('自定义模板已保存', 'success');
                 }}
+                showThinking={char.showThinking !== false}
+                onToggleShowThinking={() => updateCharacter(char.id, { showThinking: char.showThinking === false ? true : false })}
             />
 
             <ChatHeader
@@ -1316,6 +1328,7 @@ const Chat: React.FC = () => {
                             innerVoice={isLastAssistant ? (char.moodState as any)?.innerVoice : undefined}
                             statusCardData={isLastAssistant && (char.statusBarMode === 'creative' || char.statusBarMode === 'custom' || char.statusBarMode === 'freeform') ? char.lastStatusCard : undefined}
                             onRetryInnerVoice={isLastAssistant ? retryMindSnapshot : undefined}
+                            showThinking={char.showThinking !== false}
                         />
                     );
                 })}
@@ -1366,6 +1379,7 @@ const Chat: React.FC = () => {
                     onForwardSelected={handleForwardSelected}
                     selectedCount={selectedMsgIds.size}
                     emojis={filteredEmojis}
+                    allVisibleEmojis={allVisibleEmojis}
                     characters={characters} activeCharacterId={activeCharacterId}
                     onCharSelect={handleCharSelectCallback}
                     customThemes={customThemes} onUpdateTheme={(id) => updateCharacter(char.id, { bubbleStyle: id })}

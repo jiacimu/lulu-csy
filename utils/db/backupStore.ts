@@ -6,7 +6,7 @@ import {
     STORE_ROOM_NOTES, STORE_GROUPS, STORE_JOURNAL_STICKERS, STORE_SOCIAL_POSTS,
     STORE_COURSES, STORE_GAMES, STORE_WORLDBOOKS, STORE_NOVELS,
     STORE_BANK_TX, STORE_BANK_DATA, STORE_XHS_ACTIVITIES, STORE_XHS_STOCK,
-    STORE_VECTOR_MEMORIES,
+    STORE_VECTOR_MEMORIES, STORE_SCHEDULED, STORE_LETTERS,
     DB_NAME_CONST
 } from './core';
 
@@ -41,7 +41,7 @@ export const exportFullData = async (): Promise<Partial<FullBackupData>> => {
         });
     };
 
-    const [characters, messages, themes, emojis, emojiCategories, assets, galleryImages, userProfiles, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, journalStickers, socialPosts, courses, games, worldbooks, novels, bankTx, bankData, xhsActivities, xhsStockImages, vectorMemories] = await Promise.all([
+    const [characters, messages, themes, emojis, emojiCategories, assets, galleryImages, userProfiles, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, journalStickers, socialPosts, courses, games, worldbooks, novels, bankTx, bankData, xhsActivities, xhsStockImages, vectorMemories, scheduledMessages, letters] = await Promise.all([
         getAllFromStore(STORE_CHARACTERS), getAllFromStore(STORE_MESSAGES),
         getAllFromStore(STORE_THEMES), getAllFromStore(STORE_EMOJIS),
         getAllFromStore(STORE_EMOJI_CATEGORIES), getAllFromStore(STORE_ASSETS),
@@ -55,6 +55,7 @@ export const exportFullData = async (): Promise<Partial<FullBackupData>> => {
         getAllFromStore(STORE_BANK_TX), getAllFromStore(STORE_BANK_DATA),
         getAllFromStore(STORE_XHS_ACTIVITIES), getAllFromStore(STORE_XHS_STOCK),
         getAllFromStore(STORE_VECTOR_MEMORIES),
+        getAllFromStore(STORE_SCHEDULED), getAllFromStore(STORE_LETTERS),
     ]);
 
     const userProfile = userProfiles.length > 0 ? { name: userProfiles[0].name, avatar: userProfiles[0].avatar, bio: userProfiles[0].bio } : undefined;
@@ -67,7 +68,8 @@ export const exportFullData = async (): Promise<Partial<FullBackupData>> => {
         bankDollhouse: dollhouseRecord?.data || undefined,
         bankTransactions: bankTx,
         xhsActivities, xhsStockImages,
-        vectorMemories
+        vectorMemories,
+        scheduledMessages, letters
     };
 };
 
@@ -81,7 +83,8 @@ export const importFullData = async (data: FullBackupData): Promise<void> => {
         STORE_GROUPS, STORE_JOURNAL_STICKERS, STORE_SOCIAL_POSTS, STORE_COURSES, STORE_GAMES, STORE_WORLDBOOKS, STORE_NOVELS,
         STORE_BANK_TX, STORE_BANK_DATA,
         STORE_XHS_ACTIVITIES, STORE_XHS_STOCK,
-        STORE_VECTOR_MEMORIES
+        STORE_VECTOR_MEMORIES,
+        STORE_SCHEDULED, STORE_LETTERS
     ].filter(name => db.objectStoreNames.contains(name));
 
     const tx = db.transaction(availableStores, 'readwrite');
@@ -187,6 +190,8 @@ export const importFullData = async (data: FullBackupData): Promise<void> => {
     if (data.xhsActivities) clearAndAdd(STORE_XHS_ACTIVITIES, data.xhsActivities);
     if (data.xhsStockImages) clearAndAdd(STORE_XHS_STOCK, data.xhsStockImages);
     if (data.vectorMemories) clearAndAdd(STORE_VECTOR_MEMORIES, data.vectorMemories);
+    if (data.scheduledMessages) clearAndAdd(STORE_SCHEDULED, data.scheduledMessages);
+    if (data.letters) clearAndAdd(STORE_LETTERS, data.letters);
 
     if (data.userProfile) {
         if (availableStores.includes(STORE_USER)) {

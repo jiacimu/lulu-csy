@@ -5,6 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import Modal from '../../components/os/Modal';
+import CloudBackupPanel from './CloudBackupPanel';
 
 const DataSettings: React.FC = () => {
     const { exportSystem, importSystem, addToast, resetSystem, sysOperation } = useOS();
@@ -102,6 +103,9 @@ const DataSettings: React.FC = () => {
                     格式化系统 (出厂设置)
                 </button>
             </section>
+
+            {/* 云端备份 */}
+            <CloudBackupPanel />
 
             {/* 导出完成 Modal */}
             <Modal isOpen={showExportModal} title="备份下载" onClose={() => setShowExportModal(false)} footer={

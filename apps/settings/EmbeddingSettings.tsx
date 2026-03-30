@@ -2,6 +2,9 @@
 import React, { useState } from 'react';
 import { useOS } from '../../context/OSContext';
 
+import { DB } from '../../utils/db';
+import { pushMemories } from '../../utils/backendClient';
+
 const EmbeddingSettings: React.FC = () => {
     const { addToast } = useOS();
 
@@ -98,6 +101,7 @@ const EmbeddingSettings: React.FC = () => {
     };
 
     return (
+        <>
         <section className="relative overflow-hidden bg-[#f0f7ee]/70 backdrop-blur-sm rounded-3xl p-6 shadow-sm border border-[#d4e8d0]/60">
             <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-gradient-to-br from-[#c8e8c0]/30 to-[#d4e4f7]/30 blur-2xl pointer-events-none" />
 
@@ -250,7 +254,11 @@ const EmbeddingSettings: React.FC = () => {
                 </div>
             </div>
         </section>
+
+        </>
     );
 };
+
+
 
 export default EmbeddingSettings;

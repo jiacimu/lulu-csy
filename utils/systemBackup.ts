@@ -163,19 +163,39 @@ async function restoreAssetsFromZip(obj: any, zip: JSZipLike | null): Promise<an
 // ─── Store Definitions ──────────────────────────────────────────────────
 
 const ALL_STORES = [
-    'characters', 'messages', 'themes', 'emojis', 'assets', 'gallery',
+    'characters', 'messages', 'themes', 'emojis', 'emoji_categories', 'assets', 'gallery',
     'user_profile', 'diaries', 'tasks', 'anniversaries', 'room_todos',
     'room_notes', 'groups', 'journal_stickers', 'social_posts', 'courses', 'games', 'worldbooks', 'novels',
     'bank_transactions', 'bank_data',
     'xhs_activities', 'xhs_stock',
-    'vector_memories'
+    'vector_memories',
+    'scheduled_messages', 'letters'
+];
+
+// localStorage keys to include in backup (sub API, embedding, backend, etc.)
+const EXTRA_LS_KEYS = [
+    'sub_api_key', 'sub_api_base_url', 'sub_api_model', 'sub_api_presets',
+    'csyos_backend_token', 'csyos_backend_url',
+    'embedding_provider', 'embedding_api_key', 'embedding_base_url', 'embedding_model',
+    'embedding_api_key_openai', 'embedding_base_url_openai', 'embedding_model_openai',
+    'embedding_api_key_cohere', 'embedding_base_url_cohere', 'embedding_model_cohere',
+    'cohere_rerank_api_key', 'cohere_rerank_use_paid',
+    'body_signal_mode', 'autonomous_debug',
+    // Agent config
+    'agent_config',
+    // 摘星楼 secondary API
+    'zhaixinglou_secondary_api_config', 'zhaixinglou_secondary_api_presets', 'zhaixinglou_secondary_models',
+    // Misc app settings
+    'schedule_app_theme', 'os_haptics_enabled', 'os_last_active_char_id',
+    // User ID
+    'csyos_user_id',
 ];
 
 function getStoresToProcess(mode: 'text_only' | 'media_only' | 'full'): string[] {
     if (mode === 'full') return ALL_STORES;
     if (mode === 'text_only') return ALL_STORES.filter(s => s !== 'assets');
     // media_only
-    return ['gallery', 'emojis', 'journal_stickers', 'user_profile', 'characters', 'messages', 'themes', 'assets', 'bank_data'];
+    return ['gallery', 'emojis', 'emoji_categories', 'journal_stickers', 'user_profile', 'characters', 'messages', 'themes', 'assets', 'bank_data'];
 }
 
 // ─── Export Pipeline ────────────────────────────────────────────────────
@@ -337,10 +357,23 @@ export async function exportSystemData(
             }
             case 'xhs_activities': backupData.xhsActivities = processedData; break;
             case 'xhs_stock': backupData.xhsStockImages = processedData; break;
+            case 'emoji_categories': backupData.emojiCategories = processedData; break;
             case 'vector_memories': backupData.vectorMemories = processedData; break;
+            case 'scheduled_messages': backupData.scheduledMessages = processedData; break;
+            case 'letters': backupData.letters = processedData; break;
         }
 
         await new Promise(resolve => setTimeout(resolve, 10));
+    }
+
+    // Collect extra localStorage config keys
+    const extraConfig: Record<string, string> = {};
+    for (const key of EXTRA_LS_KEYS) {
+        const val = localStorage.getItem(key);
+        if (val !== null) extraConfig[key] = val;
+    }
+    if (Object.keys(extraConfig).length > 0) {
+        backupData.extraLocalStorageConfig = extraConfig;
     }
 
     onProgress('正在生成压缩包...', 95);
@@ -454,6 +487,13 @@ export async function importSystemData(
 
     if (data.roomCustomAssets) {
         await DB.saveAsset('room_custom_assets_list', JSON.stringify(data.roomCustomAssets));
+    }
+
+    // Restore extra localStorage config (sub API, embedding, backend, etc.)
+    if (data.extraLocalStorageConfig) {
+        for (const [key, value] of Object.entries(data.extraLocalStorageConfig)) {
+            localStorage.setItem(key, value);
+        }
     }
 
     callbacks.addToast('恢复成功，系统即将重启...', 'success');
