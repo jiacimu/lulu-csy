@@ -41,7 +41,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
     onCallPress
 }) => {
     return (
-        <div className="sully-chat-header min-h-[6rem] pt-[max(env(safe-area-inset-top),_1rem)] bg-white/80 backdrop-blur-xl px-5 flex items-end pb-4 border-b border-slate-200/60 shrink-0 z-30 sticky top-0 shadow-sm relative transition-all duration-300">
+        <div className="sully-chat-header min-h-[6rem] pt-10 bg-white/80 backdrop-blur-xl px-5 flex items-end pb-4 border-b border-slate-200/60 shrink-0 z-30 sticky top-0 shadow-sm relative transition-all duration-300">
             {selectionMode ? (
                 <div className="flex items-center justify-between w-full">
                     <button onClick={onCancelSelection} className="text-sm font-bold text-slate-500 px-2 py-1">取消</button>

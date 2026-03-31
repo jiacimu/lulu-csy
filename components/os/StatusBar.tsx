@@ -67,7 +67,7 @@ const StatusBar: React.FC = () => {
         className="w-full flex justify-between items-start px-6 text-[11px] font-bold z-50 absolute top-0 left-0 bg-transparent transition-colors duration-500 select-none pointer-events-none"
         style={{
           color: textColor,
-          paddingTop: 'max(4px, env(safe-area-inset-top))',
+          paddingTop: '8px',
           height: 'auto',
           minHeight: '2rem'
         }}
