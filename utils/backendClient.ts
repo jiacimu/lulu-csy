@@ -323,6 +323,7 @@ export async function pushMemories(charId: string, memories: any[]): Promise<{ s
             method: 'POST',
             headers,
             body: JSON.stringify({ charId, memories, clientTimestamp: Date.now() }),
+            signal: AbortSignal.timeout(30000), // 30s timeout
         });
 
         if (!resp.ok) {
