@@ -188,22 +188,31 @@ async function buildContextSnapshot(charId: string, char: CharacterProfile) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  BackendAgentManager — Frontend Orchestrator
+//  BackendAgentManager — Frontend Orchestrator (SSE-powered)
 // ═══════════════════════════════════════════════════════════════
 
+// Module-level singleton to prevent React StrictMode double-connect
+let _instance: BackendAgentManager | null = null;
+
 export class BackendAgentManager {
-    private pollTimer: ReturnType<typeof setInterval> | null = null;
     private contextTimer: ReturnType<typeof setInterval> | null = null;
+    private pollTimer: ReturnType<typeof setInterval> | null = null;
+    private eventSource: EventSource | null = null;
+    private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     private stopped = false;
     private charId: string = '';
     private charRef: CharacterProfile | null = null;
+    private sseFailCount = 0;
+    private useFallbackPolling = false;
+    private reconnectDelay = 1000; // Exponential backoff: 1s → 2s → 4s → max 30s
 
     /**
      * 启动 Agent:
      *   1. 推送完整上下文到后端
      *   2. 调用 /api/agent/start
-     *   3. 启动消息轮询 (30s) 和上下文推送 (5min)
-     * 
+     *   3. 建立 SSE 连接（替代 30s 轮询）
+     *   4. 启动上下文推送 (5min)
+     *
      * @returns cleanup 函数
      */
     start(
@@ -211,9 +220,18 @@ export class BackendAgentManager {
         char: CharacterProfile,
         secondaryApi: SecondaryApiConfig,
     ): () => void {
+        // Singleton guard: if another instance is running for the same char, stop it
+        if (_instance && _instance !== this) {
+            _instance.stop();
+        }
+        _instance = this;
+
         this.stopped = false;
         this.charId = charId;
         this.charRef = char;
+        this.sseFailCount = 0;
+        this.useFallbackPolling = false;
+        this.reconnectDelay = 1000;
 
         const isDebug = localStorage.getItem('autonomous_debug') === 'true';
 
@@ -259,18 +277,8 @@ export class BackendAgentManager {
 
                 if (this.stopped) return;
 
-                // 4. Start polling for messages (every 30s)
-                this.pollTimer = setInterval(() => {
-                    if (this.stopped) return;
-                    this.pollMessages().catch(err => {
-                        if (isDebug) console.warn('🤖 [Agent] Poll error:', err.message);
-                    });
-                }, 30000);
-
-                // Also poll immediately after a short delay
-                setTimeout(() => {
-                    if (!this.stopped) this.pollMessages().catch(() => {});
-                }, 10000);
+                // 4. Connect SSE (replaces 30s polling)
+                this.connectSSE();
 
                 // 5. Push context updates every 5 minutes
                 this.contextTimer = setInterval(() => {
@@ -290,6 +298,17 @@ export class BackendAgentManager {
 
     stop(): void {
         this.stopped = true;
+        _instance = null;
+
+        // Close SSE connection
+        if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+        }
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
         if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
         if (this.contextTimer) { clearInterval(this.contextTimer); this.contextTimer = null; }
 
@@ -305,8 +324,138 @@ export class BackendAgentManager {
     }
 
     /**
-     * Poll for backend-generated messages and write them to local DB
-     * as scheduled messages (same pipeline as before).
+     * Connect to the SSE stream endpoint.
+     * On failure, retries with exponential backoff.
+     * After 3 consecutive failures, degrades to 30s polling.
+     */
+    private connectSSE(): void {
+        if (this.stopped || !this.charId) return;
+
+        const baseUrl = getBackendUrl();
+        if (!baseUrl) {
+            console.warn('🤖 [Agent] No backend URL, falling back to polling');
+            this.startFallbackPolling();
+            return;
+        }
+
+        // Build URL with query-param auth (EventSource can't set headers)
+        const token = 'change-me-to-a-random-string';
+        const userId = getUserId();
+        const sseUrl = `${baseUrl}/api/agent/stream?charId=${encodeURIComponent(this.charId)}&token=${encodeURIComponent(token)}&userId=${encodeURIComponent(userId)}`;
+
+        const isDebug = localStorage.getItem('autonomous_debug') === 'true';
+
+        // Close existing connection if any
+        if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+        }
+
+        try {
+            const es = new EventSource(sseUrl);
+            this.eventSource = es;
+
+            // Connected
+            es.addEventListener('connected', () => {
+                console.log('🤖 [Agent] SSE connected');
+                this.sseFailCount = 0;
+                this.reconnectDelay = 1000;
+
+                // If we were in fallback polling mode, stop it
+                if (this.useFallbackPolling && this.pollTimer) {
+                    clearInterval(this.pollTimer);
+                    this.pollTimer = null;
+                    this.useFallbackPolling = false;
+                    console.log('🤖 [Agent] SSE recovered, stopped fallback polling');
+                }
+            });
+
+            // Message received
+            es.addEventListener('message', async (event: MessageEvent) => {
+                if (this.stopped) return;
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (isDebug) {
+                        console.log(`🤖 [Agent] SSE message: "${(msg.content || '').slice(0, 40)}..."`);
+                    }
+
+                    const now = Date.now();
+                    await DB.saveScheduledMessage({
+                        id: `backend-${msg.id}-sse`,
+                        charId: this.charId,
+                        content: msg.content,
+                        dueAt: now,
+                        createdAt: msg.createdAt || now,
+                        metadata: {
+                            source: 'autonomous',
+                            reason: msg.metadata?.reason,
+                            fromBackend: true,
+                        },
+                    });
+                } catch (err: any) {
+                    if (isDebug) console.warn('🤖 [Agent] SSE message parse error:', err.message);
+                }
+            });
+
+            // Server says "done, reconnect please" (90s lifetime expired)
+            es.addEventListener('done', () => {
+                if (isDebug) console.log('🤖 [Agent] SSE session ended, reconnecting...');
+                es.close();
+                this.eventSource = null;
+                if (!this.stopped) {
+                    // Reconnect immediately (this is a graceful server-initiated close)
+                    this.reconnectTimer = setTimeout(() => this.connectSSE(), 500);
+                }
+            });
+
+            // Error: exponential backoff reconnect
+            es.onerror = () => {
+                if (this.stopped) return;
+                this.sseFailCount++;
+                es.close();
+                this.eventSource = null;
+
+                if (this.sseFailCount >= 3 && !this.useFallbackPolling) {
+                    console.warn(`🤖 [Agent] SSE failed ${this.sseFailCount} times, degrading to polling`);
+                    this.startFallbackPolling();
+                    // Still try to reconnect SSE periodically in the background
+                    this.reconnectTimer = setTimeout(() => this.connectSSE(), 60000);
+                    return;
+                }
+
+                const delay = Math.min(this.reconnectDelay, 30000);
+                if (isDebug) {
+                    console.log(`🤖 [Agent] SSE error, reconnecting in ${delay}ms (fail #${this.sseFailCount})`);
+                }
+                this.reconnectTimer = setTimeout(() => this.connectSSE(), delay);
+                this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+            };
+        } catch (err: any) {
+            console.warn('🤖 [Agent] EventSource constructor failed:', err.message);
+            this.startFallbackPolling();
+        }
+    }
+
+    /**
+     * Fallback: 30s polling (same as old behavior).
+     * Activated when SSE fails 3 consecutive times.
+     */
+    private startFallbackPolling(): void {
+        if (this.pollTimer || this.stopped) return;
+        this.useFallbackPolling = true;
+
+        console.log('🤖 [Agent] Starting fallback polling (30s interval)');
+        this.pollTimer = setInterval(() => {
+            if (this.stopped) return;
+            this.pollMessages().catch(() => {});
+        }, 30000);
+
+        // Immediate first poll
+        this.pollMessages().catch(() => {});
+    }
+
+    /**
+     * Poll for backend-generated messages (fallback mode).
      */
     async pollMessages(): Promise<void> {
         if (!this.charId) return;
@@ -331,7 +480,7 @@ export class BackendAgentManager {
                     id: `backend-${msg.id}-${i}`,
                     charId: this.charId,
                     content: msg.content,
-                    dueAt: now + i * 3000, // Stagger by 3s
+                    dueAt: now + i * 3000,
                     createdAt: msg.created_at || now,
                     metadata: {
                         source: 'autonomous',
@@ -344,7 +493,6 @@ export class BackendAgentManager {
             console.log(`🤖 [Agent] Saved ${messages.length} backend message(s) to scheduled queue`);
 
         } catch (err: any) {
-            // Silent failure — will retry on next poll
             if (localStorage.getItem('autonomous_debug') === 'true') {
                 console.warn('🤖 [Agent] Poll failed:', err.message);
             }
@@ -353,13 +501,11 @@ export class BackendAgentManager {
 
     /**
      * Push fresh context snapshot to backend.
-     * Called periodically (5 min) and before page unload.
      */
     async pushContext(): Promise<void> {
         if (!this.charId || !this.charRef) return;
 
         try {
-            // Refresh character data
             let freshChar = this.charRef;
             try {
                 const allChars = await DB.getAllCharacters();
@@ -397,20 +543,4 @@ export class BackendAgentManager {
             });
         } catch { /* silent */ }
     }
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  Legacy compatibility — executeBackendDecision (kept for reference)
-// ═══════════════════════════════════════════════════════════════
-
-/**
- * @deprecated — Backend now handles message generation directly.
- * Kept for backward compatibility during transition.
- */
-export async function executeBackendDecision(
-    charId: string,
-    char: CharacterProfile,
-    decision: LLMDecision,
-): Promise<void> {
-    console.warn('🤖 [Agent] executeBackendDecision is deprecated — backend generates messages directly');
 }
