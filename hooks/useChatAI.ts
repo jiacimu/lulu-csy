@@ -523,7 +523,7 @@ end if
                 setWeiboStatus(`正在刷微博: ${weiboQuery}...`);
 
                 try {
-                    const wbRes = await safeFetchJson(`https://chushiyu.de5.net/api/public/weibo/search?q=${encodeURIComponent(weiboQuery)}`, {});
+                    const wbRes = await safeFetchJson(`https://sully-n.sully-tts-proxy.workers.dev/weibo/search?q=${encodeURIComponent(weiboQuery)}`, {});
                     console.log('📱 [WeiboSearch] 搜索结果:', wbRes);
 
                     if (wbRes.success && wbRes.posts && wbRes.posts.length > 0) {
