@@ -92,7 +92,7 @@ export const HotSearchSection = React.memo<HotSearchProps>(({ enabled, set }) =>
             </div>
             {enabled && (
                 <div className="space-y-2">
-                    <p className="text-xs text-red-600/70">开启后，AI 将感知微博热搜 TOP 8，可以主动和你聊热点话题。无需配置，免费使用。</p>
+                    <p className="text-xs text-red-600/70">开启后，AI 将感知微博热搜 TOP 8，并能在对话中自主搜索真实微博帖子与你探讨。无需配置，免费使用。</p>
                     <button onClick={testHotSearch} className="w-full py-2 bg-red-100 text-red-600 text-xs font-bold rounded-xl active:scale-95 transition-transform">测试热搜接口</button>
                     {testStatus && <p className="text-xs text-center text-red-600/80">{testStatus}</p>}
                 </div>
