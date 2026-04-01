@@ -57,6 +57,7 @@ export const useChatAI = ({
     const [searchStatus, setSearchStatus] = useState<string>('');
     const [diaryStatus, setDiaryStatus] = useState<string>('');
     const [xhsStatus, setXhsStatus] = useState<string>('');
+    const [weiboStatus, setWeiboStatus] = useState<string>('');
     const [lastTokenUsage, setLastTokenUsage] = useState<number | null>(null);
     const [tokenBreakdown, setTokenBreakdown] = useState<{ prompt: number; completion: number; total: number; msgCount: number; pass: string } | null>(null);
 
@@ -513,6 +514,62 @@ end if
 
             // 清理残留的搜索标记
             aiContent = aiContent.replace(/\[\[SEARCH:.*?\]\]/g, '').trim();
+
+            // 5.55 Handle Weibo Search (微博搜索)
+            const weiboSearchMatch = aiContent.match(/\[\[WEIBO_SEARCH:\s*(.+?)\]\]/);
+            if (weiboSearchMatch && realtimeConfig?.hotSearchEnabled) {
+                const weiboQuery = weiboSearchMatch[1].trim();
+                console.log('📱 [WeiboSearch] AI触发微博搜索:', weiboQuery);
+                setWeiboStatus(`正在刷微博: ${weiboQuery}...`);
+
+                try {
+                    const wbRes = await safeFetchJson(`https://chushiyu.de5.net/api/public/weibo/search?q=${encodeURIComponent(weiboQuery)}`, {});
+                    console.log('📱 [WeiboSearch] 搜索结果:', wbRes);
+
+                    if (wbRes.success && wbRes.posts && wbRes.posts.length > 0) {
+                        // 构建微博帖子字符串
+                        const postsStr = wbRes.posts.slice(0, 8).map((p: any, i: number) =>
+                            `${i + 1}. @${p.user}: "${p.text}" (转发${p.reposts} 评论${p.comments} 赞${p.likes}${p.created_at ? ` · ${p.created_at}` : ''})`
+                        ).join('\n\n');
+
+                        console.log('📱 [WeiboSearch] 注入微博内容到AI，重新生成回复...');
+
+                        // 重新调用 API，注入微博搜索结果
+                        const cleanedForWeibo = aiContent.replace(/\[\[WEIBO_SEARCH:.*?\]\]/g, '').trim() || '等一下，我搜搜微博...';
+                        const weiboMessages = [
+                            ...fullMessages,
+                            { role: 'assistant', content: cleanedForWeibo },
+                            { role: 'user', content: `[系统: 你刚在微博上搜索了"${weiboQuery}"，以下是你看到的真实微博帖子]\n\n${postsStr}\n\n[系统: 现在请根据这些真实微博内容自然回复。像和朋友一起刷手机分享一样，比如"我刚看到有人说..."、"微博上好多人在讨论..."、"哈哈笑死有个人写的..."。用你自己的说话风格。不要再输出[[WEIBO_SEARCH:...]]了。]` }
+                        ];
+
+                        data = await safeFetchJson(`${baseUrl}/chat/completions`, {
+                            method: 'POST', headers,
+                            body: JSON.stringify({ model: apiConfig.model, messages: weiboMessages, temperature: 0.85, stream: false })
+                        });
+                        updateTokenUsage(data, historyMsgCount, 'weibo-search');
+                        aiContent = data.choices?.[0]?.message?.content || '';
+                        console.log('📱 [WeiboSearch] AI基于微博内容生成的新回复:', aiContent.slice(0, 100) + '...');
+                        // Re-clean
+                        aiContent = ChatParser.cleanAiSecondPass(aiContent);
+                        addToast(`📱 微博搜索完成: ${weiboQuery}`, 'success');
+                    } else {
+                        console.log('📱 [WeiboSearch] 搜索失败或无结果:', wbRes.error || '无帖子');
+                        addToast(`微博搜索无结果: ${weiboQuery}`, 'info');
+                        // 搜索失败，移除标记继续
+                        aiContent = aiContent.replace(weiboSearchMatch[0], '').trim();
+                    }
+                } catch (e) {
+                    console.error('📱 [WeiboSearch] execution failed:', e);
+                    aiContent = aiContent.replace(weiboSearchMatch[0], '').trim();
+                }
+            } else if (weiboSearchMatch) {
+                console.log('📱 [WeiboSearch] 检测到微博搜索意图但热搜未开启');
+                aiContent = aiContent.replace(weiboSearchMatch[0], '').trim();
+            }
+            setWeiboStatus('');
+
+            // 清理残留的微博搜索标记
+            aiContent = aiContent.replace(/\[\[WEIBO_SEARCH:.*?\]\]/g, '').trim();
 
             // 5.6 Handle Diary Writing (写日记到 Notion)
             // 支持两种格式:
@@ -1521,6 +1578,7 @@ end if
         searchStatus,
         diaryStatus,
         xhsStatus,
+        weiboStatus,
         lastTokenUsage,
         tokenBreakdown,
         setLastTokenUsage,

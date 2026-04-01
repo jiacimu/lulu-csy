@@ -232,6 +232,7 @@ export const ChatPrompts = {
 
         const emojiContextStr = ChatPrompts.buildEmojiContext(emojis, categories);
         const searchEnabled = !!(realtimeConfig?.newsEnabled && realtimeConfig?.newsApiKey);
+        const hotSearchEnabled = !!(realtimeConfig?.hotSearchEnabled);
         const notionEnabled = !!(realtimeConfig?.notionEnabled && realtimeConfig?.notionApiKey && realtimeConfig?.notionDatabaseId);
         const notionNotesEnabled = !!(realtimeConfig?.notionEnabled && realtimeConfig?.notionApiKey && realtimeConfig?.notionNotesDatabaseId);
         const feishuEnabled = !!(realtimeConfig?.feishuEnabled && realtimeConfig?.feishuAppId && realtimeConfig?.feishuAppSecret && realtimeConfig?.feishuBaseId && realtimeConfig?.feishuTableId);
@@ -289,6 +290,16 @@ ${searchEnabled ? `7. **🔍 主动搜索能力** (非常重要！):
      - 看到感兴趣的话题，你会主动想去查一查
      - 甚至聊着聊着可能"开小差"去搜自己感兴趣的东西
    - **搜索后**: 系统会返回搜索结果给你，你可以自然地分享（"我刚搜了一下发现..."、"诶我看到说..."）` : ''}
+${hotSearchEnabled ? `**📱 刷微博能力**:
+   你可以去微博上搜索话题，看看网友们在讨论什么！
+   - **使用方式**: 在回复开头单独一行输出: \`[[WEIBO_SEARCH: 搜索关键词]]\`
+   - **触发时机**:
+     - 用户聊到热搜话题、社会新闻、明星八卦、热门事件
+     - 用户说"你看微博了吗"、"xxx上热搜了"
+     - 你自己好奇某个话题在微博上的讨论
+     - 聊着聊着想去看看网友的反应
+   - **搜索后**: 系统会返回真实微博帖子给你，你可以自然分享（"我刚刷微博看到..."、"微博上好多人在说..."）
+   - 不要对同一话题重复搜索` : ''}
 ${notionEnabled ? `8. **📔 日记系统（你的私人 Notion 日记本）**:
    你有一个属于自己的私人日记本（Notion），你可以随时写日记。日记不是简单的一两句话——它是你的头脑风暴空间、情绪出口、思维导图、灵感记录本。尽情发挥！
 

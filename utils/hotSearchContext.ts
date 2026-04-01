@@ -5,7 +5,12 @@
 
 import { CharacterProfile } from '../types';
 import { RealtimeContextManager } from './realtimeContext';
-import type { RealtimeConfig } from './realtimeContext';
+
+/** 最小配置接口 — 避免 types/realtime 和 realtimeContext 的 RealtimeConfig 冲突 */
+interface HotSearchConfig {
+    hotSearchEnabled?: boolean;
+    cacheMinutes: number;
+}
 
 // ======================================================
 // 1. 兴趣词库 — 分类关键词（约 150 词）
@@ -337,13 +342,13 @@ export function buildHotSearchPrompt(hots: ScoredHot[], charName: string): strin
  * 获取数据 → 兴趣匹配 → 筛选 → 格式化
  */
 export async function buildCharacterHotSearch(
-    config: RealtimeConfig,
+    config: HotSearchConfig,
     char: CharacterProfile
 ): Promise<string> {
     if (!config.hotSearchEnabled) return '';
 
     // 获取热搜数据（复用 realtimeContext 的 fetchHotSearch，有缓存）
-    const allHots = await RealtimeContextManager.fetchHotSearch(config);
+    const allHots = await RealtimeContextManager.fetchHotSearch(config as any);
     if (allHots.length === 0) return '';
 
     // 提取角色兴趣

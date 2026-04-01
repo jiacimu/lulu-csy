@@ -848,17 +848,21 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
                     <div className="bg-white/60 backdrop-blur-md p-4 rounded-3xl border border-white shadow-sm">
                         <h4 className="text-[11px] font-bold text-slate-700 tracking-widest uppercase mb-3">重要度分布</h4>
                         <div className="flex items-end h-32 gap-1.5 pb-2 border-b border-slate-200">
-                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(level => {
-                                const count = vmList.filter(m => Math.round(m.importance ?? 5) === level).length;
-                                const height = vmCount > 0 ? Math.max((count / vmCount) * 100, count > 0 ? 5 : 0) : 0;
-                                return (
-                                    <div key={level} className="flex-1 flex flex-col items-center justify-end group">
-                                        <div className="w-full bg-gradient-to-t from-indigo-200 to-indigo-300/80 rounded-t-lg transition-all duration-300 group-hover:from-indigo-400 group-hover:to-purple-400 relative" style={{ height: `${height}%` }}>
-                                            {count > 0 && <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[8px] font-bold text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">{count}</span>}
+                            {(() => {
+                                const counts = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(level => vmList.filter(m => Math.round(m.importance ?? 5) === level).length);
+                                const maxCount = Math.max(...counts, 1);
+                                return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level, i) => {
+                                    const count = counts[i];
+                                    const height = count > 0 ? Math.max((count / maxCount) * 100, 8) : 0;
+                                    return (
+                                        <div key={level} className="flex-1 flex flex-col items-center justify-end group">
+                                            <div className="w-full bg-gradient-to-t from-indigo-200 to-indigo-300/80 rounded-t-sm transition-all duration-500 group-hover:from-indigo-400 group-hover:to-purple-400 relative" style={{ height: `${height}%` }}>
+                                                {count > 0 && <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[8px] font-bold text-slate-500 transition-colors group-hover:text-indigo-500">{count}</span>}
+                                            </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                });
+                            })()}
                         </div>
                         <div className="flex justify-between mt-1 px-1">
                             <span className="text-[8px] text-slate-400 font-bold">1</span>

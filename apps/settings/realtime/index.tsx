@@ -53,34 +53,51 @@ const RealtimeSettings: React.FC = () => {
     return (
         <>
             {/* 概览卡片 */}
-            <section className="bg-white/60 backdrop-blur-sm rounded-3xl p-5 shadow-sm border border-white/50">
-                <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                        <div className="p-2 bg-violet-100/50 rounded-xl text-violet-600">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418" /></svg>
+            {/* 概览卡片 - 高级质感重设 */}
+            <section className="bg-white/70 backdrop-blur-md rounded-3xl p-6 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] border border-white/80 transition-all">
+                <div className="flex items-center justify-between mb-5">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-gradient-to-br from-violet-500 to-fuchsia-500 rounded-2xl text-white shadow-md shadow-violet-200">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418" /></svg>
                         </div>
-                        <h2 className="text-sm font-semibold text-slate-600 tracking-wider">实时感知</h2>
+                        <div>
+                            <h2 className="text-base font-bold text-slate-800 tracking-wide">实时感知引擎</h2>
+                            <p className="text-[10px] text-slate-400 font-medium">Real-world Awareness</p>
+                        </div>
                     </div>
-                    <button onClick={() => setShowModal(true)} className="text-[10px] bg-violet-100 text-violet-600 px-3 py-1.5 rounded-full font-bold shadow-sm active:scale-95 transition-transform">配置</button>
-                </div>
-
-                <p className="text-xs text-slate-500 mb-3 leading-relaxed">
-                    让AI角色感知真实世界：天气、新闻热点、当前时间。角色可以根据天气关心你、聊聊最近的热点话题。
-                </p>
-
-                <div className="grid grid-cols-6 gap-2 text-center">
-                    <div className={`py-3 rounded-xl text-xs font-bold ${rt.weatherEnabled ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-400'}`}>
-                        <div className="text-lg mb-1">{rt.weatherEnabled ? '☀️' : '🌫️'}</div>天气</div>
-                    <div className={`py-3 rounded-xl text-xs font-bold ${rt.newsEnabled ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-400'}`}>
-                        <div className="text-lg mb-1">{rt.newsEnabled ? '📰' : '📄'}</div>新闻</div>
-                    <div className={`py-3 rounded-xl text-xs font-bold ${rt.hotSearchEnabled ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-400'}`}>
-                        <div className="text-lg mb-1">{rt.hotSearchEnabled ? '🔥' : '🧊'}</div>热搜</div>
-                    <div className={`py-3 rounded-xl text-xs font-bold ${rt.notionEnabled ? 'bg-orange-50 text-orange-600' : 'bg-slate-50 text-slate-400'}`}>
-                        <div className="text-lg mb-1">{rt.notionEnabled ? '📝' : '📋'}</div>Notion</div>
-                    <div className={`py-3 rounded-xl text-xs font-bold ${rt.feishuEnabled ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}>
-                        <div className="text-lg mb-1">{rt.feishuEnabled ? '📒' : '📋'}</div>飞书</div>
-                    <div className={`py-3 rounded-xl text-xs font-bold ${rt.xhsEnabled ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-400'}`}>
-                        <div className="text-lg mb-1">{rt.xhsEnabled ? '📕' : '📋'}</div>小红书</div>
+                    <button onClick={() => setShowModal(true)} className="text-xs bg-slate-900 text-white px-4 py-2 rounded-xl font-semibold shadow-md active:scale-95 transition-transform hover:bg-slate-800">
+                        配置节点
+                    </button>
+                </div>                <div className="grid grid-cols-3 gap-3">
+                    <div className={`p-3 rounded-2xl transition-all border ${rt.weatherEnabled ? 'bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-100 shadow-sm' : 'bg-slate-50/50 border-transparent text-slate-400 opacity-60'}`}>
+                        <div className="text-2xl mb-1.5">{rt.weatherEnabled ? '🌦️' : '🌫️'}</div>
+                        <div className={`text-xs font-bold ${rt.weatherEnabled ? 'text-emerald-700' : ''}`}>气象预报</div>
+                    </div>
+                    
+                    <div className={`p-3 rounded-2xl transition-all border ${rt.newsEnabled ? 'bg-gradient-to-br from-blue-50 to-sky-50 border-blue-100 shadow-sm' : 'bg-slate-50/50 border-transparent text-slate-400 opacity-60'}`}>
+                        <div className="text-2xl mb-1.5">{rt.newsEnabled ? '📰' : '📄'}</div>
+                        <div className={`text-xs font-bold ${rt.newsEnabled ? 'text-blue-700' : ''}`}>新闻早报</div>
+                    </div>
+                    
+                    <div className={`p-3 rounded-2xl transition-all border ${rt.hotSearchEnabled ? 'bg-gradient-to-br from-rose-50 to-red-50 border-rose-100 shadow-sm' : 'bg-slate-50/50 border-transparent text-slate-400 opacity-60'}`}>
+                        <div className="text-2xl mb-1.5">{rt.hotSearchEnabled ? '🔥' : '🧊'}</div>
+                        <div className={`text-xs font-bold ${rt.hotSearchEnabled ? 'text-rose-700' : ''}`}>微博热搜</div>
+                    </div>
+                    
+                    <div className={`p-3 rounded-2xl transition-all border ${rt.notionEnabled ? 'bg-gradient-to-br from-orange-50 to-amber-50 border-orange-100 shadow-sm' : 'bg-slate-50/50 border-transparent text-slate-400 opacity-60'}`}>
+                        <div className="text-2xl mb-1.5">{rt.notionEnabled ? '📝' : '📋'}</div>
+                        <div className={`text-xs font-bold ${rt.notionEnabled ? 'text-orange-700' : ''}`}>Notion</div>
+                    </div>
+                    
+                    <div className={`p-3 rounded-2xl transition-all border ${rt.feishuEnabled ? 'bg-gradient-to-br from-indigo-50 to-violet-50 border-indigo-100 shadow-sm' : 'bg-slate-50/50 border-transparent text-slate-400 opacity-60'}`}>
+                        <div className="text-2xl mb-1.5">{rt.feishuEnabled ? '📒' : '📋'}</div>
+                        <div className={`text-xs font-bold ${rt.feishuEnabled ? 'text-indigo-700' : ''}`}>飞书文档</div>
+                    </div>
+                    
+                    <div className={`p-3 rounded-2xl transition-all border ${rt.xhsEnabled ? 'bg-gradient-to-br from-red-50 to-pink-50 border-red-100 shadow-sm' : 'bg-slate-50/50 border-transparent text-slate-400 opacity-60'}`}>
+                        <div className="text-2xl mb-1.5">{rt.xhsEnabled ? '📕' : '📋'}</div>
+                        <div className={`text-xs font-bold ${rt.xhsEnabled ? 'text-red-700' : ''}`}>小红书</div>
+                    </div>
                 </div>
             </section>
 

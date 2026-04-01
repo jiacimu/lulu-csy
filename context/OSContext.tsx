@@ -20,6 +20,7 @@ const defaultRealtimeConfig: RealtimeConfig = {
     weatherCity: 'Beijing',
     newsEnabled: false,
     newsApiKey: '',
+    hotSearchEnabled: false,
     notionEnabled: false,
     notionApiKey: '',
     notionDatabaseId: '',

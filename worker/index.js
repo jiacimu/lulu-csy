@@ -1475,6 +1475,100 @@ export default {
       return jsonResponse({ error: "Unknown XHS endpoint. Use /xhs/profile, /xhs/upload-test, /xhs/search, /xhs/feed, /xhs/publish, /xhs/comment" }, { status: 404, origin });
     }
 
+    // ========== 微博搜索代理 (移动端公开API，无需登录) ==========
+    if (url.pathname === '/weibo/search' && request.method === 'GET') {
+      const q = url.searchParams.get('q')?.trim();
+      if (!q) {
+        return jsonResponse({ success: false, error: '缺少搜索关键词 q' }, { status: 400, origin });
+      }
+
+      const page = parseInt(url.searchParams.get('page') || '1') || 1;
+
+      // 5分钟缓存
+      const CACHE_MS = 5 * 60 * 1000;
+      const cacheKey = `wb_search_${q}_${page}`;
+      if (!globalThis._weiboSearchCache) globalThis._weiboSearchCache = {};
+      const cached = globalThis._weiboSearchCache[cacheKey];
+      if (cached && (Date.now() - cached.timestamp) < CACHE_MS) {
+        return jsonResponse({ success: true, posts: cached.data, _cached: true }, { origin });
+      }
+
+      try {
+        // m.weibo.cn 移动端搜索接口 (公开，无需Cookie)
+        const containerid = `100103type=1&q=${encodeURIComponent(q)}&t=0`;
+        const apiUrl = `https://m.weibo.cn/api/container/getIndex?containerid=${encodeURIComponent(containerid)}&page_type=searchall&page=${page}`;
+
+        const res = await fetch(apiUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': `https://m.weibo.cn/search?containerid=${encodeURIComponent(containerid)}`,
+            'X-Requested-With': 'XMLHttpRequest',
+          }
+        });
+
+        if (!res.ok) {
+          return jsonResponse({ success: false, error: `Weibo mobile API returned ${res.status}` }, { status: 502, origin });
+        }
+
+        const raw = await res.json();
+
+        if (raw.ok === 1 && raw.data && raw.data.cards) {
+          // 从 cards 中提取微博帖子
+          const posts = [];
+
+          for (const card of raw.data.cards) {
+            // card_type 9 = 单条微博, card_type 11 = card_group (包含子微博)
+            if (card.card_type === 9 && card.mblog) {
+              const mb = card.mblog;
+              // 清洗 HTML 标签
+              const cleanText = (mb.text || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&#[\d]+;/g, '').trim();
+              if (cleanText) {
+                posts.push({
+                  id: mb.id || '',
+                  text: cleanText.slice(0, 300),
+                  user: mb.user?.screen_name || '',
+                  reposts: mb.reposts_count || 0,
+                  comments: mb.comments_count || 0,
+                  likes: mb.attitudes_count || 0,
+                  created_at: mb.created_at || '',
+                });
+              }
+            } else if (card.card_type === 11 && card.card_group) {
+              for (const subCard of card.card_group) {
+                if (subCard.card_type === 9 && subCard.mblog) {
+                  const mb = subCard.mblog;
+                  const cleanText = (mb.text || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&#[\d]+;/g, '').trim();
+                  if (cleanText) {
+                    posts.push({
+                      id: mb.id || '',
+                      text: cleanText.slice(0, 300),
+                      user: mb.user?.screen_name || '',
+                      reposts: mb.reposts_count || 0,
+                      comments: mb.comments_count || 0,
+                      likes: mb.attitudes_count || 0,
+                      created_at: mb.created_at || '',
+                    });
+                  }
+                }
+              }
+            }
+          }
+
+          // 缓存结果
+          if (posts.length > 0) {
+            globalThis._weiboSearchCache[cacheKey] = { data: posts, timestamp: Date.now() };
+          }
+
+          return jsonResponse({ success: true, posts, query: q, total: posts.length }, { origin });
+        }
+
+        return jsonResponse({ success: false, error: 'Weibo 搜索返回格式异常', debug: { ok: raw.ok } }, { status: 502, origin });
+      } catch (e) {
+        return jsonResponse({ success: false, error: `微博搜索异常: ${e.message}` }, { status: 502, origin });
+      }
+    }
+
     // ========== 热搜代理 (原生微博直连) ==========
     if (url.pathname === '/hotlist' && request.method === 'GET') {
       const type = url.searchParams.get('type') || 'wbHot';
