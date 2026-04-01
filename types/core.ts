@@ -22,6 +22,7 @@ export enum AppID {
     Game = 'game',
     Worldbook = 'worldbook',
     Novel = 'novel',
+    HotSearch = 'hot_search', // 新增：实时热搜
     Bank = 'bank', // New App
     XhsStock = 'xhs_stock', // XHS image stock for publishing
     SpecialMoments = 'special_moments', // Valentine's Day & future events

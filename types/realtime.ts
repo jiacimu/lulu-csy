@@ -12,6 +12,9 @@ export interface RealtimeConfig {
     newsEnabled: boolean;
     newsApiKey?: string;
 
+    // 热搜配置
+    hotSearchEnabled: boolean;
+
     // Notion 配置
     notionEnabled: boolean;
     notionApiKey: string;   // Notion Integration Token

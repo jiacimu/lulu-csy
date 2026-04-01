@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useOS } from '../../../context/OSContext';
 import Modal from '../../../components/os/Modal';
-import { WeatherSection, NewsSection, NotionSection, FeishuSection, XhsMcpSection } from './sections';
+import { WeatherSection, NewsSection, HotSearchSection, NotionSection, FeishuSection, XhsMcpSection } from './sections';
 
 const RealtimeSettings: React.FC = () => {
     const { realtimeConfig, updateRealtimeConfig, addToast } = useOS();
@@ -13,6 +13,7 @@ const RealtimeSettings: React.FC = () => {
         weatherCity: realtimeConfig.weatherCity,
         newsEnabled: realtimeConfig.newsEnabled,
         newsApiKey: realtimeConfig.newsApiKey || '',
+        hotSearchEnabled: realtimeConfig.hotSearchEnabled ?? false,
         notionEnabled: realtimeConfig.notionEnabled,
         notionApiKey: realtimeConfig.notionApiKey,
         notionDbId: realtimeConfig.notionDatabaseId,
@@ -37,7 +38,7 @@ const RealtimeSettings: React.FC = () => {
     const handleSave = () => {
         updateRealtimeConfig({
             weatherEnabled: rt.weatherEnabled, weatherApiKey: rt.weatherApiKey, weatherCity: rt.weatherCity,
-            newsEnabled: rt.newsEnabled, newsApiKey: rt.newsApiKey,
+            newsEnabled: rt.newsEnabled, newsApiKey: rt.newsApiKey, hotSearchEnabled: rt.hotSearchEnabled,
             notionEnabled: rt.notionEnabled, notionApiKey: rt.notionApiKey, notionDatabaseId: rt.notionDbId,
             notionNotesDatabaseId: rt.notionNotesDbId || undefined,
             feishuEnabled: rt.feishuEnabled, feishuAppId: rt.feishuAppId, feishuAppSecret: rt.feishuAppSecret,
@@ -67,11 +68,13 @@ const RealtimeSettings: React.FC = () => {
                     让AI角色感知真实世界：天气、新闻热点、当前时间。角色可以根据天气关心你、聊聊最近的热点话题。
                 </p>
 
-                <div className="grid grid-cols-5 gap-2 text-center">
+                <div className="grid grid-cols-6 gap-2 text-center">
                     <div className={`py-3 rounded-xl text-xs font-bold ${rt.weatherEnabled ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-400'}`}>
                         <div className="text-lg mb-1">{rt.weatherEnabled ? '☀️' : '🌫️'}</div>天气</div>
                     <div className={`py-3 rounded-xl text-xs font-bold ${rt.newsEnabled ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-400'}`}>
                         <div className="text-lg mb-1">{rt.newsEnabled ? '📰' : '📄'}</div>新闻</div>
+                    <div className={`py-3 rounded-xl text-xs font-bold ${rt.hotSearchEnabled ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-400'}`}>
+                        <div className="text-lg mb-1">{rt.hotSearchEnabled ? '🔥' : '🧊'}</div>热搜</div>
                     <div className={`py-3 rounded-xl text-xs font-bold ${rt.notionEnabled ? 'bg-orange-50 text-orange-600' : 'bg-slate-50 text-slate-400'}`}>
                         <div className="text-lg mb-1">{rt.notionEnabled ? '📝' : '📋'}</div>Notion</div>
                     <div className={`py-3 rounded-xl text-xs font-bold ${rt.feishuEnabled ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}>
@@ -87,6 +90,7 @@ const RealtimeSettings: React.FC = () => {
                 <div className="space-y-5 max-h-[60vh] overflow-y-auto no-scrollbar">
                     <WeatherSection enabled={rt.weatherEnabled} apiKey={rt.weatherApiKey} city={rt.weatherCity} set={set} onTestStatus={setTestStatus} />
                     <NewsSection enabled={rt.newsEnabled} apiKey={rt.newsApiKey} set={set} />
+                    <HotSearchSection enabled={rt.hotSearchEnabled} set={set} />
                     <NotionSection enabled={rt.notionEnabled} apiKey={rt.notionApiKey} dbId={rt.notionDbId} notesDbId={rt.notionNotesDbId} set={set} onTestStatus={setTestStatus} />
                     <FeishuSection enabled={rt.feishuEnabled} appId={rt.feishuAppId} appSecret={rt.feishuAppSecret} baseId={rt.feishuBaseId} tableId={rt.feishuTableId} set={set} onTestStatus={setTestStatus} />
                     <XhsMcpSection enabled={rt.xhsMcpEnabled} mcpUrl={rt.xhsMcpUrl} nickname={rt.xhsNickname} userId={rt.xhsUserId} set={set} onTestStatus={setTestStatus}

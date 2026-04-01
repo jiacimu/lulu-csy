@@ -52,7 +52,7 @@ const CognitiveNetworkApp: React.FC = () => {
     const [backfilling, setBackfilling] = useState(false);
     const [semanticRunning, setSemanticRunning] = useState(false);
     const [showConfirm, setShowConfirm] = useState<'temporal' | 'semantic' | 'rescan' | 'distill' | 'chains' | null>(null);
-    const [queueStatus, setQueueStatus] = useState<{ total: number; done: number; errors: number; isCircuitBroken: boolean } | null>(null);
+    const [queueStatus, setQueueStatus] = useState<{ total: number; done: number; errors: number; retrying: number; isCircuitBroken: boolean; lastError?: string } | null>(null);
     const [polling, setPolling] = useState(false);
 
     // Distillation & Chains state
@@ -768,11 +768,30 @@ const CognitiveNetworkApp: React.FC = () => {
                             />
                         </div>
                         <div className="flex justify-between text-[9px] text-slate-300">
-                            <span>已完成 {queueStatus.done} · 失败 {queueStatus.errors}</span>
+                            <span>已完成 {queueStatus.done} · 失败 {queueStatus.errors}{(queueStatus as any).retrying > 0 && ` · 重试中 ${(queueStatus as any).retrying}`}</span>
                             <span>{Math.round((queueStatus.done / Math.max(1, queueStatus.total)) * 100)}%</span>
                         </div>
                         {queueStatus.isCircuitBroken && (
-                            <p className="text-[10px] text-amber-500 mt-2">连续失败次数过多，已自动暂停。请检查副 API 配置。</p>
+                            <div className="mt-3 p-2.5 bg-amber-50 rounded-xl border border-amber-100">
+                                <p className="text-[11px] font-bold text-amber-700 mb-1 flex items-center gap-1">
+                                    <span className="text-[13px]">⚠️</span> 连续失败次数过多，已自动暂停
+                                </p>
+                                <p className="text-[10px] text-amber-600 mb-2 leading-relaxed">
+                                    可能是副 API（如硅基流动、Groq等）遇到限制，或是模型上下文超长。
+                                </p>
+                                {queueStatus.lastError && (
+                                    <div className="bg-white/60 p-2 rounded-md border border-amber-200/50">
+                                        <p className="text-[9px] text-amber-700/80 font-medium mb-1">最近一次报错信息：</p>
+                                        <p className="text-[9px] text-amber-900 font-mono break-all">{queueStatus.lastError}</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        {!queueStatus.isCircuitBroken && queueStatus.lastError && (queueStatus as any).retrying > 0 && (
+                            <div className="mt-2 text-[10px] text-amber-600 bg-amber-50/50 px-2.5 py-1.5 rounded-lg border border-amber-100/50">
+                                <span className="font-semibold block mb-0.5">⚠️ 发生错误，正在重试：</span>
+                                <span className="font-mono text-[9px] break-all line-clamp-1 opacity-80" title={queueStatus.lastError}>{queueStatus.lastError}</span>
+                            </div>
                         )}
                     </section>
                 )}

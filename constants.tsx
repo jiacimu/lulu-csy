@@ -29,6 +29,7 @@ import {
   Notebook,
   Phone,
   Brain,
+  TrendUp,
 
 } from '@phosphor-icons/react';
 
@@ -62,6 +63,7 @@ export const Icons: Record<string, React.FC<{ className?: string }>> = {
   CsyManual: ({ className }) => <Notebook className={className} weight="bold" />,
   VoiceCall: ({ className }) => <Phone className={className} weight="bold" />,
   CognitiveNetwork: ({ className }) => <Brain className={className} weight="bold" />,
+  HotSearch: ({ className }) => <TrendUp className={className} weight="bold" />,
 
 };
 
@@ -72,6 +74,7 @@ export const INSTALLED_APPS: AppConfig[] = [
   { id: AppID.Room, name: '小小窝', icon: 'Room', color: 'rose' },
   { id: AppID.CheckPhone, name: '查手机', icon: 'CheckPhone', color: 'slate' },
   // { id: AppID.Browser, name: '浏览器', icon: 'Browser', color: 'blue' }, // Hidden
+  { id: AppID.HotSearch, name: '实时热搜', icon: 'HotSearch', color: 'orange' },
   { id: AppID.Social, name: 'Spark', icon: 'Social', color: 'red' },
   { id: AppID.User, name: '档案', icon: 'User', color: 'blue' },
   { id: AppID.Bank, name: '存钱罐', icon: 'Bank', color: 'lime' }, // Hidden

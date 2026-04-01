@@ -37,6 +37,9 @@ export interface RealtimeConfig {
     newsEnabled: boolean;
     newsApiKey?: string;    // 可选，用于更多新闻源
 
+    // 热搜配置
+    hotSearchEnabled?: boolean;
+
     // Notion 配置
     notionEnabled: boolean;
     notionApiKey: string;   // Notion Integration Token
@@ -65,6 +68,7 @@ export const defaultRealtimeConfig: RealtimeConfig = {
     weatherCity: 'Beijing',
     newsEnabled: false,
     newsApiKey: '',
+    hotSearchEnabled: false,
     notionEnabled: false,
     notionApiKey: '',
     notionDatabaseId: '',
@@ -76,6 +80,7 @@ export const defaultRealtimeConfig: RealtimeConfig = {
 // 缓存
 let weatherCache: { data: WeatherData | null; timestamp: number } = { data: null, timestamp: 0 };
 let newsCache: { data: NewsItem[]; timestamp: number } = { data: [], timestamp: 0 };
+let hotSearchCache: { data: any[]; timestamp: number } = { data: [], timestamp: 0 };
 
 // 特殊日期表
 const SPECIAL_DATES: Record<string, string> = {
@@ -215,6 +220,38 @@ export const RealtimeContextManager = {
             newsCache = { data: news, timestamp: now };
         }
         return news;
+    },
+
+    /**
+     * 获取微博热搜
+     */
+    fetchHotSearch: async (config: RealtimeConfig): Promise<any[]> => {
+        if (!config.hotSearchEnabled) {
+            return [];
+        }
+
+        const now = Date.now();
+        const cacheMs = config.cacheMinutes * 60 * 1000;
+
+        // 检查缓存
+        if (hotSearchCache.data.length > 0 && (now - hotSearchCache.timestamp) < cacheMs) {
+            return hotSearchCache.data;
+        }
+
+        try {
+            const res = await fetch('https://sully-n.sully-tts-proxy.workers.dev/hotlist?type=wbHot');
+            if (res.ok) {
+                const json = await res.json() as any;
+                if (json.success && json.data) {
+                    const sortedData = json.data.sort((a: any, b: any) => a.index - b.index).slice(0, 8);
+                    hotSearchCache = { data: sortedData, timestamp: now };
+                    return sortedData;
+                }
+            }
+        } catch (e) {
+            console.error('Fetch hot search failed:', e);
+        }
+        return [];
     },
 
     /**
@@ -396,6 +433,22 @@ export const RealtimeContextManager = {
             }
         }
 
+        // 4.5 实时热搜
+        if (config.hotSearchEnabled) {
+            const hots = await RealtimeContextManager.fetchHotSearch(config);
+            if (hots.length > 0) {
+                parts.push('');
+                parts.push(`🔥 【实时微博热搜 TOP 8】`);
+                parts.push(`（这些是当下互联网网友正在热议的话题，你可以偶尔引用或吐槽）`);
+                hots.forEach((h: any, i: number) => {
+                    const desc = h.desc ? ` [${h.desc}]` : '';
+                    let hotval = h.hot;
+                    if (hotval >= 10000) hotval = (hotval / 10000).toFixed(1) + '万';
+                    parts.push(`${i + 1}. ${h.title}${desc} - 热度:${hotval}`);
+                });
+            }
+        }
+
         // 5. 行为指令（强调）
         parts.push('');
         parts.push(`### 【如何使用这些信息】`);
@@ -414,6 +467,7 @@ export const RealtimeContextManager = {
     clearCache: () => {
         weatherCache = { data: null, timestamp: 0 };
         newsCache = { data: [], timestamp: 0 };
+        hotSearchCache = { data: [], timestamp: 0 };
     },
 
     /**

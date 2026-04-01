@@ -64,6 +64,43 @@ export const NewsSection = React.memo<NewsProps>(({ enabled, apiKey, set }) => (
     </div>
 ));
 
+interface HotSearchProps { enabled: boolean; set: (field: string, value: any) => void; }
+
+export const HotSearchSection = React.memo<HotSearchProps>(({ enabled, set }) => {
+    const [testStatus, setTestStatus] = useState('');
+    const testHotSearch = async () => {
+        setTestStatus('正在测试...');
+        try {
+            const res = await fetch('https://sully-n.sully-tts-proxy.workers.dev/hotlist?type=wbHot');
+            if (res.ok) {
+                const json = await res.json() as any;
+                if (json.success && json.data?.length > 0) {
+                    setTestStatus(`✅ 连接成功！当前 #1 热搜: ${json.data[0].title}`);
+                } else { setTestStatus('❌ 返回数据异常'); }
+            } else { setTestStatus(`❌ HTTP ${res.status}`); }
+        } catch (e: any) { setTestStatus(`❌ 网络错误: ${e.message}`); }
+    };
+
+    return (
+        <div className="bg-red-50/50 p-4 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2"><span className="text-lg">🔥</span><span className="text-sm font-bold text-red-700">实时热搜</span></div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" checked={enabled} onChange={e => set('hotSearchEnabled', e.target.checked)} className="sr-only peer" />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
+                </label>
+            </div>
+            {enabled && (
+                <div className="space-y-2">
+                    <p className="text-xs text-red-600/70">开启后，AI 将感知微博热搜 TOP 8，可以主动和你聊热点话题。无需配置，免费使用。</p>
+                    <button onClick={testHotSearch} className="w-full py-2 bg-red-100 text-red-600 text-xs font-bold rounded-xl active:scale-95 transition-transform">测试热搜接口</button>
+                    {testStatus && <p className="text-xs text-center text-red-600/80">{testStatus}</p>}
+                </div>
+            )}
+        </div>
+    );
+});
+
 interface NotionProps {
     enabled: boolean; apiKey: string; dbId: string; notesDbId: string;
     set: (field: string, value: any) => void;
