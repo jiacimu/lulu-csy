@@ -849,7 +849,7 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
                         <h4 className="text-[11px] font-bold text-slate-700 tracking-widest uppercase mb-3">重要度分布</h4>
                         <div className="flex items-end h-32 gap-1.5 pb-2 border-b border-slate-200">
                             {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(level => {
-                                const count = vmList.filter(m => m.importance === level).length;
+                                const count = vmList.filter(m => Math.round(m.importance ?? 5) === level).length;
                                 const height = vmCount > 0 ? Math.max((count / vmCount) * 100, count > 0 ? 5 : 0) : 0;
                                 return (
                                     <div key={level} className="flex-1 flex flex-col items-center justify-end group">
