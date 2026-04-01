@@ -9,7 +9,8 @@ import { safeResponseJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
 import DateSession from '../components/date/DateSession';
 import DateSettings from '../components/date/DateSettings';
-import { buildDatePreamble, buildTheaterScene, buildTheaterSceneCompact, buildDateTail, STYLE_BLOCK } from '../utils/datePrompts';
+import { buildDatePreamble, buildTheaterScene, buildDateTail } from '../utils/datePrompts';
+import { extractThinking } from '../utils/thinkingExtractor';
 
 const DateApp: React.FC = () => {
     const { closeApp, characters, activeCharacterId, setActiveCharacterId, apiConfig, addToast, updateCharacter, userProfile } = useOS();
@@ -167,10 +168,9 @@ const DateApp: React.FC = () => {
 
             const timeStr = `${virtualTime.day} ${formatTime()}`;
 
-            // Build system prompt: dreamweaver + identity intro + core context + style
+            // Build system prompt: dreamweaver + identity intro + core context
             let peekSystemPrompt = buildDatePreamble(c.name, userProfile.name);
             peekSystemPrompt += ContextBuilder.buildCoreContext(c, userProfile, false);
-            peekSystemPrompt += STYLE_BLOCK;
 
             // Force separator to signal new scene
             const contextSeparator = gapHint ? `\n\n--- [TIME SKIP: ${gapHint}] ---\n\n` : `\n\n--- [NEW SCENE START] ---\n\n`;
@@ -188,7 +188,7 @@ const DateApp: React.FC = () => {
 ### 逻辑检查
 1. **上下文连贯性**: 参考 [最近记录]，但**必须**注意 [TIME SKIP]。如果是很久没见，不要接着上一次的话题聊，而是开启新场景。
 2. **状态一致性**: ${gapHint.includes('很久') ? '因为很久没见，可能在发呆、忙碌或者有点落寞。' : '根据之前的聊天状态决定。'}
-3. **描写风格**: 严格遵循 <style> 中的电影级文风要求。不要输出任何前缀，直接输出描写内容。`;
+3. **描写风格**: 电影感，沉浸式，细节丰富。不要输出任何前缀，直接输出描写内容。`;
 
             const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST',
@@ -205,8 +205,9 @@ const DateApp: React.FC = () => {
 
             if (!response.ok) throw new Error('Failed to sense presence');
             const data = await safeResponseJson(response);
-            const content = data.choices[0].message.content;
-            setPeekStatus(content);
+            const rawPeek = data.choices[0].message.content;
+            const peekExtracted = extractThinking(rawPeek);
+            setPeekStatus(peekExtracted.content);
 
         } catch (e: any) {
             setPeekStatus(`(无法感知状态: ${e.message})`);
@@ -247,9 +248,10 @@ const DateApp: React.FC = () => {
         systemPrompt += ContextBuilder.buildCoreContext(char, userProfile);
         const REQUIRED_EMOTIONS = ['normal', 'happy', 'angry', 'sad', 'shy'];
         const dateEmotions = [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])];
-        const perspective = char.datePerspective || 'second';
-        systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, perspective);
-        systemPrompt += buildDateTail(char.name, userProfile.name, perspective);
+        const userPov = char.datePerspective || 'second';
+        const charPov = char.dateCharPerspective || 'third';
+        systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov);
+        systemPrompt += buildDateTail(char.name, userProfile.name, userPov, charPov);
 
         const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST',
@@ -259,7 +261,7 @@ const DateApp: React.FC = () => {
                 messages: [
                     { role: 'system', content: systemPrompt },
                     ...historyMsgs,
-                    { role: 'user', content: `${text}\n\n(System Note: 严格遵守沉浸剧场格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签。叙述行遵循 <style> 文风要求。叙述人称严格遵守当前视角设定。)` }
+                    { role: 'user', content: `${text}\n\n(System Note: 严格遵守沉浸剧场格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签。叙述人称严格遵守当前视角设定。)` }
                 ],
                 temperature: 0.85
             })
@@ -267,9 +269,11 @@ const DateApp: React.FC = () => {
 
         if (!response.ok) throw new Error('API Error');
         const data = await safeResponseJson(response);
-        const content = data.choices[0].message.content;
+        const rawContent = data.choices[0].message.content;
+        const extracted = extractThinking(rawContent);
+        const content = extracted.content;
 
-        // 3. Save AI Response
+        // 3. Save AI Response (thinking chain discarded, never stored)
         await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: content, metadata: { source: 'date' } });
 
         // Refresh local state
@@ -307,9 +311,10 @@ const DateApp: React.FC = () => {
         systemPrompt += ContextBuilder.buildCoreContext(char, userProfile);
         const REQUIRED_EMOTIONS_R = ['normal', 'happy', 'angry', 'sad', 'shy'];
         const dateEmotionsR = [...REQUIRED_EMOTIONS_R, ...(char.customDateSprites || [])];
-        const perspectiveR = char.datePerspective || 'second';
-        systemPrompt += buildTheaterSceneCompact(char.name, userProfile.name, dateEmotionsR, perspectiveR);
-        systemPrompt += buildDateTail(char.name, userProfile.name, perspectiveR);
+        const userPovR = char.datePerspective || 'second';
+        const charPovR = char.dateCharPerspective || 'third';
+        systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotionsR, userPovR, charPovR);
+        systemPrompt += buildDateTail(char.name, userProfile.name, userPovR, charPovR);
 
         const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST',
@@ -319,7 +324,7 @@ const DateApp: React.FC = () => {
                 messages: [
                     { role: 'system', content: systemPrompt },
                     ...historyMsgs,
-                    { role: 'user', content: `${lastUserMsg.content}\n\n(System Note: Reroll. 用不同的角度重写。严格遵守沉浸剧场格式、<style> 文风、当前叙述人称。)` }
+                    { role: 'user', content: `${lastUserMsg.content}\n\n(System Note: Reroll. 用不同的角度重写。严格遵守沉浸剧场格式、当前叙述人称。)` }
                 ],
                 temperature: 0.9
             })
@@ -327,8 +332,11 @@ const DateApp: React.FC = () => {
 
         if (!response.ok) throw new Error('API Error');
         const data = await safeResponseJson(response);
-        const content = data.choices[0].message.content;
+        const rawContent = data.choices[0].message.content;
+        const extracted = extractThinking(rawContent);
+        const content = extracted.content;
 
+        // Save (thinking chain discarded, never stored)
         await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: content, metadata: { source: 'date' } });
 
         // Sync
