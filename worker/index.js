@@ -1475,18 +1475,16 @@ export default {
       return jsonResponse({ error: "Unknown XHS endpoint. Use /xhs/profile, /xhs/upload-test, /xhs/search, /xhs/feed, /xhs/publish, /xhs/comment" }, { status: 404, origin });
     }
 
-    // ========== 微博搜索代理 (移动端公开API，无需登录) ==========
+    // ========== 微博搜索代理 (HTML抓取 s.weibo.com，无需登录) ==========
     if (url.pathname === '/weibo/search' && request.method === 'GET') {
       const q = url.searchParams.get('q')?.trim();
       if (!q) {
         return jsonResponse({ success: false, error: '缺少搜索关键词 q' }, { status: 400, origin });
       }
 
-      const page = parseInt(url.searchParams.get('page') || '1') || 1;
-
       // 5分钟缓存
       const CACHE_MS = 5 * 60 * 1000;
-      const cacheKey = `wb_search_${q}_${page}`;
+      const cacheKey = `wb_search_${q}`;
       if (!globalThis._weiboSearchCache) globalThis._weiboSearchCache = {};
       const cached = globalThis._weiboSearchCache[cacheKey];
       if (cached && (Date.now() - cached.timestamp) < CACHE_MS) {
@@ -1494,76 +1492,148 @@ export default {
       }
 
       try {
-        // m.weibo.cn 移动端搜索接口 (公开，无需Cookie)
-        const containerid = `100103type=1&q=${encodeURIComponent(q)}&t=0`;
-        const apiUrl = `https://m.weibo.cn/api/container/getIndex?containerid=${encodeURIComponent(containerid)}&page_type=searchall&page=${page}`;
+        // 策略1: 尝试 weibo.com/ajax 桌面端 AJAX 接口
+        const ajaxUrl = `https://weibo.com/ajax/side/search?q=${encodeURIComponent(q)}`;
+        let posts = [];
 
-        const res = await fetch(apiUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-            'Accept': 'application/json, text/plain, */*',
-            'Referer': `https://m.weibo.cn/search?containerid=${encodeURIComponent(containerid)}`,
-            'X-Requested-With': 'XMLHttpRequest',
-          }
-        });
+        try {
+          const ajaxRes = await fetch(ajaxUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'application/json, text/plain, */*',
+              'Referer': 'https://weibo.com/',
+            }
+          });
 
-        if (!res.ok) {
-          return jsonResponse({ success: false, error: `Weibo mobile API returned ${res.status}` }, { status: 502, origin });
-        }
-
-        const raw = await res.json();
-
-        if (raw.ok === 1 && raw.data && raw.data.cards) {
-          // 从 cards 中提取微博帖子
-          const posts = [];
-
-          for (const card of raw.data.cards) {
-            // card_type 9 = 单条微博, card_type 11 = card_group (包含子微博)
-            if (card.card_type === 9 && card.mblog) {
-              const mb = card.mblog;
-              // 清洗 HTML 标签
-              const cleanText = (mb.text || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&#[\d]+;/g, '').trim();
-              if (cleanText) {
-                posts.push({
-                  id: mb.id || '',
-                  text: cleanText.slice(0, 300),
-                  user: mb.user?.screen_name || '',
-                  reposts: mb.reposts_count || 0,
-                  comments: mb.comments_count || 0,
-                  likes: mb.attitudes_count || 0,
-                  created_at: mb.created_at || '',
-                });
-              }
-            } else if (card.card_type === 11 && card.card_group) {
-              for (const subCard of card.card_group) {
-                if (subCard.card_type === 9 && subCard.mblog) {
-                  const mb = subCard.mblog;
-                  const cleanText = (mb.text || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&#[\d]+;/g, '').trim();
-                  if (cleanText) {
-                    posts.push({
-                      id: mb.id || '',
-                      text: cleanText.slice(0, 300),
-                      user: mb.user?.screen_name || '',
-                      reposts: mb.reposts_count || 0,
-                      comments: mb.comments_count || 0,
-                      likes: mb.attitudes_count || 0,
-                      created_at: mb.created_at || '',
-                    });
+          if (ajaxRes.ok) {
+            const ajaxData = await ajaxRes.json();
+            // 尝试从 ajax 结构中提取
+            if (ajaxData.ok === 1 && ajaxData.data) {
+              const items = ajaxData.data.cards || ajaxData.data.statuses || ajaxData.data;
+              if (Array.isArray(items)) {
+                for (const item of items) {
+                  const mb = item.mblog || item;
+                  if (mb.text || mb.text_raw) {
+                    const cleanText = (mb.text_raw || mb.text || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+                    if (cleanText) {
+                      posts.push({
+                        id: mb.id || mb.mid || '',
+                        text: cleanText.slice(0, 300),
+                        user: mb.user?.screen_name || mb.screen_name || '',
+                        reposts: mb.reposts_count || 0,
+                        comments: mb.comments_count || 0,
+                        likes: mb.attitudes_count || 0,
+                        created_at: mb.created_at || '',
+                      });
+                    }
                   }
                 }
               }
             }
           }
+        } catch (e) {
+          console.log('[WeiboSearch] Ajax approach failed:', e.message);
+        }
 
-          // 缓存结果
-          if (posts.length > 0) {
-            globalThis._weiboSearchCache[cacheKey] = { data: posts, timestamp: Date.now() };
+        // 策略2: HTML 抓取 s.weibo.com
+        if (posts.length === 0) {
+          try {
+            const searchUrl = `https://s.weibo.com/weibo?q=${encodeURIComponent(q)}&Refer=index`;
+            const htmlRes = await fetch(searchUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml',
+                'Accept-Language': 'zh-CN,zh;q=0.9',
+                'Referer': 'https://s.weibo.com/',
+              }
+            });
+
+            if (htmlRes.ok) {
+              const html = await htmlRes.text();
+              // 从 HTML 中提取微博帖子内容
+              // s.weibo.com 搜索结果页面的帖子在 <p class="txt" ...> 标签中
+              const txtMatches = html.matchAll(/<p[^>]*class="txt"[^>]*node-type="feed_list_content"[^>]*>([\s\S]*?)<\/p>/g);
+              const nickMatches = html.matchAll(/<a[^>]*class="name"[^>]*nick-name="([^"]*)"[^>]*>/g);
+              const txts = [...txtMatches].map(m => m[1].replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&#[\d]+;/g, '').trim());
+              const nicks = [...nickMatches].map(m => m[1]);
+
+              for (let i = 0; i < txts.length && i < 10; i++) {
+                if (txts[i]) {
+                  posts.push({
+                    id: '',
+                    text: txts[i].slice(0, 300),
+                    user: nicks[i] || '',
+                    reposts: 0,
+                    comments: 0,
+                    likes: 0,
+                    created_at: '',
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            console.log('[WeiboSearch] HTML scrape failed:', e.message);
           }
+        }
 
+        // 策略3: 如果都失败了，降级使用热搜中匹配的条目
+        if (posts.length === 0) {
+          try {
+            const hotRes = await fetch('https://weibo.com/ajax/side/hotSearch', {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'application/json',
+                'Referer': 'https://s.weibo.com/top/summary'
+              }
+            });
+            if (hotRes.ok) {
+              const hotData = await hotRes.json();
+              if (hotData.ok === 1 && hotData.data?.realtime) {
+                const keyword = q.toLowerCase();
+                const matched = hotData.data.realtime
+                  .filter(item => item.word && item.word.toLowerCase().includes(keyword))
+                  .slice(0, 5);
+                for (const item of matched) {
+                  posts.push({
+                    id: '',
+                    text: `热搜话题: #${item.word}# — 热度 ${item.num || '未知'}${item.label_name ? ` [${item.label_name}]` : ''}`,
+                    user: '微博热搜',
+                    reposts: 0,
+                    comments: 0,
+                    likes: item.num || 0,
+                    created_at: '',
+                  });
+                }
+                // 如果精确匹配不够，补充TOP热搜
+                if (posts.length < 3) {
+                  const topHot = hotData.data.realtime.slice(0, 5);
+                  for (const item of topHot) {
+                    if (!posts.find(p => p.text.includes(item.word))) {
+                      posts.push({
+                        id: '',
+                        text: `热搜 #${item.word}# — 热度 ${item.num || '未知'}`,
+                        user: '微博热搜',
+                        reposts: 0,
+                        comments: 0,
+                        likes: item.num || 0,
+                        created_at: '',
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.log('[WeiboSearch] Hotlist fallback failed:', e.message);
+          }
+        }
+
+        if (posts.length > 0) {
+          globalThis._weiboSearchCache[cacheKey] = { data: posts, timestamp: Date.now() };
           return jsonResponse({ success: true, posts, query: q, total: posts.length }, { origin });
         }
 
-        return jsonResponse({ success: false, error: 'Weibo 搜索返回格式异常', debug: { ok: raw.ok } }, { status: 502, origin });
+        return jsonResponse({ success: false, error: '微博搜索暂无结果，请稍后再试', query: q }, { status: 200, origin });
       } catch (e) {
         return jsonResponse({ success: false, error: `微博搜索异常: ${e.message}` }, { status: 502, origin });
       }
