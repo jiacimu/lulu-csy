@@ -133,7 +133,7 @@ const DateApp: React.FC = () => {
                     role: 'assistant',
                     type: 'text',
                     content: peekStatus,
-                    metadata: { source: 'date', isOpening: true } // Added Flag
+                    metadata: { source: 'date', isOpening: true, thinking: (peekStatus as any)._thinking } // Added Flag
                 });
                 setHasSavedOpening(true);
             } catch (e) {
@@ -208,6 +208,10 @@ const DateApp: React.FC = () => {
             const rawPeek = data.choices[0].message.content;
             const peekExtracted = extractThinking(rawPeek);
             setPeekStatus(peekExtracted.content);
+            // Temporary hack to pass thinking down to save opening
+            if (peekExtracted.thinking) {
+                (peekExtracted.content as any)._thinking = peekExtracted.thinking;
+            }
 
         } catch (e: any) {
             setPeekStatus(`(无法感知状态: ${e.message})`);
@@ -273,8 +277,8 @@ const DateApp: React.FC = () => {
         const extracted = extractThinking(rawContent);
         const content = extracted.content;
 
-        // 3. Save AI Response (thinking chain discarded, never stored)
-        await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: content, metadata: { source: 'date' } });
+        // 3. Save AI Response (thinking chain saved to metadata for dev debugging, hidden from UI)
+        await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: content, metadata: { source: 'date', thinking: extracted.thinking } });
 
         // Refresh local state
         const freshMsgs = await DB.getMessagesByCharId(char.id);
@@ -336,8 +340,8 @@ const DateApp: React.FC = () => {
         const extracted = extractThinking(rawContent);
         const content = extracted.content;
 
-        // Save (thinking chain discarded, never stored)
-        await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: content, metadata: { source: 'date' } });
+        // Save AI Response (thinking chain saved to metadata for dev debugging, hidden from UI)
+        await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: content, metadata: { source: 'date', thinking: extracted.thinking } });
 
         // Sync
         const freshMsgs = await DB.getMessagesByCharId(char.id);
