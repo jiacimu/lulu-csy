@@ -3,6 +3,7 @@ import React, { useEffect } from 'react';
 import { VirtualTimeProvider } from './context/VirtualTimeContext';
 import { OSProvider } from './context/OSContext';
 import PhoneShell from './components/PhoneShell';
+import { startKeepAlive } from './utils/keepAlive';
 
 /**
  * 检测是否运行在 PWA (已安装到桌面) 模式
@@ -16,11 +17,20 @@ function isPwaMode(): boolean {
 }
 
 /**
+ * 检查用户是否开启了全屏模式
+ */
+export function isFullscreenEnabled(): boolean {
+  try { return localStorage.getItem('os_fullscreen_enabled') === 'true'; } catch { return false; }
+}
+
+/**
  * 请求系统级全屏 (Fullscreen API)
  * 隐藏安卓状态栏 + 导航栏
+ * 只有在用户开启了全屏设置时才会执行
  */
 export function requestSystemFullscreen() {
   if (typeof document === 'undefined') return;
+  if (!isFullscreenEnabled()) return;
   const el = document.documentElement;
   const request =
     el.requestFullscreen ||
@@ -34,9 +44,21 @@ export function requestSystemFullscreen() {
   }
 }
 
+/**
+ * 退出全屏
+ */
+export function exitSystemFullscreen() {
+  if (typeof document === 'undefined') return;
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
 const App: React.FC = () => {
   useEffect(() => {
+    startKeepAlive();
     if (!isPwaMode()) return;
+    if (!isFullscreenEnabled()) return;
 
     // 积极维护全屏状态：任何点击或触摸（用户手势）都会尝试恢复全屏
     // 这是为了解决 Android 侧滑返回、键盘收起时意外退出全屏的 Bug
