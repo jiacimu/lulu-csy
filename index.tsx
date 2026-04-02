@@ -3,6 +3,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { initSystemInterceptor } from './utils/systemInterceptor';
+import { initAppLifecycle } from './utils/appLifecycle';
 import { preloadLocalAssets, scheduleIdlePreload } from './utils/preloadResources';
 
 // ── Production Log Suppression ──────────────────────────────────
@@ -19,6 +20,9 @@ if (!import.meta.env.DEV) {
 
 // Initialize global interceptors BEFORE React mounts
 initSystemInterceptor();
+
+// Initialize app lifecycle manager (handles background → foreground recovery)
+initAppLifecycle();
 
 // 预加载本地关键图片（心声水墨画 + 邮戳装饰）
 preloadLocalAssets();

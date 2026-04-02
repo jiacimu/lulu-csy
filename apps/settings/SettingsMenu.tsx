@@ -1,6 +1,7 @@
 
 import React, { useMemo } from 'react';
 import { haptic } from '../../utils/haptics';
+import { requestSystemFullscreen, exitSystemFullscreen } from '../../App';
 
 export type SettingsPanel = 'menu' | 'data' | 'api' | 'subapi' | 'realtime' | 'tts' | 'stt' | 'embedding' | 'agent';
 
@@ -109,6 +110,20 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
         if (checked) haptic.medium();
     };
 
+    // Fullscreen toggle — read/write localStorage directly
+    const [fullscreenEnabled, setFullscreenEnabled] = React.useState(() => {
+        try { return localStorage.getItem('os_fullscreen_enabled') === 'true'; } catch { return false; }
+    });
+    const toggleFullscreen = (checked: boolean) => {
+        setFullscreenEnabled(checked);
+        localStorage.setItem('os_fullscreen_enabled', String(checked));
+        if (checked) {
+            requestSystemFullscreen();
+        } else {
+            exitSystemFullscreen();
+        }
+    };
+
     const statusMap: Record<string, string | undefined> = {
         api: statuses.api,
         tts: statuses.tts,
@@ -157,6 +172,23 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
                 <label className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" checked={hapticsEnabled} onChange={e => toggleHaptics(e.target.checked)} className="sr-only peer" />
                     <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
+            </div>
+
+            {/* 沉浸全屏 */}
+            <div className="flex items-center justify-between bg-white/60 backdrop-blur-sm rounded-2xl p-4 shadow-sm border border-white/50">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-teal-100/50 rounded-xl text-teal-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /></svg>
+                    </div>
+                    <div>
+                        <div className="text-sm font-semibold text-slate-700">沉浸全屏</div>
+                        <div className="text-[10px] text-slate-400">隐藏系统状态栏与导航栏</div>
+                    </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" checked={fullscreenEnabled} onChange={e => toggleFullscreen(e.target.checked)} className="sr-only peer" />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500"></div>
                 </label>
             </div>
 

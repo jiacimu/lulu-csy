@@ -580,6 +580,21 @@ export class BackendAgentManager {
 
             if (localStorage.getItem('autonomous_debug') === 'true') {
                 console.log('🤖 [Agent] Context pushed to backend');
+
+                // LifeStream 调试：拉取最新片段并打印
+                try {
+                    const lsData = await agentFetch(`/api/agent/lifestream?charId=${this.charId}`);
+                    if (lsData.fragments && lsData.fragments.length > 0) {
+                        console.log(`🌊 [LifeStream] ${lsData.fragments.length} fragment(s) today:`);
+                        for (const f of lsData.fragments.slice(-5)) {
+                            console.log(`  ${f.time_label} — ${f.fragment}`);
+                        }
+                    } else {
+                        console.log(`🌊 [LifeStream] no fragments yet`);
+                    }
+                } catch (e: any) {
+                    console.log(`🌊 [LifeStream] fetch error: ${e.message}`);
+                }
             }
         } catch (err: any) {
             if (localStorage.getItem('autonomous_debug') === 'true') {
