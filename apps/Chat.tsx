@@ -738,9 +738,21 @@ const Chat: React.FC = () => {
         await DB.deleteMessage(selectedMessage.id);
         setMessages(prev => prev.filter(m => m.id !== selectedMessage.id));
         setTotalMsgCount(prev => Math.max(0, prev - 1));
+
+        // 清理由于此条消息引发的心理状态残留
+        if (char && char.moodState && typeof char.moodState === 'object') {
+            updateCharacter(char.id, { 
+                moodState: { 
+                    ...(char.moodState as any), 
+                    innerVoice: '', 
+                    surfaceEmotion: '平静' 
+                } 
+            });
+        }
+
         setModalType('none');
         setSelectedMessage(null);
-        addToast('消息已删除', 'success');
+        addToast('消息已删除 (心境已复位)', 'success');
     };
 
     const confirmEditMessage = async () => {
