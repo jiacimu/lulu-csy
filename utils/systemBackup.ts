@@ -1,6 +1,7 @@
 
 import { APIConfig, OSTheme, CharacterProfile, ChatTheme, FullBackupData, UserProfile, ApiPreset, GroupProfile, SystemLog, Worldbook, NovelBook, Message, RealtimeConfig, TtsConfig, SttConfig } from '../types';
 import { DB } from './db';
+import { getBackendUrl, getUserId } from './backendClient';
 
 // ─── JSZip Dynamic Loader ───────────────────────────────────────────────
 
@@ -376,6 +377,36 @@ export async function exportSystemData(
         backupData.extraLocalStorageConfig = extraConfig;
     }
 
+    // ── 拉取后端 graph 数据（语义关联 + 逻辑链 + 认知）──
+    if (mode === 'text_only' || mode === 'full') {
+        onProgress('正在拉取认知网络数据...', 90);
+        try {
+            const backendUrl = getBackendUrl();
+            if (backendUrl) {
+                const graphResp = await fetch(`${backendUrl}/api/graph/export`, {
+                    headers: {
+                        'Authorization': `Bearer csyos_k7m2x9f4p1w8v3`,
+                        'X-User-Id': getUserId(),
+                    },
+                    signal: AbortSignal.timeout(15000),
+                });
+                if (graphResp.ok) {
+                    const graphData = await graphResp.json();
+                    if (graphData.ok) {
+                        (backupData as any).graphData = {
+                            relations: graphData.relations || [],
+                            chains: graphData.chains || [],
+                            l1Memories: graphData.l1Memories || [],
+                        };
+                        console.log(`📦 [Export] Graph data: ${graphData.relations?.length || 0} relations, ${graphData.chains?.length || 0} chains`);
+                    }
+                }
+            }
+        } catch (e: any) {
+            console.warn('📦 [Export] Graph data fetch failed (non-critical):', e.message);
+        }
+    }
+
     onProgress('正在生成压缩包...', 95);
 
     zip.file("data.json", JSON.stringify(backupData));
@@ -493,6 +524,36 @@ export async function importSystemData(
     if (data.extraLocalStorageConfig) {
         for (const [key, value] of Object.entries(data.extraLocalStorageConfig)) {
             localStorage.setItem(key, value);
+        }
+    }
+
+    // ── 恢复后端 graph 数据（语义关联 + 逻辑链 + 认知）──
+    if ((data as any).graphData) {
+        try {
+            const backendUrl = getBackendUrl();
+            if (backendUrl) {
+                onProgress('正在恢复认知网络数据...', 90);
+                const graphData = (data as any).graphData;
+                const importResp = await fetch(`${backendUrl}/api/graph/import`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer csyos_k7m2x9f4p1w8v3`,
+                        'X-User-Id': getUserId(),
+                    },
+                    body: JSON.stringify({
+                        relations: graphData.relations || [],
+                        chains: graphData.chains || [],
+                    }),
+                    signal: AbortSignal.timeout(30000),
+                });
+                if (importResp.ok) {
+                    const result = await importResp.json();
+                    console.log(`📦 [Import] Graph data restored: ${result.relationsImported} relations, ${result.chainsImported} chains`);
+                }
+            }
+        } catch (e: any) {
+            console.warn('📦 [Import] Graph data restore failed (non-critical):', e.message);
         }
     }
 
