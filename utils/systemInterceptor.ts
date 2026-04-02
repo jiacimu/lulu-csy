@@ -39,6 +39,52 @@ function emit(log: SystemLog) {
  * MUST be called exactly once, before ReactDOM.createRoot().
  * Safe to call multiple times (idempotent via _initialized guard).
  */
+/**
+ * Patterns that indicate a non-critical, internal error which should NOT
+ * be surfaced to the user in the debug terminal.  These are common browser
+ * / infrastructure issues that clutter the log without actionable info.
+ */
+const SUPPRESSED_ERROR_PATTERNS: RegExp[] = [
+    /ISO.8859/i,                          // Header encoding (non-ASCII in headers)
+    /Failed to fetch/i,                   // Generic network connectivity
+    /NetworkError/i,
+    /Load failed/i,
+    /AbortError/i,                        // AbortController / signal timeouts
+    /signal.*timed?\s*out/i,
+    /ERR_CONNECTION/i,
+    /ERR_NAME_NOT_RESOLVED/i,
+    /ERR_INTERNET_DISCONNECTED/i,
+    /CORS/i,                              // Cross-origin issues (infra, not user)
+    /ServiceWorker/i,
+    /chunk.*failed/i,                     // Vite HMR chunk loading
+    /dynamically imported module/i,
+    /ResizeObserver/i,                    // Harmless browser warning
+];
+
+/**
+ * URL paths that are internal / background and whose failures should
+ * NOT appear in the user-facing debug terminal.
+ */
+const SUPPRESSED_URL_PATTERNS: RegExp[] = [
+    /\/api\/graph\//i,
+    /\/api\/sync\//i,
+    /\/api\/agent\//i,
+    /\/api\/memory\//i,
+    /\/api\/push\//i,
+    /\/api\/vector/i,
+    /hot-update/i,                        // Vite HMR
+    /sockjs-node/i,
+    /ws:\/\//i,
+];
+
+function isSuppressedError(message: string): boolean {
+    return SUPPRESSED_ERROR_PATTERNS.some(p => p.test(message));
+}
+
+function isSuppressedUrl(url: string): boolean {
+    return SUPPRESSED_URL_PATTERNS.some(p => p.test(url));
+}
+
 export function initSystemInterceptor(): void {
     if (_initialized) return;
     _initialized = true;
@@ -53,7 +99,7 @@ export function initSystemInterceptor(): void {
             const response = await originalFetch(...args);
 
             if (!response.ok) {
-                // Only log if it's likely an API call
+                // Only log if it's an important user-facing API call
                 if (urlStr.includes('/chat/completions') || urlStr.includes('/models')) {
                     try {
                         const clone = response.clone();
@@ -80,14 +126,24 @@ export function initSystemInterceptor(): void {
             }
             return response;
         } catch (err: any) {
-            emit({
-                id: `log-${Date.now()}`,
-                timestamp: Date.now(),
-                type: 'network',
-                source: 'Network',
-                message: err.message || 'Fetch Failed',
-                detail: `URL: ${urlStr}`
-            });
+            const errMsg = err.message || 'Fetch Failed';
+
+            // Suppress non-critical / background network errors
+            if (isSuppressedError(errMsg) || isSuppressedUrl(urlStr)) {
+                throw err;   // Still throw (caller handles retry), just don't show in UI
+            }
+
+            // Only show important fetch errors to user
+            if (urlStr.includes('/chat/completions') || urlStr.includes('/models')) {
+                emit({
+                    id: `log-${Date.now()}`,
+                    timestamp: Date.now(),
+                    type: 'network',
+                    source: 'Network',
+                    message: errMsg,
+                    detail: `URL: ${urlStr}`
+                });
+            }
             throw err;
         }
     };
@@ -111,8 +167,12 @@ export function initSystemInterceptor(): void {
     console.error = (...args: any[]) => {
         originalConsoleError(...args);
         const msg = args.map(a => (a instanceof Error ? a.message : String(a))).join(' ');
-        const detail = args.map(a => (a instanceof Error ? a.stack : '')).join('\n');
+
+        // Filter out React warnings and non-critical errors
         if (msg.includes('Warning:')) return;
+        if (isSuppressedError(msg)) return;
+
+        const detail = args.map(a => (a instanceof Error ? a.stack : '')).join('\n');
         emit({
             id: `log-${Date.now()}-${Math.random()}`,
             timestamp: Date.now(),

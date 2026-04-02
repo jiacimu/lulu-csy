@@ -55,6 +55,7 @@ const CognitiveNetworkApp: React.FC = () => {
     const [queueStatus, setQueueStatus] = useState<{
         total: number; done: number; errors: number; running: boolean;
         lastError?: string; lastElapsed?: number;
+        totalRelations?: number;
     } | null>(null);
     const [polling, setPolling] = useState(false);
 
@@ -228,7 +229,8 @@ const CognitiveNetworkApp: React.FC = () => {
             const total = result.totalQueued;
             let done = 0;
             let errors = 0;
-            setQueueStatus({ total, done: 0, errors: 0, running: true });
+            let totalRelations = 0;
+            setQueueStatus({ total, done: 0, errors: 0, running: true, totalRelations: 0 });
 
             for (let i = 0; i < total; i++) {
                 try {
@@ -248,11 +250,18 @@ const CognitiveNetworkApp: React.FC = () => {
 
                     if (data.processed) {
                         done++;
+                        totalRelations += (data.relationsFound || 0);
                         setQueueStatus({ 
                             total, done, errors, running: true, 
                             lastElapsed: data.elapsed, 
+                            totalRelations,
                             lastRelations: data.relationsFound,
-                            lastSnippet: data.debug?.llmSnippet
+                            lastSnippet: data.debug?.llmSnippet,
+                            lastParseError: data.debug?.parseError,
+                            lastRawCount: data.debug?.rawParsedCount ?? data.debug?.rawParsed?.length,
+                            lastFilterCount: data.relationsFound,
+                            lastCandidateCount: data.debug?.candidateCount,
+                            lastVecSim: data.debug?.vectorSimilarityUsed,
                         });
                     } else if (data.error) {
                         errors++;
@@ -818,14 +827,22 @@ const CognitiveNetworkApp: React.FC = () => {
                             />
                         </div>
                         <div className="flex justify-between text-[9px] text-slate-300">
-                            <span>已完成 {queueStatus.done} · 失败 {queueStatus.errors}{(queueStatus as any).lastRelations !== undefined ? ` · 最近发现 ${(queueStatus as any).lastRelations} 个关联` : ''}{queueStatus.lastElapsed ? ` · ${(queueStatus.lastElapsed / 1000).toFixed(1)}s` : ''}</span>
+                            <span>已完成 {queueStatus.done} · 失败 {queueStatus.errors}{(queueStatus as any).totalRelations !== undefined ? ` · 已发现 ${(queueStatus as any).totalRelations} 个关联` : ''}{queueStatus.lastElapsed ? ` · ${(queueStatus.lastElapsed / 1000).toFixed(1)}s` : ''}</span>
                             <span>{Math.round((queueStatus.done / Math.max(1, queueStatus.total)) * 100)}%</span>
                         </div>
                         {(queueStatus as any).lastSnippet && (
-                            <div className="mt-1 text-[9px] text-slate-400 font-mono truncate">
-                                LLM返回: {(queueStatus as any).lastSnippet.slice(0, 40)}...
+                            <div className="mt-1 text-[9px] text-slate-400 font-mono" style={{wordBreak: 'break-all'}}>
+                                LLM返回: {(queueStatus as any).lastSnippet.slice(0, 100)}...
                             </div>
                         )}
+                        {(queueStatus as any).lastParseError && (
+                            <div className="mt-1 text-[9px] text-red-400 font-mono" style={{wordBreak: 'break-all'}}>
+                                ⚠ 解析错误: {(queueStatus as any).lastParseError}
+                            </div>
+                        )}
+                        <div className="mt-0.5 text-[9px] text-slate-300 font-mono">
+                            本轮: 解析{(queueStatus as any).lastRawCount ?? '?'}条 · 写入{(queueStatus as any).lastFilterCount ?? '?'}条{(queueStatus as any).lastVecSim !== undefined ? ` · 向量${(queueStatus as any).lastVecSim ? '✓' : '✗'}` : ''} · 候选{(queueStatus as any).lastCandidateCount ?? '?'}条
+                        </div>
                         {queueStatus.lastError && (
                             <div className="mt-3 p-2.5 bg-amber-50 rounded-xl border border-amber-100">
                                 <p className="text-[11px] font-bold text-amber-700 mb-1 flex items-center gap-1">
