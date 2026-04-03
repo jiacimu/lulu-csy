@@ -29,7 +29,7 @@ import {
 // ─── Configuration ───────────────────────────────────────────
 
 const SENSE_TIMEOUT_MS = 60000;   // senseBefore 超时（与 embedding/rerank 并行，不影响用户等待）
-const VOICE_TIMEOUT_MS = 60000;   // innerVoice 超时（不阻塞，可以慢一点）
+const VOICE_TIMEOUT_MS = 180000;  // innerVoice 超时（不阻塞，可以慢一点）
 const AUTO_RETRY_DELAY_MS = 3000;
 
 // Module-level: abort-and-replace controllers
