@@ -312,6 +312,13 @@ end if
                 console.log('🧩 [Prefill] Injected <thinking> prefill assistant message');
             }
 
+            // Claude API 兼容：确保最后一条 assistant 消息无尾部空白
+            // (防止中转站转发到 Claude 时触发 "final assistant content cannot end with trailing whitespace" 报错)
+            const lastFullMsg = fullMessages[fullMessages.length - 1];
+            if (lastFullMsg?.role === 'assistant' && typeof lastFullMsg.content === 'string') {
+                lastFullMsg.content = lastFullMsg.content.trimEnd();
+            }
+
             const requestBody: Record<string, any> = {
                 model: apiConfig.model,
                 messages: fullMessages,
