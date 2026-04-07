@@ -1,14 +1,14 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React,{ useState,useEffect,useCallback } from 'react';
 import { useOS } from '../../context/OSContext';
 import Modal from '../../components/os/Modal';
 import {
-    uploadCloudBackup,
-    listCloudBackups,
-    downloadCloudBackup,
-    deleteCloudBackup,
-    isCloudBackupAvailable,
-    CloudBackupMeta,
+  uploadCloudBackup,
+  listCloudBackups,
+  downloadCloudBackup,
+  deleteCloudBackup,
+  isCloudBackupAvailable,
+  CloudBackupMeta,
 } from '../../utils/cloudBackup';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -68,11 +68,6 @@ const ShieldIcon = () => (
     </svg>
 );
 
-const CheckIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-    </svg>
-);
 
 // ─── Component ───────────────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@
  * 💬 Native App 级极简主义 — 克制的留白、纯粹的色彩、
  * 平滑的苹果阴影 (Smooth Corners & Shadow)、原生的 Typography 比例
  */
-import React, { useMemo } from 'react';
+import React,{ useMemo } from 'react';
 import { StatusCardData } from '../../../types/statusCard';
 
 const FONT_MAP: Record<string, string> = {

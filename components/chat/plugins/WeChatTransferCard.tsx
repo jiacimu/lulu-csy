@@ -1,5 +1,4 @@
 import React from 'react';
-import { Message } from '../../../types';
 import { TransferCardProps } from '../ThemeRegistry';
 
 const WeChatTransferCard: React.FC<TransferCardProps> = ({ message: m, isUser, charName, selectionMode, onTransferAction }) => {

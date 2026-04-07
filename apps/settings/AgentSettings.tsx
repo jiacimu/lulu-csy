@@ -1,7 +1,14 @@
 
-import React, { useState } from 'react';
-import { getAgentConfig, saveAgentConfig, type AgentConfig } from '../../utils/autonomousAgent';
+import React,{ useEffect,useState } from 'react';
+import {
+    getAgentConfig,
+    getAutonomousDebugEnabled,
+    saveAgentConfig,
+    setAutonomousDebugEnabled,
+    type AgentConfig,
+} from '../../utils/autonomousAgent';
 import { haptic } from '../../utils/haptics';
+import { forceResubscribe,getPushDebugInfo } from '../../utils/pushSubscription';
 
 /**
  * AgentSettings — 自律代理频率 / 推送通知设置面板
@@ -9,7 +16,25 @@ import { haptic } from '../../utils/haptics';
  */
 const AgentSettings: React.FC = () => {
     const [config, setConfig] = useState<AgentConfig>(getAgentConfig);
+    const [autonomousDebugEnabled, setAutonomousDebugState] = useState(getAutonomousDebugEnabled);
     const [saved, setSaved] = useState(false);
+    const [pushInfo, setPushInfo] = useState(getPushDebugInfo);
+    const [pushBusy, setPushBusy] = useState(false);
+
+    useEffect(() => {
+        const refresh = () => setPushInfo(getPushDebugInfo());
+        refresh();
+
+        const timer = window.setInterval(refresh, 2000);
+        window.addEventListener('focus', refresh);
+        document.addEventListener('visibilitychange', refresh);
+
+        return () => {
+            window.clearInterval(timer);
+            window.removeEventListener('focus', refresh);
+            document.removeEventListener('visibilitychange', refresh);
+        };
+    }, []);
 
     const update = (patch: Partial<AgentConfig>) => {
         const next = { ...config, ...patch };
@@ -18,6 +43,28 @@ const AgentSettings: React.FC = () => {
         setSaved(true);
         setTimeout(() => setSaved(false), 1500);
         window.dispatchEvent(new Event('agent-config-changed'));
+    };
+
+    const permissionLabel = (() => {
+        if (typeof window === 'undefined' || !('Notification' in window)) {
+            return '当前浏览器不支持';
+        }
+
+        if (Notification.permission === 'granted') return '已允许';
+        if (Notification.permission === 'denied') return '已拒绝';
+        return '未决定';
+    })();
+
+    const handleResubscribe = async () => {
+        if (pushBusy) return;
+
+        setPushBusy(true);
+        try {
+            await forceResubscribe();
+        } finally {
+            setPushInfo(getPushDebugInfo());
+            setPushBusy(false);
+        }
     };
 
     return (
@@ -138,7 +185,7 @@ const AgentSettings: React.FC = () => {
                             <span className="text-sm font-bold text-[#7faa95]">🔔 系统通知</span>
                         </div>
                         <p className="text-[10px] text-[#a89b91] leading-relaxed max-w-[240px]">
-                            角色主动发消息时弹出手机原生通知。需要 Android APK 打包后才能使用
+                            Web 端依赖浏览器的 Web Push 和 Service Worker。当前 Android 原生壳还没有接入真正的后端推送。
                         </p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer shrink-0">
@@ -150,6 +197,38 @@ const AgentSettings: React.FC = () => {
                         />
                         <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#7faa95]"></div>
                     </label>
+                </div>
+
+                <div className="mt-4 rounded-2xl bg-white/45 border border-white/40 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                        <span className="text-[11px] font-bold text-[#7faa95]">Web Push 状态</span>
+                        <button
+                            type="button"
+                            onClick={handleResubscribe}
+                            disabled={pushBusy}
+                            className="px-3 py-1.5 rounded-xl text-[10px] font-bold bg-[#7faa95] text-white disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 transition-transform"
+                        >
+                            {pushBusy ? '重新初始化中...' : '重新初始化 Web Push'}
+                        </button>
+                    </div>
+
+                    <div className="grid grid-cols-[72px_1fr] gap-x-2 gap-y-1 text-[10px] leading-relaxed">
+                        <span className="text-[#8b7e74] font-bold">通知权限</span>
+                        <span className="text-[#a89b91] break-all">{permissionLabel}</span>
+
+                        <span className="text-[#8b7e74] font-bold">订阅状态</span>
+                        <span className="text-[#a89b91] break-all">{pushInfo.status || '未初始化'}</span>
+
+                        <span className="text-[#8b7e74] font-bold">订阅端点</span>
+                        <span className="text-[#a89b91] break-all">{pushInfo.endpoint || '暂无'}</span>
+
+                        <span className="text-[#8b7e74] font-bold">错误信息</span>
+                        <span className="text-[#a89b91] break-all">{pushInfo.error || '暂无'}</span>
+                    </div>
+
+                    <p className="text-[10px] text-[#a89b91] leading-relaxed">
+                        如果这里一直不是“推送通知已就绪”，那你现在收到的大概率只是浏览器开着时的前台消息同步，不是真正的离线推送。
+                    </p>
                 </div>
             </section>
 
@@ -167,11 +246,12 @@ const AgentSettings: React.FC = () => {
                     <label className="relative inline-flex items-center cursor-pointer shrink-0">
                         <input
                             type="checkbox"
-                            checked={localStorage.getItem('autonomous_debug') === 'true'}
+                            checked={autonomousDebugEnabled}
                             onChange={e => {
                                 haptic.medium();
-                                localStorage.setItem('autonomous_debug', String(e.target.checked));
-                                setConfig({ ...config }); // force re-render
+                                const nextValue = e.target.checked;
+                                setAutonomousDebugEnabled(nextValue);
+                                setAutonomousDebugState(nextValue);
                                 window.dispatchEvent(new Event('agent-config-changed'));
                             }}
                             className="sr-only peer"

@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { CaretLeft, Lightning, Phone } from '@phosphor-icons/react';
+import { CaretLeft,Lightning,Phone } from '@phosphor-icons/react';
 import { CharacterProfile } from '../../types';
 
 interface TokenBreakdown {

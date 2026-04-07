@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React,{ useState } from 'react';
 
 /**
  * ForwardCard — 策略 B: 可主题化聊天记录卡片

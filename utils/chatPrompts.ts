@@ -1,8 +1,8 @@
 
-import { CharacterProfile, UserProfile, Message, Emoji, EmojiCategory, GroupProfile, RealtimeConfig, APIConfig } from '../types';
+import { CharacterProfile,UserProfile,Message,Emoji,EmojiCategory,GroupProfile,RealtimeConfig,APIConfig } from '../types';
 import { ContextBuilder } from './context';
 import { DB } from './db';
-import { RealtimeContextManager, NotionManager, FeishuManager, defaultRealtimeConfig } from './realtimeContext';
+import { RealtimeContextManager,NotionManager,FeishuManager,defaultRealtimeConfig } from './realtimeContext';
 import { buildCharacterHotSearch } from './hotSearchContext';
 import { VectorMemoryRetriever } from './vectorMemoryRetriever';
 import { buildTemporalContext } from './temporalContext';
@@ -739,7 +739,7 @@ Step 5 — 最后检查
         messages: Message[],
         limit: number,
         char: CharacterProfile,
-        userProfile: UserProfile,
+        _userProfile: UserProfile,
         emojis: Emoji[]
     ) => {
         // Filter Logic

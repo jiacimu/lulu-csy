@@ -1,7 +1,7 @@
 
-import React, { useRef, useState, useMemo } from 'react';
-import { ShareNetwork, Trash, Plus, Smiley, PaperPlaneTilt, Money, BookOpenText, GearSix, Image, Lock, ArrowsClockwise } from '@phosphor-icons/react';
-import { CharacterProfile, ChatTheme, EmojiCategory, Emoji } from '../../types';
+import React,{ useRef,useState,useMemo } from 'react';
+import { ShareNetwork,Trash,Plus,Smiley,PaperPlaneTilt,Money,BookOpenText,GearSix,Image,Lock,ArrowsClockwise } from '@phosphor-icons/react';
+import { CharacterProfile,ChatTheme,EmojiCategory,Emoji } from '../../types';
 import { PRESET_THEMES } from './ChatConstants';
 import { THEME_PLUGINS } from './ThemeRegistry';
 import VoiceRecordButton from './VoiceRecordButton';
@@ -94,7 +94,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         }
     };
 
-    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'chat' | 'bg') => {
+    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
             onImageSelect(file);
@@ -434,7 +434,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                     </div>
                                 )}
                                 {/* Hidden file input for both default and plugin panels */}
-                                <input type="file" ref={chatImageInputRef} className="hidden" accept="image/*" onChange={(e) => handleImageChange(e, 'chat')} />
+                                <input type="file" ref={chatImageInputRef} className="hidden" accept="image/*" onChange={handleImageChange} />
                             </>
                         )}
                         {showPanel === 'chars' && (

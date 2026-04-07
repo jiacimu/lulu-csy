@@ -2,9 +2,9 @@
 
 
 
-import React, { useRef, useState } from 'react';
+import React,{ useRef,useState } from 'react';
 import ReactDOM from 'react-dom';
-import { Message, ChatTheme } from '../../types';
+import { Message,ChatTheme } from '../../types';
 import { StatusCardData } from '../../types/statusCard';
 import { haptic } from '../../utils/haptics';
 import { THEME_PLUGINS } from './ThemeRegistry';
@@ -85,7 +85,6 @@ interface MessageItemProps {
 
 const MessageItem = React.memo(({
     msg: m,
-    isFirstInGroup,
     isLastInGroup,
     activeTheme,
     charAvatar,
@@ -609,8 +608,6 @@ const MessageItem = React.memo(({
 
         // Parse bilingual content in voice transcript (reuses shared utility)
         const voiceBi = parseBilingual(sourceText, stripJunk);
-        const showVoiceTranslate = translationEnabled && voiceBi.hasBilingual && !!voiceBi.langB;
-        const voiceDisplayText = (isShowingTarget && voiceBi.langB) ? voiceBi.langB : voiceBi.langA;
 
         // Resolve plugin theme ID (DIY themes inherit from baseThemeId)
         // BUT: custom (DIY) themes should always use generic VoiceBubble with their own styleConfig,

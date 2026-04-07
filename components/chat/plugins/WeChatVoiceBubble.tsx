@@ -9,7 +9,7 @@
  *   - 完全遵循 VoiceBubbleProps 接口，即插即用
  */
 
-import React, { useCallback } from 'react';
+import React,{ useCallback } from 'react';
 import type { VoiceBubbleProps } from '../VoiceBubble';
 
 const WeChatVoiceBubble: React.FC<VoiceBubbleProps> = ({

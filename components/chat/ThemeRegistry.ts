@@ -10,7 +10,7 @@ import React from 'react';
 import { Message } from '../../types';
 import WeChatInputBar from './plugins/WeChatInputBar';
 import WeChatTransferCard from './plugins/WeChatTransferCard';
-import WeChatActionsPanel, { ActionsPanelProps } from './plugins/WeChatActionsPanel';
+import WeChatActionsPanel,{ ActionsPanelProps } from './plugins/WeChatActionsPanel';
 import WeChatVoiceBubble from './plugins/WeChatVoiceBubble';
 import type { VoiceBubbleProps } from './VoiceBubble';
 

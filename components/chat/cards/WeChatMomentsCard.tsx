@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React,{ useState } from 'react';
 
 /**
  * WeChatMomentsCard — a pixel-perfect replica of a WeChat Moments (朋友圈) post.

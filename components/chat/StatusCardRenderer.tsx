@@ -5,7 +5,7 @@
  * 负责：CSS变量注入、白名单验证、fallback降级。
  */
 
-import React, { Suspense, useMemo } from 'react';
+import React,{ Suspense,useMemo } from 'react';
 import { StatusCardData } from '../../types/statusCard';
 
 // ─── Lazy-loaded skeletons ──────────────────────────────────────

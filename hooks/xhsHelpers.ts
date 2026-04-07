@@ -1,8 +1,8 @@
 
-import { CharacterProfile, RealtimeConfig } from '../types';
+import { CharacterProfile,RealtimeConfig } from '../types';
 import { DB } from '../utils/db';
 import { XhsNote } from '../utils/realtimeContext';
-import { XhsMcpClient, extractNotesFromMcpData, normalizeNote } from '../utils/xhsMcpClient';
+import { XhsMcpClient,extractNotesFromMcpData,normalizeNote } from '../utils/xhsMcpClient';
 
 // Resolve XHS config: per-character override, MCP-only
 export function resolveXhsConfig(char: CharacterProfile, realtimeConfig?: RealtimeConfig): {

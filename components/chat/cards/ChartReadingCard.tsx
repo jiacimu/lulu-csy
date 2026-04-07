@@ -13,7 +13,7 @@ interface ChartReadingCardProps {
     displayText: string;
 }
 
-const ChartReadingCard: React.FC<ChartReadingCardProps> = ({ message, displayText }) => {
+const ChartReadingCard: React.FC<ChartReadingCardProps> = ({ displayText }) => {
     return (
         <div
             className="w-[90%] max-w-sm mx-auto relative overflow-hidden"

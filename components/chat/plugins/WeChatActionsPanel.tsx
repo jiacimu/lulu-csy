@@ -1,5 +1,5 @@
 import React from 'react';
-import { Money, BookOpenText, GearSix, Image, ArrowsClockwise, HandTap, Phone } from '@phosphor-icons/react';
+import { Money,BookOpenText,GearSix,Image,ArrowsClockwise,HandTap,Phone } from '@phosphor-icons/react';
 
 export interface ActionsPanelProps {
     onPanelAction: (action: string) => void;

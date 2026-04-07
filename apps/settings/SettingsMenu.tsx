@@ -1,7 +1,9 @@
 
-import React, { useMemo } from 'react';
+import React,{ useMemo } from 'react';
 import { haptic } from '../../utils/haptics';
-import { requestSystemFullscreen, exitSystemFullscreen } from '../../App';
+import { requestSystemFullscreen,exitSystemFullscreen } from '../../App';
+import { getRuntimeConfigSnapshot,inferEmbeddingEngineId } from '../../utils/runtimeConfig';
+import { safeLocalStorageGet,safeLocalStorageSet } from '../../utils/storage';
 
 export type SettingsPanel = 'menu' | 'data' | 'api' | 'subapi' | 'realtime' | 'tts' | 'stt' | 'embedding' | 'agent';
 
@@ -53,7 +55,7 @@ const MENU_ITEMS: MenuItem[] = [
     {
         id: 'embedding', iconBg: 'bg-green-100/50 text-green-600',
         icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" /></svg>,
-        title: '向量记忆引擎', desc: 'OpenAI 兼容 / Cohere',
+        title: '向量记忆引擎', desc: '标准版 / 增强版',
     },
     {
         id: 'agent', iconBg: 'bg-orange-100/50 text-orange-600',
@@ -62,30 +64,42 @@ const MENU_ITEMS: MenuItem[] = [
     },
 ];
 
-// ─── Status reading from localStorage (no context subscription!) ────────
+const HAPTICS_ENABLED_KEY = 'os_haptics_enabled';
+const FULLSCREEN_ENABLED_KEY = 'os_fullscreen_enabled';
+
+// ─── Status reading from runtime snapshot (no context subscription!) ─────
 
 function readStatuses(): Record<string, string | undefined> {
     try {
-        const apiModel = localStorage.getItem('os_api_config');
-        const apiModelParsed = apiModel ? JSON.parse(apiModel)?.model?.split('/').pop() : undefined;
+        const snapshot = getRuntimeConfigSnapshot();
+        const hasPrimaryApiConfig = Boolean(
+            snapshot.api.primary.apiKey
+            && snapshot.api.primary.baseUrl
+            && snapshot.api.primary.model,
+        );
+        const apiStatus = hasPrimaryApiConfig
+            ? snapshot.api.primary.model.split('/').pop()
+            : '未配置';
+        const ttsStatus = snapshot.tts.apiKey ? '已配置' : '未配置';
+        const sttStatus = snapshot.stt.provider === 'siliconflow' ? '硅基' : 'Groq';
+        const rtStatus = [
+            snapshot.realtime.weatherEnabled && '天气',
+            snapshot.realtime.newsEnabled && '新闻',
+            snapshot.realtime.notionEnabled && 'Notion',
+            snapshot.realtime.feishuEnabled && '飞书',
+            snapshot.realtime.xhsEnabled && '小红书',
+        ].filter(Boolean).join(' · ') || '未开启';
 
-        const ttsKey = localStorage.getItem('os_tts_config');
-        const ttsParsed = ttsKey ? JSON.parse(ttsKey) : null;
-        const ttsStatus = ttsParsed?.apiKey ? '已配置' : '未配置';
-
-        const sttParsed = (() => { try { return JSON.parse(localStorage.getItem('os_stt_config') || '{}'); } catch { return {}; } })();
-        const sttStatus = sttParsed?.provider === 'siliconflow' ? '硅基' : 'Groq';
-
-        const rtParsed = (() => { try { return JSON.parse(localStorage.getItem('os_realtime_config') || '{}'); } catch { return {}; } })();
-        const rtStatus = [rtParsed?.weatherEnabled && '天气', rtParsed?.newsEnabled && '新闻', rtParsed?.notionEnabled && 'Notion', rtParsed?.feishuEnabled && '飞书', rtParsed?.xhsEnabled && '小红书'].filter(Boolean).join(' · ') || '未开启';
-
-        const embProvider = localStorage.getItem('embedding_provider') || 'openai';
-        const embKey = localStorage.getItem('embedding_api_key') || '';
-        const embStatus = embKey ? '已配置' : '未配置';
-        const embDesc = embProvider === 'cohere' ? 'Cohere Embed-v4' : 'OpenAI 兼容接口';
+        const embeddingEngineId = inferEmbeddingEngineId(snapshot.embedding.model);
+        const embStatus = snapshot.embedding.apiKey
+            ? (embeddingEngineId === 'enhanced' ? '增强版' : '标准版')
+            : '未配置';
+        const embDesc = embeddingEngineId === 'enhanced'
+            ? 'Qwen3-Embedding-8B'
+            : 'bge-m3';
 
         return {
-            api: apiModelParsed || '未配置',
+            api: apiStatus,
             tts: ttsStatus,
             stt: sttStatus,
             realtime: rtStatus,
@@ -100,23 +114,23 @@ function readStatuses(): Record<string, string | undefined> {
 const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
     const statuses = useMemo(readStatuses, []);
 
-    // Haptics toggle — read/write localStorage directly
+    // Haptics toggle — UI-only preference via storage helper
     const [hapticsEnabled, setHapticsEnabled] = React.useState(() => {
-        try { return localStorage.getItem('os_haptics_enabled') !== 'false'; } catch { return true; }
+        return safeLocalStorageGet(HAPTICS_ENABLED_KEY) !== 'false';
     });
     const toggleHaptics = (checked: boolean) => {
         setHapticsEnabled(checked);
-        localStorage.setItem('os_haptics_enabled', String(checked));
+        safeLocalStorageSet(HAPTICS_ENABLED_KEY, String(checked));
         if (checked) haptic.medium();
     };
 
-    // Fullscreen toggle — read/write localStorage directly
+    // Fullscreen toggle — UI-only preference via storage helper
     const [fullscreenEnabled, setFullscreenEnabled] = React.useState(() => {
-        try { return localStorage.getItem('os_fullscreen_enabled') === 'true'; } catch { return false; }
+        return safeLocalStorageGet(FULLSCREEN_ENABLED_KEY) === 'true';
     });
     const toggleFullscreen = (checked: boolean) => {
         setFullscreenEnabled(checked);
-        localStorage.setItem('os_fullscreen_enabled', String(checked));
+        safeLocalStorageSet(FULLSCREEN_ENABLED_KEY, String(checked));
         if (checked) {
             requestSystemFullscreen();
         } else {

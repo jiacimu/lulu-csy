@@ -1,6 +1,5 @@
 import React from 'react';
-import { Message } from '../../../types';
-import { CurrencyCircleDollar, CheckCircle, ArrowUUpLeft } from '@phosphor-icons/react';
+import { CurrencyCircleDollar,CheckCircle,ArrowUUpLeft } from '@phosphor-icons/react';
 import { TransferCardProps } from '../ThemeRegistry';
 
 const DefaultTransferCard: React.FC<TransferCardProps> = ({ message: m, isUser, charName, selectionMode, onTransferAction }) => {

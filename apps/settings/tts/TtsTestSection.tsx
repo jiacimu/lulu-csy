@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React,{ useState } from 'react';
 import { MinimaxTts } from '../../../utils/minimaxTts';
 import type { TtsConfig } from '../../../types/tts';
 

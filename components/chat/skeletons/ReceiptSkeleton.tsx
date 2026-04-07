@@ -74,7 +74,6 @@ const ReceiptSkeleton: React.FC<{ data: StatusCardData }> = ({ data }) => {
     const { title, body, footer, icon, meta, style } = data;
 
     const textColor = style.textColor || '#3C3830';
-    const accent = style.accent || '#8A8580';
     const fontFamily = FONT_MAP['mono'];
 
     /* 热敏纸色 — 灰白微黄 */

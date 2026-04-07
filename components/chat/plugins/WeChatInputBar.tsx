@@ -1,5 +1,5 @@
 
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React,{ useRef,useEffect,useState,useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useOS } from '../../../context/OSContext';
 import { CloudStt } from '../../../utils/cloudStt';
@@ -78,9 +78,9 @@ type GestureZone = 'send' | 'cancel' | 'convert';
 
 const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
     input, setInput, showPanel, setShowPanel, onSend,
-    onVoiceMessage, voiceRecorderState = 'idle', voiceRecordingDuration = 0,
+    onVoiceMessage, voiceRecorderState = 'idle', 
     onStartRecording, onStopRecording, onCancelRecording,
-    voiceRecorderError, isVoiceProcessing = false,
+    isVoiceProcessing = false,
     analyserNode,
 }) => {
     const { sttConfig, addToast } = useOS();

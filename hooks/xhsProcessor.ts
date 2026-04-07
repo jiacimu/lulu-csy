@@ -7,15 +7,15 @@
  * all state setters and caches are passed in via context.
  */
 
-import { Message, RealtimeConfig } from '../types';
+import { Message,RealtimeConfig } from '../types';
 import { DB } from '../utils/db';
 import { ChatParser } from '../utils/chatParser';
 import { XhsNote } from '../utils/realtimeContext';
-import { XhsMcpClient, extractNotesFromMcpData, normalizeNote } from '../utils/xhsMcpClient';
+import { XhsMcpClient,extractNotesFromMcpData,normalizeNote } from '../utils/xhsMcpClient';
 import { safeFetchJson } from '../utils/safeApi';
 import {
-    resolveXhsConfig, xhsSearch, xhsBrowse, xhsPublish,
-    xhsComment, xhsLike, xhsFavorite, xhsReplyComment
+  resolveXhsConfig,xhsSearch,xhsBrowse,xhsPublish,
+  xhsComment,xhsLike,xhsFavorite,xhsReplyComment
 } from './xhsHelpers';
 
 // ─── Types ────────────────────────────────────────────────────────

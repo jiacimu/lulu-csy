@@ -1,7 +1,7 @@
 
-import React, { useRef, useState } from 'react';
+import React,{ useRef,useState } from 'react';
 import Modal from '../os/Modal';
-import { CharacterProfile, Message, EmojiCategory } from '../../types';
+import { CharacterProfile,Message,EmojiCategory } from '../../types';
 import { CustomStatusTemplate } from '../../types/statusCard';
 
 interface ChatModalsProps {
@@ -110,7 +110,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     newCategoryName, setNewCategoryName, onAddCategory,
     archivePrompts, selectedPromptId, setSelectedPromptId,
     editingPrompt, setEditingPrompt, isSummarizing,
-    selectedMessage, selectedEmoji, selectedCategory, activeCharacter, messages,
+    selectedMessage, selectedEmoji, selectedCategory, activeCharacter, 
     allHistoryMessages = [],
     onTransfer, onImportEmoji, onSaveSettings,
     onBgUpload, onRemoveBg, onClearHistory,

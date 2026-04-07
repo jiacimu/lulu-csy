@@ -1,15 +1,29 @@
 
-import React, { useState } from 'react';
+import React,{ useState } from 'react';
 import { useOS } from '../../context/OSContext';
 import { safeResponseJson } from '../../utils/safeApi';
 import Modal from '../../components/os/Modal';
+import { getSecondaryApiConfig,setSecondaryApiConfig } from '../../utils/runtimeConfig';
+import { readJsonStorage,safeLocalStorageGet,safeLocalStorageSet,writeJsonStorage } from '../../utils/storage';
+
+const SUB_API_PRESETS_KEY = 'sub_api_presets';
+const BODY_SIGNAL_MODE_KEY = 'body_signal_mode';
+
+function getInitialSubApiState() {
+    const config = getSecondaryApiConfig();
+    return {
+        apiKey: config?.apiKey || '',
+        baseUrl: config?.baseUrl || '',
+        model: config?.model || '',
+    };
+}
 
 const SubApiSettings: React.FC = () => {
     const { addToast } = useOS();
 
-    const [subKey, setSubKey] = useState(() => localStorage.getItem('sub_api_key') || '');
-    const [subUrl, setSubUrl] = useState(() => localStorage.getItem('sub_api_base_url') || '');
-    const [subModel, setSubModel] = useState(() => localStorage.getItem('sub_api_model') || '');
+    const [subKey, setSubKey] = useState(() => getInitialSubApiState().apiKey);
+    const [subUrl, setSubUrl] = useState(() => getInitialSubApiState().baseUrl);
+    const [subModel, setSubModel] = useState(() => getInitialSubApiState().model);
     const [subModels, setSubModels] = useState<string[]>([]);
     const [isLoadingSubModels, setIsLoadingSubModels] = useState(false);
     const [isTestingSub, setIsTestingSub] = useState(false);
@@ -17,14 +31,32 @@ const SubApiSettings: React.FC = () => {
     const [subStatusMsg, setSubStatusMsg] = useState('');
     const [showSubModelModal, setShowSubModelModal] = useState(false);
     const [subPresets, setSubPresets] = useState<Array<{ id: string; name: string; config: { baseUrl: string; apiKey: string; model: string } }>>(() => {
-        try { return JSON.parse(localStorage.getItem('sub_api_presets') || '[]'); } catch { return []; }
+        const presets = readJsonStorage<Array<{ id: string; name: string; config: { baseUrl: string; apiKey: string; model: string } }>>(SUB_API_PRESETS_KEY);
+        return Array.isArray(presets) ? presets : [];
     });
-    const [signalMode, setSignalMode] = useState(() => localStorage.getItem('body_signal_mode') || 'raw');
+    const [signalMode, setSignalMode] = useState(() => safeLocalStorageGet(BODY_SIGNAL_MODE_KEY) || 'raw');
 
     const handleSaveSubApi = () => {
-        localStorage.setItem('sub_api_key', subKey);
-        localStorage.setItem('sub_api_base_url', subUrl);
-        localStorage.setItem('sub_api_model', subModel);
+        const trimmedKey = subKey.trim();
+        const trimmedUrl = subUrl.trim();
+        const trimmedModel = subModel.trim();
+
+        if (!trimmedKey && !trimmedUrl && !trimmedModel) {
+            setSecondaryApiConfig(null);
+            setSubKey('');
+            setSubUrl('');
+            setSubModel('');
+        } else {
+            setSecondaryApiConfig({
+                apiKey: trimmedKey,
+                baseUrl: trimmedUrl,
+                model: trimmedModel,
+            });
+            setSubKey(trimmedKey);
+            setSubUrl(trimmedUrl.replace(/\/+$/, ''));
+            setSubModel(trimmedModel);
+        }
+
         setSubStatusMsg('配置已保存');
         setTimeout(() => setSubStatusMsg(''), 2000);
         setSubTestStatus('idle');
@@ -76,17 +108,25 @@ const SubApiSettings: React.FC = () => {
     };
 
     const handleSaveSubPreset = (name: string) => {
-        const preset = { id: `sub-${Date.now()}`, name, config: { baseUrl: subUrl, apiKey: subKey, model: subModel } };
+        const preset = {
+            id: `sub-${Date.now()}`,
+            name,
+            config: {
+                baseUrl: subUrl.trim(),
+                apiKey: subKey.trim(),
+                model: subModel.trim(),
+            },
+        };
         const updated = [...subPresets, preset];
         setSubPresets(updated);
-        localStorage.setItem('sub_api_presets', JSON.stringify(updated));
+        writeJsonStorage(SUB_API_PRESETS_KEY, updated);
         addToast('副 API 预设已保存', 'success');
     };
 
     const removeSubPreset = (id: string) => {
         const updated = subPresets.filter(p => p.id !== id);
         setSubPresets(updated);
-        localStorage.setItem('sub_api_presets', JSON.stringify(updated));
+        writeJsonStorage(SUB_API_PRESETS_KEY, updated);
     };
 
     const loadSubPreset = (preset: typeof subPresets[0]) => {
@@ -204,7 +244,7 @@ const SubApiSettings: React.FC = () => {
 
                 <div className="flex gap-2">
                     <button
-                        onClick={() => { localStorage.setItem('body_signal_mode', 'raw'); setSignalMode('raw'); }}
+                        onClick={() => { safeLocalStorageSet(BODY_SIGNAL_MODE_KEY, 'raw'); setSignalMode('raw'); }}
                         className={`flex-1 py-3 px-3 rounded-2xl text-xs font-bold border transition-all ${signalMode === 'raw'
                             ? 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white border-purple-300 shadow-lg shadow-purple-500/20'
                             : 'bg-white/50 text-[#8b7e64] border-[#e8e0cc]/60 active:bg-[#f0eadc]'}`}
@@ -216,7 +256,7 @@ const SubApiSettings: React.FC = () => {
                         </div>
                     </button>
                     <button
-                        onClick={() => { localStorage.setItem('body_signal_mode', 'wordLibrary'); setSignalMode('wordLibrary'); }}
+                        onClick={() => { safeLocalStorageSet(BODY_SIGNAL_MODE_KEY, 'wordLibrary'); setSignalMode('wordLibrary'); }}
                         className={`flex-1 py-3 px-3 rounded-2xl text-xs font-bold border transition-all ${signalMode === 'wordLibrary'
                             ? 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white border-purple-300 shadow-lg shadow-purple-500/20'
                             : 'bg-white/50 text-[#8b7e64] border-[#e8e0cc]/60 active:bg-[#f0eadc]'}`}
@@ -228,7 +268,7 @@ const SubApiSettings: React.FC = () => {
                         </div>
                     </button>
                     <button
-                        onClick={() => { localStorage.setItem('body_signal_mode', 'quantified'); setSignalMode('quantified'); }}
+                        onClick={() => { safeLocalStorageSet(BODY_SIGNAL_MODE_KEY, 'quantified'); setSignalMode('quantified'); }}
                         className={`flex-1 py-3 px-3 rounded-2xl text-xs font-bold border transition-all ${signalMode === 'quantified'
                             ? 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white border-purple-300 shadow-lg shadow-purple-500/20'
                             : 'bg-white/50 text-[#8b7e64] border-[#e8e0cc]/60 active:bg-[#f0eadc]'}`}
