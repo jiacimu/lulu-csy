@@ -1,20 +1,26 @@
 
-import { useState, useRef, useCallback } from 'react';
-import { CharacterProfile, UserProfile, Message, Emoji, EmojiCategory, GroupProfile, RealtimeConfig } from '../types';
+import { useState,useRef,useCallback } from 'react';
+import { CharacterProfile,UserProfile,Message,Emoji,EmojiCategory,GroupProfile,RealtimeConfig } from '../types';
 import { DB } from '../utils/db';
 import { ChatPrompts } from '../utils/chatPrompts';
-import { ChatParser, BILINGUAL_MARKER } from '../utils/chatParser';
-import { RealtimeContextManager, NotionManager, FeishuManager, XhsNote } from '../utils/realtimeContext';
-import { XhsMcpClient, extractNotesFromMcpData, normalizeNote } from '../utils/xhsMcpClient';
-import { safeFetchJson, safeResponseJson } from '../utils/safeApi';
-import { haptic, playThemeNotification } from '../utils/haptics';
+import { ChatParser,BILINGUAL_MARKER } from '../utils/chatParser';
+import { safeFetchJson } from '../utils/safeApi';
+import { haptic,playThemeNotification } from '../utils/haptics';
 import { THEME_PLUGINS } from '../components/chat/ThemeRegistry';
-import { resolveXhsConfig, xhsSearch, xhsBrowse, xhsPublish, xhsComment, xhsLike, xhsFavorite, xhsReplyComment } from './xhsHelpers';
-import { processXhsActions } from './xhsProcessor';
 import { VectorMemoryExtractor } from '../utils/vectorMemoryExtractor';
 import { MindSnapshotExtractor } from '../utils/mindSnapshotExtractor';
 import { EventExtractor } from '../utils/eventExtractor';
-import { extractThinking, stripCoTResidual } from '../utils/thinkingExtractor';
+import { extractThinking } from '../utils/thinkingExtractor';
+import { getEmbeddingConfig,getSecondaryApiConfig } from '../utils/runtimeConfig';
+import type { HandlerContext } from './handlers/types';
+import { handleRecall } from './handlers/handleRecall';
+import { handleSearch } from './handlers/handleSearch';
+import { handleWeiboSearch } from './handlers/handleWeiboSearch';
+import { handleDiaryWrite } from './handlers/handleDiaryWrite';
+import { handleDiaryRead } from './handlers/handleDiaryRead';
+import { handleFeishuDiary } from './handlers/handleFeishuDiary';
+import { handleFeishuDiaryRead } from './handlers/handleFeishuDiaryRead';
+import { handleXhsActions } from './handlers/handleXhsActions';
 
 interface UseChatAIProps {
     char: CharacterProfile | undefined;
@@ -75,24 +81,7 @@ export const useChatAI = ({
     // commentId→parentCommentId 缓存，供 reply_comment 传递 parent_comment_id（xiaohongshu-mcp PR#440+）
     const commentParentIdCacheRef = useRef<Map<string, string>>(new Map());
 
-    /** 将笔记列表的 xsecToken 和 title 存入缓存 */
-    const cacheXsecTokens = (notes: XhsNote[]) => {
-        for (const n of notes) {
-            if (n.noteId && n.xsecToken) {
-                xsecTokenCacheRef.current.set(n.noteId, n.xsecToken);
-            }
-            if (n.noteId && n.title) {
-                noteTitleCacheRef.current.set(n.noteId, n.title);
-            }
-        }
-    };
 
-    /** 从缓存或 lastXhsNotes 中查找 xsecToken */
-    const findXsecToken = (noteId: string, lastXhsNotes: XhsNote[]): string | undefined => {
-        const fromNotes = lastXhsNotes.find(n => n.noteId === noteId)?.xsecToken;
-        if (fromNotes) return fromNotes;
-        return xsecTokenCacheRef.current.get(noteId);
-    };
 
     const updateTokenUsage = (data: any, msgCount: number, pass: string) => {
         if (data.usage?.total_tokens) {
@@ -121,15 +110,10 @@ export const useChatAI = ({
             const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey || 'sk-none'}` };
 
             // 0. Internal State Layer: senseBefore (和下方 buildSystemPrompt 的 embedding/rerank 并行)
-            const subKey = localStorage.getItem('sub_api_key');
-            const subUrl = localStorage.getItem('sub_api_base_url');
-            const subModel = localStorage.getItem('sub_api_model');
-            const secondaryConfig = (subKey && subUrl && subModel)
-                ? { baseUrl: subUrl, apiKey: subKey, model: subModel }
-                : apiConfig;
+            const secondaryConfig = getSecondaryApiConfig() || apiConfig;
 
             // Run senseBefore in parallel with buildSystemPrompt
-            const embeddingApiKey = localStorage.getItem('embedding_api_key') || undefined;
+            const embeddingApiKey = getEmbeddingConfig().apiKey || undefined;
             const [senseResult, systemPromptResult] = await Promise.all([
                 secondaryConfig.apiKey
                     ? MindSnapshotExtractor.senseBefore(char, currentMsgs, secondaryConfig)
@@ -407,645 +391,47 @@ mode 可选值：
 
             console.log(`🧠 [ThinkingDebug] final thinkingContent length=${thinkingContent.length}, preview:`, thinkingContent.substring(0, 200));
 
-            // 5. Handle Recall (Loop if needed)
-            const recallMatch = aiContent.match(/\[\[RECALL:\s*(\d{4})[-/年](\d{1,2})\]\]/);
-            if (recallMatch) {
-                const year = recallMatch[1];
-                const month = recallMatch[2];
-                const targetMonth = `${year}-${month.padStart(2, '0')}`;
-
-                // Check if this month is already in activeMemoryMonths (already in system prompt)
-                const alreadyActive = char.activeMemoryMonths?.includes(targetMonth);
-
-                if (alreadyActive) {
-                    // Memory already present in system prompt via buildCoreContext, skip redundant API call
-                    console.log(`♻️ [Recall] ${targetMonth} already in activeMemoryMonths, skipping duplicate recall`);
-                    aiContent = aiContent.replace(/\[\[RECALL:\s*\d{4}[-/年]\d{1,2}\]\]/g, '').trim();
-                } else {
-                    setRecallStatus(`正在调阅 ${year}年${month}月 的详细档案...`);
-
-                    // Helper to fetch detailed logs (duplicated logic from Chat.tsx, moved inside hook context)
-                    const getDetailedLogs = (y: string, m: string) => {
-                        if (!char.memories) return null;
-                        const target = `${y}-${m.padStart(2, '0')}`;
-                        const logs = char.memories.filter(mem => {
-                            return mem.date.includes(target) || mem.date.includes(`${y}年${parseInt(m)}月`);
-                        });
-                        if (logs.length === 0) return null;
-                        return logs.map(mem => `[${mem.date}] (${mem.mood || 'normal'}): ${mem.summary}`).join('\n');
-                    };
-
-                    const detailedLogs = getDetailedLogs(year, month);
-
-                    if (detailedLogs) {
-                        const recallMessages = [...fullMessages, { role: 'user', content: `[系统: 已成功调取 ${year}-${month} 的详细日志]\n${detailedLogs}\n[系统: 现在请结合这些细节回答用户。保持对话自然。]` }];
-                        try {
-                            data = await safeFetchJson(`${baseUrl}/chat/completions`, {
-                                method: 'POST', headers,
-                                body: JSON.stringify({ model: apiConfig.model, messages: recallMessages, temperature: 0.8, stream: false })
-                            });
-                            updateTokenUsage(data, historyMsgCount, 'recall');
-                            aiContent = data.choices?.[0]?.message?.content || '';
-                            // Re-clean
-                            aiContent = ChatParser.cleanAiSecondPass(aiContent);
-                            addToast(`已调用 ${year}-${month} 详细记忆`, 'info');
-                        } catch (recallErr: any) {
-                            console.error('Recall API failed:', recallErr.message);
-                        }
-                    }
-                }
-            }
-            setRecallStatus('');
-
-            // 5.5 Handle Active Search (主动搜索)
-            const searchMatch = aiContent.match(/\[\[SEARCH:\s*(.+?)\]\]/);
-            if (searchMatch && realtimeConfig?.newsEnabled && realtimeConfig?.newsApiKey) {
-                const searchQuery = searchMatch[1].trim();
-                console.log('🔍 [Search] AI触发搜索:', searchQuery);
-                setSearchStatus(`正在搜索: ${searchQuery}...`);
-
-                try {
-                    const searchResult = await RealtimeContextManager.performSearch(searchQuery, realtimeConfig.newsApiKey);
-                    console.log('🔍 [Search] 搜索结果:', searchResult);
-
-                    if (searchResult.success && searchResult.results.length > 0) {
-                        // 构建搜索结果字符串
-                        const resultsStr = searchResult.results.map((r, i) =>
-                            `${i + 1}. ${r.title}\n   ${r.description}`
-                        ).join('\n\n');
-
-                        console.log('🔍 [Search] 注入结果到AI，重新生成回复...');
-
-                        // 重新调用 API，注入搜索结果
-                        const cleanedForSearch = aiContent.replace(/\[\[SEARCH:.*?\]\]/g, '').trim() || '让我搜一下...';
-                        const searchMessages = [
-                            ...fullMessages,
-                            { role: 'assistant', content: cleanedForSearch },
-                            { role: 'user', content: `[系统: 搜索完成！以下是关于"${searchQuery}"的搜索结果]\n\n${resultsStr}\n\n[系统: 现在请根据这些真实信息回复用户。用自然的语气分享，比如"我刚搜了一下发现..."、"诶我看到说..."。不要再输出[[SEARCH:...]]了。]` }
-                        ];
-
-                        data = await safeFetchJson(`${baseUrl}/chat/completions`, {
-                            method: 'POST', headers,
-                            body: JSON.stringify({ model: apiConfig.model, messages: searchMessages, temperature: 0.8, stream: false })
-                        });
-                        updateTokenUsage(data, historyMsgCount, 'search');
-                        aiContent = data.choices?.[0]?.message?.content || '';
-                        console.log('🔍 [Search] AI基于搜索结果生成的新回复:', aiContent.slice(0, 100) + '...');
-                        // Re-clean
-                        aiContent = ChatParser.cleanAiSecondPass(aiContent);
-                        addToast(`🔍 搜索完成: ${searchQuery}`, 'success');
-                    } else {
-                        console.log('🔍 [Search] 搜索失败或无结果:', searchResult.message);
-                        addToast(`搜索失败: ${searchResult.message}`, 'error');
-                        // 搜索失败，移除搜索标记继续
-                        aiContent = aiContent.replace(searchMatch[0], '').trim();
-                    }
-                } catch (e) {
-                    console.error('Search execution failed:', e);
-                    aiContent = aiContent.replace(searchMatch[0], '').trim();
-                }
-            } else if (searchMatch) {
-                console.log('🔍 [Search] 检测到搜索意图但未配置API Key');
-                // 没有配置 API Key，移除搜索标记
-                aiContent = aiContent.replace(searchMatch[0], '').trim();
-            }
-            setSearchStatus('');
-
-            // 清理残留的搜索标记
-            aiContent = aiContent.replace(/\[\[SEARCH:.*?\]\]/g, '').trim();
-
-            // 5.55 Handle Weibo Search (微博搜索)
-            const weiboSearchMatch = aiContent.match(/\[\[WEIBO_SEARCH:\s*(.+?)\]\]/);
-            if (weiboSearchMatch && realtimeConfig?.hotSearchEnabled) {
-                const weiboQuery = weiboSearchMatch[1].trim();
-                console.log('📱 [WeiboSearch] AI触发微博搜索:', weiboQuery);
-                setWeiboStatus(`正在刷微博: ${weiboQuery}...`);
-
-                try {
-                    const wbRes = await safeFetchJson(`https://chushiyu.de5.net/api/public/weibo/search?q=${encodeURIComponent(weiboQuery)}`, {});
-                    console.log('📱 [WeiboSearch] 搜索结果:', wbRes);
-
-                    if (wbRes.success && wbRes.posts && wbRes.posts.length > 0) {
-                        // 构建微博帖子字符串
-                        const postsStr = wbRes.posts.slice(0, 8).map((p: any, i: number) =>
-                            `${i + 1}. @${p.user}: "${p.text}" (转发${p.reposts} 评论${p.comments} 赞${p.likes}${p.created_at ? ` · ${p.created_at}` : ''})`
-                        ).join('\n\n');
-
-                        console.log('📱 [WeiboSearch] 注入微博内容到AI，重新生成回复...');
-
-                        // 重新调用 API，注入微博搜索结果
-                        const cleanedForWeibo = aiContent.replace(/\[\[WEIBO_SEARCH:.*?\]\]/g, '').trim() || '等一下，我搜搜微博...';
-                        const weiboMessages = [
-                            ...fullMessages,
-                            { role: 'assistant', content: cleanedForWeibo },
-                            { role: 'user', content: `[系统: 你刚在微博上搜索了"${weiboQuery}"，以下是你看到的真实微博帖子]\n\n${postsStr}\n\n[系统: 现在请根据这些真实微博内容自然回复。像和朋友一起刷手机分享一样，比如"我刚看到有人说..."、"微博上好多人在讨论..."、"哈哈笑死有个人写的..."。用你自己的说话风格。不要再输出[[WEIBO_SEARCH:...]]了。]` }
-                        ];
-
-                        data = await safeFetchJson(`${baseUrl}/chat/completions`, {
-                            method: 'POST', headers,
-                            body: JSON.stringify({ model: apiConfig.model, messages: weiboMessages, temperature: 0.85, stream: false })
-                        });
-                        updateTokenUsage(data, historyMsgCount, 'weibo-search');
-                        aiContent = data.choices?.[0]?.message?.content || '';
-                        console.log('📱 [WeiboSearch] AI基于微博内容生成的新回复:', aiContent.slice(0, 100) + '...');
-                        // Re-clean
-                        aiContent = ChatParser.cleanAiSecondPass(aiContent);
-                        addToast(`📱 微博搜索完成: ${weiboQuery}`, 'success');
-                    } else {
-                        console.log('📱 [WeiboSearch] 搜索失败或无结果:', wbRes.error || '无帖子');
-                        addToast(`微博搜索无结果: ${weiboQuery}`, 'info');
-                        // 搜索失败，移除标记继续
-                        aiContent = aiContent.replace(weiboSearchMatch[0], '').trim();
-                    }
-                } catch (e) {
-                    console.error('📱 [WeiboSearch] execution failed:', e);
-                    aiContent = aiContent.replace(weiboSearchMatch[0], '').trim();
-                }
-            } else if (weiboSearchMatch) {
-                console.log('📱 [WeiboSearch] 检测到微博搜索意图但热搜未开启');
-                aiContent = aiContent.replace(weiboSearchMatch[0], '').trim();
-            }
-            setWeiboStatus('');
-
-            // 清理残留的微博搜索标记
-            aiContent = aiContent.replace(/\[\[WEIBO_SEARCH:.*?\]\]/g, '').trim();
-
-            // 5.6 Handle Diary Writing (写日记到 Notion)
-            // 支持两种格式:
-            //   旧格式: [[DIARY: 标题 | 内容]]
-            //   新格式: [[DIARY_START: 标题 | 心情]]\n多行内容...\n[[DIARY_END]]
-            const diaryStartMatch = aiContent.match(/\[\[DIARY_START:\s*(.+?)\]\]\n?([\s\S]*?)\[\[DIARY_END\]\]/);
-            const diaryMatch = diaryStartMatch || aiContent.match(/\[\[DIARY:\s*(.+?)\]\]/s);
-
-            if (diaryMatch && realtimeConfig?.notionEnabled && realtimeConfig?.notionApiKey && realtimeConfig?.notionDatabaseId) {
-                let title = '';
-                let content = '';
-                let mood = '';
-
-                if (diaryStartMatch) {
-                    // 新格式: [[DIARY_START: 标题 | 心情]]\n内容\n[[DIARY_END]]
-                    const header = diaryStartMatch[1].trim();
-                    content = diaryStartMatch[2].trim();
-
-                    if (header.includes('|')) {
-                        const parts = header.split('|');
-                        title = parts[0].trim();
-                        mood = parts.slice(1).join('|').trim();
-                    } else {
-                        title = header;
-                    }
-                    console.log('📔 [Diary] AI写了一篇长日记:', title, '心情:', mood);
-                } else {
-                    // 旧格式: [[DIARY: 标题 | 内容]]
-                    const diaryRaw = diaryMatch[1].trim();
-                    console.log('📔 [Diary] AI想写日记:', diaryRaw);
-
-                    if (diaryRaw.includes('|')) {
-                        const parts = diaryRaw.split('|');
-                        title = parts[0].trim();
-                        content = parts.slice(1).join('|').trim();
-                    } else {
-                        content = diaryRaw;
-                    }
-                }
-
-                // 没有标题时用日期
-                if (!title) {
-                    const now = new Date();
-                    title = `${char.name}的日记 - ${now.getMonth() + 1}/${now.getDate()}`;
-                }
-
-                try {
-                    const result = await NotionManager.createDiaryPage(
-                        realtimeConfig.notionApiKey,
-                        realtimeConfig.notionDatabaseId,
-                        { title, content, mood: mood || undefined, characterName: char.name }
-                    );
-
-                    if (result.success) {
-                        console.log('📔 [Diary] 写入成功:', result.url);
-                        await DB.saveMessage({
-                            charId: char.id,
-                            role: 'system',
-                            type: 'text',
-                            content: `📔 ${char.name}写了一篇日记「${title}」`
-                        });
-                        addToast(`📔 ${char.name}写了一篇日记!`, 'success');
-                    } else {
-                        console.error('📔 [Diary] 写入失败:', result.message);
-                        addToast(`日记写入失败: ${result.message}`, 'error');
-                    }
-                } catch (e) {
-                    console.error('📔 [Diary] 写入异常:', e);
-                }
-
-                // 移除日记标记，不在聊天中显示
-                aiContent = aiContent.replace(diaryMatch[0], '').trim();
-            } else if (diaryMatch) {
-                console.log('📔 [Diary] 检测到日记意图但未配置Notion');
-                aiContent = aiContent.replace(diaryMatch[0], '').trim();
-            }
-
-            // 清理残留的日记标记（两种格式都清理）
-            aiContent = aiContent.replace(/\[\[DIARY:.*?\]\]/gs, '').trim();
-            aiContent = aiContent.replace(/\[\[DIARY_START:.*?\]\][\s\S]*?\[\[DIARY_END\]\]/g, '').trim();
-
-            // 5.7 Handle Read Diary (翻阅日记)
-            const readDiaryMatch = aiContent.match(/\[\[READ_DIARY:\s*(.+?)\]\]/);
-
-            // Helper: make a fallback API call so the AI keeps talking even when diary fails
-            // NOTE: Uses role:'user' for the system instruction to ensure API compatibility
-            // (some providers reject conversations not ending with a user message)
-            const diaryFallbackCall = async (reason: string, tagPattern: RegExp) => {
-                const cleaned = aiContent.replace(tagPattern, '').trim() || '让我翻翻日记...';
-                const msgs = [
-                    ...fullMessages,
-                    { role: 'assistant', content: cleaned },
-                    { role: 'user', content: `[系统: ${reason}。请你：\n1. 先正常回应用户刚才说的话（用户还在等你回复！）\n2. 可以自然地提一下，比如"日记好像打不开诶"、"嗯...好像没找到"\n3. 继续正常聊天，用多条消息回复\n4. 严禁再输出[[READ_DIARY:...]]或[[FS_READ_DIARY:...]]标记]` }
-                ];
-                try {
-                    data = await safeFetchJson(`${baseUrl}/chat/completions`, {
-                        method: 'POST', headers,
-                        body: JSON.stringify({ model: apiConfig.model, messages: msgs, temperature: 0.8, stream: false })
-                    });
-                    updateTokenUsage(data, historyMsgCount, 'diary-fallback');
-                    aiContent = data.choices?.[0]?.message?.content || '';
-                    aiContent = ChatParser.cleanAiSecondPass(aiContent);
-                } catch (fallbackErr) {
-                    console.error('📖 [Diary Fallback] 也失败了:', fallbackErr);
-                    aiContent = aiContent.replace(tagPattern, '').trim();
-                }
-            };
-
-            // Helper: parse various date formats
-            const parseDiaryDate = (dateInput: string): string => {
-                const now = new Date();
-                if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) return dateInput;
-                if (dateInput === '今天') return now.toISOString().split('T')[0];
-                if (dateInput === '昨天') { const d = new Date(now); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; }
-                if (dateInput === '前天') { const d = new Date(now); d.setDate(d.getDate() - 2); return d.toISOString().split('T')[0]; }
-                const daysAgo = dateInput.match(/^(\d+)天前$/);
-                if (daysAgo) { const d = new Date(now); d.setDate(d.getDate() - parseInt(daysAgo[1])); return d.toISOString().split('T')[0]; }
-                const monthDay = dateInput.match(/(\d{1,2})月(\d{1,2})/);
-                if (monthDay) return `${now.getFullYear()}-${monthDay[1].padStart(2, '0')}-${monthDay[2].padStart(2, '0')}`;
-                const parsed = new Date(dateInput);
-                if (!isNaN(parsed.getTime())) return parsed.toISOString().split('T')[0];
-                return '';
-            };
-
-            if (readDiaryMatch) {
-                const dateInput = readDiaryMatch[1].trim();
-                console.log('📖 [ReadDiary] AI想翻阅日记:', dateInput);
-
-                if (realtimeConfig?.notionEnabled && realtimeConfig?.notionApiKey && realtimeConfig?.notionDatabaseId) {
-                    const targetDate = parseDiaryDate(dateInput);
-
-                    if (targetDate) {
-                        try {
-                            setDiaryStatus(`正在翻阅 ${targetDate} 的日记...`);
-
-                            const findResult = await NotionManager.getDiaryByDate(
-                                realtimeConfig.notionApiKey,
-                                realtimeConfig.notionDatabaseId,
-                                char.name,
-                                targetDate
-                            );
-
-                            if (findResult.success && findResult.entries.length > 0) {
-                                setDiaryStatus(`找到 ${findResult.entries.length} 篇日记，正在阅读...`);
-                                const diaryContents: string[] = [];
-                                for (const entry of findResult.entries) {
-                                    const readResult = await NotionManager.readDiaryContent(
-                                        realtimeConfig.notionApiKey,
-                                        entry.id
-                                    );
-                                    if (readResult.success) {
-                                        diaryContents.push(`📔「${entry.title}」(${entry.date})\n${readResult.content}`);
-                                    }
-                                }
-
-                                if (diaryContents.length > 0) {
-                                    const diaryText = diaryContents.join('\n\n---\n\n');
-                                    console.log('📖 [ReadDiary] 成功读取', findResult.entries.length, '篇日记');
-                                    setDiaryStatus('正在整理日记回忆...');
-
-                                    const cleanedForDiary = aiContent.replace(/\[\[READ_DIARY:.*?\]\]/g, '').trim() || '让我翻翻日记...';
-                                    const diaryMessages = [
-                                        ...fullMessages,
-                                        { role: 'assistant', content: cleanedForDiary },
-                                        { role: 'user', content: `[系统: 你翻开了自己 ${targetDate} 的日记，以下是你当时写的内容]\n\n${diaryText}\n\n[系统: 你已经看完了日记。现在请你：\n1. 先正常回应用户刚才说的话（这是最重要的！用户还在等你回复）\n2. 自然地把日记中的回忆融入你的回复中，比如"我想起来了那天..."、"看了日记才发现..."等\n3. 可以分享日记中有趣的细节，表达当时的情绪\n4. 用多条消息回复，别只说一句话就结束\n5. 严禁再输出[[READ_DIARY:...]]标记]` }
-                                    ];
-
-                                    data = await safeFetchJson(`${baseUrl}/chat/completions`, {
-                                        method: 'POST', headers,
-                                        body: JSON.stringify({ model: apiConfig.model, messages: diaryMessages, temperature: 0.8, stream: false })
-                                    });
-                                    updateTokenUsage(data, historyMsgCount, 'read-diary-notion');
-                                    aiContent = data.choices?.[0]?.message?.content || '';
-                                    aiContent = ChatParser.cleanAiSecondPass(aiContent);
-                                    addToast(`📖 ${char.name}翻阅了${targetDate}的日记`, 'info');
-                                } else {
-                                    console.log('📖 [ReadDiary] 日记内容为空');
-                                    await diaryFallbackCall('你翻开了日记本但页面是空白的', /\[\[READ_DIARY:.*?\]\]/g);
-                                }
-                            } else {
-                                console.log('📖 [ReadDiary] 该日期没有日记:', targetDate);
-                                setDiaryStatus(`${targetDate} 没有找到日记...`);
-                                const cleanedForNoDiary = aiContent.replace(/\[\[READ_DIARY:.*?\]\]/g, '').trim() || '让我翻翻日记...';
-                                const nodiaryMessages = [
-                                    ...fullMessages,
-                                    { role: 'assistant', content: cleanedForNoDiary },
-                                    { role: 'user', content: `[系统: 你翻了翻日记本，发现 ${targetDate} 那天没有写日记。请你：\n1. 先正常回应用户刚才说的话（用户还在等你回复！）\n2. 自然地提到没找到那天的日记，比如"嗯...那天好像没写日记"、"翻了翻没找到诶"\n3. 用多条消息回复，保持对话自然\n4. 严禁再输出[[READ_DIARY:...]]标记]` }
-                                ];
-
-                                data = await safeFetchJson(`${baseUrl}/chat/completions`, {
-                                    method: 'POST', headers,
-                                    body: JSON.stringify({ model: apiConfig.model, messages: nodiaryMessages, temperature: 0.8, stream: false })
-                                });
-                                updateTokenUsage(data, historyMsgCount, 'no-diary-notion');
-                                aiContent = data.choices?.[0]?.message?.content || '';
-                                aiContent = ChatParser.cleanAiSecondPass(aiContent);
-                            }
-                        } catch (e) {
-                            console.error('📖 [ReadDiary] 读取异常:', e);
-                            setDiaryStatus('日记读取失败，继续对话...');
-                            await diaryFallbackCall('你想翻阅日记但读取出了问题（可能是网络问题）', /\[\[READ_DIARY:.*?\]\]/g);
-                        }
-                    } else {
-                        console.log('📖 [ReadDiary] 无法解析日期:', dateInput);
-                        await diaryFallbackCall(`你想翻阅日记但没能理解要找哪天的（"${dateInput}"）`, /\[\[READ_DIARY:.*?\]\]/g);
-                    }
-                } else {
-                    console.log('📖 [ReadDiary] 检测到读日记意图但未配置Notion');
-                    await diaryFallbackCall('你想翻阅日记但日记本暂时不可用', /\[\[READ_DIARY:.*?\]\]/g);
-                }
-                setDiaryStatus('');
-            }
-
-            // 清理残留的读日记标记
-            aiContent = aiContent.replace(/\[\[READ_DIARY:.*?\]\]/g, '').trim();
-
-            // 5.8 Handle Feishu Diary Writing (写日记到飞书多维表格 - 独立于 Notion)
-            const fsDiaryStartMatch = aiContent.match(/\[\[FS_DIARY_START:\s*(.+?)\]\]\n?([\s\S]*?)\[\[FS_DIARY_END\]\]/);
-            const fsDiaryMatch = fsDiaryStartMatch || aiContent.match(/\[\[FS_DIARY:\s*(.+?)\]\]/s);
-
-            if (fsDiaryMatch && realtimeConfig?.feishuEnabled && realtimeConfig?.feishuAppId && realtimeConfig?.feishuAppSecret && realtimeConfig?.feishuBaseId && realtimeConfig?.feishuTableId) {
-                let fsTitle = '';
-                let fsContent = '';
-                let fsMood = '';
-
-                if (fsDiaryStartMatch) {
-                    const header = fsDiaryStartMatch[1].trim();
-                    fsContent = fsDiaryStartMatch[2].trim();
-                    if (header.includes('|')) {
-                        const parts = header.split('|');
-                        fsTitle = parts[0].trim();
-                        fsMood = parts.slice(1).join('|').trim();
-                    } else {
-                        fsTitle = header;
-                    }
-                    console.log('📒 [Feishu] AI写了一篇长日记:', fsTitle, '心情:', fsMood);
-                } else {
-                    const diaryRaw = fsDiaryMatch[1].trim();
-                    console.log('📒 [Feishu] AI想写日记:', diaryRaw);
-                    if (diaryRaw.includes('|')) {
-                        const parts = diaryRaw.split('|');
-                        fsTitle = parts[0].trim();
-                        fsContent = parts.slice(1).join('|').trim();
-                    } else {
-                        fsContent = diaryRaw;
-                    }
-                }
-
-                if (!fsTitle) {
-                    const now = new Date();
-                    fsTitle = `${char.name}的日记 - ${now.getMonth() + 1}/${now.getDate()}`;
-                }
-
-                try {
-                    const result = await FeishuManager.createDiaryRecord(
-                        realtimeConfig.feishuAppId,
-                        realtimeConfig.feishuAppSecret,
-                        realtimeConfig.feishuBaseId,
-                        realtimeConfig.feishuTableId,
-                        { title: fsTitle, content: fsContent, mood: fsMood || undefined, characterName: char.name }
-                    );
-
-                    if (result.success) {
-                        console.log('📒 [Feishu] 写入成功:', result.recordId);
-                        await DB.saveMessage({
-                            charId: char.id,
-                            role: 'system',
-                            type: 'text',
-                            content: `📒 ${char.name}写了一篇日记「${fsTitle}」(飞书)`
-                        });
-                        addToast(`📒 ${char.name}写了一篇日记! (飞书)`, 'success');
-                    } else {
-                        console.error('📒 [Feishu] 写入失败:', result.message);
-                        addToast(`飞书日记写入失败: ${result.message}`, 'error');
-                    }
-                } catch (e) {
-                    console.error('📒 [Feishu] 写入异常:', e);
-                }
-
-                aiContent = aiContent.replace(fsDiaryMatch[0], '').trim();
-            } else if (fsDiaryMatch) {
-                console.log('📒 [Feishu] 检测到日记意图但未配置飞书');
-                aiContent = aiContent.replace(fsDiaryMatch[0], '').trim();
-            }
-
-            // 清理残留的飞书日记标记
-            aiContent = aiContent.replace(/\[\[FS_DIARY:.*?\]\]/gs, '').trim();
-            aiContent = aiContent.replace(/\[\[FS_DIARY_START:.*?\]\][\s\S]*?\[\[FS_DIARY_END\]\]/g, '').trim();
-
-            // 5.9 Handle Feishu Read Diary (翻阅飞书日记)
-            const fsReadDiaryMatch = aiContent.match(/\[\[FS_READ_DIARY:\s*(.+?)\]\]/);
-            if (fsReadDiaryMatch) {
-                const dateInput = fsReadDiaryMatch[1].trim();
-                console.log('📖 [Feishu ReadDiary] AI想翻阅飞书日记:', dateInput);
-
-                if (realtimeConfig?.feishuEnabled && realtimeConfig?.feishuAppId && realtimeConfig?.feishuAppSecret && realtimeConfig?.feishuBaseId && realtimeConfig?.feishuTableId) {
-                    const targetDate = parseDiaryDate(dateInput);
-
-                    if (targetDate) {
-                        try {
-                            setDiaryStatus(`正在翻阅 ${targetDate} 的飞书日记...`);
-
-                            const findResult = await FeishuManager.getDiaryByDate(
-                                realtimeConfig.feishuAppId,
-                                realtimeConfig.feishuAppSecret,
-                                realtimeConfig.feishuBaseId,
-                                realtimeConfig.feishuTableId,
-                                char.name,
-                                targetDate
-                            );
-
-                            if (findResult.success && findResult.entries.length > 0) {
-                                setDiaryStatus(`找到 ${findResult.entries.length} 篇飞书日记，正在阅读...`);
-                                const diaryContents: string[] = [];
-                                for (const entry of findResult.entries) {
-                                    diaryContents.push(`📒「${entry.title}」(${entry.date})\n${entry.content}`);
-                                }
-
-                                if (diaryContents.length > 0) {
-                                    const diaryText = diaryContents.join('\n\n---\n\n');
-                                    console.log('📖 [Feishu ReadDiary] 成功读取', findResult.entries.length, '篇日记');
-                                    setDiaryStatus('正在整理日记回忆...');
-
-                                    const cleanedForFsDiary = aiContent.replace(/\[\[FS_READ_DIARY:.*?\]\]/g, '').trim() || '让我翻翻日记...';
-                                    const diaryMessages = [
-                                        ...fullMessages,
-                                        { role: 'assistant', content: cleanedForFsDiary },
-                                        { role: 'user', content: `[系统: 你翻开了自己 ${targetDate} 的日记（飞书），以下是你当时写的内容]\n\n${diaryText}\n\n[系统: 你已经看完了日记。现在请你：\n1. 先正常回应用户刚才说的话（这是最重要的！用户还在等你回复）\n2. 自然地把日记中的回忆融入你的回复中，比如"我想起来了那天..."、"看了日记才发现..."等\n3. 可以分享日记中有趣的细节，表达当时的情绪\n4. 用多条消息回复，别只说一句话就结束\n5. 严禁再输出[[FS_READ_DIARY:...]]标记]` }
-                                    ];
-
-                                    data = await safeFetchJson(`${baseUrl}/chat/completions`, {
-                                        method: 'POST', headers,
-                                        body: JSON.stringify({ model: apiConfig.model, messages: diaryMessages, temperature: 0.8, stream: false })
-                                    });
-                                    updateTokenUsage(data, historyMsgCount, 'read-diary-feishu');
-                                    aiContent = data.choices?.[0]?.message?.content || '';
-                                    aiContent = ChatParser.cleanAiSecondPass(aiContent);
-                                    addToast(`📖 ${char.name}翻阅了${targetDate}的飞书日记`, 'info');
-                                } else {
-                                    console.log('📖 [Feishu ReadDiary] 日记内容为空');
-                                    await diaryFallbackCall('你翻开了飞书日记本但页面是空白的', /\[\[FS_READ_DIARY:.*?\]\]/g);
-                                }
-                            } else {
-                                setDiaryStatus(`${targetDate} 没有找到飞书日记...`);
-                                const cleanedForFsNoDiary = aiContent.replace(/\[\[FS_READ_DIARY:.*?\]\]/g, '').trim() || '让我翻翻日记...';
-                                const nodiaryMessages = [
-                                    ...fullMessages,
-                                    { role: 'assistant', content: cleanedForFsNoDiary },
-                                    { role: 'user', content: `[系统: 你翻了翻飞书日记本，发现 ${targetDate} 那天没有写日记。请你：\n1. 先正常回应用户刚才说的话（用户还在等你回复！）\n2. 自然地提到没找到那天的日记，比如"嗯...那天好像没写日记"、"翻了翻没找到诶"\n3. 用多条消息回复，保持对话自然\n4. 严禁再输出[[FS_READ_DIARY:...]]标记]` }
-                                ];
-
-                                data = await safeFetchJson(`${baseUrl}/chat/completions`, {
-                                    method: 'POST', headers,
-                                    body: JSON.stringify({ model: apiConfig.model, messages: nodiaryMessages, temperature: 0.8, stream: false })
-                                });
-                                updateTokenUsage(data, historyMsgCount, 'no-diary-feishu');
-                                aiContent = data.choices?.[0]?.message?.content || '';
-                                aiContent = ChatParser.cleanAiSecondPass(aiContent);
-                            }
-                        } catch (e) {
-                            console.error('📖 [Feishu ReadDiary] 读取异常:', e);
-                            setDiaryStatus('飞书日记读取失败，继续对话...');
-                            await diaryFallbackCall('你想翻阅飞书日记但读取出了问题（可能是网络问题）', /\[\[FS_READ_DIARY:.*?\]\]/g);
-                        }
-                    } else {
-                        console.log('📖 [Feishu ReadDiary] 无法解析日期:', dateInput);
-                        await diaryFallbackCall(`你想翻阅飞书日记但没能理解要找哪天的（"${dateInput}"）`, /\[\[FS_READ_DIARY:.*?\]\]/g);
-                    }
-                } else {
-                    console.log('📖 [Feishu ReadDiary] 检测到读日记意图但未配置飞书');
-                    await diaryFallbackCall('你想翻阅飞书日记但飞书暂时不可用', /\[\[FS_READ_DIARY:.*?\]\]/g);
-                }
-                setDiaryStatus('');
-            }
-
-            // 清理残留的飞书读日记标记
-            aiContent = aiContent.replace(/\[\[FS_READ_DIARY:.*?\]\]/g, '').trim();
-
-            // 5.9b Handle Read User Note (翻阅用户笔记)
-            const readNoteMatch = aiContent.match(/\[\[READ_NOTE:\s*(.+?)\]\]/);
-            if (readNoteMatch) {
-                const keyword = readNoteMatch[1].trim();
-                console.log('📝 [ReadNote] AI想翻阅用户笔记:', keyword);
-
-                if (realtimeConfig?.notionEnabled && realtimeConfig?.notionApiKey && realtimeConfig?.notionNotesDatabaseId) {
-                    try {
-                        setDiaryStatus(`正在翻阅笔记: ${keyword}...`);
-
-                        const findResult = await NotionManager.searchUserNotes(
-                            realtimeConfig.notionApiKey,
-                            realtimeConfig.notionNotesDatabaseId,
-                            keyword,
-                            3
-                        );
-
-                        if (findResult.success && findResult.entries.length > 0) {
-                            setDiaryStatus(`找到 ${findResult.entries.length} 篇笔记，正在阅读...`);
-                            const noteContents: string[] = [];
-                            for (const entry of findResult.entries) {
-                                const readResult = await NotionManager.readNoteContent(
-                                    realtimeConfig.notionApiKey,
-                                    entry.id
-                                );
-                                if (readResult.success) {
-                                    noteContents.push(`📝「${entry.title}」(${entry.date})\n${readResult.content}`);
-                                }
-                            }
-
-                            if (noteContents.length > 0) {
-                                const noteText = noteContents.join('\n\n---\n\n');
-                                console.log('📝 [ReadNote] 成功读取', findResult.entries.length, '篇笔记');
-                                setDiaryStatus('正在整理笔记内容...');
-
-                                const cleanedForNote = aiContent.replace(/\[\[READ_NOTE:.*?\]\]/g, '').trim() || '让我看看...';
-                                const noteMessages = [
-                                    ...fullMessages,
-                                    { role: 'assistant', content: cleanedForNote },
-                                    { role: 'user', content: `[系统: 你翻阅了${userProfile.name}的笔记，以下是内容:\n\n${noteText}\n\n请你：\n1. 先正常回应用户刚才说的话\n2. 自然地提到你看到的笔记内容，语气温馨，像不经意间看到的\n3. 可以对内容表示好奇、关心或共鸣\n4. 用多条消息回复，保持对话自然\n5. 严禁再输出[[READ_NOTE:...]]标记]` }
-                                ];
-
-                                data = await safeFetchJson(`${baseUrl}/chat/completions`, {
-                                    method: 'POST', headers,
-                                    body: JSON.stringify({ model: apiConfig.model, messages: noteMessages, temperature: 0.8, stream: false })
-                                });
-                                updateTokenUsage(data, historyMsgCount, 'read-note');
-                                aiContent = data.choices?.[0]?.message?.content || '';
-                                aiContent = ChatParser.cleanAiSecondPass(aiContent);
-                                addToast(`📝 ${char.name}翻阅了关于"${keyword}"的笔记`, 'info');
-                            } else {
-                                console.log('📝 [ReadNote] 笔记内容为空');
-                                await diaryFallbackCall('你翻阅了笔记但内容是空的', /\[\[READ_NOTE:.*?\]\]/g);
-                            }
-                        } else {
-                            console.log('📝 [ReadNote] 没有找到匹配的笔记:', keyword);
-                            setDiaryStatus(`没有找到关于"${keyword}"的笔记...`);
-                            const cleanedForNoNote = aiContent.replace(/\[\[READ_NOTE:.*?\]\]/g, '').trim() || '让我看看...';
-                            const nonoteMessages = [
-                                ...fullMessages,
-                                { role: 'assistant', content: cleanedForNoNote },
-                                { role: 'user', content: `[系统: 你想看${userProfile.name}关于"${keyword}"的笔记，但没有找到。请你：\n1. 先正常回应用户刚才说的话\n2. 可以自然地提一下，比如"嗯，好像没找到那篇笔记"\n3. 继续正常聊天\n4. 严禁再输出[[READ_NOTE:...]]标记]` }
-                            ];
-
-                            data = await safeFetchJson(`${baseUrl}/chat/completions`, {
-                                method: 'POST', headers,
-                                body: JSON.stringify({ model: apiConfig.model, messages: nonoteMessages, temperature: 0.8, stream: false })
-                            });
-                            updateTokenUsage(data, historyMsgCount, 'read-note-empty');
-                            aiContent = data.choices?.[0]?.message?.content || '';
-                            aiContent = ChatParser.cleanAiSecondPass(aiContent);
-                        }
-                    } catch (e) {
-                        console.error('📝 [ReadNote] 读取异常:', e);
-                        setDiaryStatus('笔记读取失败，继续对话...');
-                        await diaryFallbackCall('你想翻阅笔记但读取出了问题（可能是网络问题）', /\[\[READ_NOTE:.*?\]\]/g);
-                    }
-                } else {
-                    console.log('📝 [ReadNote] 检测到读笔记意图但未配置笔记数据库');
-                    await diaryFallbackCall('你想翻阅笔记但笔记功能暂时不可用', /\[\[READ_NOTE:.*?\]\]/g);
-                }
-                setDiaryStatus('');
-            }
-
-            // 清理残留的读笔记标记
-            aiContent = aiContent.replace(/\[\[READ_NOTE:.*?\]\]/g, '').trim();
-            // 5.10 Handle XHS (小红书) Actions — delegated to xhsProcessor.ts
-            aiContent = await processXhsActions(aiContent, {
-                charId: char.id, charName: char.name,
-                realtimeConfig, fullMessages, apiConfig, headers,
-                addToast, setMessages, setXhsStatus,
-                updateTokenUsage, historyMsgCount,
+            const hadSecondPassFallbackTrigger = /\[\[(?:SEARCH|READ_DIARY|FS_READ_DIARY):/.test(aiContent);
+
+            const handlerContext: HandlerContext = {
+                char,
+                userProfile,
+                apiConfig,
+                realtimeConfig,
+                fullMessages,
+                historyMsgCount,
+                baseUrl,
+                headers,
+                setMessages,
+                updateTokenUsage,
+                addToast,
+                setRecallStatus,
+                setSearchStatus,
+                setDiaryStatus,
+                setWeiboStatus,
+                setXhsStatus,
                 xsecTokenCache: xsecTokenCacheRef.current,
                 noteTitleCache: noteTitleCacheRef.current,
                 commentUserIdCache: commentUserIdCacheRef.current,
                 commentAuthorNameCache: commentAuthorNameCacheRef.current,
                 commentParentIdCache: commentParentIdCacheRef.current,
-            }, char);
-            aiContent = await ChatParser.parseAndExecuteActions(aiContent, char.id, char.name, addToast);
+            };
+
+            aiContent = await handleRecall(aiContent, handlerContext);
+
+            aiContent = await handleSearch(aiContent, handlerContext);
+
+            aiContent = await handleWeiboSearch(aiContent, handlerContext);
+
+            aiContent = await handleDiaryWrite(aiContent, handlerContext);
+
+            aiContent = await handleDiaryRead(aiContent, handlerContext);
+
+            aiContent = await handleFeishuDiary(aiContent, handlerContext);
+
+            aiContent = await handleFeishuDiaryRead(aiContent, handlerContext);
+
+            aiContent = await handleXhsActions(aiContent, handlerContext);
 
             // 6.5 Detect AI-initiated incoming call [[CALL: mode]]
             const callMatch = aiContent.match(/\[\[CALL:\s*(\w+)\]\]/);
@@ -1099,7 +485,7 @@ mode 可选值：
             aiContent = ChatParser.sanitize(aiContent);
 
             // Fallback: if second-pass API calls (search/diary) returned empty, provide a minimal response
-            if (!aiContent.trim() && (searchMatch || readDiaryMatch || fsReadDiaryMatch)) {
+            if (!aiContent.trim() && hadSecondPassFallbackTrigger) {
                 aiContent = '嗯...';
             }
             if (aiContent) {
@@ -1413,7 +799,7 @@ mode 可选值：
 
             // ====== Vector Memory Extraction — fire-and-forget (success path only) ======
             if (char.vectorMemoryEnabled && char.vectorMemoryAutoExtract !== false) {
-                const emKey = localStorage.getItem('embedding_api_key');
+                const emKey = embeddingApiKey;
                 if (emKey) {
                     const charSnapshot = { ...char };
                     VectorMemoryExtractor.maybeExtract(charSnapshot, secondaryConfig, emKey)
