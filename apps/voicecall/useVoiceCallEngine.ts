@@ -19,13 +19,13 @@
  *   - voiceCallAudioPlayer.ts (VoiceCallAudioPlayer) — PCM 版
  */
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState,useRef,useCallback,useEffect } from 'react';
 import type { SttConfig } from '../../types/stt';
 import type { TtsConfig } from '../../types/tts';
-import type { CharacterProfile, UserProfile } from '../../types';
+import type { CharacterProfile,UserProfile } from '../../types';
 import { CloudStt } from '../../utils/cloudStt';
 import { MinimaxTtsWs } from '../../utils/minimaxTtsWs';
-import { VoiceCallLlm, VoiceCallLlmConfig } from './voiceCallLlm';
+import { VoiceCallLlm,VoiceCallLlmConfig } from './voiceCallLlm';
 import { VoiceCallAudioPlayer } from './voiceCallAudioPlayer';
 import type { VoiceCallMode } from './voiceCallTypes';
 import { VectorMemoryRetriever } from '../../utils/vectorMemoryRetriever';
@@ -319,12 +319,10 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             const vcTtsConfig = buildVoiceCallTtsConfig(opts.ttsConfig);
 
             let ttsReady = false;
-            let ttsConnecting = true;  // 预连接模式：初始就是 connecting 状态
             let ttsConnectFailed = false;
             let reconnectAttempted = false;  // 防止无限重连
             // ── 降级句子队列：一句一句显示 ──
             const degradedSentenceQueue: string[] = [];
-            let degradedDisplayTimer: ReturnType<typeof setTimeout> | null = null;
             let degradedDisplaying = false;  // 是否正在显示某句
 
             /** 显示下一句降级文字 */
@@ -344,8 +342,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                 setAiResponse(stripInterjections(sentence));
                 // 显示时长：按字数计算，模拟阅读节奏
                 const displayMs = Math.max(2000, Math.min(6000, sentence.length * 120));
-                degradedDisplayTimer = setTimeout(() => {
-                    degradedDisplayTimer = null;
+                setTimeout(() => {
                     showNextDegradedSentence();
                 }, displayMs);
             };
@@ -415,7 +412,6 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             const attemptTtsReconnect = async () => {
                 console.log(`[Engine] TTS mid-turn disconnect (${isFinalCount}/${sentSentCount} done). Attempting reconnection...`);
                 ttsReady = false;
-                ttsConnecting = true;  // 防止 onSentence 再次触发 connect
                 ttsTaskFinished = false;
 
                 try {
@@ -431,7 +427,6 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                     if (gen !== generationRef.current) { newWs.close(); return; }
 
                     ttsReady = true;
-                    ttsConnecting = false;
                     console.log('[Engine] TTS reconnected successfully');
 
                     // 重发未完成的句子（从 isFinalCount 位置开始）
@@ -452,7 +447,6 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                     }
                 } catch (err) {
                     console.error('[Engine] TTS reconnection failed, degrading to text:', err);
-                    ttsConnecting = false;
                     degradeRemainingToText();
                 }
             };
@@ -479,27 +473,6 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             ttsWsRef.current = ttsWs;
 
             // ─── TTS 预连接：与 LLM 并行启动握手，消除首句等待 ───
-            const ttsPreConnectPromise = (async () => {
-                try {
-                    console.log('[Engine] TTS pre-connecting (parallel with LLM)...');
-                    await ttsWs.connect(vcTtsConfig);
-                    await ttsWs.start(vcTtsConfig);
-                    if (gen !== generationRef.current) { ttsWs.close(); return; }
-                    ttsReady = true;
-                    ttsConnecting = false;
-                    console.log('[Engine] TTS pre-connected successfully');
-                    // flush 预连接期间到达的句子
-                    for (const s of pendingSentences) {
-                        ttsWs.sendText(s);
-                        sentSentCount++;
-                    }
-                    pendingSentences.length = 0;
-                } catch (err) {
-                    console.error('[Engine] TTS pre-connect failed, degrading to text:', err);
-                    ttsConnecting = false;
-                    degradeRemainingToText();
-                }
-            })();
 
             await llm.chat(text, {
                 onSentence: async (sentence) => {

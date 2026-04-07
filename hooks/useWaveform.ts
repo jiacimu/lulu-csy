@@ -8,7 +8,7 @@
  *   - 返回 Uint8Array 引用（每帧原地更新），消费者用 canvas 读取即可
  */
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef,useEffect,useCallback } from 'react';
 
 /**
  * 从 AnalyserNode 持续采样频率数据。

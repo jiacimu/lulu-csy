@@ -5,7 +5,7 @@
  * 录音中显示脉冲动画和计时器，上滑时变为红色取消提示。
  */
 
-import React, { useRef, useState, useCallback } from 'react';
+import React,{ useRef,useState,useCallback } from 'react';
 import WaveformCanvas from './WaveformCanvas';
 
 interface VoiceRecordButtonProps {

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { X, Sun, Moon, ChatCircleDots, Heart, Translate } from '@phosphor-icons/react';
-import { getVoiceCallModeOptions, type VoiceCallMode } from '../voiceCallTypes';
+import React,{ useState } from 'react';
+import { X,Sun,Moon,ChatCircleDots,Heart,Translate } from '@phosphor-icons/react';
+import { getVoiceCallModeOptions,type VoiceCallMode } from '../voiceCallTypes';
 
 interface ModeSelectOverlayProps {
     charName: string;

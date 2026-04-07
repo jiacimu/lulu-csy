@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React,{ useState,useEffect,useRef,useCallback,useMemo } from 'react';
 import { DB } from '../../utils/db';
 import { saveVoiceAudio } from '../../utils/db/contentStore';
 import { VectorMemoryExtractor } from '../../utils/vectorMemoryExtractor';
-import { useVoiceCall, CallDirection } from './useVoiceCall';
+import { useVoiceCall,CallDirection } from './useVoiceCall';
 import { useVoiceCallEngine } from './useVoiceCallEngine';
 import IncomingCallOverlay from './components/IncomingCallOverlay';
 import ConnectingOverlay from './components/ConnectingOverlay';
@@ -16,7 +16,6 @@ import { formatDuration } from './utils';
 import { MODE_LABELS } from './voiceCallTypes';
 import dialToneSrc from './assets/dial-tone.mp3';
 import ringtoneWechatSrc from './assets/ringtone-wechat.mp3';
-import ringtoneIphoneSrc from './assets/ringtone-iphone.mp3';
 import vcBgSrc from './assets/vc-bg.jpg';
 import vcBgDailySrc from './assets/vc-bg-daily.jpg';
 import vcBgConfideSrc from './assets/vc-bg-confide.jpg';
@@ -25,9 +24,10 @@ import vcBgSleepSrc from './assets/vc-bg-sleep.jpg';
 import vcBgModeSelectSrc from './assets/vc-bg-modeselect.jpg';
 import type { TtsConfig } from '../../types/tts';
 import type { SttConfig } from '../../types/stt';
-import type { CharacterProfile, UserProfile } from '../../types';
+import type { CharacterProfile,UserProfile } from '../../types';
 import type { VoiceCallMode } from './voiceCallTypes';
 import type { MessageType } from '../../types';
+import { getEmbeddingConfig,getSecondaryApiConfig } from '../../utils/runtimeConfig';
 
 interface VoiceCallScreenProps {
     avatarUrl: string;
@@ -71,7 +71,7 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
     const [foreignLang, setForeignLang] = useState<{ sourceLang: string; targetLang: string } | null>(null);
 
     // ─── 向量记忆 (Vector Memory) ───
-    const embeddingApiKey = useMemo(() => localStorage.getItem('embedding_api_key') || undefined, []);
+    const embeddingApiKey = useMemo(() => getEmbeddingConfig().apiKey || undefined, []);
 
     const handleSelectMode = useCallback((mode: VoiceCallMode) => {
         unlockAudio(); // Fix E: iOS Safari 音频解锁（必须在用户手势同步链中）
@@ -242,12 +242,7 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                     // 向量记忆提取 (fire-and-forget，不阻塞关闭)
                     // Read secondary API config fresh at call-end time (not from useMemo)
                     if (char.vectorMemoryEnabled && embeddingApiKey) {
-                        const subK = localStorage.getItem('sub_api_key');
-                        const subU = localStorage.getItem('sub_api_base_url');
-                        const subM = localStorage.getItem('sub_api_model');
-                        const callExtractConfig = (subK && subU && subM)
-                            ? { baseUrl: subU, apiKey: subK, model: subM }
-                            : apiConfig;
+                        const callExtractConfig = getSecondaryApiConfig() || apiConfig;
                         VectorMemoryExtractor.extractFromCallHistory(
                             char.id, char.name, history, Date.now(), callExtractConfig, embeddingApiKey,
                         ).then(count => {

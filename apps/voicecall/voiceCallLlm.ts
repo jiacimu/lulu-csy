@@ -8,7 +8,7 @@
  * - 独立的 context 构建（不依赖 chatPrompts.ts / context.ts）
  */
 
-import type { CharacterProfile, UserProfile } from '../../types';
+import type { CharacterProfile,UserProfile } from '../../types';
 import type { VoiceCallMode } from './voiceCallTypes';
 import { RealtimeContextManager } from '../../utils/realtimeContext';
 
@@ -1072,7 +1072,6 @@ Somnia，深呼吸，回到梦里。
 
 export class VoiceCallLlm {
     private config: VoiceCallLlmConfig;
-    private charName: string;
     private systemPrompt: string;
     private history: ChatMessage[] = [];
     private abortController: AbortController | null = null;
@@ -1083,7 +1082,6 @@ export class VoiceCallLlm {
         userProfile: UserProfile,
     ) {
         this.config = config;
-        this.charName = char.name;
         // 独立构建语音通话上下文（破限+CoT 在语音通话中强制开启）
         this.systemPrompt = buildVoiceContext(
             char,

@@ -2,7 +2,7 @@
 
 
 
-import React, { useState, useEffect, useRef, useCallback, Component, ErrorInfo, Suspense } from 'react';
+import React,{ useState,useEffect,Component,ErrorInfo,Suspense } from 'react';
 import { useOS } from '../context/OSContext';
 import { useVirtualTime } from '../context/VirtualTimeContext';
 import StatusBar from './os/StatusBar';
@@ -10,7 +10,7 @@ import AppSplashScreen from './os/AppSplashScreen';
 import Launcher from '../apps/Launcher';
 import { AppID } from '../types';
 import { App as CapApp } from '@capacitor/app';
-import { StatusBar as CapStatusBar, Style as StatusBarStyle } from '@capacitor/status-bar';
+import { StatusBar as CapStatusBar,Style as StatusBarStyle } from '@capacitor/status-bar';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
 import { requestSystemFullscreen } from '../App';
@@ -52,53 +52,89 @@ const LazyValentineController = React.lazy(() => import('./ValentineEvent').then
   default: m.ValentineController
 })));
 
-// shouldShowValentinePopup is a pure function, import it statically
-import { shouldShowValentinePopup } from './ValentineEvent';
+import {
+  getSpecialEventDefinition,
+  shouldShowSpecialEventPopup,
+} from '../utils/specialEvents';
 import { haptic } from '../utils/haptics';
 import UpdatePopup from './os/UpdatePopup';
+import { attemptChunkAutoReload,isChunkLoadError,reloadApplication } from '../utils/runtimeRecovery';
+
+const VALENTINE_EVENT_ID = 'valentine_2026';
+const valentineEvent = getSpecialEventDefinition(VALENTINE_EVENT_ID);
+
+function shouldShowActiveSpecialEventPopup(): boolean {
+  return !!valentineEvent && shouldShowSpecialEventPopup(valentineEvent);
+}
 
 // Internal Error Boundary Component
-class AppErrorBoundary extends Component<{ children: React.ReactNode, onCloseApp: () => void }, { hasError: boolean, error: Error | null }> {
+class AppErrorBoundary extends Component<{ children: React.ReactNode, onCloseApp: () => void }, { hasError: boolean, error: Error | null, isChunkError: boolean, isRecovering: boolean }> {
   constructor(props: any) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, isChunkError: false, isRecovering: false };
   }
 
   static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error };
+    return {
+      hasError: true,
+      error,
+      isChunkError: isChunkLoadError(error),
+      isRecovering: false,
+    };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    const didTriggerChunkReload = attemptChunkAutoReload(error);
+    if (didTriggerChunkReload) {
+      this.setState({ isRecovering: true });
+    }
     console.error("App Crash:", error, errorInfo);
   }
 
   // Reset error state when children change (e.g. app switch)
   componentDidUpdate(prevProps: any) {
     if (prevProps.children !== this.props.children) {
-      this.setState({ hasError: false, error: null });
+      this.setState({ hasError: false, error: null, isChunkError: false, isRecovering: false });
     }
   }
 
   render() {
     if (this.state.hasError) {
+      const errorText = this.state.error?.message || 'Unknown Error';
       return (
         <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-white p-6 text-center space-y-4">
-          <div className="text-4xl">😵</div>
-          <h2 className="text-lg font-bold">应用运行错误</h2>
+          <div className="text-4xl">{this.state.isChunkError ? '↻' : '😵'}</div>
+          <h2 className="text-lg font-bold">{this.state.isChunkError ? '应用资源加载失败' : '应用运行错误'}</h2>
+          <p className="text-xs text-slate-300 max-w-xs leading-relaxed">
+            {this.state.isChunkError
+              ? this.state.isRecovering
+                ? '检测到新版本资源，正在自动刷新一次…'
+                : '检测到 chunk 加载失败。为了避免死循环，这一标签页不会再自动重试，请手动刷新应用。'
+              : '应用运行时遇到了一个未处理错误。'}
+          </p>
           <p className="text-xs text-slate-400 font-mono bg-black/30 p-3 rounded max-w-full overflow-auto max-h-40 select-text break-all whitespace-pre-wrap">
-            {this.state.error?.message || 'Unknown Error'}
+            {errorText}
           </p>
           <button
             onClick={() => {
-              const errText = this.state.error?.message || 'Unknown Error';
-              navigator.clipboard?.writeText(errText).then(() => { }).catch(() => { });
+              navigator.clipboard?.writeText(errorText).then(() => { }).catch(() => { });
             }}
             className="px-4 py-2 bg-slate-700 rounded-full text-xs active:scale-95 transition-transform"
           >
             复制错误信息
           </button>
+          {this.state.isChunkError && !this.state.isRecovering && (
+            <button
+              onClick={() => {
+                reloadApplication('正在刷新应用…');
+              }}
+              className="px-6 py-3 bg-emerald-500 rounded-full font-bold text-sm shadow-lg active:scale-95 transition-transform"
+            >
+              刷新应用
+            </button>
+          )}
           <button
-            onClick={() => { this.setState({ hasError: false }); this.props.onCloseApp(); }}
+            onClick={() => { this.setState({ hasError: false, error: null, isChunkError: false, isRecovering: false }); this.props.onCloseApp(); }}
             className="px-6 py-3 bg-red-600 rounded-full font-bold text-sm shadow-lg active:scale-95 transition-transform"
           >
             返回桌面
@@ -126,21 +162,23 @@ const DisclaimerPopup: React.FC<{ onAccept: () => void }> = ({ onAccept }) => (
       {/* Content */}
       <div className="px-6 pb-4 max-h-[55vh] overflow-y-auto no-scrollbar space-y-3">
         <p className="text-[13px] text-slate-600 leading-relaxed">
-          本项目「手抓糯米机 (SullyOS)」是一个<strong className="text-slate-800">完全开源、免费</strong>的软件，仅供个人学习、研究与技术交流使用。
+          本项目“手抓糯米机 (SullyOS)”是一款
+          <strong className="text-slate-800"> 完全开源、免费 </strong>
+          的软件，仅供个人学习、研究与技术交流使用。
         </p>
         <ul className="text-[12px] text-slate-500 leading-relaxed space-y-1.5 list-none">
-          <li className="flex gap-2"><span className="shrink-0">•</span><span>本软件不提供任何明示或暗示的担保，作者不对使用本软件产生的任何后果承担责任。</span></li>
-          <li className="flex gap-2"><span className="shrink-0">•</span><span>用户应自行承担使用本软件的一切风险，包括但不限于数据丢失、设备损坏等。</span></li>
-          <li className="flex gap-2"><span className="shrink-0">•</span><span>本软件生成的任何 AI 内容均不代表作者立场，用户需自行判断内容的准确性与合规性。</span></li>
-          <li className="flex gap-2"><span className="shrink-0">•</span><span>禁止将本软件用于任何违反当地法律法规的用途。</span></li>
+          <li className="flex gap-2"><span className="shrink-0">-</span><span>本软件不提供任何明示或暗示的担保，作者不对使用本软件产生的任何后果承担责任。</span></li>
+          <li className="flex gap-2"><span className="shrink-0">-</span><span>用户应自行承担使用本软件的一切风险，包括但不限于数据丢失、设备损坏等。</span></li>
+          <li className="flex gap-2"><span className="shrink-0">-</span><span>本软件生成的任何 AI 内容均不代表作者立场，用户需要自行判断内容的准确性与合规性。</span></li>
+          <li className="flex gap-2"><span className="shrink-0">-</span><span>禁止将本软件用于任何违反当地法律法规的用途。</span></li>
         </ul>
 
         {/* Highlighted warning */}
         <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4 mt-3">
           <p className="text-[13px] font-bold text-red-600 text-center leading-relaxed">
-            ⚠️ 本程序完全免费！<br />
-            如果您是通过<span className="underline decoration-2 decoration-red-400">付费购买</span>获得此程序的，说明您已被倒卖欺骗。<br />
-            请向售卖者维权追责！
+            注意：本程序完全免费！<br />
+            如果你是通过<span className="underline decoration-2 decoration-red-400">付费购买</span>获得本程序，说明你可能遭遇了倒卖或诈骗。<br />
+            请及时向售卖者维权追责。
           </p>
         </div>
       </div>
@@ -186,24 +224,24 @@ const PhoneShell: React.FC = () => {
     setShowDisclaimer(false);
   };
 
-  // Valentine's Day popup (only on 2026-02-14, first visit)
+  // Special-event popup state. Valentine currently uses the shared event helper.
   const [showValentine, setShowValentine] = useState(() => {
     try {
       // Only show after disclaimer is accepted
-      return !!(localStorage.getItem(DISCLAIMER_KEY)) && shouldShowValentinePopup();
+      return !!(localStorage.getItem(DISCLAIMER_KEY)) && shouldShowActiveSpecialEventPopup();
     } catch { return false; }
   });
 
-  // Re-check valentine popup after disclaimer is accepted
+  // Re-check the special-event popup after the disclaimer is accepted.
   useEffect(() => {
     if (!showDisclaimer && !showValentine) {
-      if (shouldShowValentinePopup()) {
+      if (shouldShowActiveSpecialEventPopup()) {
         setShowValentine(true);
       }
     }
   }, [showDisclaimer]);
 
-  // ── Capacitor: Native Status Bar + Permissions ──────────────────────────────
+  // Capacitor: native status bar and notification permissions
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     const init = async () => {
@@ -218,7 +256,7 @@ const PhoneShell: React.FC = () => {
     init();
   }, []);
 
-  // ── Capacitor: Android Hardware Back Button ───────────────────────────────────
+  // Capacitor: Android hardware back button
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     const setup = async () => {
@@ -232,7 +270,7 @@ const PhoneShell: React.FC = () => {
           }
           const handled = handleBackRef.current();
           if (!handled) {
-            // Already at the Launcher root — exit the app
+            // Already at the launcher root, so exit the app.
             CapApp.exitApp();
           }
         });
@@ -242,7 +280,7 @@ const PhoneShell: React.FC = () => {
     return () => { CapApp.removeAllListeners().catch(() => { }); };
   }, []); // Stable: always reads latest values via refs
 
-  // ── Web / PWA: History API Trap ──────────────────────────────────────────────
+  // Web/PWA: trap browser back navigation inside the app shell
   // Injects a dummy history entry so that the browser's back gesture fires
   // a popstate event instead of navigating away from the page.
   useEffect(() => {
@@ -266,13 +304,13 @@ const PhoneShell: React.FC = () => {
       const handled = handleBackRef.current();
 
       if (handled) {
-        // Action was taken (app closed / sub-view closed) — stay in the trap
+        // Action was taken, so keep the trap active.
         requestAnimationFrame(() => {
           history.pushState({ sullyos: true }, '');
           handling = false;
         });
       } else {
-        // Already at root — release the trap, next back exits normally
+        // Already at root, so release the trap and let the next back exit normally.
         handling = false;
       }
     };
@@ -288,10 +326,10 @@ const PhoneShell: React.FC = () => {
     window.scrollTo(0, 0);
   }, [activeApp]);
 
-  // ── Idle Prefetch: Preload Zhaixinglou chunk + critical assets after unlock ──
+  // Idle prefetch: warm the Zhaixinglou chunk and critical assets after unlock
   // This runs once when the user enters the Launcher, so the chunk is already
   // in browser cache by the time they tap the Zhaixinglou icon.
-  // NOTE: Safari/iOS does NOT support requestIdleCallback — use setTimeout fallback.
+  // NOTE: Safari/iOS does not support requestIdleCallback, so use setTimeout as a fallback.
   useEffect(() => {
     if (isLocked) return;
     const rIC = window.requestIdleCallback || ((cb: () => void) => window.setTimeout(cb, 1));
@@ -426,10 +464,9 @@ const PhoneShell: React.FC = () => {
       <div className={`absolute inset-0 transition-all duration-500 ${activeApp === AppID.Launcher ? 'bg-transparent' : 'bg-white/50 backdrop-blur-3xl'}`} />
 
       {/* 
-          CRITICAL FIX: 
-          Using 'absolute inset-0' prevents layout collapse.
-          REMOVED 'flex flex-col' to fix layout issues in CheckPhone (gap) and SocialApp (jumping).
-          Now it acts as a pure container for full-screen apps.
+          Full-screen app container.
+          Keep `absolute inset-0` to avoid layout collapse, and keep `flex flex-col`
+          because several app views still rely on column layout plus safe-area padding.
        */}
       <div
         className="absolute inset-0 z-10 w-full h-full overflow-hidden bg-transparent overscroll-none flex flex-col"
@@ -478,7 +515,7 @@ const PhoneShell: React.FC = () => {
       {/* First-time disclaimer popup */}
       {showDisclaimer && <DisclaimerPopup onAccept={handleAcceptDisclaimer} />}
 
-      {/* Valentine's Day popup (2026-02-14) */}
+      {/* Special-event popup */}
       {!showDisclaimer && showValentine && <Suspense fallback={null}><LazyValentineController onClose={() => setShowValentine(false)} /></Suspense>}
 
       {/* Update Changelog Popup */}
@@ -488,3 +525,5 @@ const PhoneShell: React.FC = () => {
 };
 
 export default PhoneShell;
+
+

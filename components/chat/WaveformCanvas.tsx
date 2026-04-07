@@ -9,7 +9,7 @@
  *   - 支持自定义颜色/尺寸，适配不同主题
  */
 
-import React, { useRef, useEffect, useCallback } from 'react';
+import React,{ useRef,useEffect,useCallback } from 'react';
 import { useWaveform } from '../../hooks/useWaveform';
 
 interface WaveformCanvasProps {

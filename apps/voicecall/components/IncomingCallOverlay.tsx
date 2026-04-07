@@ -1,5 +1,5 @@
 import React from 'react';
-import { Phone, PhoneDisconnect } from '@phosphor-icons/react';
+import { Phone,PhoneDisconnect } from '@phosphor-icons/react';
 import AvatarPulse from './AvatarPulse';
 
 interface IncomingCallOverlayProps {

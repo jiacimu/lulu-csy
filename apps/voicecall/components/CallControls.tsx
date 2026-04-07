@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { MicrophoneSlash, Microphone, PhoneDisconnect, ChatCircle, SpeakerHigh, SpeakerLow, SpeakerSlash } from '@phosphor-icons/react';
+import React,{ useState,useCallback,useRef } from 'react';
+import { MicrophoneSlash,Microphone,PhoneDisconnect,ChatCircle,SpeakerHigh,SpeakerLow,SpeakerSlash } from '@phosphor-icons/react';
 
 interface CallControlsProps {
     isMuted: boolean;

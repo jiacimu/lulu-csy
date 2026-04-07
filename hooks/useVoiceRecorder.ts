@@ -8,7 +8,7 @@
  * VAD 作为增强层，如果加载失败不影响核心录音功能。
  */
 
-import { useState, useRef, useCallback } from 'react';
+import { useState,useRef,useCallback } from 'react';
 
 export type RecordingState = 'idle' | 'recording' | 'processing';
 

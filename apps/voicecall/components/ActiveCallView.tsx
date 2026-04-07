@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React,{ useState,useEffect,useRef,useCallback } from 'react';
 import CallControls from './CallControls';
 import AudioVisualizer from './AudioVisualizer';
 import AvatarPulse from './AvatarPulse';
@@ -114,7 +114,6 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
     isUserSpeaking = false,
     ttsDegraded = false,
     transcriptSource = 'voice',
-    callMode,
     // ─── 外语模式 (Foreign Language) ───
     aiTranslation = '',
     // ─── 音量控制 ───
