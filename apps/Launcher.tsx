@@ -1,11 +1,10 @@
-import React, { useMemo, useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react';
+import React,{ useMemo,useEffect,useLayoutEffect,useState,useRef,useCallback } from 'react';
 import { useOS } from '../context/OSContext';
 import { useVirtualTime } from '../context/VirtualTimeContext';
-import { INSTALLED_APPS, DOCK_APPS } from '../constants';
+import { INSTALLED_APPS,DOCK_APPS } from '../constants';
 import AppIcon from '../components/os/AppIcon';
-import { haptic } from '../utils/haptics';
 import { DB } from '../utils/db';
-import { CharacterProfile, Anniversary, AppID } from '../types';
+import { CharacterProfile,Anniversary,AppID } from '../types';
 
 // --- Isolated Components to prevent full re-renders ---
 

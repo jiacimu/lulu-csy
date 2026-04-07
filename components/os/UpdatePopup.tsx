@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React,{ useState,useEffect } from 'react';
 
 const UPDATE_VERSION_KEY = 'sullyos_update_seen_version';
 export const CURRENT_VERSION = 'v2.8.0';

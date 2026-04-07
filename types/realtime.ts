@@ -5,6 +5,7 @@ import { XhsMcpConfig } from './xhs';
 export interface RealtimeConfig {
     // 天气配置
     weatherEnabled: boolean;
+    weatherProvider?: 'openweathermap';
     weatherApiKey: string;  // OpenWeatherMap API Key
     weatherCity: string;    // 城市名
 

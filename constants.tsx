@@ -1,5 +1,5 @@
 import React from 'react';
-import { AppConfig, AppID } from './types';
+import { AppConfig,AppID } from './types';
 import {
   UserCircle,
   IdentificationCard,

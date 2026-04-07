@@ -2,9 +2,9 @@
 
 
 
-import React, { useState, useRef, useEffect } from 'react';
+import React,{ useState,useRef,useEffect } from 'react';
 import { useOS } from '../context/OSContext';
-import { ChatTheme, BubbleStyle, Message } from '../types';
+import { ChatTheme,BubbleStyle,Message } from '../types';
 import { processImage } from '../utils/file';
 import VoiceBubble from '../components/chat/VoiceBubble';
 import DefaultTransferCard from '../components/chat/plugins/DefaultTransferCard';
@@ -35,48 +35,6 @@ const DEFAULT_THEME: ChatTheme = {
 };
 
 // --- Aesthetic Palette Inspiration Cards ---
-const AESTHETIC_PALETTES: { name: string; user: BubbleStyle; ai: BubbleStyle }[] = [
-    {
-        name: '晚霞',
-        user: { ...DEFAULT_STYLE, textColor: '#ffffff', gradient: { from: '#FF6B6B', to: '#FFC371', direction: 135 }, backgroundColor: '#FF6B6B', borderRadius: 20 },
-        ai: { ...DEFAULT_STYLE, textColor: '#5D4037', backgroundColor: '#FFF8F0', borderRadius: 20 },
-    },
-    {
-        name: '深海',
-        user: { ...DEFAULT_STYLE, textColor: '#E0F0FF', backgroundColor: '#0D1B2A', borderRadius: 16 },
-        ai: { ...DEFAULT_STYLE, textColor: '#94D2BD', backgroundColor: '#1B3A4B', borderRadius: 16 },
-    },
-    {
-        name: '薄荷',
-        user: { ...DEFAULT_STYLE, textColor: '#ffffff', backgroundColor: '#34D399', borderRadius: 22 },
-        ai: { ...DEFAULT_STYLE, textColor: '#065F46', backgroundColor: '#ECFDF5', borderRadius: 22 },
-    },
-    {
-        name: '蜜桃',
-        user: { ...DEFAULT_STYLE, textColor: '#ffffff', gradient: { from: '#FDA4AF', to: '#FDE68A', direction: 135 }, backgroundColor: '#FDA4AF', borderRadius: 24 },
-        ai: { ...DEFAULT_STYLE, textColor: '#881337', backgroundColor: '#FFF1F2', borderRadius: 24 },
-    },
-    {
-        name: '星空',
-        user: { ...DEFAULT_STYLE, textColor: '#ffffff', gradient: { from: '#6366F1', to: '#8B5CF6', direction: 135 }, backgroundColor: '#6366F1', borderRadius: 18 },
-        ai: { ...DEFAULT_STYLE, textColor: '#C4B5FD', backgroundColor: '#1E1B4B', borderRadius: 18 },
-    },
-    {
-        name: '纸笺',
-        user: { ...DEFAULT_STYLE, textColor: '#F5F5F4', backgroundColor: '#2C2C2C', borderRadius: 4 },
-        ai: { ...DEFAULT_STYLE, textColor: '#333333', backgroundColor: '#FAF9F6', borderRadius: 4 },
-    },
-    {
-        name: '暖阳',
-        user: { ...DEFAULT_STYLE, textColor: '#ffffff', backgroundColor: '#F59E0B', borderRadius: 20 },
-        ai: { ...DEFAULT_STYLE, textColor: '#78350F', backgroundColor: '#FFFBEB', borderRadius: 20 },
-    },
-    {
-        name: '水墨',
-        user: { ...DEFAULT_STYLE, textColor: '#F5F0EB', backgroundColor: '#1A1A2E', borderRadius: 2 },
-        ai: { ...DEFAULT_STYLE, textColor: '#1A1A2E', backgroundColor: '#F5F0EB', borderRadius: 2 },
-    },
-];
 
 // --- CSS Examples ---
 const CSS_EXAMPLES = [

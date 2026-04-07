@@ -5,8 +5,8 @@
  * 两家都兼容 OpenAI /v1/audio/transcriptions 格式。
  */
 
-import type { SttConfig, SttResult } from '../types/stt';
-import { STT_PROVIDER_DEFAULTS, getActiveApiKey } from '../types/stt';
+import type { SttConfig,SttResult } from '../types/stt';
+import { STT_PROVIDER_DEFAULTS,getActiveApiKey } from '../types/stt';
 
 // ─── 自定义错误 ──────────────────────────────────────────────────────
 

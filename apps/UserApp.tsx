@@ -1,5 +1,5 @@
 
-import React, { useState, useRef } from 'react';
+import React,{ useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { processImage } from '../utils/file';
 

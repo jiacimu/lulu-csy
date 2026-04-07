@@ -1,9 +1,9 @@
-import { ChatTheme, Emoji, EmojiCategory, UserProfile, GalleryImage, XhsStockImage, XhsActivityRecord } from '../../types';
+import { ChatTheme,Emoji,EmojiCategory,UserProfile,GalleryImage,XhsStockImage,XhsActivityRecord } from '../../types';
 import {
-    openDB, STORE_THEMES, STORE_EMOJIS, STORE_EMOJI_CATEGORIES, STORE_ASSETS,
-    STORE_USER, STORE_GALLERY, STORE_JOURNAL_STICKERS,
-    STORE_XHS_STOCK, STORE_XHS_ACTIVITIES, STORE_VOICE_AUDIO,
-    SULLY_CATEGORY_ID, SULLY_PRESET_EMOJIS
+  openDB,STORE_THEMES,STORE_EMOJIS,STORE_EMOJI_CATEGORIES,STORE_ASSETS,
+  STORE_USER,STORE_GALLERY,STORE_JOURNAL_STICKERS,
+  STORE_XHS_STOCK,STORE_XHS_ACTIVITIES,STORE_VOICE_AUDIO,
+  SULLY_CATEGORY_ID,SULLY_PRESET_EMOJIS
 } from './core';
 
 // --- Themes ---

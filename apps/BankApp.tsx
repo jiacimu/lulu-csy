@@ -1,15 +1,14 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { BankFullState, BankTransaction, SavingsGoal, ShopStaff, BankGuestbookItem, DollhouseState } from '../types';
+import { BankFullState,BankTransaction,SavingsGoal,ShopStaff,BankGuestbookItem,DollhouseState } from '../types';
 import { safeResponseJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
-import BankShopScene from '../components/bank/BankShopScene';
 import BankDollhouse from '../components/bank/BankDollhouse';
 import BankGameMenu from '../components/bank/BankGameMenu';
 import BankAnalytics from '../components/bank/BankAnalytics';
-import { SHOP_RECIPES, INITIAL_DOLLHOUSE } from '../components/bank/BankGameConstants';
+import { SHOP_RECIPES,INITIAL_DOLLHOUSE } from '../components/bank/BankGameConstants';
 import { processImage } from '../utils/file';
 import { ContextBuilder } from '../utils/context';
 
@@ -679,19 +678,6 @@ ${previousGuestbook}
         }
     };
 
-    const handleMoveStaff = async (x: number, y: number) => {
-        const cur = stateRef.current;
-        const manager = cur.shop.staff[0];
-        if (!manager) return;
-
-        const updatedManager = { ...manager, x, y };
-        const updatedStaffList = [updatedManager, ...cur.shop.staff.slice(1)];
-
-        const newState = { ...cur, shop: { ...cur.shop, staff: updatedStaffList } };
-        stateRef.current = newState;
-        setState(newState);
-        await DB.saveBankState(newState);
-    };
 
     const handleConfigUpdate = async (updates: Partial<typeof state.config>) => {
         const cur = stateRef.current;

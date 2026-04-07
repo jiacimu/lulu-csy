@@ -25,11 +25,12 @@ export enum AppID {
     HotSearch = 'hot_search', // 新增：实时热搜
     Bank = 'bank', // New App
     XhsStock = 'xhs_stock', // XHS image stock for publishing
-    SpecialMoments = 'special_moments', // Valentine's Day & future events
+    SpecialMoments = 'special_moments', // Seasonal specials and future limited-time events
     XhsFreeRoam = 'xhs_free_roam', // Character autonomous XHS activity
     Zhaixinglou = 'zhaixinglou', // 摘星楼 - Astrology & Divination
     CsyManual = 'csy_manual', // CSY二改版使用手册
     VoiceCall = 'voice_call', // 语音通话
+    CognitiveNetwork = 'cognitive_network', // 认知网络
 }
 
 export interface SystemLog {

@@ -1,8 +1,8 @@
-import { DiaryEntry, Task, Anniversary, RoomTodo, RoomNote, SocialPost, StudyCourse, GameSession, Worldbook, NovelBook } from '../../types';
+import { DiaryEntry,Task,Anniversary,RoomTodo,RoomNote,SocialPost,StudyCourse,GameSession,Worldbook,NovelBook } from '../../types';
 import {
-    openDB, STORE_DIARIES, STORE_TASKS, STORE_ANNIVERSARIES,
-    STORE_ROOM_TODOS, STORE_ROOM_NOTES, STORE_SOCIAL_POSTS,
-    STORE_COURSES, STORE_GAMES, STORE_WORLDBOOKS, STORE_NOVELS
+  openDB,STORE_DIARIES,STORE_TASKS,STORE_ANNIVERSARIES,
+  STORE_ROOM_TODOS,STORE_ROOM_NOTES,STORE_SOCIAL_POSTS,
+  STORE_COURSES,STORE_GAMES,STORE_WORLDBOOKS,STORE_NOVELS
 } from './core';
 
 // --- Diaries ---

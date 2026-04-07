@@ -1,10 +1,10 @@
-import { parseDateExpression, segmentWords } from '../utils/parseDateExpression';
+import { parseDateExpression,segmentWords } from '../utils/parseDateExpression';
 
 function fmt(ts: number): string {
   return new Date(ts).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
 }
 
-function test(label: string, input: string) {
+function test(_label: string, input: string) {
   const r = parseDateExpression(input);
   if (r) {
     console.log(`✅ "${input}" => ${fmt(r.start)}  ~  ${fmt(r.end)}`);

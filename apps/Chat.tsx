@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, useLayoutEffect, useMemo, useCallback } from 'react';
+import React,{ useState,useEffect,useRef,useLayoutEffect,useMemo,useCallback } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { Message, MessageType, MemoryFragment, Emoji, EmojiCategory, AppID } from '../types';
+import { Message,MessageType,MemoryFragment,Emoji,EmojiCategory,AppID } from '../types';
 import { processImage } from '../utils/file';
 import { safeResponseJson } from '../utils/safeApi';
 import { parseBilingual } from '../utils/chatParser';
-import { XhsMcpClient, extractNotesFromMcpData, normalizeNote } from '../utils/xhsMcpClient';
+import { XhsMcpClient,normalizeNote } from '../utils/xhsMcpClient';
 import { unlockAudio } from './voicecall/unlockAudio';
 import MessageItem from '../components/chat/MessageItem';
 import { PRESET_THEMES } from '../components/chat/ChatConstants';
@@ -17,14 +17,21 @@ import Modal from '../components/os/Modal';
 import { useChatAI } from '../hooks/useChatAI';
 import { useVoiceTts } from '../hooks/useVoiceTts';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
-import { CloudStt, SttNotConfiguredError } from '../utils/cloudStt';
+import { CloudStt,SttNotConfiguredError } from '../utils/cloudStt';
 import { haptic } from '../utils/haptics';
-import { BackendAgentManager } from '../utils/autonomousAgent';
+import {
+  BackendAgentManager,
+  getLifeStreamVisibleInChat,
+  LIFE_STREAM_VISIBILITY_EVENT_NAME,
+} from '../utils/autonomousAgent';
 
 const Chat: React.FC = () => {
     const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, closeApp, openApp, customThemes, removeCustomTheme, addToast, userProfile, lastMsgTimestamp, groups, clearUnread, realtimeConfig, ttsConfig, sttConfig } = useOS();
     const [messages, setMessages] = useState<Message[]>([]);
     const [totalMsgCount, setTotalMsgCount] = useState(0);
+    const [lifeStreamVisibleInChat, setLifeStreamVisibleInChat] = useState(() => (
+        activeCharacterId ? getLifeStreamVisibleInChat(activeCharacterId) : false
+    ));
     const [visibleCount, setVisibleCount] = useState(30);
     const [input, setInput] = useState('');
     const [showPanel, setShowPanel] = useState<'none' | 'actions' | 'emojis' | 'chars'>('none');
@@ -40,6 +47,7 @@ const Chat: React.FC = () => {
     const scrollThrottleRef = useRef(0);
     const visibleCountRef = useRef(30);
     const activeCharIdRef = useRef(activeCharacterId);
+    const lifeStreamVisibleRef = useRef(lifeStreamVisibleInChat);
     const messagesRef = useRef<Message[]>(messages);
     messagesRef.current = messages;
 
@@ -99,7 +107,6 @@ const Chat: React.FC = () => {
     // --- Voice Recording (STT) ---
     const voiceRecorder = useVoiceRecorder();
     const [sttProcessing, setSttProcessing] = useState(false);
-    const [transcribingMsgIds, setTranscribingMsgIds] = useState<Set<number>>(new Set());
     // --- Voice transcript expansion (inline "转文字") ---
     const [expandedVoiceTextIds, setExpandedVoiceTextIds] = useState<Set<number>>(new Set());
 
@@ -113,6 +120,24 @@ const Chat: React.FC = () => {
             addToast(voiceRecorder.error, 'error');
         }
     }, [voiceRecorder.error]);
+
+    useEffect(() => {
+        lifeStreamVisibleRef.current = lifeStreamVisibleInChat;
+    }, [lifeStreamVisibleInChat]);
+
+    useEffect(() => {
+        const refreshVisibility = () => {
+            setLifeStreamVisibleInChat(
+                activeCharacterId ? getLifeStreamVisibleInChat(activeCharacterId) : false,
+            );
+        };
+
+        refreshVisibility();
+        window.addEventListener(LIFE_STREAM_VISIBILITY_EVENT_NAME, refreshVisibility);
+        return () => {
+            window.removeEventListener(LIFE_STREAM_VISIBILITY_EVENT_NAME, refreshVisibility);
+        };
+    }, [activeCharacterId]);
 
     const char = characters.find(c => c.id === activeCharacterId) || characters[0];
     const currentThemeId = char?.bubbleStyle || 'default';
@@ -245,7 +270,8 @@ const Chat: React.FC = () => {
         const chatScopeMsgs = allMsgs
             .filter(m => m.metadata?.source !== 'date')
             .filter(m => !char?.hideBeforeMessageId || m.id >= char.hideBeforeMessageId)
-            .filter(m => !(char?.hideSystemLogs && m.role === 'system'));
+            .filter(m => !(char?.hideSystemLogs && m.role === 'system'))
+            .filter(m => lifeStreamVisibleRef.current || (m.type as string) !== 'lifestream');
 
         setTotalMsgCount(chatScopeMsgs.length);
         setMessages(chatScopeMsgs.slice(-requestedVisibleCount));
@@ -290,17 +316,24 @@ const Chat: React.FC = () => {
         }
     }, [activeCharacterId, reloadMessages]);
 
+    useEffect(() => {
+        if (activeCharacterId) {
+            reloadMessages(visibleCountRef.current);
+        }
+    }, [lifeStreamVisibleInChat, activeCharacterId, reloadMessages]);
+
     // Load all messages when history-manager modal opens
     useEffect(() => {
         if (modalType === 'history-manager' && activeCharacterId) {
             DB.getMessagesByCharId(activeCharacterId).then(allMsgs => {
                 const filtered = allMsgs
                     .filter(m => m.metadata?.source !== 'date')
-                    .filter(m => !(char?.hideSystemLogs && m.role === 'system'));
+                    .filter(m => !(char?.hideSystemLogs && m.role === 'system'))
+                    .filter(m => lifeStreamVisibleInChat || (m.type as string) !== 'lifestream');
                 setAllHistoryMessages(filtered);
             });
         }
-    }, [modalType, activeCharacterId, char?.hideSystemLogs]);
+    }, [modalType, activeCharacterId, char?.hideSystemLogs, lifeStreamVisibleInChat]);
 
     useEffect(() => {
         const savedPrompts = localStorage.getItem('chat_archive_prompts');
@@ -1066,11 +1099,11 @@ const Chat: React.FC = () => {
 
     const displayMessages = useMemo(() => messages
         .filter(m => m.metadata?.source !== 'date')
-        .filter(m => (m.type as string) !== 'lifestream')
+        .filter(m => lifeStreamVisibleInChat || (m.type as string) !== 'lifestream')
         .filter(m => !char.hideBeforeMessageId || m.id >= char.hideBeforeMessageId)
         .filter(m => { if (char.hideSystemLogs && m.role === 'system' && m.type !== 'call_log') return false; return true; })
         .slice(-visibleCount),
-        [messages, char?.hideBeforeMessageId, char?.hideSystemLogs, visibleCount]);
+        [messages, char?.hideBeforeMessageId, char?.hideSystemLogs, lifeStreamVisibleInChat, visibleCount]);
 
     const collapsedCount = Math.max(0, totalMsgCount - displayMessages.length);
 
@@ -1132,8 +1165,6 @@ const Chat: React.FC = () => {
             // 3. Update UI immediately — user sees their voice bubble
             await reloadMessages(visibleCountRef.current);
 
-            // Mark as transcribing
-            setTranscribingMsgIds(prev => new Set(prev).add(voiceMsgId));
             setSttProcessing(true);
 
             // 4. Run Whisper STT in background (with 15s timeout)
@@ -1158,7 +1189,6 @@ const Chat: React.FC = () => {
                 }
             }
 
-            setTranscribingMsgIds(prev => { const s = new Set(prev); s.delete(voiceMsgId); return s; });
             setSttProcessing(false);
 
             if (transcribedText.trim()) {

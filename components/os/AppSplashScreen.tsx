@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { INSTALLED_APPS, Icons } from '../../constants';
+import React,{ useState,useEffect } from 'react';
+import { INSTALLED_APPS,Icons } from '../../constants';
 import { AppID } from '../../types';
 
 /**

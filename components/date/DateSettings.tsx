@@ -1,7 +1,7 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React,{ useState,useRef,useEffect } from 'react';
 import { useOS } from '../../context/OSContext';
-import { CharacterProfile, SpriteConfig, SkinSet } from '../../types';
+import { CharacterProfile,SpriteConfig,SkinSet } from '../../types';
 import { processImage } from '../../utils/file';
 
 // 标准情绪列表

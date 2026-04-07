@@ -15,6 +15,7 @@
  * @see https://platform.minimaxi.com/docs/api-reference/speech-t2a-websocket
  */
 
+import { getTtsWsProxyUrl } from './backendConfig';
 import { TtsConfig } from '../types/tts';
 
 // ─── 类型定义 ──────────────────────────────────────────────────────────────
@@ -63,7 +64,6 @@ function hexToUint8Array(hex: string): Uint8Array {
 // ─── 连接地址 ────────────────────────────────────────────────────────────
 
 /** Cloudflare Worker 代理地址 */
-const CLOUDFLARE_WS_PROXY = 'wss://tts-ws-proxy.sully-tts-proxy.workers.dev/ws';
 
 /**
  * 构建 WebSocket 连接 URL。
@@ -78,12 +78,15 @@ function buildWsUrl(config: TtsConfig): string {
     const bearerToken = `Bearer ${config.apiKey}`;
 
     // 所有环境统一使用 Cloudflare Worker 代理
-    let proxyUrl = `${CLOUDFLARE_WS_PROXY}?token=${encodeURIComponent(bearerToken)}`;
+    const proxyUrl = new URL(getTtsWsProxyUrl());
+    proxyUrl.searchParams.set('token', bearerToken);
     if (config.groupId) {
-        proxyUrl += `&group_id=${encodeURIComponent(config.groupId)}`;
+        proxyUrl.searchParams.set('group_id', config.groupId);
     }
-    console.log('[TTS WS] Using Cloudflare proxy:', proxyUrl.replace(encodeURIComponent(bearerToken), '[token]'));
-    return proxyUrl;
+    const debugUrl = new URL(proxyUrl.toString());
+    debugUrl.searchParams.set('token', '[token]');
+    console.log('[TTS WS] Using Cloudflare proxy:', debugUrl.toString());
+    return proxyUrl.toString();
 }
 
 // ─── 主类 ─────────────────────────────────────────────────────────────────

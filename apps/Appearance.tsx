@@ -1,8 +1,8 @@
 
-import React, { useState, useRef, useCallback } from 'react';
+import React,{ useState,useRef,useCallback } from 'react';
 import { useOS } from '../context/OSContext';
-import { OSTheme, DesktopDecoration } from '../types';
-import { INSTALLED_APPS, Icons } from '../constants';
+import { OSTheme,DesktopDecoration } from '../types';
+import { INSTALLED_APPS,Icons } from '../constants';
 import { processImage } from '../utils/file';
 
 const Appearance: React.FC = () => {
@@ -25,7 +25,6 @@ const Appearance: React.FC = () => {
   const [showPresetPicker, setShowPresetPicker] = useState(false);
 
   const decorations = theme.desktopDecorations || [];
-  const editingDeco = editingDecoId ? decorations.find(d => d.id === editingDecoId) : null;
 
   // Preset decoration SVGs (cute decorative elements)
   const PRESET_DECOS: { name: string; content: string; category: string }[] = [

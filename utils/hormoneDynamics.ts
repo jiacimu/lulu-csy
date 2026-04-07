@@ -11,7 +11,7 @@
  *   - 主模型只负责"表现"（基于注入的躯体描述自由涌现）
  */
 
-import { InternalState, MoodState } from '../types/character';
+import { InternalState,MoodState } from '../types/character';
 
 // ═══════════════════════════════════════════════════════════════
 //  Types

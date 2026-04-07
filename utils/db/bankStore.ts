@@ -1,5 +1,5 @@
-import { BankTransaction, BankFullState, DollhouseState } from '../../types';
-import { openDB, STORE_BANK_TX, STORE_BANK_DATA } from './core';
+import { BankTransaction,BankFullState,DollhouseState } from '../../types';
+import { openDB,STORE_BANK_TX,STORE_BANK_DATA } from './core';
 
 // --- Bank State ---
 export const getBankState = async (): Promise<BankFullState | null> => {

@@ -1,10 +1,4 @@
 
-import {
-    CharacterProfile, ChatTheme, Message, UserProfile,
-    Task, Anniversary, DiaryEntry, RoomTodo, RoomNote,
-    GalleryImage, FullBackupData, GroupProfile, SocialPost, StudyCourse, GameSession, Worldbook, NovelBook, Emoji, EmojiCategory,
-    BankTransaction, SavingsGoal, BankFullState, DollhouseState, XhsStockImage, XhsActivityRecord
-} from '../../types';
 
 const DB_NAME = 'AetherOS_Data';
 const DB_VERSION = 38; // Bumped for Vector Memory store

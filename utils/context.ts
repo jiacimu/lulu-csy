@@ -1,5 +1,5 @@
 
-import { CharacterProfile, UserProfile, InternalState } from '../types';
+import { CharacterProfile,UserProfile } from '../types';
 import { renderBodySignals } from './bodySignalRenderer';
 import { resolveInternalState } from './hormoneDynamics';
 

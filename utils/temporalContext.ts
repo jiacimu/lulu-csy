@@ -246,7 +246,7 @@ function analyzeRhythm(messages: Message[], currentTimestamp: number): Conversat
 /**
  * 获取最后两条消息之间的时间差描述（增强版，考虑是否为新会话）。
  */
-function getLastGapDescription(messages: Message[], currentTimestamp: number): string | null {
+function getLastGapDescription(messages: Message[], _currentTimestamp: number): string | null {
     if (messages.length < 2) return null;
 
     const lastMsg = messages[messages.length - 1];

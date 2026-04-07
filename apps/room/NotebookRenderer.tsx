@@ -4,7 +4,6 @@
  * Extracted from RoomApp.tsx. Pure render functions with zero state coupling.
  */
 
-import React from 'react';
 
 /** Render inline formatting: **bold**, ~~strike~~, *italic*, `code` */
 export const renderInlineStyle = (text: string) => {

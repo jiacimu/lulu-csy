@@ -1,10 +1,9 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { CharacterProfile, DiaryEntry, StickerData, MemoryFragment, DiaryPage } from '../types';
+import { CharacterProfile,DiaryEntry,StickerData,MemoryFragment,DiaryPage } from '../types';
 import { ContextBuilder } from '../utils/context';
-import { processImage } from '../utils/file';
 import Modal from '../components/os/Modal';
 import { safeResponseJson } from '../utils/safeApi';
 
@@ -39,8 +38,7 @@ const JournalApp: React.FC = () => {
     const [selectedChar, setSelectedChar] = useState<CharacterProfile | null>(null);
     const [diaries, setDiaries] = useState<DiaryEntry[]>([]);
     const [currentEntry, setCurrentEntry] = useState<DiaryEntry | null>(null);
-    const [selectedDate, setSelectedDate] = useState<string>(getLocalDateStr());
-    
+
     // Editor State
     const [isThinking, setIsThinking] = useState(false);
     const [isArchiving, setIsArchiving] = useState(false); // New: Archiving state
@@ -106,7 +104,6 @@ const JournalApp: React.FC = () => {
             setActiveTab('user');
         }
         setMode('write');
-        setSelectedDate(date);
         setSelectedStickerId(null); // Reset selection
     };
 
@@ -300,7 +297,6 @@ const JournalApp: React.FC = () => {
             let systemPrompt = ContextBuilder.buildCoreContext(selectedChar, userProfile);
 
             const styleOptions = PAPER_STYLES.map(p => p.id).join(', ');
-            const defaultStickers = DEFAULT_STICKERS.join(' ');
             const customStickerContext = customStickers.length > 0 
                 ? `Custom Stickers (Name: URL): \n${customStickers.map(s => `- ${s.name}: ${s.url}`).join('\n')}`
                 : '';

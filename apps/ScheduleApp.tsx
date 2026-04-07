@@ -1,15 +1,18 @@
 
 
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React,{ useState,useEffect,useMemo } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { Task, Anniversary, CharacterProfile } from '../types';
+import { Task,Anniversary } from '../types';
 import Modal from '../components/os/Modal';
 import { ContextBuilder } from '../utils/context';
 import { safeResponseJson } from '../utils/safeApi';
 
 type ThemeMode = 'cyber' | 'soft' | 'minimal';
+
+const sortTasksByCreatedAt = (items: Task[]) => [...items].sort((a: Task, b: Task) => b.createdAt - a.createdAt);
+const sortAnniversariesByDate = (items: Anniversary[]) => [...items].sort((a: Anniversary, b: Anniversary) => a.date.localeCompare(b.date));
 
 // Theme Configuration Definitions
 const THEMES: Record<ThemeMode, any> = {
@@ -84,6 +87,8 @@ const ScheduleApp: React.FC = () => {
     // Add Modal States
     const [showTaskModal, setShowTaskModal] = useState(false);
     const [showAnniModal, setShowAnniModal] = useState(false);
+    const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+    const [editingAnniId, setEditingAnniId] = useState<string | null>(null);
 
     // Forms
     const [newTaskTitle, setNewTaskTitle] = useState('');
@@ -92,6 +97,7 @@ const ScheduleApp: React.FC = () => {
     const [newAnniTitle, setNewAnniTitle] = useState('');
     const [newAnniDate, setNewAnniDate] = useState('');
     const [newAnniChar, setNewAnniChar] = useState<string>(activeCharacterId || '');
+    const defaultCharacterId = activeCharacterId || characters[0]?.id || '';
 
     useEffect(() => {
         loadData();
@@ -112,8 +118,71 @@ const ScheduleApp: React.FC = () => {
 
     const loadData = async () => {
         const [t, a] = await Promise.all([DB.getAllTasks(), DB.getAllAnniversaries()]);
-        setTasks(t.sort((a, b) => b.createdAt - a.createdAt));
-        setAnniversaries(a.sort((a, b) => a.date.localeCompare(b.date)));
+        setTasks(sortTasksByCreatedAt(t));
+        setAnniversaries(sortAnniversariesByDate(a));
+    };
+
+    const closeTaskModal = () => {
+        setShowTaskModal(false);
+        setEditingTaskId(null);
+        setNewTaskTitle('');
+        setNewTaskSupervisor(defaultCharacterId);
+    };
+
+    const openTaskModal = (task?: Task) => {
+        if (task) {
+            setEditingTaskId(task.id);
+            setNewTaskTitle(task.title);
+            setNewTaskSupervisor(task.supervisorId || defaultCharacterId);
+        } else {
+            setEditingTaskId(null);
+            setNewTaskTitle('');
+            setNewTaskSupervisor(defaultCharacterId);
+        }
+        setShowTaskModal(true);
+    };
+
+    const closeAnniModal = () => {
+        setShowAnniModal(false);
+        setEditingAnniId(null);
+        setNewAnniTitle('');
+        setNewAnniDate('');
+        setNewAnniChar(defaultCharacterId);
+    };
+
+    const openAnniModal = (anni?: Anniversary) => {
+        if (anni) {
+            setEditingAnniId(anni.id);
+            setNewAnniTitle(anni.title);
+            setNewAnniDate(anni.date);
+            setNewAnniChar(anni.charId || defaultCharacterId);
+        } else {
+            setEditingAnniId(null);
+            setNewAnniTitle('');
+            setNewAnniDate('');
+            setNewAnniChar(defaultCharacterId);
+        }
+        setShowAnniModal(true);
+    };
+
+    const actionGroupClass = 'flex flex-wrap items-center justify-end gap-2 opacity-100 transition-opacity sm:opacity-0 sm:pointer-events-none sm:group-hover:opacity-100 sm:group-hover:pointer-events-auto sm:group-focus-within:opacity-100 sm:group-focus-within:pointer-events-auto';
+
+    const getActionButtonClass = (tone: 'default' | 'danger') => {
+        if (currentThemeMode === 'minimal') {
+            return tone === 'danger'
+                ? 'px-3 py-1.5 text-[11px] font-bold rounded-xl text-rose-500 shadow-[4px_4px_8px_#d1d9e6,-4px_-4px_8px_#ffffff] active:shadow-[inset_2px_2px_5px_#d1d9e6,inset_-2px_-2px_5px_#ffffff]'
+                : 'px-3 py-1.5 text-[11px] font-bold rounded-xl text-slate-500 shadow-[4px_4px_8px_#d1d9e6,-4px_-4px_8px_#ffffff] active:shadow-[inset_2px_2px_5px_#d1d9e6,inset_-2px_-2px_5px_#ffffff]';
+        }
+
+        if (currentThemeMode === 'soft') {
+            return tone === 'danger'
+                ? 'px-3 py-1.5 text-[11px] font-bold rounded-full bg-rose-50 text-rose-500 border border-rose-100 active:scale-95'
+                : 'px-3 py-1.5 text-[11px] font-bold rounded-full bg-white/80 text-pink-500 border border-pink-100 active:scale-95';
+        }
+
+        return tone === 'danger'
+            ? 'px-3 py-1.5 text-[11px] font-bold rounded-full border border-rose-900/60 bg-rose-950/40 text-rose-300 active:scale-95'
+            : 'px-3 py-1.5 text-[11px] font-bold rounded-full border border-cyan-900 bg-cyan-950/40 text-cyan-300 active:scale-95';
     };
 
     // --- AI Logic ---
@@ -275,20 +344,37 @@ const ScheduleApp: React.FC = () => {
 
     // --- Actions ---
 
-    const handleAddTask = async () => {
+    const handleSaveTask = async () => {
         if (!newTaskTitle.trim()) return;
+        const normalizedTitle = newTaskTitle.trim();
+
+        if (editingTaskId) {
+            const existingTask = tasks.find(task => task.id === editingTaskId);
+            if (!existingTask) return;
+
+            const updatedTask: Task = {
+                ...existingTask,
+                title: normalizedTitle,
+                supervisorId: newTaskSupervisor || defaultCharacterId,
+            };
+
+            await DB.saveTask(updatedTask);
+            setTasks(prev => sortTasksByCreatedAt(prev.map(task => task.id === updatedTask.id ? updatedTask : task)));
+            closeTaskModal();
+            return;
+        }
+
         const task: Task = {
             id: `task-${Date.now()}`,
-            title: newTaskTitle,
-            supervisorId: newTaskSupervisor || characters[0]?.id,
+            title: normalizedTitle,
+            supervisorId: newTaskSupervisor || defaultCharacterId,
             tone: 'gentle', // Deprecated but kept for type compatibility
             isCompleted: false,
             createdAt: Date.now()
         };
         await DB.saveTask(task);
-        setTasks(prev => [task, ...prev]);
-        setShowTaskModal(false);
-        setNewTaskTitle('');
+        setTasks(prev => sortTasksByCreatedAt([task, ...prev]));
+        closeTaskModal();
     };
 
     const handleToggleTask = async (task: Task) => {
@@ -317,19 +403,42 @@ const ScheduleApp: React.FC = () => {
         setTasks(prev => prev.filter(t => t.id !== id));
     };
 
-    const handleAddAnni = async () => {
+    const handleSaveAnni = async () => {
         if (!newAnniTitle.trim() || !newAnniDate) return;
+        const normalizedTitle = newAnniTitle.trim();
+
+        if (editingAnniId) {
+            const existingAnni = anniversaries.find(anni => anni.id === editingAnniId);
+            if (!existingAnni) return;
+
+            const didCoreFieldsChange =
+                existingAnni.title !== normalizedTitle
+                || existingAnni.date !== newAnniDate
+                || existingAnni.charId !== (newAnniChar || defaultCharacterId);
+
+            const updatedAnni: Anniversary = {
+                ...existingAnni,
+                title: normalizedTitle,
+                date: newAnniDate,
+                charId: newAnniChar || defaultCharacterId,
+                ...(didCoreFieldsChange ? { aiThought: undefined, lastThoughtGeneratedAt: undefined } : {}),
+            };
+
+            await DB.saveAnniversary(updatedAnni);
+            setAnniversaries(prev => sortAnniversariesByDate(prev.map(anni => anni.id === updatedAnni.id ? updatedAnni : anni)));
+            closeAnniModal();
+            return;
+        }
+
         const anni: Anniversary = {
             id: `anni-${Date.now()}`,
-            title: newAnniTitle,
+            title: normalizedTitle,
             date: newAnniDate,
-            charId: newAnniChar || characters[0]?.id
+            charId: newAnniChar || defaultCharacterId
         };
         await DB.saveAnniversary(anni);
-        setAnniversaries(prev => [...prev, anni].sort((a, b) => a.date.localeCompare(b.date)));
-        setShowAnniModal(false);
-        setNewAnniTitle('');
-        setNewAnniDate('');
+        setAnniversaries(prev => sortAnniversariesByDate([...prev, anni]));
+        closeAnniModal();
 
         // Remove immediate trigger to avoid double calls (useEffect will handle if it's upcoming)
     };
@@ -338,6 +447,26 @@ const ScheduleApp: React.FC = () => {
         await DB.deleteAnniversary(id);
         setAnniversaries(prev => prev.filter(a => a.id !== id));
     };
+
+    useEffect(() => {
+        if (!showTaskModal) {
+            setEditingTaskId(null);
+            setNewTaskTitle('');
+            setNewTaskSupervisor(defaultCharacterId);
+        }
+    }, [showTaskModal, defaultCharacterId]);
+
+    useEffect(() => {
+        if (!showAnniModal) {
+            setEditingAnniId(null);
+            setNewAnniTitle('');
+            setNewAnniDate('');
+            setNewAnniChar(defaultCharacterId);
+        }
+    }, [showAnniModal, defaultCharacterId]);
+
+    const handleAddTask = handleSaveTask;
+    const handleAddAnni = handleSaveAnni;
 
     // --- Render Helpers ---
 
@@ -406,7 +535,7 @@ const ScheduleApp: React.FC = () => {
                     </button>
 
                     {/* Add Button */}
-                    <button onClick={() => activeTab === 'quest' ? setShowTaskModal(true) : setShowAnniModal(true)} className={`p-2 rounded-full active:scale-90 transition-transform ${theme.accent} ${currentThemeMode === 'minimal' ? 'shadow-[4px_4px_8px_#d1d9e6,-4px_-4px_8px_#ffffff]' : 'hover:bg-white/10'}`}>
+                    <button onClick={() => activeTab === 'quest' ? openTaskModal() : openAnniModal()} className={`p-2 rounded-full active:scale-90 transition-transform ${theme.accent} ${currentThemeMode === 'minimal' ? 'shadow-[4px_4px_8px_#d1d9e6,-4px_-4px_8px_#ffffff]' : 'hover:bg-white/10'}`}>
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
                     </button>
                 </div>
@@ -456,21 +585,21 @@ const ScheduleApp: React.FC = () => {
                             const isProcessing = processingTaskIds.has(task.id);
 
                             return (
-                                <div key={task.id} className={`${theme.card} p-4 flex items-center gap-4 group relative overflow-hidden transition-all duration-300`}>
+                                <div key={task.id} className={`${theme.card} p-4 flex items-start gap-4 group relative overflow-hidden transition-all duration-300`}>
                                     {/* Supervisor Icon */}
                                     <div className="w-12 h-12 rounded-full overflow-hidden shrink-0 relative border border-white/10">
                                         {supervisor ? <img src={supervisor.avatar} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" /> : <span className="text-xs">?</span>}
                                         <div className={`absolute -bottom-0 -right-0 w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${currentThemeMode === 'soft' ? 'bg-white text-pink-500' : 'bg-black text-cyan-500'}`}>!</div>
                                     </div>
 
-                                    <div className="flex-1">
+                                    <div className="min-w-0 flex-1">
                                         <div className={`${theme.text} font-bold text-sm tracking-wide`}>{task.title}</div>
                                         <div className={`text-[10px] ${theme.textSub} mt-1 font-mono uppercase`}>
                                             监督人: {supervisor?.name || 'Unknown'}
                                         </div>
                                     </div>
 
-                                    {/* Action Button Area */}
+                                    <div className="shrink-0 flex flex-col items-end gap-2">
                                     {isProcessing ? (
                                         <div className="flex items-center gap-2 px-2 py-2">
                                             <div className={`w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin ${theme.accent}`}></div>
@@ -485,7 +614,25 @@ const ScheduleApp: React.FC = () => {
                                         </button>
                                     )}
 
+                                        <div className={actionGroupClass}>
+                                            <button
+                                                onClick={() => openTaskModal(task)}
+                                                aria-label={`编辑任务 ${task.title}`}
+                                                className={getActionButtonClass('default')}
+                                            >
+                                                编辑
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeleteTask(task.id)}
+                                                aria-label={`删除任务 ${task.title}`}
+                                                className={getActionButtonClass('danger')}
+                                            >
+                                                删除
+                                            </button>
+                                        </div>
+
                                     <button onClick={() => handleDeleteTask(task.id)} className="absolute top-2 right-2 text-slate-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-1">×</button>
+                                </div>
                                 </div>
                             );
                         })}
@@ -514,10 +661,26 @@ const ScheduleApp: React.FC = () => {
                                 {anniversaries.map(a => (
                                     <div key={a.id} className="relative group">
                                         <div className={`absolute -left-[20px] top-4 w-2 h-2 rounded-full z-10 ${currentThemeMode === 'cyber' ? 'bg-black border border-purple-500' : 'bg-pink-400'}`}></div>
-                                        <div className={`${theme.card} p-4 flex justify-between items-center transition-colors`}>
-                                            <div>
+                                        <div className={`${theme.card} p-4 flex justify-between items-start gap-3 transition-colors`}>
+                                            <div className="min-w-0 flex-1">
                                                 <div className={`text-sm font-bold ${theme.text}`}>{a.title}</div>
                                                 <div className={`text-[10px] ${theme.textSub} font-mono mt-1`}>{a.date} · {characters.find(c => c.id === a.charId)?.name}</div>
+                                            </div>
+                                            <div className={`${actionGroupClass} shrink-0`}>
+                                                <button
+                                                    onClick={() => openAnniModal(a)}
+                                                    aria-label={`编辑纪念日 ${a.title}`}
+                                                    className={getActionButtonClass('default')}
+                                                >
+                                                    编辑
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteAnni(a.id)}
+                                                    aria-label={`删除纪念日 ${a.title}`}
+                                                    className={getActionButtonClass('danger')}
+                                                >
+                                                    删除
+                                                </button>
                                             </div>
                                             <button onClick={() => handleDeleteAnni(a.id)} className="text-slate-400 hover:text-red-400 p-2 opacity-0 group-hover:opacity-100 transition-opacity">×</button>
                                         </div>

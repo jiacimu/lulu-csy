@@ -1,9 +1,9 @@
 
-import React, { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
+import React,{ useState,useEffect,useRef,useLayoutEffect,useMemo } from 'react';
 import { useOS } from '../context/OSContext';
 import { useVirtualTime } from '../context/VirtualTimeContext';
 import { DB } from '../utils/db';
-import { Message, GroupProfile, CharacterProfile, MessageType, ChatTheme, MemoryFragment, EmojiCategory } from '../types';
+import { Message,GroupProfile,CharacterProfile,MessageType,MemoryFragment,EmojiCategory } from '../types';
 import { safeResponseJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
 import { ContextBuilder } from '../utils/context';
@@ -11,11 +11,6 @@ import { processImage } from '../utils/file';
 import { DEFAULT_ARCHIVE_PROMPTS } from '../constants/archivePrompts';
 
 // 复用 Chat.tsx 的高颜值样式逻辑，但针对群聊微调
-const PRESET_THEME_GROUP: ChatTheme = {
-    id: 'group_default', name: 'Group', type: 'preset',
-    user: { textColor: '#ffffff', backgroundColor: '#8b5cf6', borderRadius: 18, opacity: 1 }, // Violet for User
-    ai: { textColor: '#1e293b', backgroundColor: '#ffffff', borderRadius: 18, opacity: 1 }  // White for Others
-};
 
 // --- Sub-Component: Group Message Bubble ---
 const GroupMessageItem = React.memo(({
@@ -430,11 +425,8 @@ const GroupChat: React.FC = () => {
         const allGroupMsgs = await DB.getGroupMessages(activeGroup.id);
 
         let msgsToDelete = allGroupMsgs;
-        let keepCount = 0;
-
         if (preserveContext) {
             msgsToDelete = allGroupMsgs.slice(0, -10);
-            keepCount = Math.min(allGroupMsgs.length, 10);
         }
 
         if (msgsToDelete.length === 0) {
@@ -654,8 +646,8 @@ ${logText.substring(0, 10000)}
 
                 const recentPrivate = privateMsgs.slice(-10).map(m => `[${m.role === 'user' ? '用户' : '我'}]: ${m.content.substring(0, 50)}`).join('\n');
 
-                // Construct Detailed Profile Wrapper
-                // CRITICAL FIX: Emphasize Private Context logic
+                // Private-chat recency should override stale "long time no see"
+                // cues from the group thread when we build each member context.
                 context += `
 <<< 角色档案 START: ${member.name} (ID: ${member.id}) >>>
 ${coreContext}

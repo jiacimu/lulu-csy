@@ -1,7 +1,6 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
-import { processImage } from '../utils/file';
 import { safeResponseJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
 

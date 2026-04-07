@@ -1,8 +1,9 @@
 
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React,{ useState,useMemo,useRef,useEffect } from 'react';
 import { MemoryFragment } from '../../types';
 import Modal from '../../components/os/Modal';
 import { DEFAULT_REFINE_PROMPTS } from '../../constants/archivePrompts';
+import { getCharacterRefinePrompts } from '../../utils/runtimeConfig';
 
 interface MemoryArchivistProps {
     memories: MemoryFragment[];
@@ -41,13 +42,9 @@ const MemoryArchivist: React.FC<MemoryArchivistProps> = ({ memories, refinedMemo
     const [showPromptPanel, setShowPromptPanel] = useState(false);
 
     useEffect(() => {
-        const savedPrompts = localStorage.getItem('character_refine_prompts');
-        if (savedPrompts) {
-            try {
-                const parsed = JSON.parse(savedPrompts);
-                const merged = [...DEFAULT_REFINE_PROMPTS, ...parsed.filter((p: any) => !p.id.startsWith('refine_'))];
-                setArchivePrompts(merged);
-            } catch (e) { }
+        const savedPrompts = getCharacterRefinePrompts();
+        if (savedPrompts.length > 0) {
+            setArchivePrompts([...DEFAULT_REFINE_PROMPTS, ...savedPrompts]);
         }
     }, []);
 

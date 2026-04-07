@@ -1,8 +1,8 @@
 
-import { MemoryFragment, SpriteConfig, SkinSet, UserImpression } from './chat';
-import { RoomItem, RoomGeneratedState } from './room';
-import { ChatTheme, BubbleStyle } from './chat';
-import { StatusBarMode, CustomStatusTemplate, StatusCardData } from './statusCard';
+import { MemoryFragment,SpriteConfig,SkinSet,UserImpression } from './chat';
+import { RoomItem,RoomGeneratedState } from './room';
+import { ChatTheme } from './chat';
+import { StatusBarMode,CustomStatusTemplate,StatusCardData } from './statusCard';
 
 // --- DATE APP TYPES ---
 export interface DialogueItem {
@@ -105,6 +105,10 @@ export interface CharacterProfile {
     description: string;
     systemPrompt: string;
     worldview?: string;
+    cityOverride?: string;
+    cityAdcode?: string;
+    isFictionalCity?: boolean;
+    cityReferenceReal?: string;
     memories: MemoryFragment[];
     refinedMemories?: Record<string, string>;
     activeMemoryMonths?: string[];
@@ -119,6 +123,7 @@ export interface CharacterProfile {
     bubbleStyle?: string;
     chatBackground?: string;
     contextLimit?: number;
+    showThinking?: boolean;
     hideSystemLogs?: boolean;
     hideBeforeMessageId?: number;
 

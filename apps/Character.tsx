@@ -1,11 +1,11 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React,{ useState,useRef,useEffect } from 'react';
 import { useOS } from '../context/OSContext';
-import { AppID, CharacterProfile, CharacterExportData, UserImpression, MemoryFragment } from '../types';
+import { AppID,CharacterProfile,CharacterExportData,UserImpression,MemoryFragment } from '../types';
 import Modal from '../components/os/Modal';
 import { processImage } from '../utils/file';
 import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { Filesystem,Directory,Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { DB } from '../utils/db';
 import { ContextBuilder } from '../utils/context';
@@ -13,9 +13,53 @@ import { DEFAULT_ARCHIVE_PROMPTS } from '../constants/archivePrompts';
 import ImpressionPanel from '../components/character/ImpressionPanel';
 import MemoryCenter from '../components/character/MemoryCenter';
 import { safeResponseJson } from '../utils/safeApi';
-import { VectorMemoryExtractor } from '../utils/vectorMemoryExtractor';
-import { EmbeddingService, getEmbeddingConfig } from '../utils/embeddingService';
-import { VectorMemory } from '../types';
+import { getCityInputTips,type CityTip } from '../utils/mapService';
+
+const CITY_SUGGESTION_LIMIT = 6;
+
+function useCitySuggestions(keyword: string, enabled: boolean, selectedValue?: string) {
+    const [suggestions, setSuggestions] = useState<CityTip[]>([]);
+    const [isOpen, setIsOpen] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+
+    useEffect(() => {
+        const trimmedKeyword = keyword.trim();
+        const trimmedSelectedValue = selectedValue?.trim() || '';
+
+        if (!enabled || !trimmedKeyword || trimmedKeyword === trimmedSelectedValue) {
+            setSuggestions([]);
+            setIsOpen(false);
+            setIsLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+        const timer = window.setTimeout(async () => {
+            setIsLoading(true);
+            const nextSuggestions = (await getCityInputTips(trimmedKeyword)).slice(0, CITY_SUGGESTION_LIMIT);
+            if (cancelled) return;
+            setSuggestions(nextSuggestions);
+            setIsOpen(nextSuggestions.length > 0);
+            setIsLoading(false);
+        }, 300);
+
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [enabled, keyword, selectedValue]);
+
+    return {
+        suggestions,
+        isOpen,
+        isLoading,
+        setIsOpen,
+    };
+}
+
+function getCityTipMeta(tip: CityTip): string {
+    return [tip.district, tip.adcode].filter(Boolean).join(' · ');
+}
 
 
 const CharacterCard: React.FC<{
@@ -53,7 +97,7 @@ const CharacterCard: React.FC<{
 );
 
 const Character: React.FC = () => {
-    const { closeApp, openApp, characters, activeCharacterId, setActiveCharacterId, addCharacter, updateCharacter, deleteCharacter, apiConfig, addToast, userProfile, customThemes, addCustomTheme, worldbooks } = useOS();
+    const { closeApp, openApp, characters, setActiveCharacterId, addCharacter, updateCharacter, deleteCharacter, apiConfig, addToast, userProfile, customThemes, addCustomTheme, worldbooks } = useOS();
     const [view, setView] = useState<'list' | 'detail'>('list');
     const [detailTab, setDetailTab] = useState<'identity' | 'memory' | 'impression'>('identity');
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -64,6 +108,7 @@ const Character: React.FC = () => {
 
     // Race Condition Guards
     const editingIdRef = useRef<string | null>(null);
+    const skipNextAutoSaveRef = useRef(false);
 
     // Modals
     const [showImportModal, setShowImportModal] = useState(false);
@@ -90,6 +135,22 @@ const Character: React.FC = () => {
 
     // Impression State
     const [isGeneratingImpression, setIsGeneratingImpression] = useState(false);
+    const [cityKeyword, setCityKeyword] = useState('');
+    const [referenceCityKeyword, setReferenceCityKeyword] = useState('');
+
+    const {
+        suggestions: citySuggestions,
+        isOpen: isCitySuggestionsOpen,
+        isLoading: isCitySuggestionsLoading,
+        setIsOpen: setIsCitySuggestionsOpen,
+    } = useCitySuggestions(cityKeyword, Boolean(formData && !formData.isFictionalCity), formData?.cityOverride);
+
+    const {
+        suggestions: referenceCitySuggestions,
+        isOpen: isReferenceCitySuggestionsOpen,
+        isLoading: isReferenceCitySuggestionsLoading,
+        setIsOpen: setIsReferenceCitySuggestionsOpen,
+    } = useCitySuggestions(referenceCityKeyword, Boolean(formData?.isFictionalCity), formData?.cityReferenceReal);
 
     // Load archive prompts from localStorage (shared with ChatApp)
     useEffect(() => {
@@ -110,35 +171,55 @@ const Character: React.FC = () => {
         editingIdRef.current = editingId;
     }, [editingId]);
 
-    // CRITICAL FIX: Breaking the render loop.
-    // We only sync from global 'characters' to local 'formData' when:
-    // 1. We enter edit mode (view becomes detail)
-    // 2. We switch character IDs
+    useEffect(() => {
+        if (!formData) {
+            setCityKeyword('');
+            setReferenceCityKeyword('');
+            return;
+        }
+
+        setCityKeyword(formData.cityOverride || '');
+        setReferenceCityKeyword(formData.cityReferenceReal || '');
+    }, [formData?.id]);
+
+    // Only sync global character data into the local form when we
+    // enter detail mode or switch to a different character ID.
     useEffect(() => {
         if (editingId && view === 'detail') {
             // Only if formData is not set OR the ID doesn't match
             if (!formData || formData.id !== editingId) {
                 const target = characters.find(c => c.id === editingId);
-                if (target) setFormData(target);
+                if (target) {
+                    skipNextAutoSaveRef.current = true;
+                    setFormData(target);
+                }
             }
         }
     }, [editingId, view]);
 
     // Auto-save Effect with Safety Guard
     useEffect(() => {
-        if (formData && editingId) {
-            // SAFETY GUARD: Only save if the formData ID matches the currently active editing ID.
-            // This prevents overwriting Character B with Character A's data if a delayed async call updates formData.
-            if (formData.id === editingId) {
-                updateCharacter(editingId, formData);
-            } else {
-                console.warn(`Race condition prevented: Tried to save data for ${formData.id} into slot ${editingId}`);
-            }
+        if (!formData || !editingId) return;
+
+        if (skipNextAutoSaveRef.current) {
+            skipNextAutoSaveRef.current = false;
+            return;
         }
-    }, [formData]);
+
+        // SAFETY GUARD: Only save if the formData ID matches the currently active editing ID.
+        // This prevents overwriting Character B with Character A's data if a delayed async call updates formData.
+        if (formData.id === editingId) {
+            updateCharacter(editingId, formData);
+        } else {
+            console.warn(`Race condition prevented: Tried to save data for ${formData.id} into slot ${editingId}`);
+        }
+    }, [formData, editingId, updateCharacter]);
 
     const handleBack = () => {
         if (view === 'detail') {
+            skipNextAutoSaveRef.current = false;
+            setDetailTab('identity');
+            setFormData(null);
             setView('list');
             setEditingId(null);
         } else closeApp();
@@ -150,6 +231,32 @@ const Character: React.FC = () => {
             if (!prev) return null;
             return { ...prev, [field]: value };
         });
+    };
+
+    const handleSelectCityTip = (tip: CityTip) => {
+        setCityKeyword(tip.name);
+        setIsCitySuggestionsOpen(false);
+        handleChange('cityOverride', tip.name);
+        handleChange('cityAdcode', tip.adcode || undefined);
+    };
+
+    const handleSelectReferenceCityTip = (tip: CityTip) => {
+        setReferenceCityKeyword(tip.name);
+        setIsReferenceCitySuggestionsOpen(false);
+        handleChange('cityReferenceReal', tip.name);
+    };
+
+    const handleClearCity = () => {
+        setCityKeyword('');
+        setIsCitySuggestionsOpen(false);
+        handleChange('cityOverride', undefined);
+        handleChange('cityAdcode', undefined);
+    };
+
+    const handleClearReferenceCity = () => {
+        setReferenceCityKeyword('');
+        setIsReferenceCitySuggestionsOpen(false);
+        handleChange('cityReferenceReal', undefined);
     };
 
     // Worldbook Logic
@@ -417,7 +524,6 @@ const Character: React.FC = () => {
 
         try {
             const msgs = await DB.getMessagesByCharId(targetId);
-            const validMsgs = msgs.filter(m => !formData.hideBeforeMessageId || m.id >= formData.hideBeforeMessageId);
             const msgsByDate: Record<string, any[]> = {};
 
             msgs.forEach(m => {
@@ -559,9 +665,6 @@ const Character: React.FC = () => {
             const currentProfileJSON = (type === 'initial') ? "null" : (formData.impression ? JSON.stringify(formData.impression, null, 2) : "null");
             const isInitialGeneration = type === 'initial' || !formData.impression;
 
-            const summaryInstruction = isInitialGeneration
-                ? "用一段话（100字以内）概括你对TA的【宏观整体印象】。不要局限于最近的对话，而是定义TA本质上是个什么样的人，以及TA对你意味着什么。必须第一人称。"
-                : "基于旧的总结，结合新发现，更新你对TA的【宏观整体印象】。请保持长期视角的连贯性，除非发生了重大转折，否则不要因为一两句闲聊就彻底推翻对TA的本质判断。必须第一人称。";
 
             const listInstruction = isInitialGeneration ? `"项目1", "项目2"` : `"保留旧项目", "新项目"`;
             const changesInstruction = isInitialGeneration ? "" : `"描述变化1", "描述变化2"`;
@@ -821,7 +924,13 @@ ${isInitialGeneration ? `
                             <CharacterCard
                                 key={char.id}
                                 char={char}
-                                onClick={() => { setEditingId(char.id); setView('detail'); }}
+                                onClick={() => {
+                                    skipNextAutoSaveRef.current = false;
+                                    setDetailTab('identity');
+                                    setFormData(null);
+                                    setEditingId(char.id);
+                                    setView('detail');
+                                }}
                                 onDelete={(e) => {
                                     e.stopPropagation();
                                     setDeleteConfirmTarget(char.id);
@@ -874,6 +983,162 @@ ${isInitialGeneration ? `
                                         className="w-full h-24 bg-white rounded-3xl p-5 text-sm shadow-sm resize-none focus:ring-1 focus:ring-primary/20 transition-all"
                                         placeholder="在这个世界里，魔法是存在的..."
                                     />
+                                </div>
+
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">📍 角色所在城市</label>
+                                    <div className="bg-white rounded-3xl p-5 shadow-sm space-y-4">
+                                        <div className="relative">
+                                            {formData.isFictionalCity && (
+                                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">城市名称</label>
+                                            )}
+                                            <div className="relative">
+                                                <input
+                                                    value={cityKeyword}
+                                                    onChange={(e) => {
+                                                        const nextValue = e.target.value;
+                                                        setCityKeyword(nextValue);
+
+                                                        if (formData.isFictionalCity) {
+                                                            handleChange('cityOverride', nextValue.trim() ? nextValue : undefined);
+                                                            handleChange('cityAdcode', undefined);
+                                                        } else if (!nextValue.trim()) {
+                                                            handleClearCity();
+                                                        }
+                                                    }}
+                                                    onFocus={() => {
+                                                        if (citySuggestions.length > 0) {
+                                                            setIsCitySuggestionsOpen(true);
+                                                        }
+                                                    }}
+                                                    onBlur={() => {
+                                                        window.setTimeout(() => setIsCitySuggestionsOpen(false), 120);
+                                                    }}
+                                                    className="w-full bg-slate-50 rounded-2xl border border-slate-100 px-4 py-3 pr-10 text-sm text-slate-700 outline-none focus:ring-1 focus:ring-primary/20 transition-all"
+                                                    placeholder={formData.isFictionalCity ? '输入架空城市名...' : '输入城市名搜索...'}
+                                                />
+                                                {cityKeyword && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleClearCity}
+                                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"
+                                                        aria-label="清空城市"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                                                        </svg>
+                                                    </button>
+                                                )}
+                                            </div>
+                                            {!formData.isFictionalCity && isCitySuggestionsOpen && citySuggestions.length > 0 && (
+                                                <div className="absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-xl shadow-slate-200/70">
+                                                    {citySuggestions.map((tip) => (
+                                                        <button
+                                                            key={`${tip.name}-${tip.adcode || tip.district}`}
+                                                            type="button"
+                                                            onMouseDown={(e) => {
+                                                                e.preventDefault();
+                                                                handleSelectCityTip(tip);
+                                                            }}
+                                                            className="w-full border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-slate-50 transition-colors"
+                                                        >
+                                                            <div className="text-sm font-medium text-slate-700">{tip.name}</div>
+                                                            {getCityTipMeta(tip) && (
+                                                                <div className="mt-0.5 text-[10px] text-slate-400">{getCityTipMeta(tip)}</div>
+                                                            )}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {!formData.isFictionalCity && isCitySuggestionsLoading && (
+                                                <div className="mt-2 text-[10px] text-slate-400">正在搜索城市...</div>
+                                            )}
+                                        </div>
+
+                                        <label className="flex items-center gap-2 text-xs text-slate-500">
+                                            <input
+                                                type="checkbox"
+                                                checked={Boolean(formData.isFictionalCity)}
+                                                onChange={(e) => {
+                                                    handleChange('isFictionalCity', e.target.checked ? true : undefined);
+                                                    if (e.target.checked) {
+                                                        handleChange('cityAdcode', undefined);
+                                                    }
+                                                }}
+                                                className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary/20"
+                                            />
+                                            <span>这是一个架空 / 虚构城市</span>
+                                        </label>
+
+                                        {formData.isFictionalCity && (
+                                            <div className="space-y-3 rounded-2xl bg-slate-50/80 border border-slate-100 p-4">
+                                                <div className="relative">
+                                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">现实参照城市</label>
+                                                    <div className="relative">
+                                                        <input
+                                                            value={referenceCityKeyword}
+                                                            onChange={(e) => {
+                                                                const nextValue = e.target.value;
+                                                                setReferenceCityKeyword(nextValue);
+                                                                if (!nextValue.trim()) {
+                                                                    handleClearReferenceCity();
+                                                                }
+                                                            }}
+                                                            onFocus={() => {
+                                                                if (referenceCitySuggestions.length > 0) {
+                                                                    setIsReferenceCitySuggestionsOpen(true);
+                                                                }
+                                                            }}
+                                                            onBlur={() => {
+                                                                window.setTimeout(() => setIsReferenceCitySuggestionsOpen(false), 120);
+                                                            }}
+                                                            className="w-full bg-white rounded-2xl border border-slate-100 px-4 py-3 pr-10 text-sm text-slate-700 outline-none focus:ring-1 focus:ring-primary/20 transition-all"
+                                                            placeholder="搜索现实参照城市..."
+                                                        />
+                                                        {referenceCityKeyword && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleClearReferenceCity}
+                                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"
+                                                                aria-label="清空参照城市"
+                                                            >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                                                                </svg>
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    {isReferenceCitySuggestionsOpen && referenceCitySuggestions.length > 0 && (
+                                                        <div className="absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-xl shadow-slate-200/70">
+                                                            {referenceCitySuggestions.map((tip) => (
+                                                                <button
+                                                                    key={`${tip.name}-${tip.adcode || tip.district}`}
+                                                                    type="button"
+                                                                    onMouseDown={(e) => {
+                                                                        e.preventDefault();
+                                                                        handleSelectReferenceCityTip(tip);
+                                                                    }}
+                                                                    className="w-full border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-slate-50 transition-colors"
+                                                                >
+                                                                    <div className="text-sm font-medium text-slate-700">{tip.name}</div>
+                                                                    {getCityTipMeta(tip) && (
+                                                                        <div className="mt-0.5 text-[10px] text-slate-400">{getCityTipMeta(tip)}</div>
+                                                                    )}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    {isReferenceCitySuggestionsLoading && (
+                                                        <div className="mt-2 text-[10px] text-slate-400">正在搜索参照城市...</div>
+                                                    )}
+                                                </div>
+
+                                                <p className="text-[11px] leading-relaxed text-slate-400">
+                                                    💡 系统会基于参照城市的真实地理数据，由 AI 转化为符合世界观的内容。
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
 
                                 {/* Worldbook Section */}

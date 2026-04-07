@@ -1,11 +1,11 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React,{ useState,useEffect,useRef,useMemo } from 'react';
 import { useOS } from '../context/OSContext';
-import { NovelBook, NovelProtagonist, CharacterProfile } from '../types';
+import { NovelBook,NovelProtagonist,CharacterProfile } from '../types';
 import Modal from '../components/os/Modal';
 import ConfirmDialog from '../components/os/ConfirmDialog';
 import { processImage } from '../utils/file';
-import { NOVEL_THEMES, analyzeWriterPersonaSimple } from '../utils/novelUtils';
+import { NOVEL_THEMES,analyzeWriterPersonaSimple } from '../utils/novelUtils';
 import NovelWriter from '../components/novel/NovelWriter';
 
 const NovelApp: React.FC = () => {

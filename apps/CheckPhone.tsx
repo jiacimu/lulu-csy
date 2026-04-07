@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React,{ useState,useEffect,useRef,useMemo } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { CharacterProfile, PhoneEvidence, PhoneCustomApp } from '../types';
+import { CharacterProfile,PhoneEvidence,PhoneCustomApp } from '../types';
 import { ContextBuilder } from '../utils/context';
 import Modal from '../components/os/Modal';
 import { safeResponseJson } from '../utils/safeApi';
+import { searchNearbyRestaurants } from '../utils/mapService';
 import MeituanTakeoutCard from '../components/chat/cards/phone/MeituanTakeoutCard';
 
 // 朋友圈封面背景图池 —— 每次进入随机选一张
@@ -49,8 +50,13 @@ const LayoutInspector: React.FC = () => {
     );
 };
 
+function shuffleAndPick<T>(arr: T[], count: number): T[] {
+    const shuffled = [...arr].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, count);
+}
+
 const CheckPhone: React.FC = () => {
-    const { closeApp, characters, activeCharacterId, updateCharacter, apiConfig, addToast, userProfile } = useOS();
+    const { closeApp, characters, updateCharacter, apiConfig, addToast, userProfile } = useOS();
     const [view, setView] = useState<'select' | 'phone'>('select');
     // activeAppId: 'home' | 'chat_detail' | 'app_id'
     const [activeAppId, setActiveAppId] = useState<string>('home');
@@ -246,13 +252,52 @@ const CheckPhone: React.FC = () => {
     格式JSON数组: [{ "title": "商品名", "detail": "规格 | 状态", "value": "¥金额", "shop": "店铺名" }, ...]`;
                     logPrefix = "购物APP";
                 } else if (type === 'delivery') {
-                    promptInstruction = `生成 3 条该角色最近的美团外卖订单记录。
+                    const cityOverride = targetChar.cityOverride?.trim();
+                    const cityReferenceReal = targetChar.cityReferenceReal?.trim();
+                    let queryCity: string | null = null;
+
+                    if (targetChar.isFictionalCity && cityReferenceReal) {
+                        queryCity = cityReferenceReal;
+                    } else if (cityOverride) {
+                        queryCity = targetChar.cityAdcode || cityOverride;
+                    }
+
+                    const realShops = queryCity
+                        ? await searchNearbyRestaurants(queryCity, 15)
+                        : [];
+                    const selectedShops = realShops.length > 0
+                        ? shuffleAndPick(realShops, Math.min(5, Math.max(3, realShops.length)))
+                        : [];
+
+                    if (selectedShops.length > 0) {
+                        const shopList = selectedShops
+                            .map((shop, index) => `${index + 1}. ${shop.name} - ${shop.type} (${shop.address})`)
+                            .join('\n');
+
+                        const fictionalNote = targetChar.isFictionalCity && cityOverride && cityReferenceReal
+                            ? `\n注意：你身处"${cityOverride}"（一个以${cityReferenceReal}为参照的架空城市）。你可以将商家名改编为符合你所在世界观的风格，但菜品种类和价位要保持一致。`
+                            : '';
+
+                        promptInstruction = `生成 3 条你最近的外卖订单记录。
+【当地真实商家参考（你必须从以下商家中选择下单）】：
+${shopList}
+要求：
+1. title 必须使用上面列表中的真实商家名称（或其改编名）。
+2. 菜品必须符合该商家的菜系特征（如蜜雪冰城只出饮品甜品，华莱士出炸鸡汉堡薯条）。
+3. 根据你的人设和经济状况，选择符合你身份的商家下单。富人挑贵的，学生挑便宜的。
+4. detail 是点的菜品列表，用「;」分隔，包含数量（例如 "蜜汁手扒鸡×1;可乐×2"）。
+5. value 是订单总价，必须带 ¥ 前缀，价格要符合该商家的真实价位。
+6. shop 是订单状态（例如 "已完成"、"骑手正在配送"、"已取消"）。${fictionalNote}
+格式JSON数组: [{ "title": "商家名", "detail": "菜品1×数量;菜品2×数量;...", "value": "¥总价", "shop": "订单状态" }, ...]`;
+                    } else {
+                        promptInstruction = `生成 3 条该角色最近的美团外卖订单记录。
     要求：
     1. title 是商家名称（例如 "华莱士(高新店)"、"蜜雪冰城(大学路店)"、"张亮麻辣烫"）。
     2. detail 是点的菜品列表，用「;」分隔，包含数量（例如 "蜜汁手扒鸡×1;可乐×2;薯条（大份）×1"）。
     3. value 是订单总价，必须带 ¥ 前缀（例如 "¥45.8"）。
     4. shop 是订单状态（例如 "已完成"、"骑手正在配送"、"已取消"）。
     格式JSON数组: [{ "title": "商家名", "detail": "菜品1×数量;菜品2×数量;...", "value": "¥总价", "shop": "订单状态" }, ...]`;
+                    }
                     logPrefix = "外卖APP";
                 } else if (type === 'social') {
                     promptInstruction = `生成 2 条该角色的朋友圈/社交媒体动态。
@@ -555,43 +600,6 @@ Format:
         );
     };
 
-    const renderCallList = () => {
-        const list = records.filter(r => r.type === 'call').sort((a, b) => b.timestamp - a.timestamp);
-        return (
-            <div className="absolute inset-0 w-full h-full flex flex-col bg-white z-10">
-                {renderHeader('Recents', () => setActiveAppId('home'))}
-                <div className="flex-1 overflow-y-auto no-scrollbar pb-24 overscroll-contain">
-                    {list.length === 0 && <div className="text-center text-slate-400 mt-20 text-xs">暂无通话记录</div>}
-                    {list.map(r => {
-                        const isMissed = r.value?.includes('未接') || r.value?.includes('Missed');
-                        const isOutgoing = r.value?.includes('呼出') || r.value?.includes('Outgoing');
-                        return (
-                            <div key={r.id} className="flex items-center gap-4 px-6 py-4 border-b border-slate-50 relative group animate-fade-in hover:bg-slate-50 transition-colors">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${isMissed ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'}`}>
-                                    📞
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <div className={`font-bold text-sm truncate ${isMissed ? 'text-red-500' : 'text-slate-800'}`}>{r.title}</div>
-                                    <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                                        <span>{isMissed ? '未接来电' : (isOutgoing ? '呼出' : '呼入')}</span>
-                                        {r.value && !isMissed && <span>• {r.value.replace(/.*?\((.*?)\).*/, '$1')}</span>}
-                                    </div>
-                                    {r.detail && <div className="text-[10px] text-slate-500 mt-1 italic truncate">"{r.detail}"</div>}
-                                </div>
-                                <div className="text-[10px] text-slate-300">{new Date(r.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                                <button onClick={() => handleDeleteRecord(r)} className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 bg-red-100 text-red-500 rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity">×</button>
-                            </div>
-                        );
-                    })}
-                </div>
-                <div className="absolute bottom-8 w-full flex justify-center pointer-events-none z-30">
-                    <button disabled={isLoading} onClick={() => handleGenerate('call')} className="pointer-events-auto bg-slate-800 text-white px-6 py-2.5 rounded-full shadow-xl font-bold text-xs flex items-center gap-2 active:scale-95 transition-transform">
-                        {isLoading ? '...' : '刷新通话记录'}
-                    </button>
-                </div>
-            </div>
-        );
-    };
 
     // ─── Taobao App List (仿淘宝订单列表) ─────────────────────────
     const renderTaobaoList = () => {

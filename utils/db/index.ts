@@ -1,7 +1,6 @@
 // Barrel re-export: compose the DB object from domain stores
 // Existing `import { DB } from '../utils/db'` continues to work unchanged.
 
-import { ScheduledMessage } from './core';
 
 // Re-export core types
 export type { ScheduledMessage } from './core';
@@ -170,11 +169,13 @@ export const DB = {
 
     // Vector Memories
     getAllVectorMemories: vectorMemoryStore.getAllVectorMemories,
+    getUnsyncedVectorMemories: vectorMemoryStore.getUnsyncedVectorMemories,
     getVectorMemoryHeaders: vectorMemoryStore.getVectorMemoryHeaders,
     getVectorMemoryById: vectorMemoryStore.getVectorMemoryById,
     getVectorMemoriesByIds: vectorMemoryStore.getVectorMemoriesByIds,
     saveVectorMemory: vectorMemoryStore.saveVectorMemory,
     deleteVectorMemory: vectorMemoryStore.deleteVectorMemory,
     clearVectorMemories: vectorMemoryStore.clearVectorMemories,
+    replaceVectorMemories: vectorMemoryStore.replaceVectorMemories,
     countVectorMemories: vectorMemoryStore.countVectorMemories,
 };

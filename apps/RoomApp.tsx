@@ -1,13 +1,13 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { RoomItem, CharacterProfile, RoomTodo, RoomNote } from '../types';
+import { RoomItem,CharacterProfile,RoomTodo,RoomNote } from '../types';
 import { ContextBuilder } from '../utils/context';
 import { processImage } from '../utils/file';
 import Modal from '../components/os/Modal';
 import { safeResponseJson } from '../utils/safeApi';
-import { ASSET_LIBRARY, WALLPAPER_PRESETS, FLOOR_PRESETS, DEFAULT_FURNITURE, SULLY_FURNITURE, FLOOR_HORIZON, ItemInteraction } from './room/roomAssets';
+import { ASSET_LIBRARY,WALLPAPER_PRESETS,FLOOR_PRESETS,DEFAULT_FURNITURE,SULLY_FURNITURE,FLOOR_HORIZON,ItemInteraction } from './room/roomAssets';
 import { renderNotebookContent } from './room/NotebookRenderer';
 
 const RoomApp: React.FC = () => {
@@ -228,7 +228,7 @@ const RoomApp: React.FC = () => {
         }
     };
 
-    const initializeRoomState = async (c: CharacterProfile, currentItems: RoomItem[], force: boolean = false) => {
+    const initializeRoomState = async (c: CharacterProfile, currentItems: RoomItem[], _force: boolean = false) => {
         if (!apiConfig.apiKey) return;
 
         setIsInitializing(true);
@@ -346,7 +346,7 @@ ${!shouldGenerateTodo ? `(系统: 今日待办已存在，无需生成，请忽�
                 const data = await safeResponseJson(response);
                 let content = data.choices?.[0]?.message?.content || "";
 
-                // CRITICAL FIX: Empty content check triggers fallback
+                // Treat empty model output as a failed generation so the fallback can recover.
                 if (!content) {
                     throw new Error("AI returned empty response (Safety Block suspected).");
                 }

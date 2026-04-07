@@ -1,5 +1,5 @@
 
-import { CharacterProfile, NovelBook, NovelSegment, UserProfile } from '../types';
+import { CharacterProfile,NovelBook,NovelSegment,UserProfile } from '../types';
 import { ContextBuilder } from './context';
 import { safeResponseJson } from './safeApi';
 

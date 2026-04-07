@@ -12,7 +12,7 @@ export const processImage = (file: File, options?: { maxWidth?: number, quality?
             const reader = new FileReader();
             reader.readAsDataURL(file);
             reader.onload = (e) => resolve(e.target?.result as string);
-            reader.onerror = (e) => reject(new Error('文件读取失败'));
+            reader.onerror = () => reject(new Error('文件读取失败'));
             return;
         }
 
@@ -83,8 +83,8 @@ export const processImage = (file: File, options?: { maxWidth?: number, quality?
                 const dataUrl = canvas.toDataURL(mimeType, quality);
                 resolve(dataUrl);
             };
-            img.onerror = (err) => reject(new Error('图片加载失败'));
+            img.onerror = () => reject(new Error('图片加载失败'));
         };
-        reader.onerror = (err) => reject(new Error('文件读取失败'));
+        reader.onerror = () => reject(new Error('文件读取失败'));
     });
 };

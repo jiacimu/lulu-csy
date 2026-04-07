@@ -4,7 +4,8 @@
  */
 
 import { VectorMemory } from '../../types';
-import { openDB, STORE_VECTOR_MEMORIES } from './core';
+import { openDB,STORE_VECTOR_MEMORIES } from './core';
+import { isPendingCloudSync } from '../vectorMemorySyncState';
 
 /**
  * Get all vector memories for a character (includes full vectors).
@@ -122,6 +123,57 @@ export const clearVectorMemories = async (charId: string): Promise<void> => {
         const tx = db.transaction(STORE_VECTOR_MEMORIES, 'readwrite');
         const store = tx.objectStore(STORE_VECTOR_MEMORIES);
         all.forEach(m => store.delete(m.id));
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+};
+
+/**
+ * Get all unsynced vector memories for a character.
+ * Unsynced means the local cache is pending a future cloud write.
+ */
+export const getUnsyncedVectorMemories = async (charId: string): Promise<VectorMemory[]> => {
+    const db = await openDB();
+    if (!db.objectStoreNames.contains(STORE_VECTOR_MEMORIES)) return [];
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_VECTOR_MEMORIES, 'readonly');
+        const index = tx.objectStore(STORE_VECTOR_MEMORIES).index('charId');
+        const request = index.openCursor(charId);
+        const unsynced: VectorMemory[] = [];
+        request.onsuccess = () => {
+            const cursor = request.result;
+            if (cursor) {
+                const memory = cursor.value as VectorMemory;
+                if (isPendingCloudSync(memory)) unsynced.push(memory);
+                cursor.continue();
+            } else {
+                resolve(unsynced);
+            }
+        };
+        request.onerror = () => reject(request.error);
+    });
+};
+
+/**
+ * Replace the local cache for a character with a fresh cloud snapshot.
+ * Used by backend-first screens while keeping IndexedDB as cache/offline fallback.
+ */
+export const replaceVectorMemories = async (charId: string, memories: VectorMemory[]): Promise<void> => {
+    const db = await openDB();
+    if (!db.objectStoreNames.contains(STORE_VECTOR_MEMORIES)) return;
+
+    const existing = await getAllVectorMemories(charId);
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_VECTOR_MEMORIES, 'readwrite');
+        const store = tx.objectStore(STORE_VECTOR_MEMORIES);
+
+        for (const memory of existing) {
+            store.delete(memory.id);
+        }
+        for (const memory of memories) {
+            store.put(memory);
+        }
+
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
     });

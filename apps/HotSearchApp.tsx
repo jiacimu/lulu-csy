@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React,{ useState,useEffect,useCallback } from 'react';
 import { useOS } from '../context/OSContext';
-import { CaretLeft, ArrowsClockwise, ArrowLineUp } from '@phosphor-icons/react';
+import { CaretLeft,ArrowsClockwise,ArrowLineUp } from '@phosphor-icons/react';
+import { buildBackendUrl,getBackendUrl } from '../utils/backendClient';
 
 interface HotItem {
     index: number;
@@ -35,7 +36,13 @@ const HotSearchApp: React.FC = () => {
         setError(null);
         
         try {
-            const url = `https://chushiyu.de5.net/api/public/hotlist?type=wbHot${isRefresh ? '&t=' + Date.now() : ''}`;
+            if (!getBackendUrl()) {
+                throw new Error('当前环境未配置热搜后端。');
+            }
+            const url = buildBackendUrl('/api/public/hotlist', {
+                type: 'wbHot',
+                t: isRefresh ? Date.now() : undefined,
+            });
             const res = await fetch(url);
             
             if (!res.ok) {

@@ -1,16 +1,55 @@
 
-import React, { useState, useEffect } from 'react';
+import React,{ useState,useEffect } from 'react';
 import { useOS } from '../context/OSContext';
 import { useVirtualTime } from '../context/VirtualTimeContext';
 import { DB } from '../utils/db';
-import { CharacterProfile, Message, DateState } from '../types';
+import { CharacterProfile,Message,DateState } from '../types';
 import { ContextBuilder } from '../utils/context';
 import { safeResponseJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
 import DateSession from '../components/date/DateSession';
 import DateSettings from '../components/date/DateSettings';
-import { buildDatePreamble, buildTheaterScene, buildDateTail } from '../utils/datePrompts';
+import { buildDatePreamble,buildTheaterScene,buildDateTail } from '../utils/datePrompts';
 import { extractThinking } from '../utils/thinkingExtractor';
+
+type DateHistorySession = { date: string, msgs: Message[] };
+
+const buildHistorySessions = (msgs: Message[]): DateHistorySession[] => {
+    const dateMsgs = msgs
+        .filter(m => m.metadata?.source === 'date')
+        .sort((a, b) => b.timestamp - a.timestamp);
+
+    const sessions: DateHistorySession[] = [];
+    if (dateMsgs.length === 0) return sessions;
+
+    let currentSession: Message[] = [dateMsgs[0]];
+
+    for (let i = 1; i < dateMsgs.length; i++) {
+        const prev = dateMsgs[i - 1];
+        const curr = dateMsgs[i];
+        const isTimeBreak = Math.abs(prev.timestamp - curr.timestamp) > 30 * 60 * 1000;
+        const splitSincePrevWasOpening = prev.metadata?.isOpening === true;
+
+        if (isTimeBreak || splitSincePrevWasOpening) {
+            const sessionStartMsg = currentSession[currentSession.length - 1];
+            sessions.push({
+                date: new Date(sessionStartMsg.timestamp).toLocaleString(),
+                msgs: [...currentSession].reverse(),
+            });
+            currentSession = [curr];
+        } else {
+            currentSession.push(curr);
+        }
+    }
+
+    const sessionStartMsg = currentSession[currentSession.length - 1];
+    sessions.push({
+        date: new Date(sessionStartMsg.timestamp).toLocaleString(),
+        msgs: [...currentSession].reverse(),
+    });
+
+    return sessions;
+};
 
 const DateApp: React.FC = () => {
     const { closeApp, characters, activeCharacterId, setActiveCharacterId, apiConfig, addToast, updateCharacter, userProfile } = useOS();
@@ -25,7 +64,7 @@ const DateApp: React.FC = () => {
     const [peekLoading, setPeekLoading] = useState(false);
 
     // History State
-    const [historySessions, setHistorySessions] = useState<{ date: string, msgs: Message[] }[]>([]);
+    const [historySessions, setHistorySessions] = useState<DateHistorySession[]>([]);
 
     // Resume Logic State
     const [pendingSessionChar, setPendingSessionChar] = useState<CharacterProfile | null>(null);
@@ -73,6 +112,43 @@ const DateApp: React.FC = () => {
     };
 
     const formatTime = () => `${virtualTime.hours.toString().padStart(2, '0')}:${virtualTime.minutes.toString().padStart(2, '0')}`;
+
+    const loadHistorySessions = async (charId: string) => {
+        const msgs = await DB.getMessagesByCharId(charId);
+        setHistorySessions(buildHistorySessions(msgs));
+    };
+
+    const closeEditModal = () => {
+        setIsEditModalOpen(false);
+        setEditTargetMsg(null);
+        setEditContent('');
+    };
+
+    const openEditModal = (msg: Message) => {
+        setEditTargetMsg(msg);
+        setEditContent(msg.content);
+        setIsEditModalOpen(true);
+    };
+
+    const renderEditModal = () => (
+        <Modal
+            isOpen={isEditModalOpen}
+            title="编辑内容"
+            onClose={closeEditModal}
+            footer={
+                <>
+                    <button onClick={closeEditModal} className="flex-1 py-3 bg-slate-100 rounded-2xl">取消</button>
+                    <button onClick={confirmEditMessage} className="flex-1 py-3 bg-primary text-white font-bold rounded-2xl">保存</button>
+                </>
+            }
+        >
+            <textarea
+                value={editContent}
+                onChange={e => setEditContent(e.target.value)}
+                className="w-full h-32 bg-slate-100 rounded-2xl p-4 resize-none focus:ring-1 focus:ring-primary/20 transition-all text-sm leading-relaxed"
+            />
+        </Modal>
+    );
 
     // Improved Time Gap Logic
     const getTimeGapHint = (lastMsgTimestamp: number | undefined): string => {
@@ -353,16 +429,36 @@ const DateApp: React.FC = () => {
     // --- Editing & Deletion ---
     const handleDeleteMessage = async (msg: Message) => {
         await DB.deleteMessage(msg.id);
+        if (mode === 'history') {
+            await loadHistorySessions(msg.charId);
+            addToast('已删除该条记录', 'success');
+            return;
+        }
         setDateMessages(prev => prev.filter(m => m.id !== msg.id));
     };
 
     const confirmEditMessage = async () => {
         if (!editTargetMsg) return;
-        await DB.updateMessage(editTargetMsg.id, editContent);
-        setDateMessages(prev => prev.map(m => m.id === editTargetMsg.id ? { ...m, content: editContent } : m));
-        setIsEditModalOpen(false);
-        setEditTargetMsg(null);
-        addToast('已修改', 'success');
+        const targetMsg = editTargetMsg;
+        const nextContent = editContent;
+        await DB.updateMessage(targetMsg.id, nextContent);
+        if (mode === 'history') {
+            await loadHistorySessions(targetMsg.charId);
+        } else {
+            setDateMessages(prev => prev.map(m => m.id === targetMsg.id ? { ...m, content: nextContent } : m));
+        }
+        closeEditModal();
+        addToast('已保存修改', 'success');
+    };
+
+    const handleDeleteHistorySession = async (session: DateHistorySession) => {
+        if (!char) return;
+        const sessionMessageIds = session.msgs.map(msg => msg.id);
+        if (sessionMessageIds.length === 0) return;
+        if (!window.confirm(`删除这次见面记录？共 ${sessionMessageIds.length} 条消息会被移除。`)) return;
+        await DB.deleteMessages(sessionMessageIds);
+        await loadHistorySessions(char.id);
+        addToast('已删除本次见面记录', 'success');
     };
 
     const onExitSession = (finalState: DateState) => {
@@ -377,50 +473,7 @@ const DateApp: React.FC = () => {
 
     const openHistory = async (c: CharacterProfile) => {
         setActiveCharacterId(c.id);
-        const msgs = await DB.getMessagesByCharId(c.id);
-        // dateMsgs sorted DESCENDING (newest first)
-        const dateMsgs = msgs.filter(m => m.metadata?.source === 'date').sort((a, b) => b.timestamp - a.timestamp);
-
-        const sessions: { date: string, msgs: Message[] }[] = [];
-        if (dateMsgs.length > 0) {
-            // Group by strict time gap (30 mins) OR explicit Opening flag
-            let currentSession: Message[] = [dateMsgs[0]];
-
-            for (let i = 1; i < dateMsgs.length; i++) {
-                const prev = dateMsgs[i - 1]; // Newer message
-                const curr = dateMsgs[i];   // Older message
-
-                // Break session if:
-                // 1. Time gap > 30 minutes
-                // 2. OR THE PREVIOUS (Newer) message was an opening. 
-                //    (If 'prev' is an opening, it means 'prev' is the START of the newer session we just accumulated. 
-                //     So 'curr' must belong to an older, different session.)
-                const isTimeBreak = Math.abs(prev.timestamp - curr.timestamp) > 30 * 60 * 1000;
-                const splitSincePrevWasOpening = prev.metadata?.isOpening === true;
-
-                if (isTimeBreak || splitSincePrevWasOpening) {
-                    // This session ends. 
-                    // Date label is the Start Time of this session (which is the oldest msg in currentSession)
-                    const sessionStartMsg = currentSession[currentSession.length - 1];
-                    sessions.push({
-                        date: new Date(sessionStartMsg.timestamp).toLocaleString(),
-                        msgs: currentSession.reverse() // Reverse messages to be Chronological (Old->New) inside the bubble
-                    });
-                    currentSession = [curr];
-                } else {
-                    currentSession.push(curr);
-                }
-            }
-            // Push final session
-            const sessionStartMsg = currentSession[currentSession.length - 1];
-            sessions.push({
-                date: new Date(sessionStartMsg.timestamp).toLocaleString(),
-                msgs: currentSession.reverse()
-            });
-        }
-        // Do NOT reverse sessions array. We want [NewestSession, OlderSession, OldestSession].
-        // Default loop populated them New -> Old.
-        setHistorySessions(sessions);
+        await loadHistorySessions(c.id);
         setMode('history');
     };
 
@@ -460,7 +513,8 @@ const DateApp: React.FC = () => {
 
     if (mode === 'history') {
         return (
-            <div className="h-full w-full bg-slate-50 flex flex-col font-light">
+            <>
+                <div className="h-full w-full bg-slate-50 flex flex-col font-light">
                 <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200 bg-white sticky top-0 z-10">
                     <button onClick={handleBack} className="p-2 -ml-2 rounded-full hover:bg-slate-100"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg></button>
                     <span className="font-bold text-slate-700">见面记录</span>
@@ -471,17 +525,45 @@ const DateApp: React.FC = () => {
                         <div key={idx} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                             <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex justify-between items-center"><span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{session.date}</span><span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">{session.msgs.length} 句</span></div>
                             <div className="p-4 space-y-4">
+                                <div className="flex justify-end">
+                                    <button
+                                        onClick={() => handleDeleteHistorySession(session)}
+                                        className="px-2.5 py-1 text-[11px] font-medium text-red-500 bg-red-50 rounded-full hover:bg-red-100 transition-colors"
+                                    >
+                                        删除本次
+                                    </button>
+                                </div>
                                 {session.msgs.map(m => {
                                     const text = (m.content || '').replace(/\[.*?\]/g, '').trim();
                                     return (
+                                        <React.Fragment key={m.id}>
+                                            <div className={`mb-1 flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                                <div className={`flex gap-1 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                                                    <button
+                                                        onClick={() => openEditModal(m)}
+                                                        className="px-2 py-1 text-[11px] font-medium text-slate-500 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"
+                                                    >
+                                                        编辑
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteMessage(m)}
+                                                        className="px-2 py-1 text-[11px] font-medium text-red-500 bg-red-50 rounded-full hover:bg-red-100 transition-colors"
+                                                    >
+                                                        删除
+                                                    </button>
+                                                </div>
+                                            </div>
                                         <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}><div className={`max-w-[90%] text-sm leading-relaxed whitespace-pre-wrap ${m.role === 'user' ? 'text-slate-500 text-right italic' : 'text-slate-800'}`}>{m.role === 'user' ? <span className="bg-slate-100 px-3 py-2 rounded-xl rounded-tr-none inline-block">{text}</span> : <span>{text || '(无内容)'}</span>}</div></div>
+                                        </React.Fragment>
                                     );
                                 })}
                             </div>
                         </div>
                     ))}
                 </div>
-            </div>
+                </div>
+                {renderEditModal()}
+            </>
         );
     }
 
@@ -528,7 +610,7 @@ const DateApp: React.FC = () => {
                     onSendMessage={handleSendMessage}
                     onReroll={handleReroll}
                     onExit={onExitSession}
-                    onEditMessage={(msg) => { setEditTargetMsg(msg); setEditContent(msg.content); setIsEditModalOpen(true); }}
+                    onEditMessage={openEditModal}
                     onDeleteMessage={handleDeleteMessage}
                     onSettings={() => { }} // Removed parent state change, DateSession handles it internally now
                 />

@@ -147,6 +147,8 @@ export interface HormoneSnapshot {
     energy: number;
 }
 
+export type MemorySyncState = 'local_only' | 'pending_sync' | 'synced' | 'backend_generated';
+
 export interface VectorMemory {
     id: string;                    // "vmem-{timestamp}-{random}"
     charId: string;
@@ -160,8 +162,10 @@ export interface VectorMemory {
     updatedAt?: number;            // Timestamp (ms) of last update
     vector: number[];              // Embedding vector (dim depends on model, bge-m3=1024, cohere embed-v4=1536)
     modelId?: string;              // Embedding model used (e.g. "BAAI/bge-m3")
-    source: 'auto' | 'manual' | 'import'; // How it was created
+    source: 'auto' | 'manual' | 'import' | 'sync' | 'call'; // How it was created
     sourceMessageIds?: number[];           // IDs of messages that produced/updated this memory
+    cloudSynced?: boolean;                 // Whether this memory has been pushed to cloud successfully
+    syncState?: MemorySyncState;           // Local/cloud sync state for cache + offline fallback
     deprecated?: boolean;              // Marked as outdated by LLM (info was corrected/superseded)
     deprecatedReason?: string;         // Why it was invalidated (e.g. "用户已声明不再喝奶茶")
     hormoneSnapshot?: HormoneSnapshot; // 情感基因：记忆产生时的 7 维激素状态快照

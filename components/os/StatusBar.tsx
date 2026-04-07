@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React,{ useEffect,useState } from 'react';
 import { useOS } from '../../context/OSContext';
 import { useVirtualTime } from '../../context/VirtualTimeContext';
 import Modal from './Modal';

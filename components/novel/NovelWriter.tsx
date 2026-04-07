@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { NovelBook, NovelSegment, CharacterProfile, UserProfile } from '../../types';
+import React,{ useState,useEffect,useRef,useMemo } from 'react';
+import { NovelBook,NovelSegment,CharacterProfile,UserProfile } from '../../types';
 import {
-    NOVEL_THEMES, GenerationOptions, extractWritingTags,
-    analyzeWriterPersonaSimple, generateWriterPersonaDeep,
-    buildPrompt, parsePersonaMarkdown
+  NOVEL_THEMES,GenerationOptions,extractWritingTags,
+  analyzeWriterPersonaSimple,generateWriterPersonaDeep,
+  buildPrompt,parsePersonaMarkdown
 } from '../../utils/novelUtils';
 import Modal from '../os/Modal';
 import ConfirmDialog from '../os/ConfirmDialog';

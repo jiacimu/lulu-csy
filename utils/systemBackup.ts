@@ -1,7 +1,8 @@
 
-import { APIConfig, OSTheme, CharacterProfile, ChatTheme, FullBackupData, UserProfile, ApiPreset, GroupProfile, SystemLog, Worldbook, NovelBook, Message, RealtimeConfig, TtsConfig, SttConfig } from '../types';
+import { APIConfig,OSTheme,CharacterProfile,ChatTheme,FullBackupData,UserProfile,ApiPreset,GroupProfile,Worldbook,NovelBook,Message,RealtimeConfig,TtsConfig,SttConfig } from '../types';
 import { DB } from './db';
-import { getBackendUrl, getUserId } from './backendClient';
+import { buildBackendHeaders,getBackendUrl } from './backendClient';
+import { loadJSZip } from './lazyThirdParty';
 
 // ─── JSZip Dynamic Loader ───────────────────────────────────────────────
 
@@ -11,52 +12,6 @@ interface JSZipLike {
     generateAsync: (options: { type: 'blob' }, onUpdate?: (metadata: { percent: number }) => void) => Promise<Blob>;
 }
 
-interface JSZipCtorLike {
-    new(): JSZipLike;
-    loadAsync: (file: File) => Promise<JSZipLike>;
-}
-
-const dynamicImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
-let jszipCtorPromise: Promise<JSZipCtorLike> | null = null;
-
-function loadScript(src: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-        // Check if already loaded
-        if (document.querySelector(`script[src="${src}"]`)) {
-            resolve();
-            return;
-        }
-
-        const script = document.createElement('script');
-        script.src = src;
-        script.async = true;
-
-        script.onload = () => {
-            // Give it a tick to register globals
-            setTimeout(resolve, 50);
-        };
-        script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
-
-        document.head.appendChild(script);
-    });
-}
-
-export function loadJSZip(): Promise<JSZipCtorLike> {
-    if (jszipCtorPromise) return jszipCtorPromise;
-
-    jszipCtorPromise = (async () => {
-        try {
-            const mod = await dynamicImport('https://esm.sh/jszip@3.10.1');
-            return mod.default as JSZipCtorLike;
-        } catch {
-            console.warn('ESM import failed, falling back to CDN script tag');
-            await loadScript('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js');
-            return (window as any).JSZip as JSZipCtorLike;
-        }
-    })();
-
-    return jszipCtorPromise;
-}
 
 // ─── Pure Data Processing Helpers ───────────────────────────────────────
 
@@ -384,10 +339,7 @@ export async function exportSystemData(
             const backendUrl = getBackendUrl();
             if (backendUrl) {
                 const graphResp = await fetch(`${backendUrl}/api/graph/export`, {
-                    headers: {
-                        'Authorization': `Bearer csyos_k7m2x9f4p1w8v3`,
-                        'X-User-Id': getUserId(),
-                    },
+                    headers: buildBackendHeaders({ contentType: false }),
                     signal: AbortSignal.timeout(15000),
                 });
                 if (graphResp.ok) {
@@ -395,10 +347,9 @@ export async function exportSystemData(
                     if (graphData.ok) {
                         (backupData as any).graphData = {
                             relations: graphData.relations || [],
-                            chains: graphData.chains || [],
                             l1Memories: graphData.l1Memories || [],
                         };
-                        console.log(`📦 [Export] Graph data: ${graphData.relations?.length || 0} relations, ${graphData.chains?.length || 0} chains`);
+                        console.log(`📦 [Export] Graph data: ${graphData.relations?.length || 0} relations, ${graphData.l1Memories?.length || 0} L1 memories`);
                     }
                 }
             }
@@ -411,7 +362,7 @@ export async function exportSystemData(
 
     zip.file("data.json", JSON.stringify(backupData));
 
-    const content = await zip.generateAsync({ type: "blob" }, (metadata) => {
+    const content = await zip.generateAsync({ type: "blob" }, (metadata: { percent: number }) => {
         if (Math.random() > 0.8) {
             onProgress(`压缩中 ${metadata.percent.toFixed(0)}%...`, 95);
         }
@@ -536,20 +487,15 @@ export async function importSystemData(
                 const graphData = (data as any).graphData;
                 const importResp = await fetch(`${backendUrl}/api/graph/import`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer csyos_k7m2x9f4p1w8v3`,
-                        'X-User-Id': getUserId(),
-                    },
+                    headers: buildBackendHeaders(),
                     body: JSON.stringify({
                         relations: graphData.relations || [],
-                        chains: graphData.chains || [],
                     }),
                     signal: AbortSignal.timeout(30000),
                 });
                 if (importResp.ok) {
                     const result = await importResp.json();
-                    console.log(`📦 [Import] Graph data restored: ${result.relationsImported} relations, ${result.chainsImported} chains`);
+                    console.log(`📦 [Import] Graph data restored: ${result.relationsImported} relations`);
                 }
             }
         } catch (e: any) {

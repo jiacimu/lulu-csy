@@ -4,7 +4,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import { initSystemInterceptor } from './utils/systemInterceptor';
 import { initAppLifecycle } from './utils/appLifecycle';
-import { preloadLocalAssets, scheduleIdlePreload } from './utils/preloadResources';
+import { preloadLocalAssets,scheduleIdlePreload } from './utils/preloadResources';
 
 // ── Production Log Suppression ──────────────────────────────────
 // 生产环境下隐藏 console.log / console.warn，只保留 console.error

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
-import { CharacterProfile, Message, DateState, DialogueItem, UserProfile } from '../../types';
+import React,{ useState,useEffect,useRef } from 'react';
+import { CharacterProfile,Message,DateState,DialogueItem,UserProfile } from '../../types';
 import Modal from '../../components/os/Modal';
 import { useOS } from '../../context/OSContext';
 import DateSettings from './DateSettings';
@@ -73,9 +73,7 @@ const DateSession: React.FC<DateSessionProps> = ({
     onReroll, 
     onExit,
     onEditMessage,
-    onDeleteMessage,
-    onSettings
-}) => {
+    onDeleteMessage}) => {
     const { addToast, registerBackHandler } = useOS();
     
     // Core VN State

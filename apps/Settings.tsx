@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React,{ useState } from 'react';
 import { useOS } from '../context/OSContext';
 import SettingsMenu from './settings/SettingsMenu';
 import type { SettingsPanel } from './settings/SettingsMenu';

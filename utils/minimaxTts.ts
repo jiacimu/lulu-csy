@@ -15,9 +15,9 @@
  */
 
 import type {
-    TtsConfig,
-    TtsCreateTaskResponse,
-    TtsQueryTaskResponse,
+  TtsConfig,
+  TtsCreateTaskResponse,
+  TtsQueryTaskResponse,
 } from '../types/tts';
 
 // ─── Constants ──────────────────────────────────────────────────────────

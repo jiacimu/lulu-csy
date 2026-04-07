@@ -10,9 +10,9 @@
  * 5. 返回完整的活动记录
  */
 
-import { CharacterProfile, UserProfile, XhsActivityRecord, XhsFreeRoamSession, APIConfig, RealtimeConfig } from '../types';
+import { CharacterProfile,UserProfile,XhsActivityRecord,XhsFreeRoamSession,APIConfig,RealtimeConfig } from '../types';
 import { ContextBuilder } from './context';
-import { XhsMcpClient, McpToolResult, extractNotesFromMcpData, normalizeNote } from './xhsMcpClient';
+import { XhsMcpClient,McpToolResult,extractNotesFromMcpData,normalizeNote } from './xhsMcpClient';
 import { DB } from './db';
 
 // ==================== Types ====================

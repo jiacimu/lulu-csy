@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { CharacterProfile, SocialPost, SocialComment, SubAccount, SocialAppProfile } from '../types';
+import { SocialPost,SocialComment,SubAccount,SocialAppProfile } from '../types';
 import { ContextBuilder } from '../utils/context';
 import { processImage } from '../utils/file';
 import Modal from '../components/os/Modal';
@@ -101,7 +101,7 @@ const Icons = {
 // --- Main App ---
 
 const SocialApp: React.FC = () => {
-    const { closeApp, characters, updateCharacter, apiConfig, addToast, userProfile, groups } = useOS();
+    const { closeApp, characters, apiConfig, addToast, userProfile } = useOS();
     const [feed, setFeed] = useState<SocialPost[]>([]);
     // Modes: 'home' (Feed) | 'me' (Profile) | 'create' (Modal Overlay)
     const [activeTab, setActiveTab] = useState<'home' | 'me'>('home');

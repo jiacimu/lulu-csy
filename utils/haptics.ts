@@ -1,6 +1,6 @@
 
 import { Capacitor } from '@capacitor/core';
-import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
+import { Haptics,ImpactStyle,NotificationType } from '@capacitor/haptics';
 
 // ── Global Toggle (read by all haptic functions) ────────────────────────────
 // This is set from OSContext and persisted in IndexedDB.
