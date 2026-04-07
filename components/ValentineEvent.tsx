@@ -10,16 +10,22 @@
  * - 降级入口：桌面第三页 "特别时光" app
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { useVirtualTime } from '../context/VirtualTimeContext';
 import { DB } from '../utils/db';
 import { ContextBuilder } from '../utils/context';
 import { safeResponseJson } from '../utils/safeApi';
-import { CharacterProfile, SpecialMomentRecord } from '../types';
+import { CharacterProfile,SpecialMomentRecord } from '../types';
 import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Filesystem,Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { loadHtml2Canvas } from '../utils/lazyThirdParty';
+import {
+  getSpecialEventDefinition,
+  isSpecialEventEntryVisible,
+  shouldShowSpecialEventPopup,
+} from '../utils/specialEvents';
 
 // ============================================================
 // 情人节立绘 Sprite 映射 (占位 emoji，等图片整理好后替换为图床URL)
@@ -34,35 +40,33 @@ const VALENTINE_SPRITES: Record<string, string> = {
 };
 
 // localStorage keys
-const VALENTINE_DISMISSED_KEY = 'sullyos_valentine_2026_dismissed';
-const VALENTINE_COMPLETED_KEY = 'sullyos_valentine_2026_completed';
-const VALENTINE_RECORD_KEY = 'valentine_2026';
+const VALENTINE_EVENT_ID = 'valentine_2026';
+const VALENTINE_RECORD_KEY = VALENTINE_EVENT_ID;
+
+function getRequiredValentineEvent() {
+    const event = getSpecialEventDefinition(VALENTINE_EVENT_ID);
+    if (!event) {
+        throw new Error(`Missing special event config for ${VALENTINE_EVENT_ID}`);
+    }
+    return event;
+}
+
+const VALENTINE_EVENT = getRequiredValentineEvent();
+const VALENTINE_DISMISSED_KEY = VALENTINE_EVENT.dismissedKey;
+const VALENTINE_COMPLETED_KEY = VALENTINE_EVENT.completedKey;
 
 // ============================================================
 // 工具函数
 // ============================================================
 
-/** 判断今天是否是情人节 (2026-02-14) */
-const isValentineDay = (): boolean => {
-    const now = new Date();
-    return now.getFullYear() === 2026 && now.getMonth() === 1 && now.getDate() === 14;
-};
-
 /** 判断是否应该显示弹窗 */
 export const shouldShowValentinePopup = (): boolean => {
-    if (!isValentineDay()) return false;
-    try {
-        if (localStorage.getItem(VALENTINE_DISMISSED_KEY)) return false;
-        if (localStorage.getItem(VALENTINE_COMPLETED_KEY)) return false;
-    } catch { /* ignore */ }
-    return true;
+    return shouldShowSpecialEventPopup(VALENTINE_EVENT);
 };
 
 /** 判断情人节活动是否可用（用于降级入口 "特别时光" app） */
 export const isValentineEventAvailable = (): boolean => {
-    const now = new Date();
-    // 2026年2月期间都可以通过降级入口访问
-    return now.getFullYear() === 2026 && now.getMonth() === 1;
+    return isSpecialEventEntryVisible(VALENTINE_EVENT);
 };
 
 // ============================================================
@@ -342,7 +346,6 @@ export const ValentineSession: React.FC<ValentineSessionProps> = ({ charId, onCl
     const [displayedText, setDisplayedText] = useState('');
     const [isAnimating, setIsAnimating] = useState(false);
     const [currentEmotion, setCurrentEmotion] = useState('normal');
-    const [fullContent, setFullContent] = useState('');
     const [errorMsg, setErrorMsg] = useState('');
 
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -403,7 +406,6 @@ export const ValentineSession: React.FC<ValentineSessionProps> = ({ charId, onCl
     };
 
     const hydrateSessionFromContent = (content: string) => {
-        setFullContent(content);
         const lines = parseValentineDialogue(content);
         if (lines.length === 0) {
             setDialogueLines([{ text: content.replace(/\[.*?\]/g, '').trim(), emotion: 'normal' }]);
@@ -653,8 +655,7 @@ export const ValentineSession: React.FC<ValentineSessionProps> = ({ charId, onCl
         setIsExporting(true);
         try {
             // @ts-ignore — runtime CDN import, no type declarations available
-            const mod: any = await import('https://esm.sh/html2canvas@1.4.1');
-            const html2canvas = mod.default;
+            const html2canvas = await loadHtml2Canvas();
             const canvas = await html2canvas(recordRef.current, {
                 backgroundColor: '#faf6f1',
                 scale: 2,
@@ -844,7 +845,6 @@ export const ValentineSession: React.FC<ValentineSessionProps> = ({ charId, onCl
     }
 
     // ----- 正片：情人节特别对话界面 -----
-    const currentLine = dialogueLines[currentLineIndex];
     const spriteInfo = getSpriteForEmotion(currentEmotion, char);
     const isLastLine = currentLineIndex >= dialogueLines.length - 1;
     const isFinished = isLastLine && !isAnimating;

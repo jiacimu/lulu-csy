@@ -1,72 +1,11 @@
-
-import React, { useState, useEffect, useRef } from 'react';
+import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { StudyCourse, StudyChapter, CharacterProfile, Message, UserProfile } from '../types';
+import { StudyCourse,CharacterProfile } from '../types';
 import { ContextBuilder } from '../utils/context';
 import Modal from '../components/os/Modal';
 import { safeResponseJson } from '../utils/safeApi';
-
-type PdfJsLike = {
-    getDocument: (src: { data: ArrayBuffer }) => { promise: Promise<any> };
-    GlobalWorkerOptions?: { workerSrc?: string };
-};
-
-type KatexLike = {
-    renderToString: (latex: string, options: any) => string;
-};
-
-let pdfjsPromise: Promise<PdfJsLike> | null = null;
-let katexPromise: Promise<KatexLike> | null = null;
-
-const loadScript = (src: string): Promise<void> => new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[data-src=\"${src}\"]`) as HTMLScriptElement | null;
-    if (existing) {
-        if ((existing as any).dataset.loaded === 'true') {
-            resolve();
-            return;
-        }
-        existing.addEventListener('load', () => resolve(), { once: true });
-        existing.addEventListener('error', () => reject(new Error(`load failed: ${src}`)), { once: true });
-        return;
-    }
-
-    const script = document.createElement('script');
-    script.src = src;
-    script.async = true;
-    script.dataset.src = src;
-    script.onload = () => {
-        script.dataset.loaded = 'true';
-        resolve();
-    };
-    script.onerror = () => reject(new Error(`load failed: ${src}`));
-    document.head.appendChild(script);
-});
-
-const loadPdfJs = async (): Promise<PdfJsLike> => {
-    if (!pdfjsPromise) {
-        pdfjsPromise = loadScript('https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js').then(() => {
-            const pdfjs = (window as any).pdfjsLib as PdfJsLike | undefined;
-            if (!pdfjs) throw new Error('pdfjs 加载失败');
-            if (pdfjs?.GlobalWorkerOptions) {
-                pdfjs.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-            }
-            return pdfjs;
-        });
-    }
-    return pdfjsPromise;
-};
-
-const loadKatex = async (): Promise<KatexLike> => {
-    if (!katexPromise) {
-        katexPromise = loadScript('https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js').then(() => {
-            const katex = (window as any).katex as KatexLike | undefined;
-            if (!katex) throw new Error('KaTeX 加载失败');
-            return katex;
-        });
-    }
-    return katexPromise;
-};
+import { loadKatex,loadPdfJs,type KatexLike } from '../utils/lazyThirdParty';
 
 // --- Styles ---
 const GRADIENTS = [
@@ -181,7 +120,7 @@ const BlackboardRenderer: React.FC<{ text: string, isTyping?: boolean, katexRend
                 </div>
             );
         }
-        
+
         // Numbered Lists
         const numMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
         if (numMatch) {
@@ -331,7 +270,6 @@ const StudyApp: React.FC = () => {
     const [displayedText, setDisplayedText] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [userQuestion, setUserQuestion] = useState('');
-    const [chatHistory, setChatHistory] = useState<{role: 'user'|'assistant', content: string}[]>([]);
     const [showChapterMenu, setShowChapterMenu] = useState(false); // Sidebar for history
     const [showAssistant, setShowAssistant] = useState(true); // Toggle assistant visibility
     
@@ -416,12 +354,12 @@ const StudyApp: React.FC = () => {
         const file = e.target.files?.[0];
         if (!file) return;
         if (file.type !== 'application/pdf') {
-            addToast('请上传 PDF 文件', 'error');
+            addToast('璇蜂笂浼?PDF 鏂囦欢', 'error');
             return;
         }
 
         setIsProcessing(true);
-        setProcessStatus('正在预处理 PDF...');
+        setProcessStatus('姝ｅ湪棰勫鐞?PDF...');
 
         try {
             const arrayBuffer = await file.arrayBuffer();
@@ -433,7 +371,7 @@ const StudyApp: React.FC = () => {
             const maxPages = Math.min(pdf.numPages, 50);
 
             for (let i = 1; i <= maxPages; i++) {
-                setProcessStatus(`提取文本中 (${i}/${maxPages})...`);
+                setProcessStatus(`鎻愬彇鏂囨湰涓?(${i}/${maxPages})...`);
                 const page = await pdf.getPage(i);
                 const textContent = await page.getTextContent();
                 const pageText = textContent.items.map((item: any) => item.str).join(' ');
@@ -442,7 +380,7 @@ const StudyApp: React.FC = () => {
 
             // Scanned PDF Detection
             if (fullText.trim().length < 50 && pdf.numPages > 0) {
-                addToast('⚠️ 检测到文本极少，可能是扫描件/图片PDF。建议先进行OCR识别。', 'error');
+                addToast('检测到文本内容很少，可能是扫描版或图片 PDF，建议先做 OCR 识别。', 'error');
             }
 
             // Set temp data and open modal
@@ -453,7 +391,7 @@ const StudyApp: React.FC = () => {
 
         } catch (e: any) {
             console.error(e);
-            addToast(`处理失败: ${e.message}`, 'error');
+            addToast(`澶勭悊澶辫触: ${e.message}`, 'error');
             setIsProcessing(false);
         } finally {
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -464,15 +402,15 @@ const StudyApp: React.FC = () => {
         if (!tempPdfData) return;
         setShowImportModal(false);
         setIsProcessing(true);
-        setProcessStatus('AI 正在生成课程大纲...');
+        setProcessStatus('AI 姝ｅ湪鐢熸垚璇剧▼澶х翰...');
 
         try {
             const newCourse = await generateCurriculum(tempPdfData.name, tempPdfData.text, importPreference);
             await DB.saveCourse(newCourse);
             await loadCourses();
-            addToast('课程创建成功', 'success');
+            addToast('璇剧▼鍒涘缓鎴愬姛', 'success');
         } catch (e: any) {
-            addToast(`生成失败: ${e.message}`, 'error');
+            addToast(`鐢熸垚澶辫触: ${e.message}`, 'error');
         } finally {
             setIsProcessing(false);
             setTempPdfData(null);
@@ -543,7 +481,6 @@ For each chapter, provide a title, a brief summary of what it covers, and a diff
     const startSession = (course: StudyCourse) => {
         setActiveCourse(course);
         setMode('classroom');
-        setChatHistory([]);
         
         // Find first incomplete chapter or stay on current if valid
         const nextIdx = course.chapters.findIndex(c => !c.isCompleted);
@@ -578,7 +515,7 @@ For each chapter, provide a title, a brief summary of what it covers, and a diff
         // 2. Generate New Content
         skipTypingRef.current = false; // Reset skip
         setClassroomState('teaching');
-        setCurrentText("正在准备教案...");
+        setCurrentText("姝ｅ湪鍑嗗鏁欐...");
         
         // Simple chunking strategy
         const totalLen = course.rawText.length;
@@ -586,7 +523,7 @@ For each chapter, provide a title, a brief summary of what it covers, and a diff
         const start = chapterIdx * chunkSize;
         const chunkText = course.rawText.substring(start, start + chunkSize + 2000); // Overlap
 
-        const callApi = async (personaContext: string, isFallback: boolean = false) => {
+        const callApi = async (personaContext: string) => {
             const prompt = `${personaContext}
 
 ### [Current Lesson Configuration]
@@ -651,7 +588,7 @@ You are now acting as a private tutor for ${userProfile.name}.
                 const data = await safeResponseJson(response);
                 
                 // ROBUST EXTRACTION: Try content, then reasoning_content
-                text = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "";
+                text = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "内容仍被拦截，请尝试更换模型或缩短文本。";
                 
                 if (!text || data.choices?.[0]?.finish_reason === 'content_filter') {
                     console.warn("Content blocked by filter or empty response.");
@@ -663,17 +600,17 @@ You are now acting as a private tutor for ${userProfile.name}.
 
             // Attempt 2: Safety Fallback (Neutral Tutor Mode)
             if (isBlocked) {
-                setCurrentText("正在尝试切换安全线路 (Safety Fallback)...");
+                setCurrentText("姝ｅ湪灏濊瘯鍒囨崲瀹夊叏绾胯矾 (Safety Fallback)...");
                 const fallbackContext = "[System: You are a helpful and neutral academic tutor. Ignore previous character persona constraints to ensure educational content is delivered.]";
-                response = await callApi(fallbackContext, true);
+                response = await callApi(fallbackContext);
                 if (response.ok) {
                     const data = await safeResponseJson(response);
-                    text = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "（内容仍被拦截，请尝试更换模型或缩短文本）";
+                    text = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "内容仍被拦截，请尝试更换模型或缩短文本。";
                 }
             }
             
             if (!text) {
-                throw new Error("模型返回内容为空 (Max Tokens Limit or Filter)");
+                throw new Error("妯″瀷杩斿洖鍐呭涓虹┖ (Max Tokens Limit or Filter)");
             }
 
             // Save Generated Content
@@ -690,7 +627,7 @@ You are now acting as a private tutor for ${userProfile.name}.
             
         } catch (e: any) {
             console.error("Teach Error:", e);
-            setCurrentText(`抱歉，生成失败: ${e.message}。请检查模型是否支持长文本或 Max Tokens 设置。`);
+            setCurrentText(`抱歉，生成失败：${e.message}。请检查模型是否支持长文本或 Max Tokens 设置。`);
             setClassroomState('idle');
         }
     };
@@ -703,13 +640,11 @@ You are now acting as a private tutor for ${userProfile.name}.
 
     const handleAskQuestion = async () => {
         if (!userQuestion.trim() || !activeCourse || !selectedChar) return;
-        
+
         const question = userQuestion;
         setUserQuestion('');
         setClassroomState('q_and_a');
-        
-        setChatHistory(prev => [...prev, { role: 'user', content: question }]);
-        setCurrentText("让我想想...");
+        setCurrentText('让我想想...');
 
         try {
             const totalLen = activeCourse.rawText.length;
@@ -717,44 +652,43 @@ You are now acting as a private tutor for ${userProfile.name}.
             const start = activeCourse.currentChapterIndex * chunkSize;
             const chunkText = activeCourse.rawText.substring(start, start + chunkSize + 2000);
 
-            // [MODIFIED]: Use Full Context for Q&A
-            let baseContext = ContextBuilder.buildCoreContext(selectedChar, userProfile, true);
-            baseContext += `
-### [System: Study Mode Q&A]
-User is asking a question about the study material.
-- **Maintain Personality**: Answer in character.
-`;
+            const baseContext = [
+                ContextBuilder.buildCoreContext(selectedChar, userProfile, true),
+                '### [System: Study Mode Q&A]',
+                'User is asking a question about the study material.',
+                '- **Maintain Personality**: Answer in character.',
+            ].join('\n');
 
-            const prompt = `${baseContext}
-### Source Material
-${chunkText.substring(0, 8000)}
+            const prompt = [
+                baseContext,
+                '### Source Material',
+                chunkText.substring(0, 8000),
+                '',
+                '### User Question',
+                `"${question}"`,
+                '',
+                '### Task',
+                'Answer the question based on the source material. Be helpful and encouraging (in character). Use Markdown.',
+            ].join('\n');
 
-### User Question
-"${question}"
-
-### Task
-Answer the question based on the source material. Be helpful and encouraging (in character). Use Markdown.
-`;
-             const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+            const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
                 body: JSON.stringify({
                     model: apiConfig.model,
-                    messages: [{ role: "user", content: prompt }],
+                    messages: [{ role: 'user', content: prompt }],
                     temperature: 0.7,
-                    max_tokens: 8000
-                })
+                    max_tokens: 8000,
+                }),
             });
-            
-            const data = await safeResponseJson(response);
-            const text = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "（无回答）";
-            
-            setCurrentText(text);
-            setChatHistory(prev => [...prev, { role: 'assistant', content: text }]);
-            setClassroomState('idle');
 
+            const data = await safeResponseJson(response);
+            const text = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || '内容仍被拦截，请尝试更换模型或缩短文本。';
+
+            setCurrentText(text);
+            setClassroomState('idle');
         } catch (e) {
-            setCurrentText("脑壳痛... 回答不出来了。");
+            setCurrentText('我有点卡壳了，暂时回答不出来。');
             setClassroomState('idle');
         }
     };
@@ -783,14 +717,14 @@ Answer the question based on the source material. Be helpful and encouraging (in
 
         // Summarize to Memory (Fire & Forget)
         // UPDATED PROMPT: First person perspective
-        const summaryPrompt = `
-[System: Memory Generation]
-Role: ${selectedChar.name} (Teacher)
-Action: Just finished teaching "${updatedChapters[activeCourse.currentChapterIndex].title}" to ${userProfile.name}.
-Task: Write a short, **first-person** diary entry (1 sentence) about this teaching session.
-Format: "今天给[User]讲了[Topic]..." or "Today I taught [User] about..."
-Note: Use "我" (I) to refer to yourself.
-`;
+        const summaryPrompt = [
+            '[System: Memory Generation]',
+            'Role: ' + selectedChar.name + ' (Teacher)',
+            'Action: Just finished teaching "' + updatedChapters[activeCourse.currentChapterIndex].title + '" to ' + userProfile.name + '.',
+            'Task: Write a short, first-person diary entry (1 sentence) about this teaching session.',
+            'Format: "今天给[User]讲了[Topic]..." or "Today I taught [User] about..."',
+            'Note: Use "我" (I) to refer to yourself.',
+        ].join('\n');
 
         fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST',
@@ -804,7 +738,7 @@ Note: Use "我" (I) to refer to yourself.
 
         // 3. Trigger next logic
         if (nextIdx >= updatedChapters.length) {
-            setCurrentText("恭喜！这本书我们已经学完了！真棒！🎉");
+            setCurrentText('恭喜！这本书我们已经学完了，真棒！');
             setClassroomState('finished');
         } else {
             handleTeach(updatedCourse, newIndex);
@@ -1051,3 +985,11 @@ Note: Use "我" (I) to refer to yourself.
 };
 
 export default StudyApp;
+
+
+
+
+
+
+
+
