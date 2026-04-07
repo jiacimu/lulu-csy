@@ -92,8 +92,9 @@ export async function getCityInputTips(keyword: string): Promise<CityTip[]> {
         }
 
         const data = await safeResponseJson(response);
-        return Array.isArray(data?.tips)
-            ? data.tips
+        const tips = Array.isArray(data?.tips) ? (data.tips as unknown[]) : [];
+        return tips.length > 0
+            ? tips
                 .map(normalizeCityTip)
                 .filter((tip): tip is CityTip => Boolean(tip))
             : [];
@@ -126,8 +127,9 @@ export async function getDistrictInfo(keyword: string, subdistrict = 1): Promise
         }
 
         const data = await safeResponseJson(response);
-        return Array.isArray(data?.districts)
-            ? data.districts
+        const districts = Array.isArray(data?.districts) ? (data.districts as unknown[]) : [];
+        return districts.length > 0
+            ? districts
                 .map(normalizeDistrictInfo)
                 .filter((district): district is DistrictInfo => Boolean(district))
             : [];
@@ -167,8 +169,9 @@ export async function searchNearbyRestaurants(city: string, count = 15): Promise
         }
 
         const data = await safeResponseJson(response);
-        return Array.isArray(data?.pois)
-            ? data.pois
+        const pois = Array.isArray(data?.pois) ? (data.pois as unknown[]) : [];
+        return pois.length > 0
+            ? pois
                 .map(normalizePOIResult)
                 .filter((poi): poi is POIResult => Boolean(poi))
             : [];

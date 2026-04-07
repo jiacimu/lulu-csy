@@ -573,22 +573,8 @@ const CognitiveNetworkApp: React.FC = () => {
                                             const existing = await DB.getVectorMemoryById(mem.id);
                                             if (!existing) {
                                                 await DB.saveVectorMemory({
-                                                    id: mem.id,
-                                                    charId: mem.char_id || charId,
-                                                    title: mem.title,
-                                                    content: mem.content,
-                                                    emotionalJourney: mem.emotional_journey || '',
-                                                    importance: mem.importance || 5,
-                                                    mentionCount: mem.mention_count || 0,
-                                                    lastMentioned: mem.last_mentioned || 0,
-                                                    createdAt: mem.created_at || Date.now(),
-                                                    updatedAt: mem.updated_at,
-                                                    vector: mem.vector ? (typeof mem.vector === 'string' ? JSON.parse(mem.vector) : mem.vector) : [],
-                                                    modelId: mem.model_id || '',
-                                                    source: mem.source || 'cloud',
-                                                    hormoneSnapshot: mem.hormone_snapshot ? (typeof mem.hormone_snapshot === 'string' ? JSON.parse(mem.hormone_snapshot) : mem.hormone_snapshot) : undefined,
-                                                    salienceScore: mem.salience_score || 0,
-                                                    sourceMessageIds: mem.source_message_ids ? (typeof mem.source_message_ids === 'string' ? JSON.parse(mem.source_message_ids) : mem.source_message_ids) : [],
+                                                    ...mem,
+                                                    charId: mem.charId || charId,
                                                 });
                                                 totalPulled++;
                                             }
