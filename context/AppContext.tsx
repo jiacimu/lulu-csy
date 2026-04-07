@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useRef, useCallback } from 'react';
+import React,{ createContext,useContext,useState,useRef,useCallback } from 'react';
 import { AppID } from '../types';
 import { haptic } from '../utils/haptics';
 

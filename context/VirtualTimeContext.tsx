@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React,{ createContext,useContext,useEffect,useState } from 'react';
 import { VirtualTime } from '../types';
 
 const getRealTime = (): VirtualTime => {

@@ -1,113 +1,133 @@
 /**
  * Push Subscription Manager
- * 
- * Handles:
- *   1. Registering the push Service Worker
- *   2. Requesting notification permission
- *   3. Subscribing to Web Push via VAPID
- *   4. Sending the subscription to the backend
- *   5. Sending a test push notification to verify end-to-end
- * 
- * Called once on page load (after 3s delay) from OSContext.
- * Idempotent — won't re-subscribe if already subscribed.
- * Includes retry logic for reliability.
+ *
+ * Called after app boot. Safe to call repeatedly.
  */
 
-import { getBackendUrl, getUserId } from './backendClient';
+import { buildBackendHeaders,getBackendUrl } from './backendClient';
 
-const API_TOKEN = 'csyos_k7m2x9f4p1w8v3';
+let _pushStatus = '未初始化';
+let _pushEndpoint = '';
+let _pushError = '';
 
-// ─── 可视化状态（在设置页面可以查看）───────────────────
-let _pushStatus: string = '未初始化';
-let _pushEndpoint: string = '';
-let _pushError: string = '';
+class PushFeatureUnavailableError extends Error {}
+
+type PushSyncResult = 'synced' | 'disabled';
 
 export function getPushDebugInfo(): { status: string; endpoint: string; error: string } {
     return { status: _pushStatus, endpoint: _pushEndpoint, error: _pushError };
 }
 
-/**
- * Initialize push notifications.
- * Safe to call multiple times — exits early if already subscribed.
- * Includes retry logic for network failures.
- */
-export async function initPushSubscription(): Promise<void> {
-    // Feature detection
+export async function disablePushSubscription(): Promise<void> {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-        _pushStatus = '❌ 浏览器不支持 Web Push';
-        console.log('🔔 [Push] Not supported in this browser');
+        _pushStatus = '浏览器不支持 Web Push';
+        _pushEndpoint = '';
+        _pushError = '';
         return;
     }
 
-    // Skip in Capacitor native environment
-    if (typeof (window as any)?.Capacitor?.isNativePlatform === 'function'
-        && (window as any).Capacitor.isNativePlatform()) {
-        _pushStatus = '⏭️ 原生环境，跳过 Web Push';
+    _pushError = '';
+
+    try {
+        const registration = await navigator.serviceWorker.getRegistration('/push-sw.js');
+        if (!registration) {
+            _pushStatus = '推送通知已禁用';
+            _pushEndpoint = '';
+            return;
+        }
+
+        const subscription = await registration.pushManager.getSubscription();
+        if (!subscription) {
+            _pushStatus = '推送通知已禁用';
+            _pushEndpoint = '';
+            return;
+        }
+
+        await syncUnsubscribeToBackend(subscription).catch((error: any) => {
+            console.warn('[Push] Failed to sync unsubscribe to backend:', error.message);
+        });
+
+        await subscription.unsubscribe();
+        _pushStatus = '推送通知已禁用';
+        _pushEndpoint = '';
+    } catch (error: any) {
+        _pushStatus = '禁用推送失败';
+        _pushError = error.message || String(error);
+        throw error;
+    }
+}
+
+export async function initPushSubscription(): Promise<void> {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        _pushStatus = '浏览器不支持 Web Push';
+        console.log('[Push] Not supported in this browser');
+        return;
+    }
+
+    if (
+        typeof (window as any)?.Capacitor?.isNativePlatform === 'function'
+        && (window as any).Capacitor.isNativePlatform()
+    ) {
+        _pushStatus = '原生环境，跳过 Web Push';
         return;
     }
 
     const backendUrl = getBackendUrl();
     if (!backendUrl) {
-        _pushStatus = '❌ 未配置后端地址';
-        console.log('🔔 [Push] No backend URL configured, skipping');
+        _pushStatus = '未配置后端地址';
+        console.log('[Push] No backend URL configured, skipping');
         return;
     }
 
-    _pushStatus = '⏳ 正在注册...';
+    _pushStatus = '正在注册...';
+    _pushError = '';
 
     try {
-        // 1. Register Service Worker (idempotent — returns existing registration if already registered)
-        const registration = await navigator.serviceWorker.register('/push-sw.js', {
-            scope: '/',
-        });
-
-        // Wait for SW to be ready
+        const registration = await navigator.serviceWorker.register('/push-sw.js', { scope: '/' });
         await navigator.serviceWorker.ready;
-        console.log('🔔 [Push] Service Worker registered');
-        _pushStatus = '⏳ SW 已注册，检查订阅...';
+        console.log('[Push] Service Worker registered');
 
-        // 2. Check for existing subscription first (avoid duplicate registrations)
         let subscription = await registration.pushManager.getSubscription();
 
         if (subscription) {
-            _pushStatus = '✅ 已订阅（同步到后端中...）';
-            _pushEndpoint = subscription.endpoint.slice(0, 60) + '...';
-            console.log('🔔 [Push] Already subscribed, syncing to backend...');
-            // Still sync to backend (in case the backend lost it)
-            await syncSubscriptionToBackend(backendUrl, subscription);
-            _pushStatus = '✅ 已订阅，推送就绪';
+            _pushStatus = '已订阅，正在同步到后端...';
+            _pushEndpoint = `${subscription.endpoint.slice(0, 60)}...`;
+            console.log('[Push] Already subscribed, syncing to backend...');
+
+            const syncResult = await syncSubscriptionToBackend(backendUrl, subscription);
+            if (syncResult === 'disabled') {
+                _pushStatus = '当前环境未启用推送订阅接口';
+                return;
+            }
+
+            _pushStatus = '已订阅，推送就绪';
             return;
         }
 
-        // 3. Request notification permission (only if not yet decided)
         if (Notification.permission === 'default') {
-            _pushStatus = '⏳ 等待用户授权通知权限...';
+            _pushStatus = '等待通知权限...';
             const permission = await Notification.requestPermission();
             if (permission !== 'granted') {
-                _pushStatus = '❌ 通知权限被拒绝';
-                _pushError = '用户拒绝了通知权限。请在浏览器设置中手动开启。';
-                console.log('🔔 [Push] Notification permission denied');
+                _pushStatus = '通知权限被拒绝';
+                _pushError = '请在浏览器设置中开启通知权限。';
+                console.log('[Push] Notification permission denied');
                 return;
             }
         } else if (Notification.permission === 'denied') {
-            _pushStatus = '❌ 通知权限已被禁止';
-            _pushError = '通知权限被禁止。请在浏览器设置 → 网站设置 → 通知中开启。';
-            console.log('🔔 [Push] Notification permission previously denied');
+            _pushStatus = '通知权限已被禁用';
+            _pushError = '通知权限已被禁用，请在浏览器站点设置里开启。';
+            console.log('[Push] Notification permission previously denied');
             return;
         }
 
-        _pushStatus = '⏳ 权限已获取，正在获取 VAPID 密钥...';
+        _pushStatus = '正在获取 VAPID 公钥...';
 
-        // 4. Fetch VAPID public key from backend (with retry)
-        let vapidPublicKey: string = '';
+        let vapidPublicKey = '';
         for (let attempt = 1; attempt <= 3; attempt++) {
             try {
                 const keyResponse = await fetch(`${backendUrl}/api/push/vapid-key`, {
-                    headers: {
-                        'Authorization': `Bearer ${API_TOKEN}`,
-                        'X-User-Id': getUserId(),
-                    },
-                    signal: AbortSignal.timeout(30000), // 30s timeout (longer for slow networks)
+                    headers: buildBackendHeaders({ contentType: false }),
+                    signal: AbortSignal.timeout(30000),
                 });
 
                 if (!keyResponse.ok) {
@@ -116,166 +136,187 @@ export async function initPushSubscription(): Promise<void> {
 
                 const keyData = await keyResponse.json();
                 vapidPublicKey = keyData.vapidPublicKey;
-                break; // Success
-            } catch (err: any) {
-                console.warn(`🔔 [Push] VAPID key fetch attempt ${attempt}/3 failed:`, err.message);
+                break;
+            } catch (error: any) {
+                console.warn(`[Push] VAPID key fetch attempt ${attempt}/3 failed:`, error.message);
                 if (attempt === 3) {
-                    _pushStatus = '❌ 获取 VAPID 密钥失败（3次重试）';
-                    _pushError = `VAPID 密钥获取失败: ${err.message}`;
+                    _pushStatus = '获取 VAPID 公钥失败';
+                    _pushError = `VAPID 公钥获取失败: ${error.message}`;
                     return;
                 }
-                // Exponential backoff: 2s, 4s
-                await new Promise(r => setTimeout(r, 2000 * attempt));
+                await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
             }
         }
 
         if (!vapidPublicKey) {
-            _pushStatus = '❌ VAPID 密钥为空';
+            _pushStatus = 'VAPID 公钥为空';
             _pushError = 'VAPID key empty from server';
-            console.warn('🔔 [Push] VAPID key empty');
+            console.warn('[Push] VAPID key empty');
             return;
         }
 
-        _pushStatus = '⏳ 正在创建推送订阅...';
+        _pushStatus = '正在创建推送订阅...';
 
-        // 5. Subscribe to push (with retry)
         for (let attempt = 1; attempt <= 3; attempt++) {
             try {
                 subscription = await registration.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as BufferSource,
                 });
-                break; // Success
-            } catch (err: any) {
-                console.warn(`🔔 [Push] Subscribe attempt ${attempt}/3 failed:`, err.message);
+                break;
+            } catch (error: any) {
+                console.warn(`[Push] Subscribe attempt ${attempt}/3 failed:`, error.message);
                 if (attempt === 3) {
-                    _pushStatus = '❌ 推送订阅创建失败';
-                    _pushError = `创建推送订阅失败: ${err.message}`;
+                    _pushStatus = '推送订阅创建失败';
+                    _pushError = `创建推送订阅失败: ${error.message}`;
                     return;
                 }
-                await new Promise(r => setTimeout(r, 2000 * attempt));
+                await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
             }
         }
 
         if (!subscription) {
-            _pushStatus = '❌ 推送订阅为空';
+            _pushStatus = '推送订阅为空';
             return;
         }
 
-        _pushEndpoint = subscription.endpoint.slice(0, 60) + '...';
-        console.log('🔔 [Push] Subscribed to push notifications');
-        _pushStatus = '⏳ 正在同步订阅到后端...';
+        _pushEndpoint = `${subscription.endpoint.slice(0, 60)}...`;
+        console.log('[Push] Subscribed to push notifications');
+        _pushStatus = '正在同步订阅到后端...';
 
-        // 6. Send subscription to backend (with retry)
-        await syncSubscriptionToBackend(backendUrl, subscription);
-
-        _pushStatus = '✅ 推送通知已就绪';
-        console.log('🔔 [Push] ✅ Push notification setup complete!');
-
-        // 7. Send a test notification to verify the full pipeline
-        try {
-            _pushStatus = '⏳ 发送测试通知验证...';
-            await sendTestPush(backendUrl);
-            _pushStatus = '✅ 推送通知已就绪（测试通知已发送）';
-        } catch (err: any) {
-            // Test push failure is non-critical
-            console.warn('🔔 [Push] Test push failed (non-critical):', err.message);
-            _pushStatus = '✅ 推送通知已就绪（测试通知发送失败，但订阅成功）';
+        const syncResult = await syncSubscriptionToBackend(backendUrl, subscription);
+        if (syncResult === 'disabled') {
+            _pushStatus = '当前环境未启用推送订阅接口';
+            return;
         }
 
-    } catch (err: any) {
-        _pushStatus = '❌ 初始化失败';
-        _pushError = err.message || String(err);
-        console.warn('🔔 [Push] Initialization failed:', err.message);
+        _pushStatus = '推送通知已就绪';
+        console.log('[Push] Push notification setup complete');
+
+        try {
+            _pushStatus = '正在发送测试通知...';
+            await sendTestPush(backendUrl);
+            _pushStatus = '推送通知已就绪（测试通知已发送）';
+        } catch (error: any) {
+            console.warn('[Push] Test push failed (non-critical):', error.message);
+            _pushStatus = '推送通知已就绪（测试通知发送失败，但订阅成功）';
+        }
+    } catch (error: any) {
+        _pushStatus = '初始化失败';
+        _pushError = error.message || String(error);
+        console.warn('[Push] Initialization failed:', error.message);
     }
 }
 
-/**
- * Force re-subscribe (for troubleshooting).
- * Removes existing subscription and creates a new one.
- */
 export async function forceResubscribe(): Promise<void> {
     try {
-        const reg = await navigator.serviceWorker.getRegistration('/push-sw.js');
-        if (reg) {
-            const existingSub = await reg.pushManager.getSubscription();
-            if (existingSub) {
-                await existingSub.unsubscribe();
-                console.log('🔔 [Push] Unsubscribed existing subscription');
+        const registration = await navigator.serviceWorker.getRegistration('/push-sw.js');
+        if (registration) {
+            const existingSubscription = await registration.pushManager.getSubscription();
+            if (existingSubscription) {
+                await existingSubscription.unsubscribe();
+                console.log('[Push] Unsubscribed existing subscription');
             }
         }
-    } catch { /* continue */ }
+    } catch {
+        // Continue into a clean re-init path.
+    }
 
-    // Re-run the full init
     await initPushSubscription();
 }
 
-/**
- * Send the PushSubscription to the backend for storage.
- * Backend uses ON CONFLICT(endpoint) DO UPDATE, so this is idempotent.
- * Includes retry logic.
- */
 async function syncSubscriptionToBackend(
     backendUrl: string,
     subscription: PushSubscription,
-): Promise<void> {
+): Promise<PushSyncResult> {
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-            const resp = await fetch(`${backendUrl}/api/push/subscribe`, {
+            const headers = new Headers(buildBackendHeaders());
+            headers.set('Content-Type', 'application/json');
+
+            const response = await fetch(`${backendUrl}/api/push/subscribe`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${API_TOKEN}`,
-                    'X-User-Id': getUserId(),
-                },
+                headers,
                 body: JSON.stringify({ subscription: subscription.toJSON() }),
                 signal: AbortSignal.timeout(30000),
             });
 
-            if (resp.ok) {
-                const data = await resp.json();
-                console.log(`🔔 [Push] Subscription synced to backend (${data.subscriptionCount || 1} device(s))`);
-                return;
-            } else {
-                throw new Error(`HTTP ${resp.status}`);
+            if (response.ok) {
+                const data = await response.json();
+                console.log(`[Push] Subscription synced to backend (${data.subscriptionCount || 1} device(s))`);
+                return 'synced';
             }
-        } catch (err: any) {
-            console.warn(`🔔 [Push] Backend sync attempt ${attempt}/3 failed:`, err.message);
+
+            if (response.status === 405) {
+                throw new PushFeatureUnavailableError('Push subscription endpoint is not enabled in this environment (HTTP 405)');
+            }
+
+            throw new Error(`HTTP ${response.status}`);
+        } catch (error: any) {
+            if (error instanceof PushFeatureUnavailableError) {
+                _pushStatus = '当前环境未启用推送订阅接口';
+                _pushError = '';
+                console.warn('[Push] Subscription endpoint returned 405, skipping push setup for this environment');
+                return 'disabled';
+            }
+
+            console.warn(`[Push] Backend sync attempt ${attempt}/3 failed:`, error.message);
             if (attempt === 3) {
-                _pushError = `后端同步失败: ${err.message}`;
-                throw err;
+                _pushError = `后端同步失败: ${error.message}`;
+                throw error;
             }
-            await new Promise(r => setTimeout(r, 2000 * attempt));
+            await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
         }
     }
+
+    return 'disabled';
 }
 
-/**
- * Send a test push notification to verify the full pipeline.
- */
-async function sendTestPush(backendUrl: string): Promise<void> {
-    const resp = await fetch(`${backendUrl}/api/push/test`, {
+async function syncUnsubscribeToBackend(subscription: PushSubscription): Promise<void> {
+    const backendUrl = getBackendUrl();
+    if (!backendUrl) return;
+
+    const headers = new Headers(buildBackendHeaders());
+    headers.set('Content-Type', 'application/json');
+
+    const response = await fetch(`${backendUrl}/api/push/unsubscribe`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${API_TOKEN}`,
-            'X-User-Id': getUserId(),
-        },
+        headers,
+        body: JSON.stringify({ endpoint: subscription.endpoint }),
+        signal: AbortSignal.timeout(10000),
+    });
+
+    if (response.ok || response.status === 405) {
+        return;
+    }
+
+    throw new Error(`HTTP ${response.status}`);
+}
+
+async function sendTestPush(backendUrl: string): Promise<void> {
+    const headers = new Headers(buildBackendHeaders());
+    headers.set('Content-Type', 'application/json');
+
+    const response = await fetch(`${backendUrl}/api/push/test`, {
+        method: 'POST',
+        headers,
         signal: AbortSignal.timeout(30000),
     });
 
-    if (resp.ok) {
-        console.log('🔔 [Push] Test notification sent!');
-    } else {
-        const text = await resp.text().catch(() => '');
-        console.warn('🔔 [Push] Test push failed:', resp.status, text);
+    if (response.ok) {
+        console.log('[Push] Test notification sent');
+        return;
     }
+
+    if (response.status === 405) {
+        console.warn('[Push] Test push endpoint returned 405, skipping test notification');
+        return;
+    }
+
+    const text = await response.text().catch(() => '');
+    console.warn('[Push] Test push failed:', response.status, text);
 }
 
-/**
- * Convert a URL-safe base64 encoded VAPID key to a Uint8Array.
- * Required by PushManager.subscribe().
- */
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
     const base64 = (base64String + padding)

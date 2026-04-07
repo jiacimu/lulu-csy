@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React,{ createContext,useContext,useState,useCallback } from 'react';
 import { Toast } from '../types';
 import { haptic } from '../utils/haptics';
 

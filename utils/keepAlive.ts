@@ -3,8 +3,17 @@
  * This prevents the browser from aggressively freezing the background page.
  */
 
-let lockPromise: Promise<void> | null = null;
+import {
+  BACKEND_HEALTH_TIMEOUT_MS,
+  buildBackendUrl,
+  getBackendToken,
+  setBackendHealthCache,
+} from './backendConfig';
+
 let isKeepAliveStarted = false;
+let isHeartbeatStarted = false;
+
+const HEARTBEAT_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
 
 export function startKeepAlive() {
   if (typeof navigator === 'undefined' || !navigator.locks) {
@@ -18,17 +27,50 @@ export function startKeepAlive() {
   console.log('Starting app keep-alive via Web Locks API...');
 
   // Web Lock helps prevent browser from completely freezing the page
-  lockPromise = navigator.locks.request('app-keep-alive', { mode: 'shared' }, () => {
+  void navigator.locks.request('app-keep-alive', { mode: 'shared' }, () => {
     return new Promise<void>(() => {
       // Never resolve, keep the lock active as long as the page lives
     });
-  }) as unknown as Promise<void>;
+  });
+}
 
-  // Listen to visibility changes to handle reconnects or resume logic if needed
+/**
+ * Periodic backend heartbeat — independent of Web Locks.
+ * Pings /health every 3 minutes + on foreground resume.
+ * Refreshes health cache on success.
+ */
+export function startBackendHeartbeat() {
+  if (isHeartbeatStarted) return;
+  isHeartbeatStarted = true;
+
+  const pingBackend = async () => {
+    const token = getBackendToken();
+    if (!token) return;
+
+    try {
+      const resp = await fetch(buildBackendUrl('/health'), {
+        headers: { 'Authorization': `Bearer ${token}` },
+        signal: AbortSignal.timeout(BACKEND_HEALTH_TIMEOUT_MS),
+      });
+      if (resp.ok) {
+        setBackendHealthCache(true);
+      }
+    } catch {
+      // Fire-and-forget — don't clear cache on heartbeat failure
+    }
+  };
+
+  // Initial ping after a short delay to avoid blocking startup
+  setTimeout(pingBackend, 5000);
+
+  // Periodic ping
+  setInterval(pingBackend, HEARTBEAT_INTERVAL_MS);
+
+  // Immediate ping on foreground resume
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      console.log('App returned to foreground. Maintaining keep-alive.');
-      // Optional: Add logic to check websocket connection or force refresh stale data here
+      console.log('[KeepAlive] App returned to foreground, pinging backend...');
+      pingBackend();
     }
   });
 }

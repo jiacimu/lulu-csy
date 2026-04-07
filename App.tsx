@@ -1,9 +1,9 @@
 
-import React, { useEffect } from 'react';
+import React,{ useEffect } from 'react';
 import { VirtualTimeProvider } from './context/VirtualTimeContext';
 import { OSProvider } from './context/OSContext';
 import PhoneShell from './components/PhoneShell';
-import { startKeepAlive } from './utils/keepAlive';
+import { startKeepAlive,startBackendHeartbeat } from './utils/keepAlive';
 
 /**
  * 检测是否运行在 PWA (已安装到桌面) 模式
@@ -57,6 +57,7 @@ export function exitSystemFullscreen() {
 const App: React.FC = () => {
   useEffect(() => {
     startKeepAlive();
+    startBackendHeartbeat();
     if (!isPwaMode()) return;
     if (!isFullscreenEnabled()) return;
 

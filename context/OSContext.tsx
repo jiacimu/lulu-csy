@@ -1,95 +1,37 @@
 
-import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
-import { APIConfig, AppID, OSTheme, CharacterProfile, ChatTheme, Toast, FullBackupData, UserProfile, ApiPreset, GroupProfile, SystemLog, Worldbook, NovelBook, Message, RealtimeConfig, TtsConfig, DEFAULT_TTS_CONFIG, SttConfig, DEFAULT_STT_CONFIG } from '../types';
+import React,{ createContext,useContext,useEffect,useState,useRef } from 'react';
+import { AppID,OSTheme,CharacterProfile,ChatTheme,UserProfile,SystemLog } from '../types';
 import { DB } from '../utils/db';
 import { onSystemLog } from '../utils/systemInterceptor';
-import { exportSystemData, importSystemData, ExportStateSnapshot, ImportCallbacks } from '../utils/systemBackup';
-import { BackendAgentManager } from '../utils/autonomousAgent';
-import { haptic, setHapticsEnabled as setHapticsEnabledGlobal, getHapticsEnabled } from '../utils/haptics';
-import { initPushSubscription } from '../utils/pushSubscription';
+import { exportSystemData,importSystemData,ExportStateSnapshot,ImportCallbacks } from '../utils/systemBackup';
+import { setHapticsEnabled as setHapticsEnabledGlobal } from '../utils/haptics';
 
 // Sub-contexts
-import { NotificationProvider, useNotification, NotificationContextType } from './NotificationContext';
-import { AppProvider, useApp, AppContextType } from './AppContext';
+import { NotificationProvider,useNotification,NotificationContextType } from './NotificationContext';
+import { AppProvider,useApp,AppContextType } from './AppContext';
+import { CharacterProvider,useCharacter,CharacterContextType } from './CharacterContext';
+import { ConfigProvider,useConfig,ConfigContextType } from './ConfigContext';
+import { AgentProvider } from './AgentContext';
 
 
 // 默认实时配置
-const defaultRealtimeConfig: RealtimeConfig = {
-    weatherEnabled: false,
-    weatherApiKey: '',
-    weatherCity: 'Beijing',
-    newsEnabled: false,
-    newsApiKey: '',
-    hotSearchEnabled: false,
-    notionEnabled: false,
-    notionApiKey: '',
-    notionDatabaseId: '',
-    feishuEnabled: false,
-    feishuAppId: '',
-    feishuAppSecret: '',
-    feishuBaseId: '',
-    feishuTableId: '',
-    xhsEnabled: false,
-    cacheMinutes: 30
-};
 
 // Combined interface — keeping full backward compatibility
-interface OSContextType extends AppContextType, NotificationContextType {
+interface OSContextType extends AppContextType, NotificationContextType, CharacterContextType, ConfigContextType {
     theme: OSTheme;
     updateTheme: (updates: Partial<OSTheme>) => void;
 
-    apiConfig: APIConfig;
-    updateApiConfig: (updates: Partial<APIConfig>) => void;
     isDataLoaded: boolean;
-
-    characters: CharacterProfile[];
-    activeCharacterId: string;
-    addCharacter: () => void;
-    updateCharacter: (id: string, updates: Partial<CharacterProfile>) => void;
-    deleteCharacter: (id: string) => void;
-    setActiveCharacterId: (id: string) => void;
-
-    // Worldbooks
-    worldbooks: Worldbook[];
-    addWorldbook: (wb: Worldbook) => void;
-    updateWorldbook: (id: string, updates: Partial<Worldbook>) => Promise<void>;
-    deleteWorldbook: (id: string) => void;
-
-    // Novels
-    novels: NovelBook[];
-    addNovel: (novel: NovelBook) => void;
-    updateNovel: (id: string, updates: Partial<NovelBook>) => Promise<void>;
-    deleteNovel: (id: string) => void;
-
-    // Groups
-    groups: GroupProfile[];
-    createGroup: (name: string, members: string[]) => void;
-    deleteGroup: (id: string) => void;
 
     // User Profile
     userProfile: UserProfile;
     updateUserProfile: (updates: Partial<UserProfile>) => void;
 
-    availableModels: string[];
-    setAvailableModels: (models: string[]) => void;
-
-    // API Presets
-    apiPresets: ApiPreset[];
-    addApiPreset: (name: string, config: APIConfig) => void;
-    removeApiPreset: (id: string) => void;
-
     // 实时配置 (天气、新闻、Notion等)
-    realtimeConfig: RealtimeConfig;
-    updateRealtimeConfig: (updates: Partial<RealtimeConfig>) => void;
 
     // TTS 语音合成配置
-    ttsConfig: TtsConfig;
-    updateTtsConfig: (updates: Partial<TtsConfig>) => void;
 
     // STT 语音识别配置
-    sttConfig: SttConfig;
-    updateSttConfig: (updates: Partial<SttConfig>) => void;
-
     customThemes: ChatTheme[];
     addCustomTheme: (theme: ChatTheme) => void;
     removeCustomTheme: (id: string) => void;
@@ -116,12 +58,6 @@ const defaultTheme: OSTheme = {
     wallpaper: 'linear-gradient(135deg, #FFDEE9 0%, #B5FFFC 100%)',
     darkMode: false,
     contentColor: '#ffffff',
-};
-
-const defaultApiConfig: APIConfig = {
-    baseUrl: '',
-    apiKey: '',
-    model: 'gpt-4o-mini',
 };
 
 const generateAvatar = (seed: string) => {
@@ -308,26 +244,40 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     // Consume sub-contexts
     const appCtx = useApp();
     const notifCtx = useNotification();
+    const characterCtx = useCharacter();
+    const configCtx = useConfig();
     const { addToast, setLastMsgTimestamp, setUnreadMessages } = notifCtx;
+    const {
+        characters,
+        setCharacters,
+        activeCharacterId,
+        setActiveCharacterId,
+        setGroups,
+        setWorldbooks,
+        setNovels,
+        isCharacterDataLoaded,
+    } = characterCtx;
+    const {
+        isConfigLoaded,
+        savePresets,
+        ...publicConfigCtx
+    } = configCtx;
+    const {
+        apiConfig,
+        updateApiConfig: configUpdateApiConfig,
+        availableModels,
+        setAvailableModels: saveModels,
+        apiPresets,
+        realtimeConfig,
+        updateRealtimeConfig: configUpdateRealtimeConfig,
+        ttsConfig,
+        sttConfig,
+    } = publicConfigCtx;
 
     const [theme, setTheme] = useState<OSTheme>(defaultTheme);
-    const [apiConfig, setApiConfig] = useState<APIConfig>(defaultApiConfig);
-
-    const [characters, setCharacters] = useState<CharacterProfile[]>([]);
-    const [activeCharacterId, setActiveCharacterId] = useState<string>('');
-
-    const [groups, setGroups] = useState<GroupProfile[]>([]);
-    const [worldbooks, setWorldbooks] = useState<Worldbook[]>([]);
-    const [novels, setNovels] = useState<NovelBook[]>([]);
-
     const [userProfile, setUserProfile] = useState<UserProfile>(defaultUserProfile);
 
-    const [isDataLoaded, setIsDataLoaded] = useState(false);
-    const [availableModels, setAvailableModels] = useState<string[]>([]);
-    const [apiPresets, setApiPresets] = useState<ApiPreset[]>([]);
-    const [realtimeConfig, setRealtimeConfig] = useState<RealtimeConfig>(defaultRealtimeConfig);
-    const [ttsConfig, setTtsConfig] = useState<TtsConfig>(DEFAULT_TTS_CONFIG);
-    const [sttConfig, setSttConfig] = useState<SttConfig>(DEFAULT_STT_CONFIG);
+    const [isSettingsLoaded, setIsSettingsLoaded] = useState(false);
     const [customThemes, setCustomThemes] = useState<ChatTheme[]>([]);
     const [customIcons, setCustomIcons] = useState<Record<string, string>>({});
 
@@ -336,15 +286,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
     // Sys Operation Status
     const [sysOperation, setSysOperation] = useState<{ status: 'idle' | 'processing', message: string, progress: number }>({ status: 'idle', message: '', progress: 0 });
-
-    const [agentReloadCounter, setAgentReloadCounter] = useState(0);
-
-    // Subscribe to agent config changes to force restart
-    useEffect(() => {
-        const handler = () => setAgentReloadCounter(c => c + 1);
-        window.addEventListener('agent-config-changed', handler);
-        return () => window.removeEventListener('agent-config-changed', handler);
-    }, []);
+    const isDataLoaded = isSettingsLoaded && isCharacterDataLoaded && isConfigLoaded;
 
     const schedulerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -396,9 +338,6 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     useEffect(() => {
         const loadSettings = async () => {
             const savedThemeStr = localStorage.getItem('os_theme');
-            const savedApi = localStorage.getItem('os_api_config');
-            const savedModels = localStorage.getItem('os_available_models');
-            const savedPresets = localStorage.getItem('os_api_presets');
 
             let loadedTheme = { ...defaultTheme };
             if (savedThemeStr) {
@@ -424,47 +363,9 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
                 } catch (e) { console.error('Theme load error', e); }
             }
 
-            if (savedApi) setApiConfig(JSON.parse(savedApi));
-            if (savedModels) setAvailableModels(JSON.parse(savedModels));
-            if (savedPresets) setApiPresets(JSON.parse(savedPresets));
-
             // 加载实时配置
-            const savedRealtimeConfig = localStorage.getItem('os_realtime_config');
-            if (savedRealtimeConfig) {
-                try {
-                    setRealtimeConfig({ ...defaultRealtimeConfig, ...JSON.parse(savedRealtimeConfig) });
-                } catch (e) {
-                    console.error('Failed to load realtime config', e);
-                }
-            }
-
             // 加载 TTS 配置
-            const savedTtsConfig = localStorage.getItem('os_tts_config');
-            if (savedTtsConfig) {
-                try {
-                    const parsed = JSON.parse(savedTtsConfig);
-                    setTtsConfig(prev => ({
-                        ...prev,
-                        ...parsed,
-                        voiceSetting: { ...prev.voiceSetting, ...(parsed.voiceSetting || {}) },
-                        audioSetting: { ...prev.audioSetting, ...(parsed.audioSetting || {}) },
-                        preprocessConfig: { ...prev.preprocessConfig, ...(parsed.preprocessConfig || {}) },
-                    }));
-                } catch (e) {
-                    console.error('Failed to load TTS config', e);
-                }
-            }
-
             // 加载 STT 配置
-            const savedSttConfig = localStorage.getItem('os_stt_config');
-            if (savedSttConfig) {
-                try {
-                    setSttConfig(prev => ({ ...prev, ...JSON.parse(savedSttConfig) }));
-                } catch (e) {
-                    console.error('Failed to load STT config', e);
-                }
-            }
-
             try {
                 const assets = await DB.getAllAssets();
                 const assetMap: Record<string, string> = {};
@@ -522,93 +423,19 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
             try {
                 await loadSettings();
 
-                const [dbChars, dbThemes, dbUser, dbGroups, dbWorldbooks, dbNovels] = await Promise.all([
-                    DB.getAllCharacters(),
+                const [dbThemes, dbUser] = await Promise.all([
                     DB.getThemes(),
-                    DB.getUserProfile(),
-                    DB.getGroups(),
-                    DB.getAllWorldbooks(),
-                    DB.getAllNovels()
+                    DB.getUserProfile()
                 ]);
 
-                let finalChars = dbChars;
-
-                if (!finalChars.some(c => c.id === sullyV2.id)) {
-                    await DB.saveCharacter(sullyV2);
-                    finalChars = [...finalChars, sullyV2];
-                } else {
-                    const existingSully = finalChars.find(c => c.id === sullyV2.id);
-                    if (existingSully) {
-                        const currentSprites = existingSully.sprites || {};
-                        const isCorrupted = !currentSprites['normal'] || !currentSprites['chibi'];
-                        const needsWallUpdate = existingSully.roomConfig?.wallImage !== sullyV2.roomConfig?.wallImage;
-                        const needsSkinSets = !existingSully.dateSkinSets || existingSully.dateSkinSets.length === 0;
-
-                        if (isCorrupted || !existingSully.roomConfig || needsWallUpdate || needsSkinSets) {
-                            const restoredSprites = { ...sullyV2.sprites, ...currentSprites };
-
-                            if (!restoredSprites['normal']) restoredSprites['normal'] = sullyV2.sprites!['normal'];
-                            if (!restoredSprites['happy']) restoredSprites['happy'] = sullyV2.sprites!['happy'];
-                            if (!restoredSprites['sad']) restoredSprites['sad'] = sullyV2.sprites!['sad'];
-                            if (!restoredSprites['angry']) restoredSprites['angry'] = sullyV2.sprites!['angry'];
-                            if (!restoredSprites['shy']) restoredSprites['shy'] = sullyV2.sprites!['shy'];
-                            if (!restoredSprites['chibi']) restoredSprites['chibi'] = sullyV2.sprites!['chibi'];
-
-                            const updatedRoomConfig = existingSully.roomConfig ? {
-                                ...existingSully.roomConfig,
-                                wallImage: (existingSully.roomConfig.wallImage?.includes('radial-gradient') || !existingSully.roomConfig.wallImage)
-                                    ? sullyV2.roomConfig?.wallImage
-                                    : existingSully.roomConfig.wallImage
-                            } : sullyV2.roomConfig;
-
-                            const existingSkins = existingSully.dateSkinSets || [];
-                            const presetSkins = sullyV2.dateSkinSets || [];
-                            const mergedSkins = [...existingSkins];
-                            for (const ps of presetSkins) {
-                                if (!mergedSkins.some(s => s.id === ps.id)) {
-                                    mergedSkins.push(ps);
-                                }
-                            }
-
-                            const updatedSully = {
-                                ...existingSully,
-                                sprites: restoredSprites,
-                                roomConfig: updatedRoomConfig,
-                                dateSkinSets: mergedSkins
-                            };
-
-                            await DB.saveCharacter(updatedSully);
-                            finalChars = finalChars.map(c => c.id === sullyV2.id ? updatedSully : c);
-                        }
-                    }
-                }
-
-                if (finalChars.length > 0) {
-                    setCharacters(finalChars);
-                    const lastActiveId = localStorage.getItem('os_last_active_char_id');
-                    if (lastActiveId && finalChars.find(c => c.id === lastActiveId)) {
-                        setActiveCharacterId(lastActiveId);
-                    } else if (finalChars.find(c => c.id === sullyV2.id)) {
-                        setActiveCharacterId(sullyV2.id);
-                    } else {
-                        setActiveCharacterId(finalChars[0].id);
-                    }
-                } else {
-                    await DB.saveCharacter(initialCharacter);
-                    setCharacters([initialCharacter]);
-                    setActiveCharacterId(initialCharacter.id);
-                }
-
-                setGroups(dbGroups);
-                setWorldbooks(dbWorldbooks);
-                setNovels(dbNovels);
                 setCustomThemes(dbThemes);
                 if (dbUser) setUserProfile(dbUser);
+                const finalChars = characters;
 
                 // 预加载当前角色的所有图片资源（头像、立绘、房间素材、皮肤套装）
                 try {
                     const { preloadImages } = await import('../utils/preloadResources');
-                    const activeChar = finalChars.find((c: CharacterProfile) => c.id === (localStorage.getItem('os_last_active_char_id') || sullyV2.id)) || finalChars[0];
+                    const activeChar = finalChars.find((c: CharacterProfile) => c.id === (localStorage.getItem('os_last_active_char_id') || initialCharacter.id)) || finalChars[0];
                     if (activeChar) {
                         const urls: string[] = [
                             activeChar.avatar,
@@ -626,7 +453,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
             } catch (err) {
                 console.error('Data init failed:', err);
             } finally {
-                setIsDataLoaded(true);
+                setIsSettingsLoaded(true);
             }
         };
 
@@ -656,7 +483,28 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
                 try {
                     const dueMessages = await DB.getDueScheduledMessages(char.id);
                     if (dueMessages.length > 0) {
+                        const recentMessages = await DB.getRecentMessagesByCharId(
+                            char.id,
+                            Math.max(100, dueMessages.length * 10),
+                        );
+                        const existingBackendIds = new Set(
+                            recentMessages
+                                .map(message => message.metadata?.backendMessageId)
+                                .filter((id): id is string => typeof id === 'string' && id.length > 0),
+                        );
+                        let savedCount = 0;
+                        let firstSavedContent = '';
+
                         for (const msg of dueMessages) {
+                            const backendMessageId = typeof msg.metadata?.backendMessageId === 'string'
+                                ? msg.metadata.backendMessageId
+                                : null;
+
+                            if (backendMessageId && existingBackendIds.has(backendMessageId)) {
+                                await DB.deleteScheduledMessage(msg.id);
+                                continue;
+                            }
+
                             await DB.saveMessage({
                                 charId: msg.charId,
                                 role: 'assistant',
@@ -666,13 +514,22 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
                                 ...(msg.metadata ? { metadata: msg.metadata } : {}),
                             });
                             await DB.deleteScheduledMessage(msg.id);
+
+                            if (!firstSavedContent) {
+                                firstSavedContent = msg.content;
+                            }
+                            if (backendMessageId) {
+                                existingBackendIds.add(backendMessageId);
+                            }
+                            savedCount++;
                         }
+                        if (savedCount === 0) continue;
                         hasNewMessage = true;
                         const isChattingWithThisChar = activeAppRef.current === AppID.Chat && activeCharIdRef.current === char.id;
 
                         if (!isChattingWithThisChar) {
                             addToast(`${char.name} 发来了一条消息`, 'success');
-                            pendingUnreads[char.id] = (pendingUnreads[char.id] || 0) + dueMessages.length;
+                            pendingUnreads[char.id] = (pendingUnreads[char.id] || 0) + savedCount;
 
                             // 仅对非 autonomous 消息使用 new Notification()
                             // autonomous 消息已由后端通过 Web Push 推送到 Service Worker，不需要重复弹窗
@@ -680,7 +537,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
                             if (!isAutonomous && window.Notification && Notification.permission === 'granted') {
                                 try {
                                     const notif = new Notification(char.name, {
-                                        body: dueMessages[0].content,
+                                        body: firstSavedContent,
                                         icon: char.avatar,
                                         silent: false
                                     });
@@ -716,42 +573,13 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
         return () => { if (schedulerRef.current) clearInterval(schedulerRef.current); };
     }, [isDataLoaded, characters]);
 
-    // --- Autonomous Agent (后端驱动) ---
-    useEffect(() => {
-        if (!isDataLoaded || !activeCharacterId) return;
-        const char = characters.find(c => c.id === activeCharacterId);
-        if (!char) return;
-
-        // 从 localStorage 读取副 API 配置
-        const subKey = localStorage.getItem('sub_api_key');
-        const subUrl = localStorage.getItem('sub_api_base_url');
-        const subModel = localStorage.getItem('sub_api_model');
-        if (!subKey || !subUrl || !subModel) return;
-
-        const secondaryApi = { baseUrl: subUrl, apiKey: subKey, model: subModel };
-        const manager = new BackendAgentManager();
-        const cleanup = manager.start(activeCharacterId, char, secondaryApi);
-        return cleanup;
-    }, [isDataLoaded, activeCharacterId, characters, agentReloadCounter]);
-
-    // --- Push Notification Registration (延迟 3 秒，不阻塞首屏) ---
-    useEffect(() => {
-        if (!isDataLoaded) return;
-        const timer = setTimeout(() => {
-            initPushSubscription().catch(err => {
-                console.warn('🔔 [Push] Init failed:', err.message || err);
-            });
-        }, 3000);
-        return () => clearTimeout(timer);
-    }, [isDataLoaded]);
-
     // --- Service Worker: 通知点击 → 切换角色 + 打开聊天 ---
     useEffect(() => {
         if (!navigator.serviceWorker) return;
         const handler = (event: MessageEvent) => {
             if (event.data?.type === 'NOTIFICATION_CLICK' && event.data.charId) {
                 const charId = event.data.charId;
-                handleSetActiveCharacter(charId);
+                setActiveCharacterId(charId);
                 appCtx.openApp(AppID.Chat);
                 // 清除该角色的未读标记
                 setUnreadMessages(prev => ({ ...prev, [charId]: 0 }));
@@ -767,7 +595,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
         const params = new URLSearchParams(window.location.search);
         const notifCharId = params.get('notif_charId');
         if (notifCharId && characters.find(c => c.id === notifCharId)) {
-            handleSetActiveCharacter(notifCharId);
+            setActiveCharacterId(notifCharId);
             appCtx.openApp(AppID.Chat);
             setUnreadMessages(prev => ({ ...prev, [notifCharId]: 0 }));
             // 清理 URL（避免刷新后重复触发）
@@ -776,7 +604,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     }, [isDataLoaded, characters]);
 
     const updateTheme = async (updates: Partial<OSTheme>) => {
-        const { wallpaper, launcherWidgetImage, launcherWidgets, desktopDecorations, customFont, ...styleUpdates } = updates;
+        const { wallpaper, launcherWidgetImage, launcherWidgets, desktopDecorations, customFont } = updates;
         const newTheme = { ...theme, ...updates };
         setTheme(newTheme);
 
@@ -858,157 +686,16 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
         localStorage.setItem('os_theme', JSON.stringify(lsTheme));
     };
-    const updateApiConfig = (updates: Partial<APIConfig>) => { const newConfig = { ...apiConfig, ...updates }; setApiConfig(newConfig); localStorage.setItem('os_api_config', JSON.stringify(newConfig)); };
-    const updateRealtimeConfig = (updates: Partial<RealtimeConfig>) => { const newConfig = { ...realtimeConfig, ...updates }; setRealtimeConfig(newConfig); localStorage.setItem('os_realtime_config', JSON.stringify(newConfig)); };
     // TTS 配置更新 — 深层 merge 嵌套对象（voiceSetting / audioSetting / voiceModify / preprocessConfig）
-    const updateTtsConfig = (updates: Partial<TtsConfig>) => {
-        setTtsConfig(prev => {
-            const newConfig: TtsConfig = {
-                ...prev,
-                ...updates,
-                voiceSetting: { ...prev.voiceSetting, ...(updates.voiceSetting || {}) },
-                audioSetting: { ...prev.audioSetting, ...(updates.audioSetting || {}) },
-                preprocessConfig: { ...prev.preprocessConfig, ...(updates.preprocessConfig || {}) },
-            };
             // voiceModify 可选，只在有值时 merge
-            if (updates.voiceModify !== undefined) {
-                newConfig.voiceModify = updates.voiceModify === null ? undefined : { ...(prev.voiceModify || { pitch: 0, intensity: 0, timbre: 0 }), ...updates.voiceModify };
-            }
             // pronunciationDict 可选
-            if (updates.pronunciationDict !== undefined) {
-                newConfig.pronunciationDict = updates.pronunciationDict;
-            }
-            localStorage.setItem('os_tts_config', JSON.stringify(newConfig));
-            return newConfig;
-        });
-    };
     // STT 配置更新
-    const updateSttConfig = (updates: Partial<SttConfig>) => {
-        setSttConfig(prev => {
-            const newConfig = { ...prev, ...updates };
-            localStorage.setItem('os_stt_config', JSON.stringify(newConfig));
-            return newConfig;
-        });
-    };
-    const saveModels = (models: string[]) => { setAvailableModels(models); localStorage.setItem('os_available_models', JSON.stringify(models)); };
-    const addApiPreset = (name: string, config: APIConfig) => { setApiPresets(prev => { const next = [...prev, { id: Date.now().toString(), name, config }]; localStorage.setItem('os_api_presets', JSON.stringify(next)); return next; }); };
-    const removeApiPreset = (id: string) => { setApiPresets(prev => { const next = prev.filter(p => p.id !== id); localStorage.setItem('os_api_presets', JSON.stringify(next)); return next; }); };
-    const savePresets = (presets: ApiPreset[]) => { setApiPresets(presets); localStorage.setItem('os_api_presets', JSON.stringify(presets)); };
-    const addCharacter = async () => { const name = 'New Character'; const newChar: CharacterProfile = { id: `char-${Date.now()}`, name: name, avatar: generateAvatar(name), description: '点击编辑设定...', systemPrompt: '', memories: [], contextLimit: 500 }; setCharacters(prev => [...prev, newChar]); setActiveCharacterId(newChar.id); await DB.saveCharacter(newChar); };
-    const updateCharacter = async (id: string, updates: Partial<CharacterProfile>) => { setCharacters(prev => { const updated = prev.map(c => c.id === id ? { ...c, ...updates } : c); const target = updated.find(c => c.id === id); if (target) DB.saveCharacter(target); return updated; }); };
-    const deleteCharacter = async (id: string) => { setCharacters(prev => { const remaining = prev.filter(c => c.id !== id); if (remaining.length > 0 && activeCharacterId === id) { setActiveCharacterId(remaining[0].id); } return remaining; }); await DB.deleteCharacter(id); };
-
-    // Group Methods
-    const createGroup = async (name: string, members: string[]) => {
-        const newGroup: GroupProfile = {
-            id: `group-${Date.now()}`,
-            name,
-            members,
-            avatar: generateAvatar(name),
-            createdAt: Date.now()
-        };
-        await DB.saveGroup(newGroup);
-        setGroups(prev => [...prev, newGroup]);
-    };
-
-    const deleteGroup = async (id: string) => {
-        await DB.deleteGroup(id);
-        setGroups(prev => prev.filter(g => g.id !== id));
-    };
-
-    // Worldbook Methods
-    const addWorldbook = async (wb: Worldbook) => {
-        setWorldbooks(prev => [...prev, wb]);
-        await DB.saveWorldbook(wb);
-    };
-
-    const updateWorldbook = async (id: string, updates: Partial<Worldbook>) => {
-        let fullUpdatedWb: Worldbook | undefined;
-        setWorldbooks(prev => {
-            const next = prev.map(wb => {
-                if (wb.id === id) {
-                    fullUpdatedWb = { ...wb, ...updates, updatedAt: Date.now() };
-                    return fullUpdatedWb;
-                }
-                return wb;
-            });
-            return next;
-        });
-
-        if (fullUpdatedWb) {
-            await DB.saveWorldbook(fullUpdatedWb);
-
-            const charsToSync = characters.filter(c => c.mountedWorldbooks?.some(m => m.id === id));
-
-            if (charsToSync.length > 0) {
-                const updatedChars = characters.map(char => {
-                    if (char.mountedWorldbooks?.some(m => m.id === id)) {
-                        const newMounted = char.mountedWorldbooks.map(m =>
-                            m.id === id
-                                ? {
-                                    id: fullUpdatedWb!.id,
-                                    title: fullUpdatedWb!.title,
-                                    content: fullUpdatedWb!.content,
-                                    category: fullUpdatedWb!.category,
-                                    position: fullUpdatedWb!.position
-                                }
-                                : m
-                        );
-                        const newChar = { ...char, mountedWorldbooks: newMounted };
-                        DB.saveCharacter(newChar);
-                        return newChar;
-                    }
-                    return char;
-                });
-                setCharacters(updatedChars);
-                addToast(`已同步更新 ${charsToSync.length} 个相关角色的缓存`, 'info');
-            }
-        }
-    };
-
-    const deleteWorldbook = async (id: string) => {
-        setWorldbooks(prev => prev.filter(wb => wb.id !== id));
-        await DB.deleteWorldbook(id);
-
-        const updatedChars = characters.map(char => {
-            if (char.mountedWorldbooks?.some(m => m.id === id)) {
-                const newMounted = char.mountedWorldbooks.filter(m => m.id !== id);
-                const newChar = { ...char, mountedWorldbooks: newMounted };
-                DB.saveCharacter(newChar);
-                return newChar;
-            }
-            return char;
-        });
-        setCharacters(updatedChars);
-        addToast('世界书已删除 (同步移除角色挂载)', 'success');
-    };
-
-    // Novel Methods
-    const addNovel = async (novel: NovelBook) => {
-        setNovels(prev => [novel, ...prev]);
-        await DB.saveNovel(novel);
-    };
-
-    const updateNovel = async (id: string, updates: Partial<NovelBook>) => {
-        setNovels(prev => {
-            const next = prev.map(n => n.id === id ? { ...n, ...updates, lastActiveAt: Date.now() } : n);
-            const target = next.find(n => n.id === id);
-            if (target) DB.saveNovel(target);
-            return next;
-        });
-    };
-
-    const deleteNovel = async (id: string) => {
-        setNovels(prev => prev.filter(n => n.id !== id));
-        await DB.deleteNovel(id);
-    };
-
+    const updateApiConfig = configUpdateApiConfig;
+    const updateRealtimeConfig = configUpdateRealtimeConfig;
     const updateUserProfile = async (updates: Partial<UserProfile>) => { setUserProfile(prev => { const next = { ...prev, ...updates }; DB.saveUserProfile(next); return next; }); };
     const addCustomTheme = async (theme: ChatTheme) => { setCustomThemes(prev => { const exists = prev.find(t => t.id === theme.id); if (exists) return prev.map(t => t.id === theme.id ? theme : t); return [...prev, theme]; }); await DB.saveTheme(theme); };
     const removeCustomTheme = async (id: string) => { setCustomThemes(prev => prev.filter(t => t.id !== id)); await DB.deleteTheme(id); };
     const setCustomIcon = async (appId: string, iconUrl: string | undefined) => { setCustomIcons(prev => { const next = { ...prev }; if (iconUrl) next[appId] = iconUrl; else delete next[appId]; return next; }); if (iconUrl) { await DB.saveAsset(`icon_${appId}`, iconUrl); } else { await DB.deleteAsset(`icon_${appId}`); } };
-    const handleSetActiveCharacter = (id: string) => { setActiveCharacterId(id); localStorage.setItem('os_last_active_char_id', id); };
-
     // --- System Export/Import ---
     const exportSystem = async (mode: 'text_only' | 'media_only' | 'full'): Promise<Blob> => {
         try {
@@ -1056,39 +743,11 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
         // Data + Config
         theme,
         updateTheme,
-        apiConfig,
-        updateApiConfig,
         isDataLoaded,
-        characters,
-        activeCharacterId,
-        addCharacter,
-        updateCharacter,
-        deleteCharacter,
-        setActiveCharacterId: handleSetActiveCharacter,
-        worldbooks,
-        addWorldbook,
-        updateWorldbook,
-        deleteWorldbook,
-        novels,
-        addNovel,
-        updateNovel,
-        deleteNovel,
-        groups,
-        createGroup,
-        deleteGroup,
+        ...publicConfigCtx,
+        ...characterCtx,
         userProfile,
         updateUserProfile,
-        availableModels,
-        setAvailableModels: saveModels,
-        apiPresets,
-        addApiPreset,
-        removeApiPreset,
-        realtimeConfig,
-        updateRealtimeConfig,
-        ttsConfig,
-        updateTtsConfig,
-        sttConfig,
-        updateSttConfig,
         customThemes,
         addCustomTheme,
         removeCustomTheme,
@@ -1130,9 +789,15 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     return (
         <NotificationProvider>
             <AppProvider hapticsEnabled={hapticsEnabled} setHapticsEnabled={setHapticsEnabled}>
-                <OSDataProvider>
-                    {children}
-                </OSDataProvider>
+                <CharacterProvider initialCharacter={initialCharacter} generateAvatar={generateAvatar}>
+                    <ConfigProvider>
+                        <AgentProvider>
+                            <OSDataProvider>
+                                {children}
+                            </OSDataProvider>
+                        </AgentProvider>
+                    </ConfigProvider>
+                </CharacterProvider>
             </AppProvider>
         </NotificationProvider>
     );
