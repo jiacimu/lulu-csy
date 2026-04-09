@@ -9,7 +9,18 @@
  * - 高分辨率 Procedural Texture（128px Canvas 生成）
  */
 import React,{ useRef,useEffect } from 'react';
-import * as THREE from 'three';
+import {
+    AdditiveBlending,
+    BufferAttribute,
+    BufferGeometry,
+    CanvasTexture,
+    Color,
+    PerspectiveCamera,
+    Points,
+    PointsMaterial,
+    Scene,
+    WebGLRenderer,
+} from 'three';
 
 const DUST_COUNT = 200;  // 微尘星点
 const GLOW_COUNT = 15;   // 大光晕
@@ -42,11 +53,11 @@ const GoldenParticles: React.FC<{ paused?: boolean }> = ({ paused = false }) => 
         // --- Renderer Setup ---
         const w = container.clientWidth;
         const h = container.clientHeight;
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
+        const scene = new Scene();
+        const camera = new PerspectiveCamera(50, w / h, 0.1, 100);
         camera.position.z = 6;
 
-        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
+        const renderer = new WebGLRenderer({ alpha: true, antialias: false });
         renderer.setSize(w, h);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.5));
         renderer.setClearColor(0x000000, 0);
@@ -68,7 +79,7 @@ const GoldenParticles: React.FC<{ paused?: boolean }> = ({ paused = false }) => 
         dustGrad.addColorStop(1, 'rgba(0,0,0,0)');
         dustCtx.fillStyle = dustGrad;
         dustCtx.fillRect(0, 0, 128, 128);
-        const dustTexture = new THREE.CanvasTexture(dustCanvas);
+        const dustTexture = new CanvasTexture(dustCanvas);
         dustTexture.needsUpdate = true;
 
         // 2. Soft bokeh glow — very gentle falloff for depth
@@ -83,7 +94,7 @@ const GoldenParticles: React.FC<{ paused?: boolean }> = ({ paused = false }) => 
         glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
         glowCtx.fillStyle = glowGrad;
         glowCtx.fillRect(0, 0, 128, 128);
-        const glowTexture = new THREE.CanvasTexture(glowCanvas);
+        const glowTexture = new CanvasTexture(glowCanvas);
         glowTexture.needsUpdate = true;
 
         // 3. Cross-star flare — 4-point star
@@ -116,7 +127,7 @@ const GoldenParticles: React.FC<{ paused?: boolean }> = ({ paused = false }) => 
         coreGrad.addColorStop(1, 'rgba(255,235,180,0)');
         crossCtx.fillStyle = coreGrad;
         crossCtx.fillRect(52, 52, 24, 24);
-        const crossTexture = new THREE.CanvasTexture(crossCanvas);
+        const crossTexture = new CanvasTexture(crossCanvas);
         crossTexture.needsUpdate = true;
 
         // ===== Particle Data =====
@@ -145,19 +156,19 @@ const GoldenParticles: React.FC<{ paused?: boolean }> = ({ paused = false }) => 
             dustData.twinkle[i] = rng() * Math.PI * 2;
         }
 
-        const dustGeom = new THREE.BufferGeometry();
-        dustGeom.setAttribute('position', new THREE.BufferAttribute(dustData.positions, 3));
-        const dustMat = new THREE.PointsMaterial({
+        const dustGeom = new BufferGeometry();
+        dustGeom.setAttribute('position', new BufferAttribute(dustData.positions, 3));
+        const dustMat = new PointsMaterial({
             map: dustTexture,
             size: 0.06,
             sizeAttenuation: true,
             transparent: true,
             opacity: 0.85,
-            blending: THREE.AdditiveBlending,
+            blending: AdditiveBlending,
             depthWrite: false,
-            color: new THREE.Color('#FFF5E0'),
+            color: new Color('#FFF5E0'),
         });
-        const dustPoints = new THREE.Points(dustGeom, dustMat);
+        const dustPoints = new Points(dustGeom, dustMat);
         scene.add(dustPoints);
 
         // --- Layer 2: Large Bokeh Glows (few, soft depth) ---
@@ -177,19 +188,19 @@ const GoldenParticles: React.FC<{ paused?: boolean }> = ({ paused = false }) => 
             glowData.speeds[i] = rng() * 0.08 + 0.02;
             glowData.phases[i] = rng() * Math.PI * 2;
         }
-        const glowGeom = new THREE.BufferGeometry();
-        glowGeom.setAttribute('position', new THREE.BufferAttribute(glowData.positions, 3));
-        const glowMat = new THREE.PointsMaterial({
+        const glowGeom = new BufferGeometry();
+        glowGeom.setAttribute('position', new BufferAttribute(glowData.positions, 3));
+        const glowMat = new PointsMaterial({
             map: glowTexture,
             size: 0.35,
             sizeAttenuation: true,
             transparent: true,
             opacity: 0.15,
-            blending: THREE.AdditiveBlending,
+            blending: AdditiveBlending,
             depthWrite: false,
-            color: new THREE.Color('#D4AF37'),
+            color: new Color('#D4AF37'),
         });
-        const glowPoints = new THREE.Points(glowGeom, glowMat);
+        const glowPoints = new Points(glowGeom, glowMat);
         scene.add(glowPoints);
 
         // --- Layer 3: Cross-Star Flares (rare, dramatic) ---
@@ -207,19 +218,19 @@ const GoldenParticles: React.FC<{ paused?: boolean }> = ({ paused = false }) => 
             crossData.phases[i] = rng() * Math.PI * 2;
             crossData.baseSizes[i] = rng() * 0.25 + 0.15;
         }
-        const crossGeom = new THREE.BufferGeometry();
-        crossGeom.setAttribute('position', new THREE.BufferAttribute(crossData.positions, 3));
-        const crossMat = new THREE.PointsMaterial({
+        const crossGeom = new BufferGeometry();
+        crossGeom.setAttribute('position', new BufferAttribute(crossData.positions, 3));
+        const crossMat = new PointsMaterial({
             map: crossTexture,
             size: 0.25,
             sizeAttenuation: true,
             transparent: true,
             opacity: 0.4,
-            blending: THREE.AdditiveBlending,
+            blending: AdditiveBlending,
             depthWrite: false,
-            color: new THREE.Color('#FFE8B0'),
+            color: new Color('#FFE8B0'),
         });
-        const crossPoints = new THREE.Points(crossGeom, crossMat);
+        const crossPoints = new Points(crossGeom, crossMat);
         scene.add(crossPoints);
 
         // ===== Animation Loop =====
@@ -229,7 +240,7 @@ const GoldenParticles: React.FC<{ paused?: boolean }> = ({ paused = false }) => 
             time += 0.002;
 
             // --- Dust: spiral drift + twinkle ---
-            const dPos = dustGeom.getAttribute('position') as THREE.BufferAttribute;
+            const dPos = dustGeom.getAttribute('position') as BufferAttribute;
             for (let i = 0; i < DUST_COUNT; i++) {
                 const speed = dustData.speeds[i];
                 const orbit = dustData.orbits[i];
@@ -245,7 +256,7 @@ const GoldenParticles: React.FC<{ paused?: boolean }> = ({ paused = false }) => 
             dustMat.opacity = 0.75 + Math.sin(time * 4) * 0.1;
 
             // --- Glow: gentle float + breathing ---
-            const gPos = glowGeom.getAttribute('position') as THREE.BufferAttribute;
+            const gPos = glowGeom.getAttribute('position') as BufferAttribute;
             for (let i = 0; i < GLOW_COUNT; i++) {
                 gPos.array[i * 3 + 1] += glowData.speeds[i] * 0.003;
                 if (gPos.array[i * 3 + 1] > 3.5) gPos.array[i * 3 + 1] = -3.5;
@@ -254,7 +265,7 @@ const GoldenParticles: React.FC<{ paused?: boolean }> = ({ paused = false }) => 
             glowMat.opacity = 0.1 + Math.sin(time * 1.5) * 0.05;
 
             // --- Cross: shimmer pulsation ---
-            const cPos = crossGeom.getAttribute('position') as THREE.BufferAttribute;
+            const cPos = crossGeom.getAttribute('position') as BufferAttribute;
             for (let i = 0; i < CROSS_COUNT; i++) {
                 cPos.array[i * 3 + 1] += 0.002;
                 if (cPos.array[i * 3 + 1] > 3) cPos.array[i * 3 + 1] = -3;

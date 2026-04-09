@@ -8,11 +8,11 @@ import React,{ useState,useCallback,useEffect,Suspense } from 'react';
 import './zhaixinglou.css'; // Self-contained keyframes — independent from index.css
 import { useOS } from '../../context/OSContext';
 import { useZhaixinglouStore,SelectedCard } from './zhaixinglouStore';
-import GoldenParticles from './GoldenParticles';
 import { GothicHeader,GothicDivider,GothicCornerDecor,GothicBackgroundDecor,DECOR } from './components/GothicDecorations';
 import SecondaryApiSettingsModal from './SecondaryApiSettingsModal';
 import { useTarotPreloader } from './AssetPreloader';
 // --- Lazy-loaded sub-pages (progressively prefetched by viewState) ---
+const LazyGoldenParticles = React.lazy(() => import('./GoldenParticles'));
 const StarMirror = React.lazy(() => import('./StarMirror'));
 const StarOrbit = React.lazy(() => import('./StarOrbit'));
 const StarCalendar = React.lazy(() => import('./StarCalendar'));
@@ -50,9 +50,35 @@ const ZhaixinglouApp: React.FC = () => {
     const { state, dispatch, goBack } = useZhaixinglouStore();
     const [flippingCardId, setFlippingCardId] = useState<string | null>(null);
     const [flipPhase, setFlipPhase] = useState<'idle' | 'toBack' | 'holdBack' | 'toFront' | 'done'>('idle');
+    const [showParticles, setShowParticles] = useState(false);
 
     // Preload all tarot images + font in background
     useTarotPreloader();
+
+    // Load decorative particles after the first paint so the entry screen remains interactive.
+    useEffect(() => {
+        let cancelled = false;
+        let idleId: number | null = null;
+        const rIC = window.requestIdleCallback || ((cb: () => void) => window.setTimeout(cb, 1));
+        const cIC = window.cancelIdleCallback || window.clearTimeout;
+        const frameId = window.requestAnimationFrame(() => {
+            const mountParticles = () => {
+                if (!cancelled) {
+                    setShowParticles(true);
+                }
+            };
+
+            idleId = rIC(mountParticles, { timeout: 1200 });
+        });
+
+        return () => {
+            cancelled = true;
+            window.cancelAnimationFrame(frameId);
+            if (idleId !== null) {
+                cIC(idleId);
+            }
+        };
+    }, []);
 
     // --- Progressive prefetch: preload sub-page chunks during user's natural interaction pauses ---
     // NOTE: Safari/iOS does NOT support requestIdleCallback — use setTimeout fallback.
@@ -409,7 +435,11 @@ const ZhaixinglouApp: React.FC = () => {
     return (
         <div className="h-full w-full relative flex flex-col" style={{ background: '#060204', fontFamily: 'ZhaixinglouCN, serif' }}>
             <NoiseBackground />
-            <GoldenParticles paused={!!flippingCardId} />
+            {showParticles && (
+                <Suspense fallback={null}>
+                    <LazyGoldenParticles paused={!!flippingCardId} />
+                </Suspense>
+            )}
             {renderContent()}
             <SecondaryApiSettingsModal
                 isOpen={state.showApiSettings}

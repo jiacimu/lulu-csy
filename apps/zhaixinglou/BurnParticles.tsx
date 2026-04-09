@@ -18,7 +18,18 @@
  *   <BurnParticles active={isBurning} onComplete={() => { ... }} />
  */
 import React,{ useRef,useEffect } from 'react';
-import * as THREE from 'three';
+import {
+    AdditiveBlending,
+    BufferAttribute,
+    BufferGeometry,
+    CanvasTexture,
+    Color,
+    PerspectiveCamera,
+    Points,
+    PointsMaterial,
+    Scene,
+    WebGLRenderer,
+} from 'three';
 
 // ── Particle counts ──
 const DUST_COUNT = 160;
@@ -62,11 +73,11 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
         // ═══════════════════════════════════════
         const w = container.clientWidth;
         const h = container.clientHeight;
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 100);
+        const scene = new Scene();
+        const camera = new PerspectiveCamera(60, w / h, 0.1, 100);
         camera.position.z = 5;
 
-        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
+        const renderer = new WebGLRenderer({ alpha: true, antialias: false });
         renderer.setSize(w, h);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.5));
         renderer.setClearColor(0x000000, 0);
@@ -90,7 +101,7 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
         dustGrad.addColorStop(1, 'rgba(0,0,0,0)');
         dustCtx.fillStyle = dustGrad;
         dustCtx.fillRect(0, 0, 128, 128);
-        const dustTexture = new THREE.CanvasTexture(dustCanvas);
+        const dustTexture = new CanvasTexture(dustCanvas);
 
         // 2. Glow — large soft golden bokeh
         const glowCanvas = document.createElement('canvas');
@@ -105,7 +116,7 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
         glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
         glowCtx.fillStyle = glowGrad;
         glowCtx.fillRect(0, 0, 128, 128);
-        const glowTexture = new THREE.CanvasTexture(glowCanvas);
+        const glowTexture = new CanvasTexture(glowCanvas);
 
         // 3. Cross-star flare — 4-point star
         const crossCanvas = document.createElement('canvas');
@@ -137,7 +148,7 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
         coreGrad.addColorStop(1, 'rgba(255,235,180,0)');
         crossCtx.fillStyle = coreGrad;
         crossCtx.fillRect(48, 48, 32, 32);
-        const crossTexture = new THREE.CanvasTexture(crossCanvas);
+        const crossTexture = new CanvasTexture(crossCanvas);
 
         // 4. Ember — warm orange-red spark for magic feel
         const emberCanvas = document.createElement('canvas');
@@ -152,7 +163,7 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
         emberGrad.addColorStop(1, 'rgba(0,0,0,0)');
         emberCtx.fillStyle = emberGrad;
         emberCtx.fillRect(0, 0, 64, 64);
-        const emberTexture = new THREE.CanvasTexture(emberCanvas);
+        const emberTexture = new CanvasTexture(emberCanvas);
 
         // ═══════════════════════════════════════
         // Particle Data Generation
@@ -188,19 +199,19 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
             dustLifeOffsets[i] = rng() * 0.15; // staggered birth over first 15% of animation
         }
 
-        const dustGeom = new THREE.BufferGeometry();
-        dustGeom.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
-        const dustMat = new THREE.PointsMaterial({
+        const dustGeom = new BufferGeometry();
+        dustGeom.setAttribute('position', new BufferAttribute(dustPositions, 3));
+        const dustMat = new PointsMaterial({
             map: dustTexture,
             size: 0.08,
             sizeAttenuation: true,
             transparent: true,
             opacity: 0,
-            blending: THREE.AdditiveBlending,
+            blending: AdditiveBlending,
             depthWrite: false,
-            color: new THREE.Color('#FFF5E0'),
+            color: new Color('#FFF5E0'),
         });
-        const dustPoints = new THREE.Points(dustGeom, dustMat);
+        const dustPoints = new Points(dustGeom, dustMat);
         scene.add(dustPoints);
 
         // ── Layer 2: Large Glow Orbs ──
@@ -220,19 +231,19 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
             });
         }
 
-        const glowGeom = new THREE.BufferGeometry();
-        glowGeom.setAttribute('position', new THREE.BufferAttribute(glowPositions, 3));
-        const glowMat = new THREE.PointsMaterial({
+        const glowGeom = new BufferGeometry();
+        glowGeom.setAttribute('position', new BufferAttribute(glowPositions, 3));
+        const glowMat = new PointsMaterial({
             map: glowTexture,
             size: 0.5,
             sizeAttenuation: true,
             transparent: true,
             opacity: 0,
-            blending: THREE.AdditiveBlending,
+            blending: AdditiveBlending,
             depthWrite: false,
-            color: new THREE.Color('#D4AF37'),
+            color: new Color('#D4AF37'),
         });
-        const glowPoints = new THREE.Points(glowGeom, glowMat);
+        const glowPoints = new Points(glowGeom, glowMat);
         scene.add(glowPoints);
 
         // ── Layer 3: Cross-Star Flares ──
@@ -253,19 +264,19 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
             crossPhases[i] = rng() * Math.PI * 2;
         }
 
-        const crossGeom = new THREE.BufferGeometry();
-        crossGeom.setAttribute('position', new THREE.BufferAttribute(crossPositions, 3));
-        const crossMat = new THREE.PointsMaterial({
+        const crossGeom = new BufferGeometry();
+        crossGeom.setAttribute('position', new BufferAttribute(crossPositions, 3));
+        const crossMat = new PointsMaterial({
             map: crossTexture,
             size: 0.35,
             sizeAttenuation: true,
             transparent: true,
             opacity: 0,
-            blending: THREE.AdditiveBlending,
+            blending: AdditiveBlending,
             depthWrite: false,
-            color: new THREE.Color('#FFE8B0'),
+            color: new Color('#FFE8B0'),
         });
-        const crossPoints = new THREE.Points(crossGeom, crossMat);
+        const crossPoints = new Points(crossGeom, crossMat);
         scene.add(crossPoints);
 
         // ── Layer 4: Embers (warm sparks for magic feel) ──
@@ -286,19 +297,19 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
             });
         }
 
-        const emberGeom = new THREE.BufferGeometry();
-        emberGeom.setAttribute('position', new THREE.BufferAttribute(emberPositions, 3));
-        const emberMat = new THREE.PointsMaterial({
+        const emberGeom = new BufferGeometry();
+        emberGeom.setAttribute('position', new BufferAttribute(emberPositions, 3));
+        const emberMat = new PointsMaterial({
             map: emberTexture,
             size: 0.04,
             sizeAttenuation: true,
             transparent: true,
             opacity: 0,
-            blending: THREE.AdditiveBlending,
+            blending: AdditiveBlending,
             depthWrite: false,
-            color: new THREE.Color('#FFB040'),
+            color: new Color('#FFB040'),
         });
-        const emberPoints = new THREE.Points(emberGeom, emberMat);
+        const emberPoints = new Points(emberGeom, emberMat);
         scene.add(emberPoints);
 
         // ═══════════════════════════════════════
@@ -328,7 +339,7 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
             const finalSizeFactor = Math.max(sizeFactor, 0.1);
 
             // ── Update Dust Layer ──
-            const dPos = dustGeom.getAttribute('position') as THREE.BufferAttribute;
+            const dPos = dustGeom.getAttribute('position') as BufferAttribute;
             for (let i = 0; i < DUST_COUNT; i++) {
                 const lifeOffset = dustLifeOffsets[i];
                 const localT = Math.max(0, t - lifeOffset);
@@ -367,7 +378,7 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
             dustMat.color.setRGB(twinkle, twinkle * 0.96, twinkle * 0.88);
 
             // ── Update Glow Layer ──
-            const gPos = glowGeom.getAttribute('position') as THREE.BufferAttribute;
+            const gPos = glowGeom.getAttribute('position') as BufferAttribute;
             for (let i = 0; i < GLOW_COUNT; i++) {
                 const v = glowVelocities[i];
                 gPos.array[i * 3] += v.vx;
@@ -382,7 +393,7 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
             glowMat.size = 0.5 * finalSizeFactor;
 
             // ── Update Cross-Star Layer ──
-            const cPos = crossGeom.getAttribute('position') as THREE.BufferAttribute;
+            const cPos = crossGeom.getAttribute('position') as BufferAttribute;
             for (let i = 0; i < CROSS_COUNT; i++) {
                 const v = crossVelocities[i];
                 cPos.array[i * 3] += v.vx;
@@ -397,7 +408,7 @@ const BurnParticles: React.FC<BurnParticlesProps> = ({ active, onComplete }) => 
             crossMat.size = 0.35 * finalSizeFactor;
 
             // ── Update Ember Layer ──
-            const ePos = emberGeom.getAttribute('position') as THREE.BufferAttribute;
+            const ePos = emberGeom.getAttribute('position') as BufferAttribute;
             for (let i = 0; i < EMBER_COUNT; i++) {
                 const v = emberVelocities[i];
                 ePos.array[i * 3] += v.vx + Math.sin(elapsed * 0.001 * v.wobble) * 0.003;
