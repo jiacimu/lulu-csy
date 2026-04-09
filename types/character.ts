@@ -181,6 +181,7 @@ export interface CharacterProfile {
     // Creative Status Bar (创意状态栏)
     statusBarMode?: StatusBarMode;             // 'classic' | 'creative' | 'custom' (default: 'classic')
     customStatusTemplates?: CustomStatusTemplate[];  // User-defined templates for 'custom' mode
+    activeCustomTemplateId?: string;          // 当前活跃的自定义模板 ID
     lastStatusCard?: StatusCardData;           // Last generated creative card data
 }
 

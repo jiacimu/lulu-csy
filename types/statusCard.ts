@@ -28,6 +28,36 @@ export interface StatusCardStyle {
     decoration?: string;            // 装饰元素名
 }
 
+/** 可视化编辑器字段定义 */
+export interface TemplateField {
+    id: string;
+    name: string;          // 字段显示名（如 "时间"、"地点"）
+    description: string;   // 给 AI 的提示（如 "当前时间，格式 HH:MM"）
+    required: boolean;
+}
+
+/** 嵌入图片定义 */
+export interface EmbeddedImage {
+    id: string;
+    dataUri: string;       // base64 图片
+    x: number;             // 百分比位置
+    y: number;
+    width: number;         // px
+    opacity: number;
+}
+
+/** 卡片外观参数 */
+export interface CardAppearance {
+    bgColor?: string;
+    bgGradient?: [string, string];
+    textColor?: string;
+    fontStyle?: 'serif' | 'sans' | 'handwrite' | 'mono';
+    borderRadius?: number;
+    width?: number;
+    height?: number;
+    images?: EmbeddedImage[];
+}
+
 /** 用户自定义模板 */
 export interface CustomStatusTemplate {
     id: string;
@@ -36,6 +66,8 @@ export interface CustomStatusTemplate {
     extractRegex: string;           // 用户自定义的提取正则（从 AI 输出中提取渲染内容）
     htmlTemplate?: string;          // 用户自定义的 HTML 模板（支持 $1, $2 等正则捕获组替换）
     renderMode: 'html' | 'text';    // 渲染方式：html=iframe沙箱，text=纯文本卡片
+    fields?: TemplateField[];       // 可视化编辑器字段定义
+    cardStyle?: CardAppearance;     // 卡片外观参数
 }
 
 /** 状态栏模式类型 */
