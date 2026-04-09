@@ -103,6 +103,12 @@ const Chat: React.FC = () => {
     const [autoCall, setAutoCall] = useState(() => {
         try { return JSON.parse(localStorage.getItem(`chat_auto_call_${activeCharacterId}`) || 'false'); } catch { return false; }
     });
+    const [autoShareSong, setAutoShareSong] = useState(() => {
+        try { return JSON.parse(localStorage.getItem(`chat_auto_share_song_${activeCharacterId}`) || 'false'); } catch { return false; }
+    });
+    const [injectPlaybackContext, setInjectPlaybackContext] = useState(() => {
+        try { return JSON.parse(localStorage.getItem(`chat_inject_playback_context_${activeCharacterId}`) || 'false'); } catch { return false; }
+    });
 
     // --- Voice Recording (STT) ---
     const voiceRecorder = useVoiceRecorder();
@@ -200,6 +206,8 @@ const Chat: React.FC = () => {
             unlockAudio(); // 提前解锁音频（来电是程序触发，无用户手势，需要预解锁）
             openApp(AppID.VoiceCall, { direction: 'incoming', mode, callReason });
         } : undefined,
+        autoShareSong,
+        injectPlaybackContext,
         onMoodUpdate: (charId: string, moodState: any, statusCardData?: any) => {
             const updates: any = { moodState };
             if (statusCardData) updates.lastStatusCard = statusCardData;
@@ -313,6 +321,18 @@ const Chat: React.FC = () => {
             try {
                 setAutoTts(JSON.parse(localStorage.getItem(`chat_auto_tts_${activeCharacterId}`) || 'false'));
             } catch { setAutoTts(false); }
+            // Per-character auto call toggle
+            try {
+                setAutoCall(JSON.parse(localStorage.getItem(`chat_auto_call_${activeCharacterId}`) || 'false'));
+            } catch { setAutoCall(false); }
+            // Per-character auto share song toggle
+            try {
+                setAutoShareSong(JSON.parse(localStorage.getItem(`chat_auto_share_song_${activeCharacterId}`) || 'false'));
+            } catch { setAutoShareSong(false); }
+            // Per-character playback context toggle
+            try {
+                setInjectPlaybackContext(JSON.parse(localStorage.getItem(`chat_inject_playback_context_${activeCharacterId}`) || 'false'));
+            } catch { setInjectPlaybackContext(false); }
         }
     }, [activeCharacterId, reloadMessages]);
 
@@ -1294,14 +1314,31 @@ const Chat: React.FC = () => {
                     setAutoCall(next);
                     localStorage.setItem(`chat_auto_call_${activeCharacterId}`, JSON.stringify(next));
                 }}
+                autoShareSong={autoShareSong}
+                onToggleAutoShareSong={() => {
+                    const next = !autoShareSong;
+                    setAutoShareSong(next);
+                    localStorage.setItem(`chat_auto_share_song_${activeCharacterId}`, JSON.stringify(next));
+                }}
+                injectPlaybackContext={injectPlaybackContext}
+                onToggleInjectPlaybackContext={() => {
+                    const next = !injectPlaybackContext;
+                    setInjectPlaybackContext(next);
+                    localStorage.setItem(`chat_inject_playback_context_${activeCharacterId}`, JSON.stringify(next));
+                }}
                 statusBarMode={char.statusBarMode || 'classic'}
                 onStatusBarModeChange={(mode: string) => {
                     updateCharacter(char.id, { statusBarMode: mode as any });
                 }}
                 customStatusTemplates={char.customStatusTemplates}
                 onSaveCustomTemplate={(tpl) => {
-                    updateCharacter(char.id, { customStatusTemplates: [tpl] });
-                    addToast('自定义模板已保存', 'success');
+                    const { _setActiveOnly, ...templateToSave } = tpl;
+                    if (_setActiveOnly) {
+                        updateCharacter(char.id, { activeCustomTemplateId: tpl.id });
+                    } else {
+                        updateCharacter(char.id, { customStatusTemplates: [templateToSave] });
+                        addToast('自定义模板已保存', 'success');
+                    }
                 }}
                 showThinking={char.showThinking !== false}
                 onToggleShowThinking={() => updateCharacter(char.id, { showThinking: char.showThinking === false ? true : false })}

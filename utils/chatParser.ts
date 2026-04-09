@@ -2,6 +2,7 @@
 import { DB } from './db';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { stripCoTResidual } from './thinkingExtractor';
+import type { SongShareCard } from '../types/music';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Bilingual Marker — single source of truth for the %%BILINGUAL%% system
@@ -16,6 +17,27 @@ export const BILINGUAL_MARKER = '%%BILINGUAL%%';
  * Use with `gi` flags for global/case-insensitive matching.
  */
 export const BILINGUAL_RE = /%%\s*BILINGUAL\s*%%/gi;
+
+export type ChatResponsePart =
+    | { type: 'text'; content: string }
+    | { type: 'emoji'; content: string }
+    | { type: 'song'; content: SongShareCard };
+
+function parseSongShareContent(content: string): SongShareCard | null {
+    const parts = content.split('|').map((part) => part.trim());
+    const songName = parts[0] || '';
+    const artist = parts[1] || '';
+    if (!songName || !artist) return null;
+
+    const rawSongId = Number(parts[2] || '0');
+    const songId = Number.isFinite(rawSongId) ? Math.max(0, Math.trunc(rawSongId)) : 0;
+
+    return {
+        songId,
+        songName,
+        artist,
+    };
+}
 
 /**
  * Parse a content string that may contain a %%BILINGUAL%% marker.
@@ -145,6 +167,10 @@ export const ChatParser = {
             .replace(/\[\d{4}[-/年]\d{1,2}[-/月]\d{1,2}.*?\]/g, '')
             .replace(/^[\w\u4e00-\u9fa5]+:\s*/, '')
             .replace(/[【\[](?:(?:你|User|用户|System|我)\s*)?发送了?表情包?[:：]\s*(.*?)[】\]]/g, '[[SEND_EMOJI: $1]]');
+        result = result.replace(
+            /[\[【]\s*(?:分享(?:歌曲|音乐)|(?:share[-_]?)?song)\s*[:：]\s*([^\]】]+)\s*[\]】]/gi,
+            (_fullMatch, content: string) => `[[SHARE_SONG: ${content.trim()}]]`,
+        );
         // Strip any CoT protocol residual that leaked through (e.g. from Gemini native thinking)
         result = stripCoTResidual(result);
         return result;
@@ -216,19 +242,33 @@ export const ChatParser = {
     },
 
     // Split text into bubbles (text and emojis)
-    splitResponse: (content: string): { type: 'text' | 'emoji', content: string }[] => {
-        const emojiPattern = /\[\[SEND_EMOJI:\s*(.*?)\]\]/g;
-        const parts: { type: 'text' | 'emoji', content: string }[] = [];
-        let lastIndex = 0;
-        let emojiMatch;
+    parseSongShareContent,
 
-        while ((emojiMatch = emojiPattern.exec(content)) !== null) {
-            if (emojiMatch.index > lastIndex) {
-                const textBefore = content.slice(lastIndex, emojiMatch.index).trim();
+    splitResponse: (content: string): ChatResponsePart[] => {
+        const tokenPattern = /\[\[(SEND_EMOJI|SHARE_SONG):\s*([\s\S]*?)\]\]/g;
+        const parts: ChatResponsePart[] = [];
+        let lastIndex = 0;
+        let tokenMatch: RegExpExecArray | null;
+
+        while ((tokenMatch = tokenPattern.exec(content)) !== null) {
+            if (tokenMatch.index > lastIndex) {
+                const textBefore = content.slice(lastIndex, tokenMatch.index).trim();
                 if (textBefore) parts.push({ type: 'text', content: textBefore });
             }
-            parts.push({ type: 'emoji', content: emojiMatch[1].trim() });
-            lastIndex = emojiMatch.index + emojiMatch[0].length;
+
+            if (tokenMatch[1] === 'SEND_EMOJI') {
+                parts.push({ type: 'emoji', content: tokenMatch[2].trim() });
+            } else {
+                const songCard = parseSongShareContent(tokenMatch[2]);
+                if (songCard) {
+                    parts.push({ type: 'song', content: songCard });
+                } else {
+                    const rawTag = tokenMatch[0].trim();
+                    if (rawTag) parts.push({ type: 'text', content: rawTag });
+                }
+            }
+
+            lastIndex = tokenMatch.index + tokenMatch[0].length;
         }
 
         if (lastIndex < content.length) {

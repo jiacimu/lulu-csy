@@ -1,8 +1,13 @@
 
 import React,{ useRef,useState } from 'react';
 import Modal from '../os/Modal';
-import { CharacterProfile,Message,EmojiCategory } from '../../types';
+import { useOS } from '../../context/OSContext';
+import { AppID,CharacterProfile,Message,EmojiCategory } from '../../types';
 import { CustomStatusTemplate } from '../../types/statusCard';
+
+type CustomTemplateSelection = CustomStatusTemplate & {
+    _setActiveOnly?: boolean;
+};
 
 interface ChatModalsProps {
     modalType: string;
@@ -88,12 +93,16 @@ interface ChatModalsProps {
     onToggleAutoTts?: () => void;
     autoCall?: boolean;
     onToggleAutoCall?: () => void;
+    autoShareSong?: boolean;
+    onToggleAutoShareSong?: () => void;
+    injectPlaybackContext?: boolean;
+    onToggleInjectPlaybackContext?: () => void;
     // Status Bar Mode
     statusBarMode?: string;
     onStatusBarModeChange?: (mode: string) => void;
     // Custom Template
     customStatusTemplates?: CustomStatusTemplate[];
-    onSaveCustomTemplate?: (template: CustomStatusTemplate) => void;
+    onSaveCustomTemplate?: (template: CustomTemplateSelection) => void;
     // Thinking Chain
     showThinking?: boolean;
     onToggleShowThinking?: () => void;
@@ -122,28 +131,17 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     showTimestampSetting, isTimestampForced, onToggleTimestamp,
     onReadAloud, onVoiceToText, onDownloadVoice, autoTts, onToggleAutoTts,
     autoCall, onToggleAutoCall,
+    autoShareSong, onToggleAutoShareSong,
+    injectPlaybackContext, onToggleInjectPlaybackContext,
     statusBarMode, onStatusBarModeChange,
     customStatusTemplates, onSaveCustomTemplate,
     showThinking, onToggleShowThinking,
 }) => {
+    const { openApp } = useOS();
     const bgInputRef = useRef<HTMLInputElement>(null);
     const [visibilitySelection, setVisibilitySelection] = useState<Set<string>>(new Set());
     const [historyPage, setHistoryPage] = useState(0);
     const HISTORY_PAGE_SIZE = 50;
-
-    // Custom template editor state
-    const existingTpl = customStatusTemplates?.[0];
-    const [tplPrompt, setTplPrompt] = useState(existingTpl?.systemPrompt || '');
-    const [tplRegex, setTplRegex] = useState(existingTpl?.extractRegex || '');
-    const [tplHtmlTemplate, setTplHtmlTemplate] = useState(existingTpl?.htmlTemplate || '');
-    const [tplRenderMode, setTplRenderMode] = useState<'html' | 'text'>(existingTpl?.renderMode || 'html');
-    // Sync state when existingTpl changes (e.g. switching characters)
-    React.useEffect(() => {
-        setTplPrompt(existingTpl?.systemPrompt || '');
-        setTplRegex(existingTpl?.extractRegex || '');
-        setTplHtmlTemplate(existingTpl?.htmlTemplate || '');
-        setTplRenderMode(existingTpl?.renderMode || 'html');
-    }, [existingTpl?.id]);
 
     const openVisibilityModal = () => {
         if (selectedCategory) {
@@ -364,87 +362,61 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                         </div>
                     </div>
 
-                    {/* Custom Template Editor — shown when custom mode selected */}
+                    {/* Custom Template Selector — shown when custom mode selected */}
                     {(statusBarMode || 'classic') === 'custom' && (
-                        <div className="mt-3 space-y-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl p-4">
-                            <div className="bg-blue-50/50 rounded-xl p-3 border border-blue-100">
-                                <h4 className="text-[11px] font-bold text-blue-800 mb-1">🛠️ 酒馆风格 (Tavern Style) 自定义指南</h4>
-                                <ol className="text-[10px] text-blue-600 space-y-1 pl-3 list-decimal">
-                                    <li><b>写 Prompt：</b>定好规则，让 AI 输出指定格式（如 <code>&lt;status&gt;时间: ...&lt;/status&gt;</code>）。</li>
-                                    <li><b>写 正则：</b>用 <code>(.*?)</code> 抠出想要的内容，它们会自动变成变量 <code>$1, $2, $3...</code>。</li>
-                                    <li><b>写 HTML：</b>把你想要的卡片代码贴进来，把 <code>$1, $2</code> 塞进对应坑位。</li>
-                                </ol>
+                        <div className="mt-3 space-y-3 bg-slate-50/80 border border-slate-200/80 rounded-2xl p-4">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-[11px] font-bold text-slate-500">自定义模板</span>
+                                <button
+                                    onClick={() => {
+                                        setModalType('none');
+                                        openApp(AppID.StatusWorkshop);
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-primary/10 text-primary hover:bg-primary/20 transition-all active:scale-95"
+                                >
+                                    编辑工坊 →
+                                </button>
                             </div>
+                            {customStatusTemplates && customStatusTemplates.length > 0 ? (
+                                <div className="space-y-2">
+                                    {customStatusTemplates.map(tpl => {
+                                        const isActive = tpl.id === activeCharacter.activeCustomTemplateId
+                                            || (!activeCharacter.activeCustomTemplateId && tpl.id === customStatusTemplates[0].id);
 
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block">1. System Prompt (让 AI 怎么说)</label>
-                                <textarea
-                                    value={tplPrompt}
-                                    onChange={e => setTplPrompt(e.target.value)}
-                                    placeholder={`# 要求\n在每次输出后，仿照以下格式输出状态：\n<status>\n时间：...\n地点：...\n动作：...\n</status>`}
-                                    className="w-full h-28 bg-white rounded-xl p-3 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 leading-relaxed border border-slate-100"
-                                />
-                            </div>
-                            
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block">2. 提取正则 (怎么抠出变量 $1, $2...)</label>
-                                <textarea
-                                    value={tplRegex}
-                                    onChange={e => setTplRegex(e.target.value)}
-                                    placeholder={`<status>[\\s\\n]*时间: (.*?)[\\s\\n]*地点: (.*?)[\\s\\n]*动作: (.*?)[\\s\\n]*<\\/status>`}
-                                    className="w-full h-16 bg-white rounded-xl p-3 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 leading-relaxed border border-slate-100"
-                                />
-                                <p className="text-[9px] text-slate-400 mt-1">每个 <code>(.*?)</code> 都会被依次保存为 <code>$1</code>, <code>$2</code>... 供第三步渲染使用。</p>
-                            </div>
-
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block">3. 渲染参数</label>
-                                <div className="flex gap-2 mb-2">
-                                    {(['html', 'text'] as const).map(mode => (
-                                        <button
-                                            key={mode}
-                                            onClick={() => setTplRenderMode(mode)}
-                                            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                                                tplRenderMode === mode
-                                                    ? 'bg-primary/10 border-primary/30 text-primary'
-                                                    : 'bg-white border-slate-100 text-slate-500 hover:bg-slate-50'
-                                            }`}
-                                        >
-                                            {mode === 'html' ? '卡片模式 (HTML)' : '纯文本模式'}
-                                        </button>
-                                    ))}
+                                        return (
+                                            <button
+                                                key={tpl.id}
+                                                onClick={() => onSaveCustomTemplate?.({
+                                                    ...tpl,
+                                                    _setActiveOnly: true,
+                                                })}
+                                                className={`w-full text-left p-3 rounded-xl transition-all border ${
+                                                    isActive
+                                                        ? 'bg-primary/8 border-primary/25 ring-1 ring-primary/15'
+                                                        : 'bg-white border-slate-100 hover:bg-slate-50 active:scale-[0.97]'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-primary' : 'bg-slate-300'}`} />
+                                                    <span className={`text-[13px] font-bold ${isActive ? 'text-primary' : 'text-slate-600'}`}>
+                                                        {tpl.name || '未命名方案'}
+                                                    </span>
+                                                </div>
+                                                {tpl.systemPrompt && (
+                                                    <p className="text-[10px] text-slate-400 mt-1 pl-3.5 truncate">
+                                                        {tpl.systemPrompt.substring(0, 60)}…
+                                                    </p>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
                                 </div>
-                                {tplRenderMode === 'html' && (
-                                    <textarea
-                                        value={tplHtmlTemplate}
-                                        onChange={e => setTplHtmlTemplate(e.target.value)}
-                                        placeholder={`<html>\n  <style>...</style>\n  <body>\n    <span>时间: $1</span>\n    <span>地点: $2</span>\n    <span>动作: $3</span>\n  </body>\n</html>`}
-                                        className="w-full h-32 bg-white rounded-xl p-3 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 leading-relaxed border border-slate-100 placeholder:text-slate-300"
-                                    />
-                                )}
-                            </div>
-
-                            <button
-                                onClick={() => {
-                                    if (!tplPrompt.trim()) return;
-                                    onSaveCustomTemplate?.({
-                                        id: existingTpl?.id || `tpl_${Date.now()}`,
-                                        name: '自定义模板',
-                                        systemPrompt: tplPrompt.trim(),
-                                        extractRegex: tplRegex.trim(),
-                                        htmlTemplate: tplHtmlTemplate.trim(),
-                                        renderMode: tplRenderMode,
-                                    });
-                                }}
-                                disabled={!tplPrompt.trim()}
-                                className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all ${
-                                    tplPrompt.trim()
-                                        ? 'bg-primary text-white active:scale-[0.97]'
-                                        : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                }`}
-                            >
-                                保存模板
-                            </button>
+                            ) : (
+                                <div className="text-center py-4">
+                                    <p className="text-[11px] text-slate-400">还没有方案</p>
+                                    <p className="text-[10px] text-slate-300 mt-1">点击"编辑工坊 →"创建你的第一个方案</p>
+                                </div>
+                            )}
                         </div>
                     )}
                     <div className="pt-2 border-t border-slate-100">
@@ -469,6 +441,30 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                         </div>
                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
                             开启后，AI 会在合适的时机主动给你拨打语音电话。
+                        </p>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100">
+                        <div className="flex justify-between items-center cursor-pointer" onClick={onToggleAutoShareSong}>
+                            <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">AI 分享歌曲</label>
+                            <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${autoShareSong ? 'bg-primary' : 'bg-slate-200'}`}>
+                                <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${autoShareSong ? 'translate-x-4' : ''}`}></div>
+                            </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                            开启后，AI 在主聊天里可以自然发出歌曲分享卡片。默认关闭以减少提示词负担。
+                        </p>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100">
+                        <div className="flex justify-between items-center cursor-pointer" onClick={onToggleInjectPlaybackContext}>
+                            <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">当前播放感知</label>
+                            <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${injectPlaybackContext ? 'bg-primary' : 'bg-slate-200'}`}>
+                                <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${injectPlaybackContext ? 'translate-x-4' : ''}`}></div>
+                            </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                            开启后，主聊天 prompt 会感知你当前的在线一起听状态，并在合适时机带入歌曲氛围与歌词余韵；不会自动启用歌曲卡片分享。
                         </p>
                     </div>
 

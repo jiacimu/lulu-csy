@@ -21,6 +21,14 @@ import { handleDiaryRead } from './handlers/handleDiaryRead';
 import { handleFeishuDiary } from './handlers/handleFeishuDiary';
 import { handleFeishuDiaryRead } from './handlers/handleFeishuDiaryRead';
 import { handleXhsActions } from './handlers/handleXhsActions';
+import type { SongCardMetadata } from '../types/music';
+import { searchSongs } from '../utils/musicService';
+import { getCurrentPlayback } from './useAudioPlayer';
+import {
+    getPlaybackLyricKey,
+    getPlaybackLyricSnapshot,
+    shouldInjectPlaybackLyricSnapshot,
+} from '../utils/playbackLyricsRuntime';
 
 interface UseChatAIProps {
     char: CharacterProfile | undefined;
@@ -37,6 +45,8 @@ interface UseChatAIProps {
     onVoiceMessageSaved?: (msgId: number, text: string) => void; // 语音消息保存后的回调（用于触发 TTS）
     autoCall?: boolean; // 开启后向 AI 注入主动来电指引
     onIncomingCall?: (mode: string, callReason: string) => void; // AI 触发来电时的回调
+    autoShareSong?: boolean; // 开启后向 AI 注入歌曲分享指引
+    injectPlaybackContext?: boolean; // 开启后向 AI 注入当前播放歌曲上下文
     onMoodUpdate?: (charId: string, moodState: any, statusCardData?: any) => void; // MindSnapshot / CreativeCard 完成后回调
 }
 
@@ -55,6 +65,8 @@ export const useChatAI = ({
     onVoiceMessageSaved,
     autoCall,
     onIncomingCall,
+    autoShareSong,
+    injectPlaybackContext,
     onMoodUpdate
 }: UseChatAIProps) => {
 
@@ -80,6 +92,7 @@ export const useChatAI = ({
     const commentAuthorNameCacheRef = useRef<Map<string, string>>(new Map());
     // commentId→parentCommentId 缓存，供 reply_comment 传递 parent_comment_id（xiaohongshu-mcp PR#440+）
     const commentParentIdCacheRef = useRef<Map<string, string>>(new Map());
+    const lastInjectedPlaybackLyricKeyRef = useRef<string | null>(null);
 
 
 
@@ -114,7 +127,25 @@ export const useChatAI = ({
 
             // Run senseBefore in parallel with buildSystemPrompt
             const embeddingApiKey = getEmbeddingConfig().apiKey || undefined;
-            const [senseResult, systemPromptResult] = await Promise.all([
+            const playbackContextPromise = injectPlaybackContext
+                ? (async () => {
+                    const playback = getCurrentPlayback();
+                    if (!playback.currentSong || !playback.isPlaying) return null;
+
+                    return {
+                        playback,
+                        lyricSnapshot: await getPlaybackLyricSnapshot(
+                            playback.currentSong.id,
+                            playback.currentTime,
+                        ),
+                    };
+                })().catch((error) => {
+                    console.error('🎵 [PlaybackContext] Snapshot error:', error);
+                    return null;
+                })
+                : Promise.resolve(null);
+
+            const [senseResult, systemPromptResult, playbackContext] = await Promise.all([
                 secondaryConfig.apiKey
                     ? MindSnapshotExtractor.senseBefore(char, currentMsgs, secondaryConfig)
                         .catch(e => { console.error('💭 [Sense] Parallel error:', e); return null; })
@@ -125,6 +156,7 @@ export const useChatAI = ({
                     // we also manually inject body signals after if needed.
                     return ChatPrompts.buildSystemPrompt(char, userProfile, groups, emojis, categories, currentMsgs, realtimeConfig, apiConfig, embeddingApiKey);
                 })(),
+                playbackContextPromise,
             ]);
 
             let systemPrompt = systemPromptResult;
@@ -170,6 +202,44 @@ mode 可选值：
 - 不要频繁打电话，在合适的情绪节点自然触发
 - 输出 [[CALL: mode]] 后不要再写其他文字
 - 严禁在同一条回复里既打电话又发消息`;
+            }
+
+            if (autoShareSong) {
+                systemPrompt += `\n\n[系统功能: 分享歌曲]
+当你想分享一首歌给${userProfile.name}时，使用以下严格格式：
+[[SHARE_SONG: 歌名 | 歌手名 | 歌曲ID]]
+
+规则：
+- 只在聊到音乐、情绪、回忆、陪伴或推荐相关话题时自然使用，不需要每次都分享
+- 如果知道真实歌曲 ID，优先填写真实 ID
+- 如果暂时不知道歌曲 ID，可以写 0，系统仍会按歌名和歌手生成分享卡片
+
+示例：
+[[SHARE_SONG: 晴天 | 周杰伦 | 0]]`;
+            }
+
+            if (injectPlaybackContext) {
+                const playback = playbackContext?.playback;
+                if (playback?.currentSong && playback.isPlaying) {
+                    const song = playback.currentSong;
+                    const artistNames = song.artists.map((artist) => artist.name).join('/');
+
+                    systemPrompt += `\n\n[此刻，你和${userProfile.name}处于“在线一起听”的状态。聊天之外，你们正在同步听同一首歌，《${song.name}》- ${artistNames}。]`;
+                    systemPrompt += `\n\n这首歌不需要被反复提起，它只是此刻正安静流过你们对话的背景。你知道，ta也和你听见了同样的旋律、同样的停顿，以及那些一闪而过、还没来得及说破的情绪。`;
+                    systemPrompt += `\n\n你不用刻意聊歌，不用解释歌，也不用把“一起听”挂在嘴边。只是记住，你和ta现在正被同一首歌轻轻连着；这件事会自然影响你的语气、心情、停顿，和那些差一点就要说出口的话。`;
+
+                    const lyricSnapshot = playbackContext?.lyricSnapshot ?? null;
+                    if (shouldInjectPlaybackLyricSnapshot(
+                        lyricSnapshot,
+                        lastInjectedPlaybackLyricKeyRef.current,
+                    )) {
+                        const translationBlock = lyricSnapshot.currentTranslation
+                            ? `\n${lyricSnapshot.currentTranslation}`
+                            : '';
+                        systemPrompt += `\n\n此刻歌里正好唱到：\n\n「${lyricSnapshot.currentText}」${translationBlock}\n\n这一句也落在你耳边。你不必说破，也不要复述或解释它；若它恰好碰到你此刻的心绪，就让那一点点余韵自然落进你的回复里。若没有，就让它留在背景。`;
+                        lastInjectedPlaybackLyricKeyRef.current = getPlaybackLyricKey(lyricSnapshot);
+                    }
+                }
             }
 
             // 1.5 Inject bilingual output instruction when translation is enabled
@@ -631,17 +701,66 @@ mode 可选值：
                     return saved;
                 };
 
+                const saveSongCard = async (
+                    songCard: SongCardMetadata,
+                    replyData: { id: number; content: string; name: string } | undefined,
+                ): Promise<number> => {
+                    // Auto-search: backfill real songId when AI outputs 0
+                    if (songCard.songId === 0 && songCard.songName) {
+                        try {
+                            const query = songCard.artist
+                                ? `${songCard.songName} ${songCard.artist}`
+                                : songCard.songName;
+                            const results = await searchSongs(query, 5);
+                            if (results.songs && results.songs.length > 0) {
+                                const match = results.songs[0];
+                                songCard.songId = match.id;
+                                songCard.artist = match.artists.map((a) => a.name).join('/');
+                                songCard.albumName = match.album.name;
+                                songCard.albumCover = match.album.picUrl;
+                                songCard.duration = match.duration;
+                            }
+                        } catch (e) {
+                            console.warn('[SongCard] Auto-search failed, keeping songId=0:', e);
+                        }
+                    }
+
+                    const fallbackText = `分享了一首歌：${songCard.songName} - ${songCard.artist}`;
+                    const savedId = await DB.saveMessage({
+                        charId: char.id,
+                        role: 'assistant',
+                        type: 'text',
+                        content: fallbackText,
+                        metadata: songCard,
+                        replyTo: replyData,
+                    });
+                    if (firstSavedMsgId === null) firstSavedMsgId = savedId;
+                    setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
+                    playFirstNotification();
+                    return 1;
+                };
+
                 if (hasTranslationTags) {
                     // ─── New bilingual format: each <翻译> block = one bubble ───
                     // Extract emojis for bilingual path (splitResponse not used here)
                     const bilingualEmojis: string[] = [];
+                    const bilingualSongs: SongCardMetadata[] = [];
                     let bEm;
                     const bEmojiPat = /\[\[SEND_EMOJI:\s*(.*?)\]\]/g;
                     while ((bEm = bEmojiPat.exec(aiContent)) !== null) {
                         const name = bEm[1].trim();
                         if (!bilingualEmojis.includes(name)) bilingualEmojis.push(name);
                     }
+                    let songMatch: RegExpExecArray | null;
+                    const songPattern = /\[\[SHARE_SONG:\s*([\s\S]*?)\]\]/g;
+                    while ((songMatch = songPattern.exec(aiContent)) !== null) {
+                        const songCard = ChatParser.parseSongShareContent(songMatch[1]);
+                        if (songCard) {
+                            bilingualSongs.push({ type: 'song_card', ...songCard });
+                        }
+                    }
                     aiContent = aiContent.replace(/\[\[SEND_EMOJI:\s*.*?\]\]/g, '').trim();
+                    aiContent = aiContent.replace(/\[\[SHARE_SONG:\s*[\s\S]*?\]\]/g, '').trim();
                     const tagPattern = /<翻译>\s*<原文>([\s\S]*?)<\/原文>\s*<译文>([\s\S]*?)<\/译文>\s*<\/翻译>/g;
                     let lastIndex = 0;
                     let tagMatch;
@@ -725,6 +844,13 @@ mode 可选值：
                             playFirstNotification();
                         }
                     }
+
+                    for (const songCard of bilingualSongs) {
+                        await new Promise(r => setTimeout(r, Math.random() * 500 + 300));
+                        const replyData = globalMsgIndex === 0 ? aiReplyTarget : undefined;
+                        const saved = await saveSongCard(songCard, replyData);
+                        globalMsgIndex += saved;
+                    }
                 } else {
                     // ─── Normal text (no bilingual tags) ───
                     // Also handles legacy %%BILINGUAL%% format for backwards compatibility
@@ -740,6 +866,11 @@ mode 可选值：
                                 setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
                                 playFirstNotification();
                             }
+                        } else if (part.type === 'song') {
+                            await new Promise(r => setTimeout(r, Math.random() * 500 + 300));
+                            const replyData = globalMsgIndex === 0 ? aiReplyTarget : undefined;
+                            const saved = await saveSongCard({ type: 'song_card', ...part.content }, replyData);
+                            globalMsgIndex += saved;
                         } else {
                             // Split on --- separators first, then chunkText for fine-grained splitting
                             const rawBlocks = part.content.split(/^\s*---\s*$/m).filter(b => b.trim());
@@ -845,7 +976,9 @@ mode 可选值：
                             .catch(e => console.error('✨ [FreeformCard] Background:', e));
                     } else if (statusMode === 'custom') {
                         // ── Custom user-defined template ──
-                        const template = charSnapshot.customStatusTemplates?.[0];
+                        const template = charSnapshot.customStatusTemplates?.find(
+                            t => t.id === charSnapshot.activeCustomTemplateId,
+                        ) || charSnapshot.customStatusTemplates?.[0];
                         if (template?.systemPrompt) {
                             MindSnapshotExtractor.generateCustomCard(charSnapshot, aiContent, currentMsgs, secondaryConfig,
                                 template,
@@ -931,7 +1064,9 @@ mode 可选值：
                 })
                 .catch(e => console.error('✨ [FreeformCard] Retry failed:', e));
         } else if (statusMode === 'custom') {
-            const template = ctx.char.customStatusTemplates?.[0];
+            const template = ctx.char.customStatusTemplates?.find(
+                (t: any) => t.id === ctx.char.activeCustomTemplateId,
+            ) || ctx.char.customStatusTemplates?.[0];
             if (template?.systemPrompt) {
                 MindSnapshotExtractor.generateCustomCard(ctx.char, ctx.aiContent, ctx.msgs, ctx.config,
                     template,
