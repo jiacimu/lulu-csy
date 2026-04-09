@@ -270,7 +270,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                             </div>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-                            开启后，AI 消息自动翻译为「选」的语言显示，点「译」切换到目标语言。
+                            开启后，对方的消息会先以「选」的语言显示，点「译」切换到目标语言。
                         </p>
                         {translationEnabled && (
                             <div className="mt-3 space-y-3">
@@ -332,9 +332,9 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                             {[
                                 { id: 'off', title: '关闭', desc: '不生成心声，不消耗副 API' },
                                 { id: 'classic', title: '经典心声', desc: '明信片风格，点击头像查看' },
-                                { id: 'creative', title: '创意卡片', desc: 'AI 从 8 种预设骨架中选择' },
-                                { id: 'freeform', title: '自由创作', desc: 'AI 即兴生成独一无二的 HTML 碎片' },
-                                { id: 'custom', title: '自定义模板', desc: '自己写 prompt 和正则，完全自由' },
+                                { id: 'creative', title: '创意卡片', desc: '从 8 种预设骨架中择一生成' },
+                                { id: 'freeform', title: '自由创作', desc: '即兴生成独一无二的 HTML 碎片' },
+                                { id: 'custom', title: '自定义模板', desc: '自己写提示词和正则，完全自由' },
                             ].map(opt => {
                                 const isActive = (statusBarMode || 'classic') === opt.id;
                                 return (
@@ -421,50 +421,50 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                     )}
                     <div className="pt-2 border-t border-slate-100">
                         <div className="flex justify-between items-center cursor-pointer" onClick={onToggleAutoTts}>
-                            <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">AI 自动语音回复</label>
+                            <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">语音回复</label>
                             <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${autoTts ? 'bg-primary' : 'bg-slate-200'}`}>
                                 <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${autoTts ? 'translate-x-4' : ''}`}></div>
                             </div>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                            开启后，AI 每次回复时会自动生成语音消息。需要先在全局设置中配置 TTS。
+                            开启后，对方每次回复时都会附上一条语音消息。需要先在全局设置中配置 TTS。
                         </p>
                     </div>
 
-                    {/* AI Incoming Call Toggle */}
+                    {/* Incoming Call Toggle */}
                     <div className="pt-2 border-t border-slate-100">
                         <div className="flex justify-between items-center cursor-pointer" onClick={onToggleAutoCall}>
-                            <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">AI 来电</label>
+                            <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">主动来电</label>
                             <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${autoCall ? 'bg-primary' : 'bg-slate-200'}`}>
                                 <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${autoCall ? 'translate-x-4' : ''}`}></div>
                             </div>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                            开启后，AI 会在合适的时机主动给你拨打语音电话。
+                            开启后，对方会在合适的时机主动给你拨打语音电话。
                         </p>
                     </div>
 
                     <div className="pt-2 border-t border-slate-100">
                         <div className="flex justify-between items-center cursor-pointer" onClick={onToggleAutoShareSong}>
-                            <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">AI 分享歌曲</label>
+                            <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">歌曲分享</label>
                             <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${autoShareSong ? 'bg-primary' : 'bg-slate-200'}`}>
                                 <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${autoShareSong ? 'translate-x-4' : ''}`}></div>
                             </div>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                            开启后，AI 在主聊天里可以自然发出歌曲分享卡片。默认关闭以减少提示词负担。
+                            开启后，对方在聊天里可以自然发出歌曲分享卡片。默认关闭，让对话更克制一点。
                         </p>
                     </div>
 
                     <div className="pt-2 border-t border-slate-100">
                         <div className="flex justify-between items-center cursor-pointer" onClick={onToggleInjectPlaybackContext}>
-                            <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">当前播放感知</label>
+                            <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">一起听歌氛围</label>
                             <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${injectPlaybackContext ? 'bg-primary' : 'bg-slate-200'}`}>
                                 <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${injectPlaybackContext ? 'translate-x-4' : ''}`}></div>
                             </div>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                            开启后，主聊天 prompt 会感知你当前的在线一起听状态，并在合适时机带入歌曲氛围与歌词余韵；不会自动启用歌曲卡片分享。
+                            开启后，如果你们此刻正听着同一首歌，对话会自然沾上一点旋律、情绪和歌词余韵；不会自动发出歌曲卡片。
                         </p>
                     </div>
 
@@ -472,7 +472,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                         <button onClick={() => setModalType('history-manager')} className="w-full py-3 bg-slate-50 text-slate-600 font-bold rounded-2xl border border-slate-200 active:scale-95 transition-transform flex items-center justify-center gap-2">
                             管理上下文 / 隐藏历史
                         </button>
-                        <p className="text-[10px] text-slate-400 mt-2 text-center">可选择从某条消息开始显示，隐藏之前的记录（不被 AI 读取）。</p>
+                        <p className="text-[10px] text-slate-400 mt-2 text-center">可选择从某条消息开始显示，隐藏之前的记录（不会再参与后续回复）。</p>
                     </div>
 
                     <div className="pt-2 border-t border-slate-100">
@@ -511,7 +511,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                         <button onClick={onCreatePrompt} className="mt-3 w-full py-2 text-xs font-bold text-indigo-500 border border-dashed border-indigo-300 rounded-lg hover:bg-indigo-100">+ 新建自定义提示词</button>
                     </div>
                     <div className="text-[10px] text-slate-400 bg-slate-50 p-3 rounded-xl leading-relaxed">
-                        • <b>理性精炼</b>: 适合生成条理清晰的事件日志，便于 AI 长期记忆检索。<br />
+                        • <b>理性精炼</b>: 适合生成条理清晰的事件日志，便于长期记忆检索。<br />
                         • <b>日记风格</b>: 适合生成第一人称的角色日记，更有代入感和情感色彩。<br />
                         • 支持变量: <code>{'${dateStr}'}</code>, <code>{'${char.name}'}</code>, <code>{'${userProfile.name}'}</code>, <code>{'${rawLog}'}</code>
                     </div>
@@ -542,7 +542,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                 footer={<><button onClick={() => onSetHistoryStart(undefined)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-2xl">恢复全部</button><button onClick={() => { setModalType('none'); setHistoryPage(0); }} className="flex-1 py-3 bg-primary text-white font-bold rounded-2xl">完成</button></>}
             >
                 <div className="space-y-2 max-h-[50vh] overflow-y-auto no-scrollbar p-1">
-                    <p className="text-xs text-slate-400 text-center mb-2">点击某条消息，将其设为"新的起点"。此条之前的消息将被隐藏且不发送给 AI。</p>
+                    <p className="text-xs text-slate-400 text-center mb-2">点击某条消息，将其设为"新的起点"。此条之前的消息将被隐藏，也不会再参与后续回复。</p>
                     {(() => {
                         const reversed = allHistoryMessages.slice().reverse();
                         const totalPages = Math.max(1, Math.ceil(reversed.length / HISTORY_PAGE_SIZE));
@@ -707,7 +707,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                     {visibilitySelection.size > 0 && (
                         <div className="text-[11px] text-center text-slate-500 bg-slate-50 rounded-lg py-2">
                             {visibilitySelection.size === 1 && visibilitySelection.has('__user__')
-                                ? <>仅 <span className="font-bold text-blue-500">用户</span> 可发送此分组表情，AI 无法使用</>
+                                ? <>仅 <span className="font-bold text-blue-500">用户</span> 可发送此分组表情，对方无法使用</>
                                 : <>已选 <span className="font-bold text-primary">{visibilitySelection.size}</span> 个可使用此分组</>
                             }
                         </div>

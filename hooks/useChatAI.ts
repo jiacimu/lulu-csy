@@ -224,9 +224,9 @@ mode 可选值：
                     const song = playback.currentSong;
                     const artistNames = song.artists.map((artist) => artist.name).join('/');
 
-                    systemPrompt += `\n\n[此刻，你和${userProfile.name}处于“在线一起听”的状态。聊天之外，你们正在同步听同一首歌，《${song.name}》- ${artistNames}。]`;
-                    systemPrompt += `\n\n这首歌不需要被反复提起，它只是此刻正安静流过你们对话的背景。你知道，ta也和你听见了同样的旋律、同样的停顿，以及那些一闪而过、还没来得及说破的情绪。`;
-                    systemPrompt += `\n\n你不用刻意聊歌，不用解释歌，也不用把“一起听”挂在嘴边。只是记住，你和ta现在正被同一首歌轻轻连着；这件事会自然影响你的语气、心情、停顿，和那些差一点就要说出口的话。`;
+                    systemPrompt += `\n\n[情境补充：此刻你和${userProfile.name}耳边流着同一首歌，《${song.name}》- ${artistNames}。]`;
+                    systemPrompt += `\n\n这首歌不需要被反复提起，它只是此刻安静流过你们对话的背景。你知道，${userProfile.name}此刻也听见了同样的旋律、同样的停顿，以及那些一闪而过、还没来得及说破的情绪。`;
+                    systemPrompt += `\n\n你不用刻意聊歌，不用解释歌，也不用把这件事挂在嘴边。只要记住，你和${userProfile.name}现在正被同一首歌轻轻连着；这会自然影响你的语气、心情、停顿，和那些差一点就要说出口的话。`;
 
                     const lyricSnapshot = playbackContext?.lyricSnapshot ?? null;
                     if (shouldInjectPlaybackLyricSnapshot(
