@@ -13,6 +13,8 @@ import { DEFAULT_ARCHIVE_PROMPTS } from '../constants/archivePrompts';
 import ImpressionPanel from '../components/character/ImpressionPanel';
 import MemoryCenter from '../components/character/MemoryCenter';
 import CharacterCitySection from '../components/character/CharacterCitySection';
+import type { CharacterCitySectionHandle } from '../components/character/CharacterCitySection';
+import CharacterLocationSummaryCard from '../components/character/CharacterLocationSummaryCard';
 import { safeResponseJson } from '../utils/safeApi';
 
 
@@ -54,14 +56,17 @@ const Character: React.FC = () => {
     const { closeApp, openApp, characters, setActiveCharacterId, addCharacter, updateCharacter, deleteCharacter, apiConfig, addToast, userProfile, customThemes, addCustomTheme, worldbooks } = useOS();
     const [view, setView] = useState<'list' | 'detail'>('list');
     const [detailTab, setDetailTab] = useState<'identity' | 'memory' | 'impression'>('identity');
+    const [identitySubView, setIdentitySubView] = useState<'main' | 'location'>('main');
     const [editingId, setEditingId] = useState<string | null>(null);
     const [formData, setFormData] = useState<CharacterProfile | null>(null);
     const [isCompressing, setIsCompressing] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const cardImportRef = useRef<HTMLInputElement>(null);
+    const locationEditorRef = useRef<CharacterCitySectionHandle | null>(null);
 
     // Race Condition Guards
     const editingIdRef = useRef<string | null>(null);
+    const formDataRef = useRef<CharacterProfile | null>(null);
     const skipNextAutoSaveRef = useRef(false);
 
     // Modals
@@ -109,6 +114,10 @@ const Character: React.FC = () => {
         editingIdRef.current = editingId;
     }, [editingId]);
 
+    useEffect(() => {
+        formDataRef.current = formData;
+    }, [formData]);
+
     // Only sync global character data into the local form when we
     // enter detail mode or switch to a different character ID.
     useEffect(() => {
@@ -142,22 +151,47 @@ const Character: React.FC = () => {
         }
     }, [formData, editingId, updateCharacter]);
 
+    const commitCharacterPatch = (patch: Partial<CharacterProfile>, options?: { persistImmediately?: boolean }) => {
+        const activeEditingId = editingIdRef.current;
+        const activeFormData = formDataRef.current;
+        const canUpdateLocalForm = Boolean(activeFormData && activeEditingId && activeFormData.id === activeEditingId);
+
+        if (canUpdateLocalForm) {
+            if (options?.persistImmediately) {
+                skipNextAutoSaveRef.current = true;
+            }
+
+            setFormData(prev => {
+                if (!prev || prev.id !== activeEditingId) {
+                    return prev;
+                }
+                return { ...prev, ...patch };
+            });
+        }
+
+        if (activeEditingId && (options?.persistImmediately || !canUpdateLocalForm)) {
+            updateCharacter(activeEditingId, patch);
+        }
+    };
+
+    const handleChange = (field: keyof CharacterProfile, value: any) => {
+        commitCharacterPatch({ [field]: value } as Partial<CharacterProfile>);
+    };
+
+    const flushLocationDraftBeforeLeave = () => {
+        locationEditorRef.current?.flushPendingDraft();
+    };
+
     const handleBack = () => {
         if (view === 'detail') {
+            flushLocationDraftBeforeLeave();
             skipNextAutoSaveRef.current = false;
             setDetailTab('identity');
+            setIdentitySubView('main');
             setFormData(null);
             setView('list');
             setEditingId(null);
         } else closeApp();
-    };
-
-    const handleChange = (field: keyof CharacterProfile, value: any) => {
-        // Functional update to prevent stale state issues in simple closures
-        setFormData(prev => {
-            if (!prev) return null;
-            return { ...prev, [field]: value };
-        });
     };
 
     // Worldbook Logic
@@ -826,8 +860,10 @@ ${isInitialGeneration ? `
                                 key={char.id}
                                 char={char}
                                 onClick={() => {
+                                    flushLocationDraftBeforeLeave();
                                     skipNextAutoSaveRef.current = false;
                                     setDetailTab('identity');
+                                    setIdentitySubView('main');
                                     setFormData(null);
                                     setEditingId(char.id);
                                     setView('detail');
@@ -849,16 +885,16 @@ ${isInitialGeneration ? `
                     <div className="h-32 bg-gradient-to-b from-white/90 to-transparent backdrop-blur-sm flex flex-col justify-end px-5 pb-2 shrink-0 z-40 sticky top-0">
                         <div className="flex justify-between items-center mb-3">
                             <button onClick={handleBack} className="p-2 -ml-2 rounded-full hover:bg-white/60 flex items-center gap-1 text-slate-600"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg><span className="text-sm font-medium">列表</span></button>
-                            <button onClick={() => { setActiveCharacterId(formData.id); openApp(AppID.Chat); }} className="text-xs px-3 py-1.5 bg-primary text-white rounded-full font-bold shadow-sm shadow-primary/30 flex items-center gap-1 active:scale-95 transition-transform"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3"><path d="M3.105 2.288a.75.75 0 0 0-.826.95l1.414 4.926H16.5a.75.75 0 0 1 0 1.5H3.693l-1.414 4.926a.75.75 0 0 0 .826.95 28.897 28.897 0 0 0 15.293-7.155.75.75 0 0 0 0-1.114A28.897 28.897 0 0 0 3.105 2.288Z" /></svg>发消息</button>
+                            <button onClick={() => { flushLocationDraftBeforeLeave(); setActiveCharacterId(formData.id); openApp(AppID.Chat); }} className="text-xs px-3 py-1.5 bg-primary text-white rounded-full font-bold shadow-sm shadow-primary/30 flex items-center gap-1 active:scale-95 transition-transform"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3"><path d="M3.105 2.288a.75.75 0 0 0-.826.95l1.414 4.926H16.5a.75.75 0 0 1 0 1.5H3.693l-1.414 4.926a.75.75 0 0 0 .826.95 28.897 28.897 0 0 0 15.293-7.155.75.75 0 0 0 0-1.114A28.897 28.897 0 0 0 3.105 2.288Z" /></svg>发消息</button>
                         </div>
                         <div className="flex gap-6 text-sm font-medium text-slate-400 pl-1">
-                            <button onClick={() => setDetailTab('identity')} className={`pb-2 transition-colors relative ${detailTab === 'identity' ? 'text-slate-800' : ''}`}>设定{detailTab === 'identity' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-full"></div>}</button>
-                            <button onClick={() => setDetailTab('memory')} className={`pb-2 transition-colors relative ${detailTab === 'memory' ? 'text-slate-800' : ''}`}>记忆 ({(formData.memories || []).length}){detailTab === 'memory' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-full"></div>}</button>
-                            <button onClick={() => setDetailTab('impression')} className={`pb-2 transition-colors relative ${detailTab === 'impression' ? 'text-slate-800' : ''}`}>印象{detailTab === 'impression' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-full"></div>}</button>
+                            <button onClick={() => { flushLocationDraftBeforeLeave(); setDetailTab('identity'); setIdentitySubView('main'); }} className={`pb-2 transition-colors relative ${detailTab === 'identity' ? 'text-slate-800' : ''}`}>设定{detailTab === 'identity' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-full"></div>}</button>
+                            <button onClick={() => { flushLocationDraftBeforeLeave(); setDetailTab('memory'); setIdentitySubView('main'); }} className={`pb-2 transition-colors relative ${detailTab === 'memory' ? 'text-slate-800' : ''}`}>记忆 ({(formData.memories || []).length}){detailTab === 'memory' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-full"></div>}</button>
+                            <button onClick={() => { flushLocationDraftBeforeLeave(); setDetailTab('impression'); setIdentitySubView('main'); }} className={`pb-2 transition-colors relative ${detailTab === 'impression' ? 'text-slate-800' : ''}`}>印象{detailTab === 'impression' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-full"></div>}</button>
                         </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-5 no-scrollbar pb-10">
-                        {detailTab === 'identity' && (
+                        {detailTab === 'identity' && identitySubView === 'main' && (
                             <div className="space-y-6 animate-fade-in">
                                 <div className="flex items-center gap-5">
                                     <div className="relative group cursor-pointer w-24 h-24 shrink-0" onClick={() => fileInputRef.current?.click()}>
@@ -886,13 +922,12 @@ ${isInitialGeneration ? `
                                     />
                                 </div>
 
-                                <CharacterCitySection
-                                    characterId={formData.id}
+                                <CharacterLocationSummaryCard
                                     cityOverride={formData.cityOverride}
                                     cityAdcode={formData.cityAdcode}
                                     isFictionalCity={formData.isFictionalCity}
                                     cityReferenceReal={formData.cityReferenceReal}
-                                    onFieldChange={handleChange}
+                                    onEdit={() => setIdentitySubView('location')}
                                 />
 
                                 {/* Worldbook Section */}
@@ -958,6 +993,37 @@ ${isInitialGeneration ? `
                             </div>
                         )}
 
+                        {detailTab === 'identity' && identitySubView === 'location' && (
+                            <div className="space-y-5 animate-fade-in">
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        onClick={() => { flushLocationDraftBeforeLeave(); setIdentitySubView('main'); }}
+                                        aria-label="返回设定"
+                                        className="p-2 -ml-2 rounded-full hover:bg-white/60 text-slate-600 transition-colors"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+                                        </svg>
+                                    </button>
+                                    <div>
+                                        <h2 className="text-lg font-medium text-slate-800">地理设定</h2>
+                                        <p className="text-[11px] text-slate-400 mt-0.5">设置角色所在城市，影响外卖、本地生活等内容的地理参照</p>
+                                    </div>
+                                </div>
+
+                                <CharacterCitySection
+                                    ref={locationEditorRef}
+                                    characterId={formData.id}
+                                    cityOverride={formData.cityOverride}
+                                    cityAdcode={formData.cityAdcode}
+                                    isFictionalCity={formData.isFictionalCity}
+                                    cityReferenceReal={formData.cityReferenceReal}
+                                    onFieldChange={handleChange}
+                                    onImmediatePatchCommit={(patch) => commitCharacterPatch(patch as Partial<CharacterProfile>, { persistImmediately: true })}
+                                />
+                            </div>
+                        )}
+
                         {detailTab === 'memory' && (
                             <div className="space-y-4 animate-fade-in">
                                 <div className="flex justify-center gap-2 mb-4">
@@ -1002,148 +1068,160 @@ ${isInitialGeneration ? `
             )}
 
             {/* Modals ... */}
-            <Modal isOpen={showImportModal} title="记忆导入/沉淀" onClose={() => setShowImportModal(false)} footer={<><button onClick={() => setShowImportModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-500 font-bold rounded-2xl">取消</button><button onClick={handleImportMemories} disabled={isProcessingMemory} className="flex-1 py-3 bg-primary text-white font-bold rounded-2xl shadow-lg shadow-primary/30 flex items-center justify-center gap-2">{isProcessingMemory && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>}{isProcessingMemory ? '处理中...' : '开始执行'}</button></>}>
-                <div className="space-y-3"><div className="text-xs text-slate-400 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-100">AI 将自动整理乱序文本为记忆档案。</div>{importStatus && <div className="text-xs text-primary font-medium">{importStatus}</div>}<textarea value={importText} onChange={e => setImportText(e.target.value)} placeholder="在此粘贴文本..." className="w-full h-32 bg-slate-100 border-none rounded-2xl px-4 py-3 text-sm text-slate-700 resize-none focus:ring-2 focus:ring-primary/20 transition-all" /></div>
-            </Modal>
+            {showImportModal && (
+                <Modal isOpen={showImportModal} title="记忆导入/沉淀" onClose={() => setShowImportModal(false)} footer={<><button onClick={() => setShowImportModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-500 font-bold rounded-2xl">取消</button><button onClick={handleImportMemories} disabled={isProcessingMemory} className="flex-1 py-3 bg-primary text-white font-bold rounded-2xl shadow-lg shadow-primary/30 flex items-center justify-center gap-2">{isProcessingMemory && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>}{isProcessingMemory ? '处理中...' : '开始执行'}</button></>}>
+                    <div className="space-y-3"><div className="text-xs text-slate-400 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-100">AI 将自动整理乱序文本为记忆档案。</div>{importStatus && <div className="text-xs text-primary font-medium">{importStatus}</div>}<textarea value={importText} onChange={e => setImportText(e.target.value)} placeholder="在此粘贴文本..." className="w-full h-32 bg-slate-100 border-none rounded-2xl px-4 py-3 text-sm text-slate-700 resize-none focus:ring-2 focus:ring-primary/20 transition-all" /></div>
+                </Modal>
+            )}
 
-            <Modal isOpen={showBatchModal} title="批量记忆总结" onClose={() => { setShowBatchModal(false); setShowPromptEditor(false); }} footer={
-                isBatchProcessing ?
-                    <div className="w-full py-3 bg-slate-100 text-primary font-bold rounded-2xl text-center flex items-center justify-center gap-2"><div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>{batchProgress}</div> :
-                    <button onClick={handleBatchSummarize} className="w-full py-3 bg-primary text-white font-bold rounded-2xl">开始生成</button>
-            }>
-                <div className="space-y-3">
-                    <p className="text-xs text-slate-400">将遍历所有聊天记录，按天使用所选提示词模板生成记忆总结。</p>
-                    {/* Prompt Selection */}
-                    <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100">
-                        <label className="text-[10px] font-bold text-indigo-400 uppercase mb-2 block">选择提示词模板</label>
-                        <div className="flex flex-col gap-2">
-                            {archivePrompts.map(p => (
-                                <div key={p.id} onClick={() => { setSelectedPromptId(p.id); localStorage.setItem('chat_active_archive_prompt_id', p.id); }} className={`p-2.5 rounded-lg border cursor-pointer flex items-center justify-between ${selectedPromptId === p.id ? 'bg-white border-indigo-500 shadow-sm ring-1 ring-indigo-500' : 'bg-white/50 border-indigo-200 hover:bg-white'}`}>
-                                    <span className={`text-xs font-bold ${selectedPromptId === p.id ? 'text-indigo-700' : 'text-slate-600'}`}>{p.name}</span>
-                                    <div className="flex gap-1.5">
-                                        <button onClick={(e) => { e.stopPropagation(); setEditingPrompt(p); setShowPromptEditor(true); }} className="text-[10px] text-slate-400 hover:text-indigo-500 px-2 py-0.5 rounded bg-slate-100 hover:bg-indigo-50">查看</button>
-                                        {!p.id.startsWith('preset_') && (
-                                            <button onClick={(e) => { e.stopPropagation(); const next = archivePrompts.filter(ap => ap.id !== p.id); setArchivePrompts(next); localStorage.setItem('chat_archive_prompts', JSON.stringify(next.filter(ap => !ap.id.startsWith('preset_')))); if (selectedPromptId === p.id) setSelectedPromptId('preset_rational'); }} className="text-[10px] text-red-300 hover:text-red-500 px-1.5 py-0.5 rounded hover:bg-red-50">x</button>
-                                        )}
+            {showBatchModal && (
+                <Modal isOpen={showBatchModal} title="批量记忆总结" onClose={() => { setShowBatchModal(false); setShowPromptEditor(false); }} footer={
+                    isBatchProcessing ?
+                        <div className="w-full py-3 bg-slate-100 text-primary font-bold rounded-2xl text-center flex items-center justify-center gap-2"><div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>{batchProgress}</div> :
+                        <button onClick={handleBatchSummarize} className="w-full py-3 bg-primary text-white font-bold rounded-2xl">开始生成</button>
+                }>
+                    <div className="space-y-3">
+                        <p className="text-xs text-slate-400">将遍历所有聊天记录，按天使用所选提示词模板生成记忆总结。</p>
+                        {/* Prompt Selection */}
+                        <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100">
+                            <label className="text-[10px] font-bold text-indigo-400 uppercase mb-2 block">选择提示词模板</label>
+                            <div className="flex flex-col gap-2">
+                                {archivePrompts.map(p => (
+                                    <div key={p.id} onClick={() => { setSelectedPromptId(p.id); localStorage.setItem('chat_active_archive_prompt_id', p.id); }} className={`p-2.5 rounded-lg border cursor-pointer flex items-center justify-between ${selectedPromptId === p.id ? 'bg-white border-indigo-500 shadow-sm ring-1 ring-indigo-500' : 'bg-white/50 border-indigo-200 hover:bg-white'}`}>
+                                        <span className={`text-xs font-bold ${selectedPromptId === p.id ? 'text-indigo-700' : 'text-slate-600'}`}>{p.name}</span>
+                                        <div className="flex gap-1.5">
+                                            <button onClick={(e) => { e.stopPropagation(); setEditingPrompt(p); setShowPromptEditor(true); }} className="text-[10px] text-slate-400 hover:text-indigo-500 px-2 py-0.5 rounded bg-slate-100 hover:bg-indigo-50">查看</button>
+                                            {!p.id.startsWith('preset_') && (
+                                                <button onClick={(e) => { e.stopPropagation(); const next = archivePrompts.filter(ap => ap.id !== p.id); setArchivePrompts(next); localStorage.setItem('chat_archive_prompts', JSON.stringify(next.filter(ap => !ap.id.startsWith('preset_')))); if (selectedPromptId === p.id) setSelectedPromptId('preset_rational'); }} className="text-[10px] text-red-300 hover:text-red-500 px-1.5 py-0.5 rounded hover:bg-red-50">x</button>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                ))}
+                            </div>
+                            <button onClick={() => { const newP = { id: `custom_${Date.now()}`, name: '新自定义模板', content: DEFAULT_ARCHIVE_PROMPTS[0].content }; setEditingPrompt(newP); setShowPromptEditor(true); }} className="mt-2 w-full py-1.5 text-xs font-bold text-indigo-500 border border-dashed border-indigo-300 rounded-lg hover:bg-indigo-100">+ 新建自定义提示词</button>
                         </div>
-                        <button onClick={() => { const newP = { id: `custom_${Date.now()}`, name: '新自定义模板', content: DEFAULT_ARCHIVE_PROMPTS[0].content }; setEditingPrompt(newP); setShowPromptEditor(true); }} className="mt-2 w-full py-1.5 text-xs font-bold text-indigo-500 border border-dashed border-indigo-300 rounded-lg hover:bg-indigo-100">+ 新建自定义提示词</button>
+                        {/* Date Range */}
+                        <div className="flex gap-2">
+                            <div className="flex-1"><label className="text-[10px] uppercase text-slate-400 font-bold">开始日期 (可选)</label><input type="date" value={batchRange.start} onChange={e => setBatchRange({ ...batchRange, start: e.target.value })} className="w-full bg-slate-100 rounded-xl px-3 py-2 text-xs" /></div>
+                            <div className="flex-1"><label className="text-[10px] uppercase text-slate-400 font-bold">结束日期 (可选)</label><input type="date" value={batchRange.end} onChange={e => setBatchRange({ ...batchRange, end: e.target.value })} className="w-full bg-slate-100 rounded-xl px-3 py-2 text-xs" /></div>
+                        </div>
+                        <div className="text-[10px] text-slate-400 bg-slate-50 p-2.5 rounded-xl leading-relaxed">
+                            支持变量: <code>{'${dateStr}'}</code>, <code>{'${char.name}'}</code>, <code>{'${userProfile.name}'}</code>, <code>{'${rawLog}'}</code>
+                        </div>
                     </div>
-                    {/* Date Range */}
-                    <div className="flex gap-2">
-                        <div className="flex-1"><label className="text-[10px] uppercase text-slate-400 font-bold">开始日期 (可选)</label><input type="date" value={batchRange.start} onChange={e => setBatchRange({ ...batchRange, start: e.target.value })} className="w-full bg-slate-100 rounded-xl px-3 py-2 text-xs" /></div>
-                        <div className="flex-1"><label className="text-[10px] uppercase text-slate-400 font-bold">结束日期 (可选)</label><input type="date" value={batchRange.end} onChange={e => setBatchRange({ ...batchRange, end: e.target.value })} className="w-full bg-slate-100 rounded-xl px-3 py-2 text-xs" /></div>
-                    </div>
-                    <div className="text-[10px] text-slate-400 bg-slate-50 p-2.5 rounded-xl leading-relaxed">
-                        支持变量: <code>{'${dateStr}'}</code>, <code>{'${char.name}'}</code>, <code>{'${userProfile.name}'}</code>, <code>{'${rawLog}'}</code>
-                    </div>
-                </div>
-            </Modal>
+                </Modal>
+            )}
 
             {/* Prompt Editor Modal */}
-            <Modal isOpen={showPromptEditor} title="编辑提示词" onClose={() => setShowPromptEditor(false)} footer={<button onClick={() => {
-                if (!editingPrompt) return;
-                const isNew = !archivePrompts.some(p => p.id === editingPrompt.id);
-                const next = isNew ? [...archivePrompts, editingPrompt] : archivePrompts.map(p => p.id === editingPrompt.id ? editingPrompt : p);
-                setArchivePrompts(next);
-                setSelectedPromptId(editingPrompt.id);
-                localStorage.setItem('chat_archive_prompts', JSON.stringify(next.filter(p => !p.id.startsWith('preset_'))));
-                localStorage.setItem('chat_active_archive_prompt_id', editingPrompt.id);
-                setShowPromptEditor(false);
-                addToast('提示词已保存', 'success');
-            }} className="w-full py-3 bg-primary text-white font-bold rounded-2xl">保存</button>}>
-                <div className="space-y-3">
-                    <input
-                        value={editingPrompt?.name || ''}
-                        onChange={e => setEditingPrompt(prev => prev ? { ...prev, name: e.target.value } : null)}
-                        placeholder="预设名称"
-                        className="w-full px-4 py-2 bg-slate-100 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-primary/20"
-                        readOnly={editingPrompt?.id.startsWith('preset_')}
-                    />
-                    <textarea
-                        value={editingPrompt?.content || ''}
-                        onChange={e => setEditingPrompt(prev => prev ? { ...prev, content: e.target.value } : null)}
-                        className="w-full h-64 bg-slate-100 rounded-xl p-3 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 leading-relaxed"
-                        placeholder="输入提示词内容..."
-                        readOnly={editingPrompt?.id.startsWith('preset_')}
-                    />
-                    {editingPrompt?.id.startsWith('preset_') && (
-                        <p className="text-[10px] text-slate-400 text-center">预设模板不可编辑（仅查看）</p>
-                    )}
-                </div>
-            </Modal>
+            {showPromptEditor && (
+                <Modal isOpen={showPromptEditor} title="编辑提示词" onClose={() => setShowPromptEditor(false)} footer={<button onClick={() => {
+                    if (!editingPrompt) return;
+                    const isNew = !archivePrompts.some(p => p.id === editingPrompt.id);
+                    const next = isNew ? [...archivePrompts, editingPrompt] : archivePrompts.map(p => p.id === editingPrompt.id ? editingPrompt : p);
+                    setArchivePrompts(next);
+                    setSelectedPromptId(editingPrompt.id);
+                    localStorage.setItem('chat_archive_prompts', JSON.stringify(next.filter(p => !p.id.startsWith('preset_'))));
+                    localStorage.setItem('chat_active_archive_prompt_id', editingPrompt.id);
+                    setShowPromptEditor(false);
+                    addToast('提示词已保存', 'success');
+                }} className="w-full py-3 bg-primary text-white font-bold rounded-2xl">保存</button>}>
+                    <div className="space-y-3">
+                        <input
+                            value={editingPrompt?.name || ''}
+                            onChange={e => setEditingPrompt(prev => prev ? { ...prev, name: e.target.value } : null)}
+                            placeholder="预设名称"
+                            className="w-full px-4 py-2 bg-slate-100 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-primary/20"
+                            readOnly={editingPrompt?.id.startsWith('preset_')}
+                        />
+                        <textarea
+                            value={editingPrompt?.content || ''}
+                            onChange={e => setEditingPrompt(prev => prev ? { ...prev, content: e.target.value } : null)}
+                            className="w-full h-64 bg-slate-100 rounded-xl p-3 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 leading-relaxed"
+                            placeholder="输入提示词内容..."
+                            readOnly={editingPrompt?.id.startsWith('preset_')}
+                        />
+                        {editingPrompt?.id.startsWith('preset_') && (
+                            <p className="text-[10px] text-slate-400 text-center">预设模板不可编辑（仅查看）</p>
+                        )}
+                    </div>
+                </Modal>
+            )}
 
-            <Modal isOpen={showExportModal} title="导出文本" onClose={() => setShowExportModal(false)} footer={<div className="flex gap-2 w-full"><button onClick={() => { navigator.clipboard.writeText(exportText); addToast('已复制', 'success'); }} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-2xl">复制全文</button>{Capacitor.isNativePlatform() ? (<button onClick={handleNativeShare} className="flex-1 py-3 bg-slate-800 text-white font-bold rounded-2xl shadow-lg flex items-center justify-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" /></svg>文件分享</button>) : (<button onClick={handleWebFileDownload} className="flex-1 py-3 bg-primary text-white font-bold rounded-2xl shadow-lg flex items-center justify-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" /></svg>下载文本</button>)}</div>}>
-                <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100 space-y-2"><div className="text-[10px] text-slate-400">已自动复制到剪贴板。如果分享失败，请直接手动复制。</div><textarea value={exportText} readOnly className="w-full h-40 bg-transparent border-none text-[10px] font-mono text-slate-600 resize-none focus:ring-0 leading-relaxed select-all" onClick={(e) => e.currentTarget.select()} /></div>
-            </Modal>
+            {showExportModal && (
+                <Modal isOpen={showExportModal} title="导出文本" onClose={() => setShowExportModal(false)} footer={<div className="flex gap-2 w-full"><button onClick={() => { navigator.clipboard.writeText(exportText); addToast('已复制', 'success'); }} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-2xl">复制全文</button>{Capacitor.isNativePlatform() ? (<button onClick={handleNativeShare} className="flex-1 py-3 bg-slate-800 text-white font-bold rounded-2xl shadow-lg flex items-center justify-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" /></svg>文件分享</button>) : (<button onClick={handleWebFileDownload} className="flex-1 py-3 bg-primary text-white font-bold rounded-2xl shadow-lg flex items-center justify-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" /></svg>下载文本</button>)}</div>}>
+                    <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100 space-y-2"><div className="text-[10px] text-slate-400">已自动复制到剪贴板。如果分享失败，请直接手动复制。</div><textarea value={exportText} readOnly className="w-full h-40 bg-transparent border-none text-[10px] font-mono text-slate-600 resize-none focus:ring-0 leading-relaxed select-all" onClick={(e) => e.currentTarget.select()} /></div>
+                </Modal>
+            )}
 
             {/* Worldbook Select Modal */}
-            <Modal
-                isOpen={showWorldbookModal}
-                title="挂载世界书"
-                onClose={() => setShowWorldbookModal(false)}
-            >
-                <div className="max-h-[50vh] overflow-y-auto no-scrollbar space-y-4 p-1">
-                    {worldbooks.length === 0 ? (
-                        <div className="text-center text-slate-400 text-xs py-8">
-                            还没有世界书，请去桌面【世界书】App 创建。
-                        </div>
-                    ) : (
-                        // Group books for UI
-                        Object.entries(worldbooks.reduce((acc, wb) => {
-                            const cat = wb.category || '未分类设定 (General)';
-                            if (!acc[cat]) acc[cat] = [];
-                            acc[cat].push(wb);
-                            return acc;
-                        }, {} as Record<string, typeof worldbooks>)).map(([category, books]) => (
-                            <div key={category} className="space-y-2">
-                                <div className="flex justify-between items-center px-1">
-                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">{category}</h4>
-                                    <button
-                                        onClick={() => mountCategory(category)}
-                                        className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded font-bold hover:bg-indigo-100"
-                                    >
-                                        挂载整组
-                                    </button>
-                                </div>
-                                {books.map(wb => {
-                                    const isMounted = formData?.mountedWorldbooks?.some(m => m.id === wb.id);
-                                    return (
-                                        <button
-                                            key={wb.id}
-                                            onClick={() => !isMounted && mountWorldbook(wb.id)}
-                                            disabled={isMounted}
-                                            className={`w-full p-4 rounded-xl border text-left transition-all ${isMounted ? 'bg-slate-50 border-slate-200 opacity-50 cursor-not-allowed' : 'bg-white border-indigo-100 hover:border-indigo-300 shadow-sm active:scale-95'}`}
-                                        >
-                                            <div className="flex justify-between items-center mb-1">
-                                                <span className="font-bold text-slate-700 text-sm truncate">{wb.title}</span>
-                                                {isMounted && <span className="text-[10px] text-slate-400">已挂载</span>}
-                                            </div>
-                                        </button>
-                                    );
-                                })}
+            {showWorldbookModal && (
+                <Modal
+                    isOpen={showWorldbookModal}
+                    title="挂载世界书"
+                    onClose={() => setShowWorldbookModal(false)}
+                >
+                    <div className="max-h-[50vh] overflow-y-auto no-scrollbar space-y-4 p-1">
+                        {worldbooks.length === 0 ? (
+                            <div className="text-center text-slate-400 text-xs py-8">
+                                还没有世界书，请去桌面【世界书】App 创建。
                             </div>
-                        ))
-                    )}
-                </div>
-            </Modal>
+                        ) : (
+                            // Group books for UI
+                            Object.entries(worldbooks.reduce((acc, wb) => {
+                                const cat = wb.category || '未分类设定 (General)';
+                                if (!acc[cat]) acc[cat] = [];
+                                acc[cat].push(wb);
+                                return acc;
+                            }, {} as Record<string, typeof worldbooks>)).map(([category, books]) => (
+                                <div key={category} className="space-y-2">
+                                    <div className="flex justify-between items-center px-1">
+                                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">{category}</h4>
+                                        <button
+                                            onClick={() => mountCategory(category)}
+                                            className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded font-bold hover:bg-indigo-100"
+                                        >
+                                            挂载整组
+                                        </button>
+                                    </div>
+                                    {books.map(wb => {
+                                        const isMounted = formData?.mountedWorldbooks?.some(m => m.id === wb.id);
+                                        return (
+                                            <button
+                                                key={wb.id}
+                                                onClick={() => !isMounted && mountWorldbook(wb.id)}
+                                                disabled={isMounted}
+                                                className={`w-full p-4 rounded-xl border text-left transition-all ${isMounted ? 'bg-slate-50 border-slate-200 opacity-50 cursor-not-allowed' : 'bg-white border-indigo-100 hover:border-indigo-300 shadow-sm active:scale-95'}`}
+                                            >
+                                                <div className="flex justify-between items-center mb-1">
+                                                    <span className="font-bold text-slate-700 text-sm truncate">{wb.title}</span>
+                                                    {isMounted && <span className="text-[10px] text-slate-400">已挂载</span>}
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </Modal>
+            )}
 
-            <Modal
-                isOpen={!!deleteConfirmTarget}
-                title="断开连接"
-                onClose={() => setDeleteConfirmTarget(null)}
-                footer={<div className="flex gap-2 w-full"><button onClick={() => setDeleteConfirmTarget(null)} className="flex-1 py-3 bg-slate-100 text-slate-500 rounded-2xl font-bold">保留</button><button onClick={confirmDeleteCharacter} className="flex-1 py-3 bg-red-500 text-white font-bold rounded-2xl shadow-lg shadow-red-200">确认断开</button></div>}
-            >
-                <div className="flex flex-col items-center gap-3 py-4">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-slate-300"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" /></svg>
-                    <p className="text-sm text-slate-600 text-center leading-relaxed">
-                        确定要删除与该角色的所有连接吗？<br />
-                        <span className="text-xs text-red-400 font-bold">该操作不可恢复，记忆将被清空。</span>
-                    </p>
-                </div>
-            </Modal>
+            {deleteConfirmTarget && (
+                <Modal
+                    isOpen={!!deleteConfirmTarget}
+                    title="断开连接"
+                    onClose={() => setDeleteConfirmTarget(null)}
+                    footer={<div className="flex gap-2 w-full"><button onClick={() => setDeleteConfirmTarget(null)} className="flex-1 py-3 bg-slate-100 text-slate-500 rounded-2xl font-bold">保留</button><button onClick={confirmDeleteCharacter} className="flex-1 py-3 bg-red-500 text-white font-bold rounded-2xl shadow-lg shadow-red-200">确认断开</button></div>}
+                >
+                    <div className="flex flex-col items-center gap-3 py-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-slate-300"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" /></svg>
+                        <p className="text-sm text-slate-600 text-center leading-relaxed">
+                            确定要删除与该角色的所有连接吗？<br />
+                            <span className="text-xs text-red-400 font-bold">该操作不可恢复，记忆将被清空。</span>
+                        </p>
+                    </div>
+                </Modal>
+            )}
         </div>
     );
 };

@@ -88,7 +88,7 @@ export async function getCityInputTips(keyword: string): Promise<CityTip[]> {
         );
 
         if (!response.ok) {
-            return [];
+            throw new Error(`城市搜索失败 (${response.status})`);
         }
 
         const data = await safeResponseJson(response);
@@ -98,8 +98,14 @@ export async function getCityInputTips(keyword: string): Promise<CityTip[]> {
                 .map(normalizeCityTip)
                 .filter((tip): tip is CityTip => Boolean(tip))
             : [];
-    } catch {
-        return [];
+    } catch (error) {
+        if (error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+            throw new Error('城市搜索超时，请稍后再试');
+        }
+        if (error instanceof Error && error.message.trim()) {
+            throw error;
+        }
+        throw new Error('城市搜索失败，请稍后再试');
     }
 }
 

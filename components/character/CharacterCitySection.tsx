@@ -1,9 +1,14 @@
-import React, { memo, startTransition, useDeferredValue, useEffect, useState } from 'react';
+import React, { forwardRef, memo, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { getCityInputTips, type CityTip } from '../../utils/mapService';
 
 const CITY_SUGGESTION_LIMIT = 6;
+const CITY_SEARCH_DEBOUNCE_MS = 250;
+const FICTIONAL_CITY_SAVE_DEBOUNCE_MS = 180;
+const BLUR_CLOSE_DELAY_MS = 120;
 
 type CityFieldKey = 'cityOverride' | 'cityAdcode' | 'isFictionalCity' | 'cityReferenceReal';
+type CityFieldValue = string | boolean | undefined;
+type CityFieldPatch = Partial<Record<CityFieldKey, CityFieldValue>>;
 
 interface CharacterCitySectionProps {
     characterId: string;
@@ -12,131 +17,317 @@ interface CharacterCitySectionProps {
     isFictionalCity?: boolean;
     cityReferenceReal?: string;
     onFieldChange: (field: CityFieldKey, value: string | boolean | undefined) => void;
+    onImmediatePatchCommit?: (patch: CityFieldPatch) => void;
 }
 
-function useCitySuggestions(keyword: string, enabled: boolean, selectedValue?: string) {
-    const deferredKeyword = useDeferredValue(keyword);
-    const [suggestions, setSuggestions] = useState<CityTip[]>([]);
-    const [isOpen, setIsOpen] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
+export interface CharacterCitySectionHandle {
+    flushPendingDraft: () => void;
+}
 
-    useEffect(() => {
-        const trimmedKeyword = deferredKeyword.trim();
-        const trimmedSelectedValue = selectedValue?.trim() || '';
-
-        if (!enabled || !trimmedKeyword || trimmedKeyword === trimmedSelectedValue) {
-            startTransition(() => {
-                setSuggestions([]);
-                setIsOpen(false);
-                setIsLoading(false);
-            });
-            return;
-        }
-
-        let cancelled = false;
-        const timer = window.setTimeout(async () => {
-            startTransition(() => setIsLoading(true));
-
-            const nextSuggestions = (await getCityInputTips(trimmedKeyword)).slice(0, CITY_SUGGESTION_LIMIT);
-            if (cancelled) return;
-
-            startTransition(() => {
-                setSuggestions(nextSuggestions);
-                setIsOpen(nextSuggestions.length > 0);
-                setIsLoading(false);
-            });
-        }, 220);
-
-        return () => {
-            cancelled = true;
-            window.clearTimeout(timer);
-        };
-    }, [deferredKeyword, enabled, selectedValue]);
-
-    return {
-        suggestions,
-        isOpen,
-        isLoading,
-        setIsOpen,
-    };
+interface CityAutocompleteState {
+    debouncedKeyword: string;
+    error: string | null;
+    isFocused: boolean;
+    isLoading: boolean;
+    suggestions: CityTip[];
+    handleBlur: () => void;
+    handleFocus: () => void;
+    reset: () => void;
 }
 
 function getCityTipMeta(tip: CityTip): string {
     return [tip.district, tip.adcode].filter(Boolean).join(' · ');
 }
 
-const CharacterCitySectionComponent: React.FC<CharacterCitySectionProps> = ({
+function getAutocompleteErrorMessage(error: unknown): string {
+    if (error instanceof Error && error.message.trim()) {
+        return error.message;
+    }
+    return '城市搜索失败，请稍后再试';
+}
+
+function useCityAutocomplete(keyword: string, enabled: boolean, selectedValue?: string): CityAutocompleteState {
+    const [debouncedKeyword, setDebouncedKeyword] = useState('');
+    const [suggestions, setSuggestions] = useState<CityTip[]>([]);
+    const [isFocused, setIsFocused] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const blurTimerRef = useRef<number | null>(null);
+    const requestSequenceRef = useRef(0);
+
+    useEffect(() => {
+        return () => {
+            if (blurTimerRef.current !== null) {
+                window.clearTimeout(blurTimerRef.current);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        const trimmedKeyword = keyword.trim();
+
+        if (!enabled || !trimmedKeyword) {
+            requestSequenceRef.current += 1;
+            setDebouncedKeyword('');
+            setSuggestions([]);
+            setIsLoading(false);
+            setError(null);
+            return;
+        }
+
+        const timer = window.setTimeout(() => {
+            setDebouncedKeyword(trimmedKeyword);
+        }, CITY_SEARCH_DEBOUNCE_MS);
+
+        return () => {
+            window.clearTimeout(timer);
+        };
+    }, [keyword, enabled]);
+
+    useEffect(() => {
+        const trimmedSelectedValue = selectedValue?.trim() || '';
+
+        if (!enabled || !debouncedKeyword || debouncedKeyword === trimmedSelectedValue) {
+            requestSequenceRef.current += 1;
+            setSuggestions([]);
+            setIsLoading(false);
+            setError(null);
+            return;
+        }
+
+        const requestId = requestSequenceRef.current + 1;
+        requestSequenceRef.current = requestId;
+        let active = true;
+
+        setIsLoading(true);
+        setError(null);
+
+        getCityInputTips(debouncedKeyword)
+            .then((tips) => {
+                if (!active || requestSequenceRef.current !== requestId) {
+                    return;
+                }
+                setSuggestions(tips.slice(0, CITY_SUGGESTION_LIMIT));
+                setIsLoading(false);
+            })
+            .catch((searchError) => {
+                if (!active || requestSequenceRef.current !== requestId) {
+                    return;
+                }
+                setSuggestions([]);
+                setError(getAutocompleteErrorMessage(searchError));
+                setIsLoading(false);
+            });
+
+        return () => {
+            active = false;
+        };
+    }, [debouncedKeyword, enabled, selectedValue]);
+
+    const reset = () => {
+        requestSequenceRef.current += 1;
+        setDebouncedKeyword('');
+        setSuggestions([]);
+        setIsLoading(false);
+        setError(null);
+        setIsFocused(false);
+    };
+
+    const handleFocus = () => {
+        if (blurTimerRef.current !== null) {
+            window.clearTimeout(blurTimerRef.current);
+            blurTimerRef.current = null;
+        }
+        setIsFocused(true);
+    };
+
+    const handleBlur = () => {
+        if (blurTimerRef.current !== null) {
+            window.clearTimeout(blurTimerRef.current);
+        }
+        blurTimerRef.current = window.setTimeout(() => {
+            setIsFocused(false);
+            blurTimerRef.current = null;
+        }, BLUR_CLOSE_DELAY_MS);
+    };
+
+    return {
+        debouncedKeyword,
+        error,
+        isFocused,
+        isLoading,
+        suggestions,
+        handleBlur,
+        handleFocus,
+        reset,
+    };
+}
+
+function SuggestionList({
+    suggestions,
+    onSelect,
+}: {
+    suggestions: CityTip[];
+    onSelect: (tip: CityTip) => void;
+}) {
+    return (
+        <div className="absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-xl shadow-slate-200/70">
+            {suggestions.map((tip) => (
+                <button
+                    key={`${tip.name}-${tip.adcode || tip.district}`}
+                    type="button"
+                    onMouseDown={(event) => {
+                        event.preventDefault();
+                        onSelect(tip);
+                    }}
+                    className="w-full border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-slate-50 transition-colors"
+                >
+                    <div className="text-sm font-medium text-slate-700">{tip.name}</div>
+                    {getCityTipMeta(tip) && (
+                        <div className="mt-0.5 text-[10px] text-slate-400">{getCityTipMeta(tip)}</div>
+                    )}
+                </button>
+            ))}
+        </div>
+    );
+}
+
+const CharacterCitySectionComponent = ({
     characterId,
     cityOverride,
+    cityAdcode,
     isFictionalCity,
     cityReferenceReal,
     onFieldChange,
-}) => {
+    onImmediatePatchCommit,
+}: CharacterCitySectionProps, ref: React.ForwardedRef<CharacterCitySectionHandle>) => {
     const [cityKeyword, setCityKeyword] = useState(cityOverride || '');
     const [referenceCityKeyword, setReferenceCityKeyword] = useState(cityReferenceReal || '');
 
-    const {
-        suggestions: citySuggestions,
-        isOpen: isCitySuggestionsOpen,
-        isLoading: isCitySuggestionsLoading,
-        setIsOpen: setIsCitySuggestionsOpen,
-    } = useCitySuggestions(cityKeyword, !isFictionalCity, cityOverride);
+    const cityAutocomplete = useCityAutocomplete(cityKeyword, !isFictionalCity, cityOverride);
+    const referenceAutocomplete = useCityAutocomplete(referenceCityKeyword, Boolean(isFictionalCity), cityReferenceReal);
 
-    const {
-        suggestions: referenceCitySuggestions,
-        isOpen: isReferenceCitySuggestionsOpen,
-        isLoading: isReferenceCitySuggestionsLoading,
-        setIsOpen: setIsReferenceCitySuggestionsOpen,
-    } = useCitySuggestions(referenceCityKeyword, Boolean(isFictionalCity), cityReferenceReal);
+    const fictionalCityTimerRef = useRef<number | null>(null);
+    const pendingFictionalCityPatchRef = useRef<CityFieldPatch | null>(null);
+
+    const clearPendingFictionalCityTimer = () => {
+        if (fictionalCityTimerRef.current !== null) {
+            window.clearTimeout(fictionalCityTimerRef.current);
+            fictionalCityTimerRef.current = null;
+        }
+    };
+
+    const applyFieldPatch = (patch: CityFieldPatch, immediate: boolean) => {
+        if (immediate && onImmediatePatchCommit) {
+            onImmediatePatchCommit(patch);
+            return;
+        }
+
+        (Object.entries(patch) as Array<[CityFieldKey, CityFieldValue]>).forEach(([field, value]) => {
+            onFieldChange(field, value);
+        });
+    };
+
+    const flushPendingFictionalCityPatch = (immediate: boolean) => {
+        const pendingPatch = pendingFictionalCityPatchRef.current;
+        if (!pendingPatch) {
+            return;
+        }
+
+        clearPendingFictionalCityTimer();
+        pendingFictionalCityPatchRef.current = null;
+        applyFieldPatch(pendingPatch, immediate);
+    };
+
+    useImperativeHandle(ref, () => ({
+        flushPendingDraft: () => {
+            flushPendingFictionalCityPatch(true);
+        },
+    }));
 
     useEffect(() => {
         setCityKeyword(cityOverride || '');
-        setReferenceCityKeyword(cityReferenceReal || '');
-    }, [characterId]);
+    }, [characterId, cityOverride]);
 
     useEffect(() => {
-        if (!isFictionalCity) return;
+        setReferenceCityKeyword(cityReferenceReal || '');
+    }, [characterId, cityReferenceReal]);
 
-        const nextCityValue = cityKeyword.trim() ? cityKeyword : undefined;
-        const currentCityValue = cityOverride?.trim() ? cityOverride : undefined;
-        if (nextCityValue === currentCityValue) return;
+    useEffect(() => {
+        if (!isFictionalCity) {
+            clearPendingFictionalCityTimer();
+            pendingFictionalCityPatchRef.current = null;
+            return;
+        }
 
-        const timer = window.setTimeout(() => {
-            startTransition(() => {
-                onFieldChange('cityOverride', nextCityValue);
-                if (!nextCityValue) {
-                    onFieldChange('cityAdcode', undefined);
-                }
-            });
-        }, 180);
+        const nextCityValue = cityKeyword.trim() || undefined;
+        const currentCityValue = cityOverride?.trim() || undefined;
+        if (nextCityValue === currentCityValue) {
+            clearPendingFictionalCityTimer();
+            pendingFictionalCityPatchRef.current = null;
+            return;
+        }
 
-        return () => window.clearTimeout(timer);
-    }, [cityKeyword, cityOverride, isFictionalCity, onFieldChange]);
+        const nextPatch: CityFieldPatch = {
+            cityOverride: nextCityValue,
+        };
+        if (!nextCityValue) {
+            nextPatch.cityAdcode = undefined;
+        }
+
+        pendingFictionalCityPatchRef.current = nextPatch;
+        clearPendingFictionalCityTimer();
+        fictionalCityTimerRef.current = window.setTimeout(() => {
+            flushPendingFictionalCityPatch(false);
+        }, FICTIONAL_CITY_SAVE_DEBOUNCE_MS);
+
+        return () => {
+            clearPendingFictionalCityTimer();
+        };
+    }, [cityKeyword, cityOverride, isFictionalCity, onFieldChange, onImmediatePatchCommit]);
+
+    // Flush any pending fictional city value on unmount
+    useEffect(() => {
+        return () => {
+            flushPendingFictionalCityPatch(true);
+        };
+    }, [onFieldChange, onImmediatePatchCommit]);
+
+    const cityHasKeyword = cityAutocomplete.debouncedKeyword.length > 0;
+    const showCitySuggestions = cityAutocomplete.isFocused && !isFictionalCity && cityHasKeyword && cityAutocomplete.suggestions.length > 0;
+    const showCityEmptyState = cityAutocomplete.isFocused && !isFictionalCity && cityHasKeyword && !cityAutocomplete.isLoading && !cityAutocomplete.error && cityAutocomplete.suggestions.length === 0;
+    const showCityError = cityAutocomplete.isFocused && !isFictionalCity && cityHasKeyword && Boolean(cityAutocomplete.error);
+
+    const referenceHasKeyword = referenceAutocomplete.debouncedKeyword.length > 0;
+    const showReferenceSuggestions = referenceAutocomplete.isFocused && Boolean(isFictionalCity) && referenceHasKeyword && referenceAutocomplete.suggestions.length > 0;
+    const showReferenceEmptyState = referenceAutocomplete.isFocused && Boolean(isFictionalCity) && referenceHasKeyword && !referenceAutocomplete.isLoading && !referenceAutocomplete.error && referenceAutocomplete.suggestions.length === 0;
+    const showReferenceError = referenceAutocomplete.isFocused && Boolean(isFictionalCity) && referenceHasKeyword && Boolean(referenceAutocomplete.error);
 
     const handleSelectCityTip = (tip: CityTip) => {
         setCityKeyword(tip.name);
-        setIsCitySuggestionsOpen(false);
         onFieldChange('cityOverride', tip.name);
         onFieldChange('cityAdcode', tip.adcode || undefined);
+        cityAutocomplete.reset();
     };
 
     const handleSelectReferenceCityTip = (tip: CityTip) => {
         setReferenceCityKeyword(tip.name);
-        setIsReferenceCitySuggestionsOpen(false);
         onFieldChange('cityReferenceReal', tip.name);
+        referenceAutocomplete.reset();
     };
 
     const handleClearCity = () => {
         setCityKeyword('');
-        setIsCitySuggestionsOpen(false);
         onFieldChange('cityOverride', undefined);
         onFieldChange('cityAdcode', undefined);
+        cityAutocomplete.reset();
     };
 
     const handleClearReferenceCity = () => {
         setReferenceCityKeyword('');
-        setIsReferenceCitySuggestionsOpen(false);
         onFieldChange('cityReferenceReal', undefined);
+        referenceAutocomplete.reset();
     };
 
     return (
@@ -150,24 +341,18 @@ const CharacterCitySectionComponent: React.FC<CharacterCitySectionProps> = ({
                     <div className="relative">
                         <input
                             value={cityKeyword}
-                            onChange={(e) => {
-                                const nextValue = e.target.value;
+                            onChange={(event) => {
+                                const nextValue = event.target.value;
                                 setCityKeyword(nextValue);
 
                                 if (!isFictionalCity && !nextValue.trim()) {
-                                    setIsCitySuggestionsOpen(false);
                                     onFieldChange('cityOverride', undefined);
                                     onFieldChange('cityAdcode', undefined);
+                                    cityAutocomplete.reset();
                                 }
                             }}
-                            onFocus={() => {
-                                if (citySuggestions.length > 0) {
-                                    setIsCitySuggestionsOpen(true);
-                                }
-                            }}
-                            onBlur={() => {
-                                window.setTimeout(() => setIsCitySuggestionsOpen(false), 120);
-                            }}
+                            onFocus={cityAutocomplete.handleFocus}
+                            onBlur={cityAutocomplete.handleBlur}
                             className="w-full bg-slate-50 rounded-2xl border border-slate-100 px-4 py-3 pr-10 text-sm text-slate-700 outline-none focus:ring-1 focus:ring-primary/20 transition-all"
                             placeholder={isFictionalCity ? '输入架空城市名...' : '输入城市名搜索...'}
                         />
@@ -184,28 +369,20 @@ const CharacterCitySectionComponent: React.FC<CharacterCitySectionProps> = ({
                             </button>
                         )}
                     </div>
-                    {!isFictionalCity && isCitySuggestionsOpen && citySuggestions.length > 0 && (
-                        <div className="absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-xl shadow-slate-200/70">
-                            {citySuggestions.map((tip) => (
-                                <button
-                                    key={`${tip.name}-${tip.adcode || tip.district}`}
-                                    type="button"
-                                    onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        handleSelectCityTip(tip);
-                                    }}
-                                    className="w-full border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-slate-50 transition-colors"
-                                >
-                                    <div className="text-sm font-medium text-slate-700">{tip.name}</div>
-                                    {getCityTipMeta(tip) && (
-                                        <div className="mt-0.5 text-[10px] text-slate-400">{getCityTipMeta(tip)}</div>
-                                    )}
-                                </button>
-                            ))}
-                        </div>
+                    {showCitySuggestions && (
+                        <SuggestionList suggestions={cityAutocomplete.suggestions} onSelect={handleSelectCityTip} />
                     )}
-                    {!isFictionalCity && isCitySuggestionsLoading && (
+                    {!isFictionalCity && cityAutocomplete.isLoading && cityHasKeyword && (
                         <div className="mt-2 text-[10px] text-slate-400">正在搜索城市...</div>
+                    )}
+                    {showCityError && (
+                        <div className="mt-2 text-[10px] text-red-400">{cityAutocomplete.error}</div>
+                    )}
+                    {showCityEmptyState && (
+                        <div className="mt-2 text-[10px] text-slate-400">未找到匹配城市，请换个关键词试试。</div>
+                    )}
+                    {!isFictionalCity && cityOverride && cityAdcode && (
+                        <div className="mt-2 text-[10px] text-slate-400">已绑定地区编码：{cityAdcode}</div>
                     )}
                 </div>
 
@@ -213,10 +390,14 @@ const CharacterCitySectionComponent: React.FC<CharacterCitySectionProps> = ({
                     <input
                         type="checkbox"
                         checked={Boolean(isFictionalCity)}
-                        onChange={(e) => {
-                            onFieldChange('isFictionalCity', e.target.checked ? true : undefined);
-                            if (e.target.checked) {
+                        onChange={(event) => {
+                            const checked = event.target.checked;
+                            onFieldChange('isFictionalCity', checked ? true : undefined);
+                            if (checked) {
                                 onFieldChange('cityAdcode', undefined);
+                                cityAutocomplete.reset();
+                            } else {
+                                referenceAutocomplete.reset();
                             }
                         }}
                         className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary/20"
@@ -225,27 +406,21 @@ const CharacterCitySectionComponent: React.FC<CharacterCitySectionProps> = ({
                 </label>
 
                 {isFictionalCity && (
-                    <div className="space-y-3 rounded-2xl bg-slate-50/80 border border-slate-100 p-4">
+                    <div className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
                         <div className="relative">
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">现实参照城市</label>
                             <div className="relative">
                                 <input
                                     value={referenceCityKeyword}
-                                    onChange={(e) => {
-                                        const nextValue = e.target.value;
+                                    onChange={(event) => {
+                                        const nextValue = event.target.value;
                                         setReferenceCityKeyword(nextValue);
                                         if (!nextValue.trim()) {
                                             handleClearReferenceCity();
                                         }
                                     }}
-                                    onFocus={() => {
-                                        if (referenceCitySuggestions.length > 0) {
-                                            setIsReferenceCitySuggestionsOpen(true);
-                                        }
-                                    }}
-                                    onBlur={() => {
-                                        window.setTimeout(() => setIsReferenceCitySuggestionsOpen(false), 120);
-                                    }}
+                                    onFocus={referenceAutocomplete.handleFocus}
+                                    onBlur={referenceAutocomplete.handleBlur}
                                     className="w-full bg-white rounded-2xl border border-slate-100 px-4 py-3 pr-10 text-sm text-slate-700 outline-none focus:ring-1 focus:ring-primary/20 transition-all"
                                     placeholder="搜索现实参照城市..."
                                 />
@@ -262,28 +437,17 @@ const CharacterCitySectionComponent: React.FC<CharacterCitySectionProps> = ({
                                     </button>
                                 )}
                             </div>
-                            {isReferenceCitySuggestionsOpen && referenceCitySuggestions.length > 0 && (
-                                <div className="absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-xl shadow-slate-200/70">
-                                    {referenceCitySuggestions.map((tip) => (
-                                        <button
-                                            key={`${tip.name}-${tip.adcode || tip.district}`}
-                                            type="button"
-                                            onMouseDown={(e) => {
-                                                e.preventDefault();
-                                                handleSelectReferenceCityTip(tip);
-                                            }}
-                                            className="w-full border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-slate-50 transition-colors"
-                                        >
-                                            <div className="text-sm font-medium text-slate-700">{tip.name}</div>
-                                            {getCityTipMeta(tip) && (
-                                                <div className="mt-0.5 text-[10px] text-slate-400">{getCityTipMeta(tip)}</div>
-                                            )}
-                                        </button>
-                                    ))}
-                                </div>
+                            {showReferenceSuggestions && (
+                                <SuggestionList suggestions={referenceAutocomplete.suggestions} onSelect={handleSelectReferenceCityTip} />
                             )}
-                            {isReferenceCitySuggestionsLoading && (
+                            {referenceAutocomplete.isLoading && referenceHasKeyword && (
                                 <div className="mt-2 text-[10px] text-slate-400">正在搜索参照城市...</div>
+                            )}
+                            {showReferenceError && (
+                                <div className="mt-2 text-[10px] text-red-400">{referenceAutocomplete.error}</div>
+                            )}
+                            {showReferenceEmptyState && (
+                                <div className="mt-2 text-[10px] text-slate-400">未找到匹配城市，请换个关键词试试。</div>
                             )}
                         </div>
 
@@ -305,6 +469,9 @@ const propsAreEqual = (prev: CharacterCitySectionProps, next: CharacterCitySecti
     && prev.cityReferenceReal === next.cityReferenceReal
 );
 
-const CharacterCitySection = memo(CharacterCitySectionComponent, propsAreEqual);
+const ForwardedCharacterCitySection = forwardRef(CharacterCitySectionComponent);
+ForwardedCharacterCitySection.displayName = 'CharacterCitySection';
+
+const CharacterCitySection = memo(ForwardedCharacterCitySection, propsAreEqual);
 
 export default CharacterCitySection;
