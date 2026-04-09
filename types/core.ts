@@ -31,6 +31,7 @@ export enum AppID {
     CsyManual = 'csy_manual', // CSY二改版使用手册
     VoiceCall = 'voice_call', // 语音通话
     CognitiveNetwork = 'cognitive_network', // 认知网络
+    StatusWorkshop = 'status_workshop', // 状态栏工坊
 }
 
 export interface SystemLog {

@@ -1,0 +1,200 @@
+// @vitest-environment jsdom
+
+import { act, render } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import PhoneShell from './PhoneShell';
+import { AppID } from '../types';
+import { VirtualTimeProvider } from '../context/VirtualTimeContext';
+import { useOS } from '../context/OSContext';
+
+let launcherRenderCount = 0;
+let statusBarRenderCount = 0;
+
+vi.mock('../context/OSContext', () => ({
+    useOS: vi.fn(),
+}));
+
+vi.mock('../apps/Launcher', async () => {
+    const React = await import('react');
+    return {
+        default: () => {
+            launcherRenderCount += 1;
+            return React.createElement('div', null, 'Launcher App');
+        },
+    };
+});
+
+vi.mock('./os/StatusBar', async () => {
+    const React = await import('react');
+    const { useVirtualTime } = await import('../context/VirtualTimeContext');
+
+    return {
+        default: () => {
+            statusBarRenderCount += 1;
+            const virtualTime = useVirtualTime();
+            return React.createElement('div', { 'data-testid': 'status-bar' }, `status:${virtualTime.hours}:${virtualTime.minutes}`);
+        },
+    };
+});
+
+vi.mock('./os/AppSplashScreen', async () => {
+    const React = await import('react');
+    return {
+        default: () => React.createElement('div', null, 'Loading App'),
+    };
+});
+
+vi.mock('../apps/zhaixinglou/ZhaixinglouApp', async () => {
+    const React = await import('react');
+    return {
+        default: () => React.createElement('div', null, 'Zhaixinglou App'),
+    };
+});
+
+vi.mock('../apps/zhaixinglou/AssetPreloader', () => ({
+    prefetchZhaixinglouAssets: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock('./os/UpdatePopup', async () => {
+    const React = await import('react');
+    return {
+        default: () => React.createElement(React.Fragment, null),
+    };
+});
+
+vi.mock('./os/DynamicIsland', async () => {
+    const React = await import('react');
+    return {
+        default: () => React.createElement(React.Fragment, null),
+    };
+});
+
+vi.mock('./os/FloatingLyrics', async () => {
+    const React = await import('react');
+    return {
+        default: () => React.createElement(React.Fragment, null),
+    };
+});
+
+vi.mock('./ValentineEvent', async () => {
+    const React = await import('react');
+    return {
+        SpecialMomentsApp: () => React.createElement(React.Fragment, null),
+        ValentineController: () => React.createElement(React.Fragment, null),
+    };
+});
+
+vi.mock('../utils/specialEvents', () => ({
+    getSpecialEventDefinition: vi.fn(() => null),
+    shouldShowSpecialEventPopup: vi.fn(() => false),
+}));
+
+vi.mock('../utils/haptics', () => ({
+    haptic: {
+        light: vi.fn(),
+    },
+}));
+
+vi.mock('../utils/runtimeRecovery', () => ({
+    attemptChunkAutoReload: vi.fn(() => false),
+    isChunkLoadError: vi.fn(() => false),
+    reloadApplication: vi.fn(),
+}));
+
+vi.mock('@capacitor/core', () => ({
+    Capacitor: {
+        isNativePlatform: vi.fn(() => false),
+    },
+}));
+
+vi.mock('@capacitor/app', () => ({
+    App: {
+        addListener: vi.fn(),
+        exitApp: vi.fn(),
+        removeAllListeners: vi.fn(() => Promise.resolve()),
+    },
+}));
+
+vi.mock('@capacitor/status-bar', () => ({
+    StatusBar: {
+        hide: vi.fn(),
+        setOverlaysWebView: vi.fn(),
+        setStyle: vi.fn(),
+    },
+    Style: {
+        Dark: 'dark',
+    },
+}));
+
+vi.mock('@capacitor/local-notifications', () => ({
+    LocalNotifications: {
+        checkPermissions: vi.fn(() => Promise.resolve({ display: 'granted' })),
+        requestPermissions: vi.fn(() => Promise.resolve({ display: 'granted' })),
+    },
+}));
+
+vi.mock('../App', () => ({
+    requestSystemFullscreen: vi.fn(),
+}));
+
+const mockedUseOS = vi.mocked(useOS);
+
+describe('PhoneShell active app rendering', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'));
+
+        launcherRenderCount = 0;
+        statusBarRenderCount = 0;
+
+        localStorage.clear();
+        localStorage.setItem('sullyos_disclaimer_accepted', '1');
+
+        window.scrollTo = vi.fn();
+        window.requestIdleCallback = ((callback: IdleRequestCallback) => window.setTimeout(() => callback({
+            didTimeout: false,
+            timeRemaining: () => 50,
+        }), 1)) as typeof window.requestIdleCallback;
+        window.cancelIdleCallback = ((id: number) => window.clearTimeout(id)) as typeof window.cancelIdleCallback;
+
+        mockedUseOS.mockReturnValue({
+            activeApp: AppID.Launcher,
+            characters: [],
+            closeApp: vi.fn(),
+            handleBack: vi.fn(() => true),
+            isDataLoaded: true,
+            isLocked: false,
+            theme: {
+                wallpaper: 'linear-gradient(#000000, #111111)',
+                hideStatusBar: false,
+            },
+            toasts: [],
+            unreadMessages: {},
+            unlock: vi.fn(),
+        } as any);
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('does not rerender the active app when virtual time ticks in the status bar', async () => {
+        render(
+            <VirtualTimeProvider>
+                <PhoneShell />
+            </VirtualTimeProvider>,
+        );
+
+        expect(launcherRenderCount).toBe(1);
+
+        await act(async () => {
+            vi.advanceTimersByTime(3100);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(statusBarRenderCount).toBeGreaterThan(1);
+        expect(launcherRenderCount).toBe(1);
+    });
+});

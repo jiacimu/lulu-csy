@@ -30,7 +30,8 @@ import {
   Phone,
   Brain,
   TrendUp,
-
+  Wrench,
+  MusicNote,
 } from '@phosphor-icons/react';
 
 // SVG 图标库 - Phosphor Icons
@@ -64,7 +65,8 @@ export const Icons: Record<string, React.FC<{ className?: string }>> = {
   VoiceCall: ({ className }) => <Phone className={className} weight="bold" />,
   CognitiveNetwork: ({ className }) => <Brain className={className} weight="bold" />,
   HotSearch: ({ className }) => <TrendUp className={className} weight="bold" />,
-
+  StatusWorkshop: ({ className }) => <Wrench className={className} weight="bold" />,
+  Music: ({ className }) => <MusicNote className={className} weight="bold" />,
 };
 
 export const INSTALLED_APPS: AppConfig[] = [
@@ -97,7 +99,8 @@ export const INSTALLED_APPS: AppConfig[] = [
   { id: AppID.Zhaixinglou, name: '摘星楼', icon: 'Zhaixinglou', color: 'red' },
   { id: AppID.VoiceCall, name: '语音通话', icon: 'VoiceCall', color: 'slate' },
   { id: AppID.CognitiveNetwork, name: '认知网络', icon: 'CognitiveNetwork', color: 'violet' },
-
+  { id: AppID.StatusWorkshop, name: '状态栏工坊', icon: 'StatusWorkshop', color: 'slate' },
+  { id: AppID.Music, name: '网易云音乐', icon: 'Music', color: 'red' },
 ];
 
 export const DOCK_APPS = [AppID.Chat, AppID.GroupChat, AppID.Social, AppID.Settings];

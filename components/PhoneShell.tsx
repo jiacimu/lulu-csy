@@ -2,7 +2,7 @@
 
 
 
-import React,{ useState,useEffect,Component,ErrorInfo,Suspense } from 'react';
+import React,{ memo,useState,useEffect,Component,ErrorInfo,Suspense } from 'react';
 import { useOS } from '../context/OSContext';
 import { useVirtualTime } from '../context/VirtualTimeContext';
 import StatusBar from './os/StatusBar';
@@ -44,6 +44,8 @@ const HotSearchApp = React.lazy(() => import('../apps/HotSearchApp'));
 const ZhaixinglouApp = React.lazy(() => import('../apps/zhaixinglou/ZhaixinglouApp'));
 const CsyManualApp = React.lazy(() => import('../apps/CsyManualApp'));
 const CognitiveNetworkApp = React.lazy(() => import('../apps/CognitiveNetworkApp'));
+const StatusWorkshopApp = React.lazy(() => import('../apps/StatusWorkshopApp'));
+const MusicApp = React.lazy(() => import('../apps/music/MusicApp'));
 
 const LazyValentineEvent = React.lazy(() => import('./ValentineEvent').then(m => ({
   default: m.SpecialMomentsApp
@@ -57,6 +59,8 @@ import {
   shouldShowSpecialEventPopup,
 } from '../utils/specialEvents';
 import { haptic } from '../utils/haptics';
+import DynamicIsland from './os/DynamicIsland';
+import FloatingLyrics from './os/FloatingLyrics';
 import UpdatePopup from './os/UpdatePopup';
 import { attemptChunkAutoReload,isChunkLoadError,reloadApplication } from '../utils/runtimeRecovery';
 
@@ -196,9 +200,133 @@ const DisclaimerPopup: React.FC<{ onAccept: () => void }> = ({ onAccept }) => (
   </div>
 );
 
+interface LockScreenProps {
+  bgImageValue: string;
+  characters: Array<{ id: string; name: string }>;
+  contentColor: string;
+  onUnlock: () => void;
+  unreadMessages: Record<string, number>;
+}
+
+const LockScreen: React.FC<LockScreenProps> = ({
+  bgImageValue,
+  characters,
+  contentColor,
+  onUnlock,
+  unreadMessages,
+}) => {
+  const virtualTime = useVirtualTime();
+  const unreadCount = Object.values(unreadMessages).reduce((a, b) => a + b, 0);
+  const unreadCharId = Object.keys(unreadMessages)[0];
+  const unreadChar = unreadCharId ? characters.find(c => c.id === unreadCharId) : null;
+
+  return (
+    <div
+      onClick={() => {
+        if ('Notification' in window && Notification.permission !== 'granted') {
+          Notification.requestPermission();
+        }
+        haptic.light();
+        requestSystemFullscreen();
+        onUnlock();
+      }}
+      className="relative w-full h-full bg-cover bg-center cursor-pointer overflow-hidden group font-light select-none overscroll-none"
+      style={{ backgroundImage: bgImageValue, color: contentColor }}
+    >
+      <div className="absolute inset-0 bg-black/5 backdrop-blur-sm transition-all group-hover:backdrop-blur-none group-hover:bg-transparent duration-700" />
+
+      <div className="absolute top-24 w-full text-center drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)]">
+        <div className="text-8xl tracking-tighter opacity-95 font-bold">
+          {virtualTime.hours.toString().padStart(2, '0')}<span className="animate-pulse">:</span>{virtualTime.minutes.toString().padStart(2, '0')}
+        </div>
+        <div className="text-lg tracking-widest opacity-90 mt-2 uppercase text-xs font-bold">SullyOS Simulation</div>
+      </div>
+
+      {unreadCount > 0 && (
+        <div className="absolute top-[40%] left-4 right-4 animate-slide-up">
+          <div className="bg-white/20 backdrop-blur-md rounded-2xl p-4 shadow-lg border border-white/10 flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-green-500 flex items-center justify-center text-white shrink-0 shadow-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6"><path fillRule="evenodd" d="M4.804 21.644A6.707 6.707 0 0 0 6 21.75a6.721 6.721 0 0 0 3.583-1.029c.774.182 1.584.279 2.417.279 5.322 0 9.75-3.97 9.75-9 0-5.03-4.428-9-9.75-9s-9.75 3.97-9.75 9c0 2.409 1.025 4.587 2.674 6.192.232.226.277.428.254.543a3.73 3.73 0 0 1-.814 1.686.75.75 0 0 0 .44 1.223ZM8.25 10.875a1.125 1.125 0 1 0 0 2.25 1.125 1.125 0 0 0 0-2.25ZM10.875 12a1.125 1.125 0 1 1 2.25 0 1.125 1.125 0 0 1-2.25 0Zm4.875-1.125a1.125 1.125 0 1 0 0 2.25 1.125 1.125 0 0 0 0-2.25Z" clipRule="evenodd" /></svg>
+            </div>
+            <div className="flex-1 min-w-0 text-white text-left">
+              <div className="font-bold text-sm flex justify-between">
+                <span>{unreadChar ? unreadChar.name : 'Message'}</span>
+                <span className="text-[10px] opacity-70">刚刚</span>
+              </div>
+              <div className="text-xs opacity-90 truncate">
+                {unreadCount > 1 ? `收到 ${unreadCount} 条新消息` : '发来了一条新消息'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="absolute bottom-12 w-full flex flex-col items-center gap-3 animate-pulse opacity-80 drop-shadow-md">
+        <div className="w-1 h-8 rounded-full bg-gradient-to-b from-transparent to-current"></div>
+        <span className="text-[10px] tracking-widest uppercase font-semibold">Tap to Unlock</span>
+      </div>
+    </div>
+  );
+};
+
+function renderActiveApp(activeApp: AppID) {
+  switch (activeApp) {
+    case AppID.Settings: return <Settings />;
+    case AppID.Character: return <Character />;
+    case AppID.Chat: return <Chat />;
+    case AppID.GroupChat: return <GroupChat />;
+    case AppID.ThemeMaker: return <ThemeMaker />;
+    case AppID.Appearance: return <Appearance />;
+    case AppID.Gallery: return <Gallery />;
+    case AppID.Date: return <DateApp />;
+    case AppID.User: return <UserApp />;
+    case AppID.Journal: return <JournalApp />;
+    case AppID.Schedule: return <ScheduleApp />;
+    case AppID.Room: return <RoomApp />;
+    case AppID.CheckPhone: return <CheckPhone />;
+    case AppID.Social: return <SocialApp />;
+    case AppID.Study: return <StudyApp />;
+    case AppID.FAQ: return <FAQApp />;
+    case AppID.Game: return <GameApp />;
+    case AppID.Worldbook: return <WorldbookApp />;
+    case AppID.Novel: return <NovelApp />;
+    case AppID.Bank: return <BankApp />;
+    case AppID.HotSearch: return <HotSearchApp />;
+    case AppID.XhsStock: return <XhsStockApp />;
+    case AppID.XhsFreeRoam: return <XhsFreeRoamApp />;
+    case AppID.Browser: return <BrowserApp />;
+    case AppID.VoiceCall: return <VoiceCallApp />;
+    case AppID.SpecialMoments: return <LazyValentineEvent />;
+    case AppID.Zhaixinglou: return <ZhaixinglouApp />;
+    case AppID.CsyManual: return <CsyManualApp />;
+    case AppID.CognitiveNetwork: return <CognitiveNetworkApp />;
+    case AppID.StatusWorkshop: return <StatusWorkshopApp />;
+    case AppID.Music: return <MusicApp />;
+    case AppID.Launcher:
+    default: return <Launcher />;
+  }
+}
+
+const ActiveAppContainer = memo(function ActiveAppContainer({
+  activeApp,
+  onCloseApp,
+}: {
+  activeApp: AppID;
+  onCloseApp: () => void;
+}) {
+  return (
+    <div className="flex-1 relative overflow-hidden" style={{ contain: 'layout style paint' }}>
+      <AppErrorBoundary onCloseApp={onCloseApp}>
+        <Suspense fallback={<AppSplashScreen appId={activeApp} />}>
+          {renderActiveApp(activeApp)}
+        </Suspense>
+      </AppErrorBoundary>
+    </div>
+  );
+});
+
 const PhoneShell: React.FC = () => {
   const { theme, isLocked, unlock, activeApp, closeApp, isDataLoaded, toasts, unreadMessages, characters, handleBack } = useOS();
-  const virtualTime = useVirtualTime();
 
   // Use a ref so that the popstate / backButton handlers always see the latest values
   // without needing to be re-registered every time state changes.
@@ -207,6 +335,13 @@ const PhoneShell: React.FC = () => {
 
   const handleBackRef = React.useRef(handleBack);
   React.useEffect(() => { handleBackRef.current = handleBack; }, [handleBack]);
+
+  const closeAppRef = React.useRef(closeApp);
+  React.useEffect(() => { closeAppRef.current = closeApp; }, [closeApp]);
+
+  const handleCloseActiveApp = React.useCallback(() => {
+    closeAppRef.current();
+  }, []);
 
   // Disclaimer popup for first-time users
   const [showDisclaimer, setShowDisclaimer] = useState(() => {
@@ -356,95 +491,16 @@ const PhoneShell: React.FC = () => {
   const contentColor = theme.contentColor || '#ffffff';
 
   if (isLocked) {
-    const unreadCount = Object.values(unreadMessages).reduce((a, b) => a + b, 0);
-    const unreadCharId = Object.keys(unreadMessages)[0];
-    const unreadChar = unreadCharId ? characters.find(c => c.id === unreadCharId) : null;
-
     return (
-      <div
-        onClick={() => {
-          if ('Notification' in window && Notification.permission !== 'granted') {
-            Notification.requestPermission();
-          }
-          haptic.light();
-          requestSystemFullscreen();
-          unlock();
-        }}
-        className="relative w-full h-full bg-cover bg-center cursor-pointer overflow-hidden group font-light select-none overscroll-none"
-        style={{ backgroundImage: bgImageValue, color: contentColor }}
-      >
-        <div className="absolute inset-0 bg-black/5 backdrop-blur-sm transition-all group-hover:backdrop-blur-none group-hover:bg-transparent duration-700" />
-
-        <div className="absolute top-24 w-full text-center drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)]">
-          <div className="text-8xl tracking-tighter opacity-95 font-bold">
-            {virtualTime.hours.toString().padStart(2, '0')}<span className="animate-pulse">:</span>{virtualTime.minutes.toString().padStart(2, '0')}
-          </div>
-          <div className="text-lg tracking-widest opacity-90 mt-2 uppercase text-xs font-bold">SullyOS Simulation</div>
-        </div>
-
-        {unreadCount > 0 && (
-          <div className="absolute top-[40%] left-4 right-4 animate-slide-up">
-            <div className="bg-white/20 backdrop-blur-md rounded-2xl p-4 shadow-lg border border-white/10 flex items-center gap-4">
-              <div className="w-10 h-10 rounded-xl bg-green-500 flex items-center justify-center text-white shrink-0 shadow-sm">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6"><path fillRule="evenodd" d="M4.804 21.644A6.707 6.707 0 0 0 6 21.75a6.721 6.721 0 0 0 3.583-1.029c.774.182 1.584.279 2.417.279 5.322 0 9.75-3.97 9.75-9 0-5.03-4.428-9-9.75-9s-9.75 3.97-9.75 9c0 2.409 1.025 4.587 2.674 6.192.232.226.277.428.254.543a3.73 3.73 0 0 1-.814 1.686.75.75 0 0 0 .44 1.223ZM8.25 10.875a1.125 1.125 0 1 0 0 2.25 1.125 1.125 0 0 0 0-2.25ZM10.875 12a1.125 1.125 0 1 1 2.25 0 1.125 1.125 0 0 1-2.25 0Zm4.875-1.125a1.125 1.125 0 1 0 0 2.25 1.125 1.125 0 0 0 0-2.25Z" clipRule="evenodd" /></svg>
-              </div>
-              <div className="flex-1 min-w-0 text-white text-left">
-                <div className="font-bold text-sm flex justify-between">
-                  <span>{unreadChar ? unreadChar.name : 'Message'}</span>
-                  <span className="text-[10px] opacity-70">刚刚</span>
-                </div>
-                <div className="text-xs opacity-90 truncate">
-                  {unreadCount > 1 ? `收到 ${unreadCount} 条新消息` : '发来了一条新消息'}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="absolute bottom-12 w-full flex flex-col items-center gap-3 animate-pulse opacity-80 drop-shadow-md">
-          <div className="w-1 h-8 rounded-full bg-gradient-to-b from-transparent to-current"></div>
-          <span className="text-[10px] tracking-widest uppercase font-semibold">Tap to Unlock</span>
-        </div>
-      </div>
+      <LockScreen
+        bgImageValue={bgImageValue}
+        characters={characters}
+        contentColor={contentColor}
+        onUnlock={unlock}
+        unreadMessages={unreadMessages}
+      />
     );
   }
-
-  const renderApp = () => {
-    switch (activeApp) {
-      case AppID.Settings: return <Settings />;
-      case AppID.Character: return <Character />;
-      case AppID.Chat: return <Chat />;
-      case AppID.GroupChat: return <GroupChat />;
-      case AppID.ThemeMaker: return <ThemeMaker />;
-      case AppID.Appearance: return <Appearance />;
-      case AppID.Gallery: return <Gallery />;
-      case AppID.Date: return <DateApp />;
-      case AppID.User: return <UserApp />;
-      case AppID.Journal: return <JournalApp />;
-      case AppID.Schedule: return <ScheduleApp />;
-      case AppID.Room: return <RoomApp />;
-      case AppID.CheckPhone: return <CheckPhone />;
-      case AppID.Social: return <SocialApp />;
-      case AppID.Study: return <StudyApp />;
-      case AppID.FAQ: return <FAQApp />;
-      case AppID.Game: return <GameApp />;
-      case AppID.Worldbook: return <WorldbookApp />;
-      case AppID.Novel: return <NovelApp />;
-      case AppID.Bank: return <BankApp />;
-      case AppID.HotSearch: return <HotSearchApp />;
-      case AppID.XhsStock: return <XhsStockApp />;
-      case AppID.XhsFreeRoam: return <XhsFreeRoamApp />;
-      case AppID.Browser: return <BrowserApp />;
-      case AppID.VoiceCall: return <VoiceCallApp />;
-      case AppID.SpecialMoments: return <LazyValentineEvent />;
-      case AppID.Zhaixinglou: return <ZhaixinglouApp />;
-      case AppID.CsyManual: return <CsyManualApp />;
-      case AppID.CognitiveNetwork: return <CognitiveNetworkApp />;
-
-      case AppID.Launcher:
-      default: return <Launcher />;
-    }
-  };
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-gradient-to-br from-pink-200 via-purple-200 to-indigo-200 text-slate-900 font-sans select-none overscroll-none">
@@ -475,17 +531,16 @@ const PhoneShell: React.FC = () => {
           paddingBottom: activeApp !== AppID.Launcher ? 'var(--safe-bottom, env(safe-area-inset-bottom))' : 0
         }}
       >
-        {/* App Container */}
-        <div className="flex-1 relative overflow-hidden" style={{ contain: 'layout style paint' }}>
-          <AppErrorBoundary onCloseApp={closeApp}>
-            <Suspense fallback={<AppSplashScreen appId={activeApp} />}>
-              {renderApp()}
-            </Suspense>
-          </AppErrorBoundary>
-        </div>
+        <ActiveAppContainer activeApp={activeApp} onCloseApp={handleCloseActiveApp} />
 
         {/* Overlays: Status Bar (Top) */}
         {!theme.hideStatusBar && <StatusBar />}
+
+        {/* Overlays: Dynamic Island (Music mini player) */}
+        <DynamicIsland />
+
+        {/* Overlays: Floating Lyrics */}
+        <FloatingLyrics />
 
         {/* Overlays: iOS-Style Banner Notifications */}
         <div className="absolute top-0 left-0 w-full flex flex-col items-center gap-2 pointer-events-none z-[60]" style={{ paddingTop: 'max(12px, calc(var(--safe-top, env(safe-area-inset-top)) + 4px))' }}>
