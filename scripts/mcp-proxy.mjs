@@ -14,12 +14,12 @@
  * SPA JS 已缓存，评论区更可能正常渲染。
  *
  * 用法:
- *   node scripts/mcp-proxy.mjs                           # 默认: 代理 18061 → MCP 18060
+ *   node scripts/mcp-proxy.mjs                           # 仅在调试兼容 /mcp 接口时使用
  *   node scripts/mcp-proxy.mjs --port 19000              # 自定义代理端口
  *   node scripts/mcp-proxy.mjs --target http://localhost:9090  # 自定义 MCP 地址
  *   node scripts/mcp-proxy.mjs --no-prewarm              # 禁用 SPA 预热
  *
- * 然后在应用设置里把 MCP URL 改为: http://localhost:18061/mcp
+ * 运行后，把应用里的服务地址改为该代理输出的 /mcp 地址。
  */
 
 import { createServer, request as httpRequest } from 'http';

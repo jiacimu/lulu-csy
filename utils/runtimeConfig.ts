@@ -62,6 +62,10 @@ export const DEFAULT_RUNTIME_REALTIME_CONFIG: RealtimeConfig = {
     feishuBaseId: '',
     feishuTableId: '',
     xhsEnabled: false,
+    xhsMcpConfig: {
+        enabled: false,
+        serverUrl: 'http://localhost:18061/api',
+    },
     cacheMinutes: 30,
 };
 
@@ -175,6 +179,16 @@ function normalizeApiConfig(
 }
 
 function normalizeRealtimeConfig(value: Partial<RealtimeConfig> | null | undefined): RealtimeConfig {
+    const rawXhsServerUrl = normalizeString(value?.xhsMcpConfig?.serverUrl);
+    const legacyUntouchedMcpDefault =
+        rawXhsServerUrl === 'http://localhost:18060/mcp'
+        && value?.xhsMcpConfig?.enabled !== true
+        && !normalizeString(value?.xhsMcpConfig?.loggedInUserId)
+        && !normalizeString(value?.xhsMcpConfig?.loggedInNickname);
+    const normalizedXhsServerUrl = legacyUntouchedMcpDefault
+        ? 'http://localhost:18061/api'
+        : rawXhsServerUrl || DEFAULT_RUNTIME_REALTIME_CONFIG.xhsMcpConfig?.serverUrl || 'http://localhost:18061/api';
+
     return {
         ...DEFAULT_RUNTIME_REALTIME_CONFIG,
         ...(value || {}),
@@ -188,6 +202,13 @@ function normalizeRealtimeConfig(value: Partial<RealtimeConfig> | null | undefin
         feishuAppSecret: normalizeString(value?.feishuAppSecret),
         feishuBaseId: normalizeString(value?.feishuBaseId),
         feishuTableId: normalizeString(value?.feishuTableId),
+        xhsEnabled: value?.xhsEnabled === true,
+        xhsMcpConfig: {
+            enabled: value?.xhsMcpConfig?.enabled === true,
+            serverUrl: normalizedXhsServerUrl,
+            loggedInUserId: normalizeString(value?.xhsMcpConfig?.loggedInUserId) || undefined,
+            loggedInNickname: normalizeString(value?.xhsMcpConfig?.loggedInNickname) || undefined,
+        },
         cacheMinutes: typeof value?.cacheMinutes === 'number' && Number.isFinite(value.cacheMinutes)
             ? value.cacheMinutes
             : DEFAULT_RUNTIME_REALTIME_CONFIG.cacheMinutes,

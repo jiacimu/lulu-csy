@@ -54,7 +54,7 @@ export interface RealtimeConfig {
     feishuBaseId?: string;
     feishuTableId?: string;
 
-    // 小红书配置 (MCP)
+    // 小红书配置 (Bridge / MCP)
     xhsEnabled?: boolean;
     xhsMcpConfig?: { enabled: boolean; serverUrl: string };
 
@@ -75,7 +75,7 @@ export const defaultRealtimeConfig: RealtimeConfig = {
     notionApiKey: '',
     notionDatabaseId: '',
     xhsEnabled: false,
-    xhsMcpConfig: { enabled: false, serverUrl: 'http://localhost:18060/mcp' },
+    xhsMcpConfig: { enabled: false, serverUrl: 'http://localhost:18061/api' },
     cacheMinutes: 30
 };
 

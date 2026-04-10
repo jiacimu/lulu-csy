@@ -207,16 +207,17 @@ export const XhsMcpSection = React.memo<XhsMcpProps>(({ enabled, mcpUrl, nicknam
     const [connectedMode, setConnectedMode] = useState<'bridge' | 'mcp' | ''>('');
     const [qrImage, setQrImage] = useState<string | null>(null);
     const [qrLoading, setQrLoading] = useState(false);
+    const recommendedBridgeUrl = 'http://localhost:18061/api';
 
     const testXhsMcp = async () => {
-        if (!mcpUrl) { onTestStatus('请填写 MCP Server URL'); return; }
+        if (!mcpUrl) { onTestStatus('请填写小红书服务地址'); return; }
         onTestStatus('正在连接...');
         try {
             const { XhsMcpClient } = await import('../../../utils/xhsMcpClient');
             const result = await XhsMcpClient.testConnection(mcpUrl);
             if (result.connected) {
                 const toolCount = result.tools?.length || 0;
-                const modeLabel = result.mode === 'bridge' ? 'Bridge' : 'MCP';
+                const modeLabel = result.mode === 'bridge' ? 'Bridge' : '兼容 MCP';
                 setConnectedMode(result.mode || '');
                 const loginInfo = result.loggedIn
                     ? ` | ${result.nickname ? `账号: ${result.nickname}` : '已登录'}${result.userId ? ` (ID: ${result.userId})` : ''}`
@@ -232,7 +233,8 @@ export const XhsMcpSection = React.memo<XhsMcpProps>(({ enabled, mcpUrl, nicknam
     const autoDetect = async () => {
         onTestStatus('🔍 自动探测中...');
         const { XhsMcpClient } = await import('../../../utils/xhsMcpClient');
-        const candidates = ['/xhs-api', '/xhs-mcp', 'http://localhost:18061/api', 'http://localhost:18060/mcp'];
+        const candidates = [recommendedBridgeUrl, '/xhs-api'];
+        let lastError = '';
         for (const url of candidates) {
             try {
                 onTestStatus(`🔍 尝试 ${url}...`);
@@ -240,20 +242,21 @@ export const XhsMcpSection = React.memo<XhsMcpProps>(({ enabled, mcpUrl, nicknam
                 if (r.connected) {
                     set('xhsMcpUrl', url);
                     setConnectedMode(r.mode || '');
-                    const modeLabel = r.mode === 'bridge' ? 'Bridge' : 'MCP';
+                    const modeLabel = r.mode === 'bridge' ? 'Bridge' : '兼容 MCP';
                     onTestStatus(`✅ 自动探测成功: ${url} (${modeLabel})`);
                     if (r.nickname && !nickname) set('xhsNickname', r.nickname);
                     if (r.userId && !userId) set('xhsUserId', r.userId);
                     onUpdateConfig({ enabled, serverUrl: url, loggedInNickname: nickname || r.nickname, loggedInUserId: userId || r.userId });
                     return;
                 }
+                lastError = r.error ? `${url}：${r.error}` : `${url}：连接失败`;
             } catch { /* continue */ }
         }
-        onTestStatus('❌ 自动探测失败，请手动填写 URL 或启动 XHS 服务');
+        onTestStatus(`❌ 自动探测失败。请先双击 scripts/start-xhs.bat 启动 Bridge（推荐地址 ${recommendedBridgeUrl}）。${lastError ? `最后一次错误：${lastError}` : ''}`);
     };
 
     const fetchQrCode = async () => {
-        if (!mcpUrl) { onTestStatus('请先连接 MCP 服务'); return; }
+        if (!mcpUrl) { onTestStatus('请先连接小红书服务'); return; }
         setQrLoading(true);
         try {
             const { XhsMcpClient } = await import('../../../utils/xhsMcpClient');
@@ -283,10 +286,10 @@ export const XhsMcpSection = React.memo<XhsMcpProps>(({ enabled, mcpUrl, nicknam
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <span className="text-lg">📕</span>
-                    <span className="text-sm font-bold text-red-700">小红书 MCP</span>
+                    <span className="text-sm font-bold text-red-700">小红书 Bridge</span>
                     {connectedMode && (
                         <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${connectedMode === 'bridge' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'}`}>
-                            {connectedMode === 'bridge' ? 'Bridge 模式' : 'MCP 模式'}
+                            {connectedMode === 'bridge' ? 'Bridge 模式' : '兼容 MCP'}
                         </span>
                     )}
                 </div>
@@ -295,10 +298,10 @@ export const XhsMcpSection = React.memo<XhsMcpProps>(({ enabled, mcpUrl, nicknam
                     <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
                 </label>
             </div>
-            <p className="text-[10px] text-red-500/70 leading-relaxed">双模式小红书自动化。Bridge 模式（推荐）无需 Docker，MCP 模式兼容旧版。</p>
+            <p className="text-[10px] text-red-500/70 leading-relaxed">默认使用 Bridge 连接本地小红书服务，登录状态会跟随专用浏览器会话。</p>
             {enabled && (
                 <div className="space-y-2">
-                    <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Server URL</label><input value={mcpUrl} onChange={e => set('xhsMcpUrl', e.target.value)} className="w-full bg-white/80 border border-red-200 rounded-xl px-3 py-2 text-[11px] font-mono" placeholder="/xhs-api (Bridge) 或 /xhs-mcp (MCP)" /></div>
+                    <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Server URL</label><input value={mcpUrl} onChange={e => set('xhsMcpUrl', e.target.value)} className="w-full bg-white/80 border border-red-200 rounded-xl px-3 py-2 text-[11px] font-mono" placeholder="推荐: http://localhost:18061/api；开发期也可用 /xhs-api" /></div>
                     <div className="grid grid-cols-2 gap-2">
                         <button onClick={testXhsMcp} className="py-2 bg-red-100 text-red-600 text-xs font-bold rounded-xl active:scale-95 transition-transform">测试连接</button>
                         <button onClick={autoDetect} className="py-2 bg-red-50 text-red-500 text-xs font-bold rounded-xl active:scale-95 transition-transform border border-red-200">🔍 自动探测</button>
@@ -329,9 +332,9 @@ export const XhsMcpSection = React.memo<XhsMcpProps>(({ enabled, mcpUrl, nicknam
                         <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">用户 ID</label><input value={userId} onChange={e => set('xhsUserId', e.target.value)} className="w-full bg-white/80 border border-red-200 rounded-xl px-3 py-2 text-[11px] font-mono" placeholder="可选" /></div>
                     </div>
                     <p className="text-[10px] text-red-500/70 leading-relaxed">
-                        <b>Bridge 模式（推荐）：</b>双击 scripts/start-xhs.bat 一键启动<br />
-                        <b>MCP 模式：</b>Docker 运行 xiaohongshu-mcp + CORS 代理<br />
-                        本地开发可直接用 /xhs-api 或 /xhs-mcp（Vite 代理）
+                        <b>推荐用法：</b>双击 scripts/start-xhs.bat 一键启动，连接 {recommendedBridgeUrl}<br />
+                        本地开发也可直接用 /xhs-api（Vite 代理）<br />
+                        连接成功后会自动读取昵称和登录状态
                     </p>
                 </div>
             )}

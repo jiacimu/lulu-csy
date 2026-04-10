@@ -14,6 +14,7 @@
  *   node scripts/xhs-bridge.mjs --port 19000                       # 自定义端口
  *   node scripts/xhs-bridge.mjs --skills-dir /path/to/skills       # 自定义 skills 目录
  *   node scripts/xhs-bridge.mjs --chrome-port 9222                 # Chrome CDP 端口
+ *   node scripts/xhs-bridge.mjs --bridge-url ws://localhost:9333   # Extension Bridge 地址（新版 CLI）
  *   node scripts/xhs-bridge.mjs --account myaccount                # 多账号
  *
  * 前端 MCP URL 设为: http://localhost:18061/api
@@ -21,7 +22,7 @@
 
 import { createServer, request as httpRequest } from 'http';
 import { spawn } from 'child_process';
-import { writeFileSync, unlinkSync, mkdtempSync, existsSync } from 'fs';
+import { writeFileSync, unlinkSync, mkdtempSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -40,6 +41,7 @@ const getArg = (name, fallback) => {
 const PORT = parseInt(getArg('--port', '18061'), 10);
 const CHROME_HOST = getArg('--chrome-host', '127.0.0.1');
 const CHROME_PORT = getArg('--chrome-port', '9222');
+const BRIDGE_URL = getArg('--bridge-url', 'ws://localhost:9333');
 const ACCOUNT = getArg('--account', '');
 
 // Auto-detect skills directory
@@ -64,6 +66,8 @@ function findSkillsDir() {
 }
 const SKILLS_DIR = findSkillsDir();
 const CLI_PATH = join(SKILLS_DIR, 'scripts', 'cli.py');
+const CLI_SOURCE = existsSync(CLI_PATH) ? readFileSync(CLI_PATH, 'utf-8') : '';
+const CLI_SUPPORTS_BRIDGE_URL = CLI_SOURCE.includes('--bridge-url');
 
 const CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
@@ -104,14 +108,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function runCli(command, cliArgs = []) {
     return new Promise((resolve, reject) => {
-        const fullArgs = [
-            CLI_PATH,
-            '--host', CHROME_HOST,
-            '--port', CHROME_PORT,
-            ...(ACCOUNT ? ['--account', ACCOUNT] : []),
-            command,
-            ...cliArgs,
-        ];
+        const cliPrelude = CLI_SUPPORTS_BRIDGE_URL
+            ? ['--bridge-url', BRIDGE_URL]
+            : [
+                '--host', CHROME_HOST,
+                '--port', CHROME_PORT,
+                ...(ACCOUNT ? ['--account', ACCOUNT] : []),
+            ];
+        const fullArgs = [CLI_PATH, ...cliPrelude, command, ...cliArgs];
 
         console.log(`[bridge] $ uv run python ${fullArgs.join(' ')}`);
 
@@ -1126,6 +1130,8 @@ createServer(async (req, res) => {
     console.log(`  Listen:     http://localhost:${PORT}/api`);
     console.log(`  Skills dir: ${SKILLS_DIR}`);
     console.log(`  CLI path:   ${CLI_PATH}`);
+    console.log(`  CLI mode:   ${CLI_SUPPORTS_BRIDGE_URL ? 'extension-bridge' : 'chrome-cdp'}`);
+    console.log(`  Bridge URL: ${BRIDGE_URL}`);
     console.log(`  Chrome CDP: ${CHROME_HOST}:${CHROME_PORT}`);
     console.log(`  Account:    ${ACCOUNT || '(default)'}`);
     if (!existsSync(CLI_PATH)) {

@@ -3,8 +3,8 @@
  * XHS Client — 双模式小红书自动化客户端
  *
  * 自动检测后端类型:
- * - MCP 模式 (URL 含 /mcp): 使用 xiaohongshu-mcp Go 服务器 (JSON-RPC 2.0)
  * - Bridge 模式 (URL 含 /api): 使用 xiaohongshu-skills Python CLI (REST)
+ * - 兼容 MCP 模式 (URL 含 /mcp): 使用 xiaohongshu-mcp Go 服务器 (JSON-RPC 2.0)
  *
  * MCP Server:   https://github.com/xpzouying/xiaohongshu-mcp
  * Skills Server: https://github.com/autoclaw-cc/xiaohongshu-skills
@@ -20,9 +20,37 @@ export interface McpToolResult {
 
 type BackendMode = 'mcp' | 'bridge';
 
+const XHS_BRIDGE_SERVER_URL = 'http://localhost:18061/api';
+
 const detectMode = (serverUrl: string): BackendMode => {
     if (serverUrl.includes('/api')) return 'bridge';
     return 'mcp'; // default: MCP (backwards compatible)
+};
+
+const isConnectionRefusedError = (message: string): boolean => {
+    return /failed to fetch|fetch failed|networkerror|err_connection_refused|econnrefused/i.test(message);
+};
+
+const formatConnectionError = (serverUrl: string, error: unknown): string => {
+    const rawMessage = error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+            ? error
+            : '连接失败';
+
+    if (!isConnectionRefusedError(rawMessage)) {
+        return rawMessage;
+    }
+
+    if (serverUrl.includes('/api') || serverUrl.includes('18061')) {
+        return `连接不到 ${serverUrl}。请先运行 scripts/start-xhs.bat，启动 Bridge 服务后再试（推荐地址: ${XHS_BRIDGE_SERVER_URL}）。`;
+    }
+
+    if (serverUrl.includes('/mcp') || serverUrl.includes('18060')) {
+        return `连接不到 ${serverUrl}。这个旧版 MCP 端口当前未启动；请先运行 scripts/start-xhs.bat 改用 ${XHS_BRIDGE_SERVER_URL}，或自行启动 xiaohongshu-mcp。`;
+    }
+
+    return `连接不到 ${serverUrl}。请先运行 scripts/start-xhs.bat，或检查本地小红书服务是否已启动。`;
 };
 
 // ==================== Bridge Mode (REST) ====================
@@ -204,13 +232,13 @@ const mcpInitialize = async (serverUrl: string): Promise<void> => {
     if (!mcpSessionId) {
         console.warn(
             '[MCP] ⚠️ 无法读取 Mcp-Session-Id 响应头（CORS 限制）。\n' +
-            '请使用 CORS 代理: node scripts/mcp-proxy.mjs\n' +
-            '然后把 MCP URL 改为 http://localhost:18061/mcp'
+            '如需调试兼容 /mcp 接口，请运行 CORS 代理: node scripts/mcp-proxy.mjs\n' +
+            '然后把服务地址改为代理输出的 /mcp 地址'
         );
         throw new Error(
             'MCP 连接失败: 浏览器 CORS 限制无法读取 Session ID。\n' +
-            '请运行 CORS 代理: node scripts/mcp-proxy.mjs\n' +
-            '然后把设置里的 MCP URL 改为 http://localhost:18061/mcp'
+            '如需调试兼容 /mcp 接口，请运行 CORS 代理: node scripts/mcp-proxy.mjs\n' +
+            '然后把服务地址改为代理输出的 /mcp 地址'
         );
     }
 
@@ -406,7 +434,7 @@ export const XhsMcpClient = {
                 }
                 return { connected: true, tools, nickname, userId, loggedIn, xsecToken, mode };
             } catch (e: any) {
-                return { connected: false, error: e.message };
+                return { connected: false, error: formatConnectionError(serverUrl, e) };
             }
         }
 
@@ -451,7 +479,7 @@ export const XhsMcpClient = {
             }
             return { connected: true, tools, nickname, userId, loggedIn, xsecToken, mode };
         } catch (e: any) {
-            return { connected: false, error: e.message };
+            return { connected: false, error: formatConnectionError(serverUrl, e) };
         }
     },
 
@@ -607,7 +635,7 @@ export const XhsMcpClient = {
     /** 触发登录流程（Bridge: 命令式; MCP: 不支持） */
     login: async (serverUrl: string): Promise<McpToolResult> => {
         if (detectMode(serverUrl) === 'bridge') return bridgePost(serverUrl, 'login');
-        return { success: false, error: '登录功能仅在 Skills (Bridge) 模式下可用，MCP 模式请使用扫码登录' };
+        return { success: false, error: '登录功能仅在 Bridge 模式下可用；如果你填的是兼容 /mcp 地址，请改用 Bridge 连接后再试' };
     },
 
     /** 获取登录二维码（双模式都支持） */

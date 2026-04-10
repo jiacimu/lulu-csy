@@ -120,6 +120,12 @@ if not exist "%SKILLS_DIR%\.venv" (
 REM === Start Chrome on port 9222 with XHS profile ===
 set "CHROME_PROFILE=%USERPROFILE%\.xhs\chrome-profile"
 set "CHROME_PORT=9222"
+set "EXTENSION_DIR=%SKILLS_DIR%\extension"
+set "ASCII_EXTENSION_DIR=%USERPROFILE%\.xhs\xhs-bridge-extension"
+
+if exist "%ASCII_EXTENSION_DIR%\manifest.json" (
+    set "EXTENSION_DIR=%ASCII_EXTENSION_DIR%"
+)
 
 set "CHROME_EXE="
 if defined CHROME_BIN (
@@ -143,7 +149,13 @@ if not defined CHROME_EXE (
 ) else (
     echo [1] Starting Chrome with XHS profile...
     echo     Path: %CHROME_EXE%
-    start "" "%CHROME_EXE%" --remote-debugging-port=%CHROME_PORT% --user-data-dir="%CHROME_PROFILE%" --no-first-run --start-maximized https://www.xiaohongshu.com
+    if exist "%EXTENSION_DIR%\manifest.json" (
+        echo     Loading extension: %EXTENSION_DIR%
+        start "" "%CHROME_EXE%" --remote-debugging-port=%CHROME_PORT% --user-data-dir="%CHROME_PROFILE%" --disable-extensions-except="%EXTENSION_DIR%" --load-extension="%EXTENSION_DIR%" --no-first-run --start-maximized --new-window https://www.xiaohongshu.com
+    ) else (
+        echo     [WARN] Extension not found: %EXTENSION_DIR%
+        start "" "%CHROME_EXE%" --remote-debugging-port=%CHROME_PORT% --user-data-dir="%CHROME_PROFILE%" --no-first-run --start-maximized --new-window https://www.xiaohongshu.com
+    )
     timeout /t 3 /nobreak >nul
 )
 

@@ -9,9 +9,11 @@ import {
     LEGACY_SUB_API_BASE_URL_KEY,
     LEGACY_SUB_API_KEY,
     LEGACY_SUB_API_MODEL_KEY,
+    REALTIME_CONFIG_KEY,
     SECONDARY_API_CONFIG_KEY,
     STT_CONFIG_KEY,
     getEmbeddingConfig,
+    getRealtimeConfig,
     getSecondaryApiConfig,
     getSttConfig,
     hasCloudSyncTarget,
@@ -116,6 +118,49 @@ describe('runtimeConfig', () => {
             provider: 'siliconflow',
             groqApiKey: '',
             siliconflowApiKey: 'silicon-key',
+        });
+    });
+
+    it('defaults xhs config to the recommended bridge server', () => {
+        expect(getRealtimeConfig().xhsMcpConfig).toEqual({
+            enabled: false,
+            serverUrl: 'http://localhost:18061/api',
+            loggedInUserId: undefined,
+            loggedInNickname: undefined,
+        });
+    });
+
+    it('migrates the untouched legacy xhs MCP default to the bridge server', () => {
+        localStorage.setItem(REALTIME_CONFIG_KEY, JSON.stringify({
+            xhsEnabled: false,
+            xhsMcpConfig: {
+                enabled: false,
+                serverUrl: 'http://localhost:18060/mcp',
+            },
+        }));
+
+        expect(getRealtimeConfig().xhsMcpConfig).toEqual({
+            enabled: false,
+            serverUrl: 'http://localhost:18061/api',
+            loggedInUserId: undefined,
+            loggedInNickname: undefined,
+        });
+    });
+
+    it('preserves an explicitly enabled legacy MCP endpoint', () => {
+        localStorage.setItem(REALTIME_CONFIG_KEY, JSON.stringify({
+            xhsEnabled: true,
+            xhsMcpConfig: {
+                enabled: true,
+                serverUrl: 'http://localhost:18060/mcp',
+            },
+        }));
+
+        expect(getRealtimeConfig().xhsMcpConfig).toEqual({
+            enabled: true,
+            serverUrl: 'http://localhost:18060/mcp',
+            loggedInUserId: undefined,
+            loggedInNickname: undefined,
         });
     });
 

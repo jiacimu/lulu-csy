@@ -1,7 +1,7 @@
 
 export interface XhsMcpConfig {
     enabled: boolean;
-    serverUrl: string;  // e.g. "http://localhost:18060/mcp"
+    serverUrl: string;  // e.g. "http://localhost:18061/api"
     loggedInUserId?: string;   // 登录用户的 user_id，MCP 连接成功后自动获取
     loggedInNickname?: string; // 登录用户的昵称
 }
