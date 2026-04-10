@@ -730,10 +730,13 @@ export async function getSongUrl(
 }
 
 export async function resolvePlayableUrl(playable: MusicPlayable): Promise<string | null> {
-    const urls = await getSongUrl([playable.id], {
+    const targetId = playable.kind === 'program'
+        ? playable.mainSong?.id ?? playable.id
+        : playable.id;
+    const urls = await getSongUrl([targetId], {
         resourceType: playable.kind === 'program' ? 'program' : 'song',
     });
-    const targetUrl = urls.find((item) => item.id === playable.id)?.url;
+    const targetUrl = urls.find((item) => item.id === targetId)?.url;
     if (targetUrl) {
         return maybeProxyAudioUrl(targetUrl);
     }
