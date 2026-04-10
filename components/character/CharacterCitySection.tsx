@@ -3,7 +3,6 @@ import { getCityInputTips, type CityTip } from '../../utils/mapService';
 
 const CITY_SUGGESTION_LIMIT = 6;
 const CITY_SEARCH_DEBOUNCE_MS = 250;
-const FICTIONAL_CITY_SAVE_DEBOUNCE_MS = 180;
 const BLUR_CLOSE_DELAY_MS = 120;
 
 type CityFieldKey = 'cityOverride' | 'cityAdcode' | 'isFictionalCity' | 'cityReferenceReal';
@@ -18,6 +17,7 @@ interface CharacterCitySectionProps {
     cityReferenceReal?: string;
     onFieldChange: (field: CityFieldKey, value: string | boolean | undefined) => void;
     onImmediatePatchCommit?: (patch: CityFieldPatch) => void;
+    onSaved?: (didSave: boolean) => void;
 }
 
 export interface CharacterCitySectionHandle {
@@ -44,6 +44,10 @@ function getAutocompleteErrorMessage(error: unknown): string {
         return error.message;
     }
     return '城市搜索失败，请稍后再试';
+}
+
+function normalizeOptionalText(value?: string): string | undefined {
+    return value?.trim() || undefined;
 }
 
 function useCityAutocomplete(keyword: string, enabled: boolean, selectedValue?: string): CityAutocompleteState {
@@ -201,6 +205,7 @@ const CharacterCitySectionComponent = ({
     cityReferenceReal,
     onFieldChange,
     onImmediatePatchCommit,
+    onSaved,
 }: CharacterCitySectionProps, ref: React.ForwardedRef<CharacterCitySectionHandle>) => {
     const [cityKeyword, setCityKeyword] = useState(cityOverride || '');
     const [referenceCityKeyword, setReferenceCityKeyword] = useState(cityReferenceReal || '');
@@ -208,41 +213,70 @@ const CharacterCitySectionComponent = ({
     const cityAutocomplete = useCityAutocomplete(cityKeyword, !isFictionalCity, cityOverride);
     const referenceAutocomplete = useCityAutocomplete(referenceCityKeyword, Boolean(isFictionalCity), cityReferenceReal);
 
-    const fictionalCityTimerRef = useRef<number | null>(null);
-    const pendingFictionalCityPatchRef = useRef<CityFieldPatch | null>(null);
+    const callbacksRef = useRef({ onFieldChange, onImmediatePatchCommit, onSaved });
+    const commitCurrentDraftRef = useRef<(immediate: boolean, announce?: boolean) => boolean>(() => false);
 
-    const clearPendingFictionalCityTimer = () => {
-        if (fictionalCityTimerRef.current !== null) {
-            window.clearTimeout(fictionalCityTimerRef.current);
-            fictionalCityTimerRef.current = null;
-        }
-    };
+    useEffect(() => {
+        callbacksRef.current = { onFieldChange, onImmediatePatchCommit, onSaved };
+    }, [onFieldChange, onImmediatePatchCommit, onSaved]);
 
     const applyFieldPatch = (patch: CityFieldPatch, immediate: boolean) => {
-        if (immediate && onImmediatePatchCommit) {
-            onImmediatePatchCommit(patch);
+        const callbacks = callbacksRef.current;
+
+        if (immediate && callbacks.onImmediatePatchCommit) {
+            callbacks.onImmediatePatchCommit(patch);
             return;
         }
 
         (Object.entries(patch) as Array<[CityFieldKey, CityFieldValue]>).forEach(([field, value]) => {
-            onFieldChange(field, value);
+            callbacks.onFieldChange(field, value);
         });
     };
 
-    const flushPendingFictionalCityPatch = (immediate: boolean) => {
-        const pendingPatch = pendingFictionalCityPatchRef.current;
-        if (!pendingPatch) {
-            return;
+    const buildDraftPatch = (): CityFieldPatch | null => {
+        const nextCityValue = normalizeOptionalText(cityKeyword);
+        const currentCityValue = normalizeOptionalText(cityOverride);
+        const nextReferenceValue = normalizeOptionalText(referenceCityKeyword);
+        const currentReferenceValue = normalizeOptionalText(cityReferenceReal);
+        const patch: CityFieldPatch = {};
+
+        if (nextCityValue !== currentCityValue) {
+            patch.cityOverride = nextCityValue;
+
+            if (!nextCityValue || !isFictionalCity) {
+                patch.cityAdcode = undefined;
+            }
         }
 
-        clearPendingFictionalCityTimer();
-        pendingFictionalCityPatchRef.current = null;
-        applyFieldPatch(pendingPatch, immediate);
+        if (isFictionalCity) {
+            if (cityAdcode) {
+                patch.cityAdcode = undefined;
+            }
+            if (nextReferenceValue !== currentReferenceValue) {
+                patch.cityReferenceReal = nextReferenceValue;
+            }
+        }
+
+        return Object.keys(patch).length > 0 ? patch : null;
     };
+
+    const commitCurrentDraft = (immediate: boolean, announce = false): boolean => {
+        const patch = buildDraftPatch();
+        if (!patch) {
+            if (announce) callbacksRef.current.onSaved?.(false);
+            return false;
+        }
+
+        applyFieldPatch(patch, immediate);
+        if (announce) callbacksRef.current.onSaved?.(true);
+        return true;
+    };
+
+    commitCurrentDraftRef.current = commitCurrentDraft;
 
     useImperativeHandle(ref, () => ({
         flushPendingDraft: () => {
-            flushPendingFictionalCityPatch(true);
+            commitCurrentDraftRef.current(true);
         },
     }));
 
@@ -254,45 +288,14 @@ const CharacterCitySectionComponent = ({
         setReferenceCityKeyword(cityReferenceReal || '');
     }, [characterId, cityReferenceReal]);
 
-    useEffect(() => {
-        if (!isFictionalCity) {
-            clearPendingFictionalCityTimer();
-            pendingFictionalCityPatchRef.current = null;
-            return;
-        }
-
-        const nextCityValue = cityKeyword.trim() || undefined;
-        const currentCityValue = cityOverride?.trim() || undefined;
-        if (nextCityValue === currentCityValue) {
-            clearPendingFictionalCityTimer();
-            pendingFictionalCityPatchRef.current = null;
-            return;
-        }
-
-        const nextPatch: CityFieldPatch = {
-            cityOverride: nextCityValue,
-        };
-        if (!nextCityValue) {
-            nextPatch.cityAdcode = undefined;
-        }
-
-        pendingFictionalCityPatchRef.current = nextPatch;
-        clearPendingFictionalCityTimer();
-        fictionalCityTimerRef.current = window.setTimeout(() => {
-            flushPendingFictionalCityPatch(false);
-        }, FICTIONAL_CITY_SAVE_DEBOUNCE_MS);
-
-        return () => {
-            clearPendingFictionalCityTimer();
-        };
-    }, [cityKeyword, cityOverride, isFictionalCity, onFieldChange, onImmediatePatchCommit]);
-
-    // Flush any pending fictional city value on unmount
+    // Flush any pending city value on unmount
     useEffect(() => {
         return () => {
-            flushPendingFictionalCityPatch(true);
+            commitCurrentDraftRef.current(true);
         };
-    }, [onFieldChange, onImmediatePatchCommit]);
+    }, []);
+
+    const hasUnsavedDraft = Boolean(buildDraftPatch());
 
     const cityHasKeyword = cityAutocomplete.debouncedKeyword.length > 0;
     const showCitySuggestions = cityAutocomplete.isFocused && !isFictionalCity && cityHasKeyword && cityAutocomplete.suggestions.length > 0;
@@ -328,6 +331,10 @@ const CharacterCitySectionComponent = ({
         setReferenceCityKeyword('');
         onFieldChange('cityReferenceReal', undefined);
         referenceAutocomplete.reset();
+    };
+
+    const handleSaveDraft = () => {
+        commitCurrentDraftRef.current(true, true);
     };
 
     return (
@@ -456,6 +463,20 @@ const CharacterCitySectionComponent = ({
                         </p>
                     </div>
                 )}
+
+                <div className="flex items-center justify-between gap-3 pt-1">
+                    <span className={`text-[10px] ${hasUnsavedDraft ? 'text-amber-500' : 'text-slate-400'}`}>
+                        {hasUnsavedDraft ? '有未保存的城市改动' : '城市设定已保存'}
+                    </span>
+                    <button
+                        type="button"
+                        onClick={handleSaveDraft}
+                        disabled={!hasUnsavedDraft}
+                        className="shrink-0 rounded-lg bg-slate-800 px-4 py-2 text-xs font-bold text-white transition-all active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 disabled:active:scale-100"
+                    >
+                        保存城市
+                    </button>
+                </div>
             </div>
         </div>
     );

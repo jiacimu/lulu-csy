@@ -14,3 +14,15 @@
 ## 仓库范围
 
 - React、Vite、Tailwind、页面结构、前端配置、前端调用链路，都在本仓库内处理
+
+## 部署红线
+
+- 本仓库的 `origin/main` 会自动触发 Cloudflare Pages 正式环境部署；推送到 `main` 就等于更新正式链接。
+- 未经用户在当前对话中明确授权“更新正式链接”“发布生产”“推送 main”，禁止执行：
+  - `git push origin main`
+  - 合并分支到 `main`
+  - 任何 Cloudflare Pages production 部署
+- 用户提到“测试链接”“beta”“预览”“测试环境”时，只允许使用测试发布路径，不允许以任何形式碰 `main`。
+- 前端测试发布默认只使用 `./deploy-beta.ps1`。
+- 如果需要临时验证代码、保留提交或隔离变更，优先使用临时分支或 worktree；不要把 `main` 当测试发布通道。
+- 在执行任何推送前，先确认目标分支是否会自动触发正式环境；只要不确定，就视为 production 风险并停止。

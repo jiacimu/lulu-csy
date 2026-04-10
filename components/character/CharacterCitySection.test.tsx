@@ -166,7 +166,7 @@ describe('CharacterCitySection', () => {
         expect(screen.getByText('城市搜索失败 (500)')).toBeInTheDocument();
     });
 
-    it('keeps fictional city typing local-first and writes it back after a short delay', async () => {
+    it('keeps fictional city typing local-first until the save button is pressed', async () => {
         const { onFieldChange } = renderSection({
             isFictionalCity: true,
         });
@@ -180,6 +180,10 @@ describe('CharacterCitySection', () => {
         });
 
         expect(mockedGetCityInputTips).not.toHaveBeenCalled();
+        expect(onFieldChange).not.toHaveBeenCalledWith('cityOverride', '新月城');
+
+        fireEvent.click(screen.getByRole('button', { name: '保存城市' }));
+
         expect(onFieldChange).toHaveBeenCalledWith('cityOverride', '新月城');
     });
 

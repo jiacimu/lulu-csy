@@ -27,29 +27,40 @@
 
 .floating-lyrics-scroll {
     position: relative;
-    height: 140px;
+    height: 104px;
     overflow: hidden;
-    padding: 0 20px;
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border-radius: 20px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
-    pointer-events: none;
+    padding: 0 16px;
+    pointer-events: auto;
+    touch-action: manipulation;
+    cursor: pointer;
+    mask-image: linear-gradient(
+        to bottom,
+        transparent 0%,
+        rgba(0, 0, 0, 0.92) 18%,
+        rgba(0, 0, 0, 0.92) 82%,
+        transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(
+        to bottom,
+        transparent 0%,
+        rgba(0, 0, 0, 0.92) 18%,
+        rgba(0, 0, 0, 0.92) 82%,
+        transparent 100%
+    );
 }
 
 .floating-lyrics-track {
     display: flex;
     flex-direction: column;
-    padding: 56px 0;
+    padding: 34px 0;
     transition: transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     will-change: transform;
 }
 
 .floating-lyric-line {
     text-align: center;
-    padding: 4px 0;
-    opacity: 0.48;
+    padding: 3px 0;
+    opacity: 0.3;
     transition:
         opacity 0.3s ease,
         transform 0.3s ease;
@@ -57,10 +68,10 @@
 
 .floating-lyric-text {
     display: block;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
-    color: rgba(255, 255, 255, 0.38);
-    line-height: 1.5;
+    color: var(--lyric-color-idle, rgba(255, 255, 255, 0.42));
+    line-height: 1.35;
     transition:
         color 0.3s ease,
         font-size 0.3s ease,
@@ -70,7 +81,7 @@
 .floating-lyric-translation {
     display: block;
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.24);
+    color: var(--lyric-color-translation, rgba(255, 255, 255, 0.24));
     margin-top: 1px;
     line-height: 1.4;
     transition: color 0.3s ease;
@@ -78,18 +89,28 @@
 
 .floating-lyric-line--active {
     opacity: 1;
-    transform: scale(1.05);
+    transform: scale(1.04);
 }
 
 .floating-lyric-line--active .floating-lyric-text {
-    color: #fff;
-    font-size: 15px;
+    color: var(--lyric-color-active, #fff);
+    font-size: 16px;
     font-weight: 700;
-    text-shadow: 0 0 12px rgba(255, 255, 255, 0.3);
+    text-shadow: 0 0 12px var(--lyric-color-glow, rgba(255, 255, 255, 0.3));
 }
 
 .floating-lyric-line--active .floating-lyric-translation {
-    color: rgba(255, 255, 255, 0.6);
+    color: var(
+        --lyric-color-active-translation,
+        rgba(255, 255, 255, 0.6)
+    );
+}
+
+.floating-lyrics-toolbar-wrap {
+    display: flex;
+    justify-content: center;
+    margin-top: 6px;
+    pointer-events: auto;
 }
 
 .floating-lyrics-toolbar {
@@ -97,8 +118,6 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    margin-top: 6px;
-    pointer-events: auto;
 }
 
 .fl-tool-btn {

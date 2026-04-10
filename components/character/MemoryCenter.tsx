@@ -27,6 +27,7 @@ import {
     refreshVectorMemoryCache,
     upsertVectorMemoriesManaged,
 } from './memoryCenterActions';
+import { markVectorMemoryAsPendingSync } from '../../utils/vectorMemorySyncState';
 
 interface MemoryCenterProps {
     // Traditional Memory Props
@@ -228,6 +229,79 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
                 syncError: err?.message || 'Failed to sync cloud hormone snapshots',
             };
         }
+    };
+
+    const runLocalHormoneBackfillFallback = async (
+        targetMemories: VectorMemory[],
+        currentCharName: string,
+        subApiConfig: { baseUrl: string; model: string; apiKey: string },
+        reason: string,
+    ): Promise<void> => {
+        if (targetMemories.length === 0) return;
+
+        const fallbackController = new AbortController();
+        const targetIds = new Set(targetMemories.map(memory => memory.id));
+        setBackfillProgress(`${reason}，正在改用本地溯源...`);
+
+        const result = await VectorMemoryExtractor.backfillHormoneSnapshots(
+            targetMemories,
+            currentCharName,
+            subApiConfig,
+            (current, total, title) => {
+                if (backfillAbortRef.current) fallbackController.abort();
+                setBackfillProgress(`本地溯源 ${current}/${total}: ${title}`);
+            },
+            fallbackController.signal,
+        );
+
+        const localMemories = await DB.getAllVectorMemories(formData.id).catch(() => vmList);
+        const updatedTargets = localMemories.filter(memory => (
+            targetIds.has(memory.id) && Boolean(memory.hormoneSnapshot)
+        ));
+        let cloudSynced = false;
+        let cloudSyncFailed = false;
+
+        if (updatedTargets.length > 0 && hasCloudSyncTarget()) {
+            setBackfillProgress(`本地溯源完成 ${updatedTargets.length} 条，正在同步云端...`);
+            const pushResult = await pushMemories(formData.id, updatedTargets);
+            if (pushResult) {
+                cloudSynced = true;
+                await refreshVmList();
+            } else {
+                cloudSyncFailed = true;
+                for (const memory of updatedTargets) {
+                    await DB.saveVectorMemory(markVectorMemoryAsPendingSync(memory));
+                }
+                const pendingLocalMemories = await DB.getAllVectorMemories(formData.id).catch(() => localMemories);
+                setVmList(pendingLocalMemories);
+                setVmCount(pendingLocalMemories.length);
+            }
+        } else {
+            setVmList(localMemories);
+            setVmCount(localMemories.length);
+        }
+
+        if (backfillAbortRef.current || fallbackController.signal.aborted) {
+            addToast(`Emotion backfill cancelled (${result.success} local completed)`, 'info');
+            return;
+        }
+
+        if (result.failed > 0) {
+            addToast(
+                `Emotion backfill local fallback finished: ${result.success} updated, ${result.failed} failed, ${result.skipped} skipped`,
+                result.success > 0 ? 'info' : 'error',
+            );
+            return;
+        }
+
+        addToast(
+            cloudSynced
+                ? `Emotion backfill completed locally: ${result.success} memories updated and synced to cloud`
+                : cloudSyncFailed
+                    ? `Emotion backfill completed locally: ${result.success} memories updated, cloud sync pending`
+                    : `Emotion backfill completed locally: ${result.success} memories updated`,
+            'success',
+        );
     };
 
     // --- Timeline Handlers ---
@@ -633,8 +707,15 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
                         `Recovered ${recoverySync.syncedCount} hormone snapshots from cloud, but ${remaining} memories still need backfill`,
                         'info',
                     );
-                    return;
                 }
+
+                await runLocalHormoneBackfillFallback(
+                    listNeedHormoneBackfill(recoverySync.latestVmList),
+                    formData.name || 'AI',
+                    subApiConfig,
+                    recoverySync.syncError ? '后端任务暂不可用' : '后端任务创建失败',
+                );
+                return;
             }
 
             addToast(`Emotion backfill failed: ${errorMessage}`, 'error');

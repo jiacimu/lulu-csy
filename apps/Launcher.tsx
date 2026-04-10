@@ -261,6 +261,12 @@ const Launcher: React.FC = () => {
 
     // Total pages = App Pages + 1 Widget Page
     const totalPages = appPages.length + 1;
+    const activeCharacterWidgetKey = useMemo(() => {
+        const targetChar = characters.find(c => c.id === activeCharacterId) || characters[0];
+        return targetChar
+            ? [targetChar.id, targetChar.name, targetChar.avatar, targetChar.description || ''].join('\u0001')
+            : '';
+    }, [activeCharacterId, characters]);
 
     useEffect(() => {
         const loadData = async () => {
@@ -302,7 +308,7 @@ const Launcher: React.FC = () => {
         if (isDataLoaded) {
             loadData();
         }
-    }, [activeCharacterId, lastMsgTimestamp, isDataLoaded, characters]); // Trigger on characters change
+    }, [activeCharacterId, lastMsgTimestamp, isDataLoaded, activeCharacterWidgetKey]);
 
     // Restore scroll position BEFORE paint to avoid visible flash/slide
     useLayoutEffect(() => {

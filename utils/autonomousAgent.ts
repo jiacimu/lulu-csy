@@ -415,13 +415,13 @@ export class BackendAgentManager {
 
     private async enqueueBackendMessage(
         message: AgentBackendMessage,
-        options: { idSuffix?: string; delayMs?: number } = {},
+        options: { delayMs?: number } = {},
     ): Promise<void> {
         const now = Date.now();
         const metadata = parseBackendMetadata(message.metadata);
 
         await DB.saveScheduledMessage({
-            id: `backend-${message.id}${options.idSuffix || ''}`,
+            id: `backend-${message.id}`,
             charId: this.charId,
             content: message.content,
             dueAt: now + (options.delayMs || 0),
@@ -523,7 +523,7 @@ export class BackendAgentManager {
                         console.log(`[Agent] SSE message: "${(message.content || '').slice(0, 40)}..."`);
                     }
 
-                    await this.enqueueBackendMessage(message, { idSuffix: '-sse' });
+                    await this.enqueueBackendMessage(message);
                     await this.acknowledgeMessages([message.id]);
                 } catch (error: any) {
                     if (isDebug) {
@@ -601,7 +601,6 @@ export class BackendAgentManager {
 
             for (let i = 0; i < messages.length; i++) {
                 await this.enqueueBackendMessage(messages[i], {
-                    idSuffix: `-${i}`,
                     delayMs: i * 3000,
                 });
             }

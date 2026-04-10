@@ -121,6 +121,16 @@ export interface SwitchMemoryEmbeddingEngineResult {
     detail?: string;
 }
 
+export interface RetryFailedMemoryEngineReindexResult {
+    ok: boolean;
+    changed?: boolean;
+    reused?: boolean;
+    status?: MemoryEmbeddingEngineStatus;
+    retriedItems?: number;
+    reason?: 'backend_unavailable' | 'request_failed' | 'switch_in_progress' | 'no_failed_items';
+    detail?: string;
+}
+
 export type BackendHealthStatus = 'idle' | 'checking' | 'ok' | 'missing_config' | 'unavailable' | 'error';
 export type BackendRetrievalStatus = 'idle' | 'requesting' | 'backend_handled' | 'backend_unavailable' | 'backend_error';
 

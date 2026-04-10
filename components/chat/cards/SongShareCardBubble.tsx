@@ -33,6 +33,7 @@ const SongShareCardBubble: React.FC<SongShareCardBubbleProps> = ({ metadata }) =
             name: metadata.songName,
             artists: [{ id: 0, name: metadata.artist }],
             album: {
+                kind: 'album' as const,
                 id: 0,
                 name: metadata.albumName || '',
                 picUrl: metadata.albumCover,

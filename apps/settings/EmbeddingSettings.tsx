@@ -4,6 +4,7 @@ import BackendDiagnosticsCard from './BackendDiagnosticsCard';
 import {
   cancelMemoryEngineReindex,
   getMemoryEmbeddingEngineStatus,
+  retryFailedMemoryEngineReindex,
   switchMemoryEmbeddingEngine,
   type MemoryEmbeddingEngineId,
   type MemoryEmbeddingEngineStatus,
@@ -101,11 +102,13 @@ const EmbeddingSettings: React.FC = () => {
     const [isStatusLoading, setIsStatusLoading] = useState(true);
     const [isSwitching, setIsSwitching] = useState(false);
     const [isCancelling, setIsCancelling] = useState(false);
+    const [isRetryingFailed, setIsRetryingFailed] = useState(false);
 
     const selectedEngine = EMBEDDING_ENGINES[engineId];
     const activeJob = cloudStatus?.reindexJob || null;
     const hasActiveJob = Boolean(activeJob && !isTerminalJob(activeJob.status));
     const canCancelActiveJob = activeJob?.status === 'queued' || activeJob?.status === 'processing';
+    const canRetryFailedItems = Boolean(activeJob && isTerminalJob(activeJob.status) && activeJob.failedItems > 0);
     const progress = formatJobProgress(activeJob);
 
     const refreshCloudStatus = async () => {
@@ -211,8 +214,12 @@ const EmbeddingSettings: React.FC = () => {
             return;
         }
 
-        if (nextEngineId === engineId && !activeJob) {
-            addToast(`当前已经是${ENGINE_COPY[nextEngineId].title}`, 'info');
+        if (nextEngineId === engineId) {
+            if (canRetryFailedItems) {
+                addToast(`当前已经是${ENGINE_COPY[nextEngineId].title}，失败项可用下方按钮单独重试`, 'info');
+            } else {
+                addToast(`当前已经是${ENGINE_COPY[nextEngineId].title}`, 'info');
+            }
             return;
         }
 
@@ -262,6 +269,42 @@ const EmbeddingSettings: React.FC = () => {
             addToast('重建任务已取消，已处理的记忆会保留', 'success');
         } finally {
             setIsCancelling(false);
+        }
+    };
+
+    const handleRetryFailedReindex = async () => {
+        if (!activeJob || !canRetryFailedItems || isRetryingFailed) return;
+
+        setIsRetryingFailed(true);
+        try {
+            const result = await retryFailedMemoryEngineReindex(activeJob.id);
+            if (result.ok && result.status) {
+                setCloudStatus(result.status);
+                setEngineId(result.status.engineId);
+                persistEmbeddingEngine(result.status.engineId, embeddingUrl.trim() || getDefaultBaseUrl(result.status.engineId));
+                addToast(`已重新排队 ${result.retriedItems ?? activeJob.failedItems} 条失败记忆`, 'success');
+                return;
+            }
+
+            if (result.reason === 'no_failed_items') {
+                await refreshCloudStatus();
+                addToast('当前没有可重试的失败项', 'info');
+                return;
+            }
+
+            if (result.reason === 'switch_in_progress') {
+                if (result.status) {
+                    setCloudStatus(result.status);
+                    setEngineId(result.status.engineId);
+                    persistEmbeddingEngine(result.status.engineId, embeddingUrl.trim() || getDefaultBaseUrl(result.status.engineId));
+                }
+                addToast('已有一轮旧记忆重建任务在进行中，请稍候', 'info');
+                return;
+            }
+
+            addToast(result.detail || '失败项重试启动失败', 'error');
+        } finally {
+            setIsRetryingFailed(false);
         }
     };
 
@@ -373,6 +416,16 @@ const EmbeddingSettings: React.FC = () => {
                                                 {isCancelling ? '取消中...' : '取消重建'}
                                             </button>
                                         )}
+                                        {canRetryFailedItems && (
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleRetryFailedReindex()}
+                                                disabled={isRetryingFailed}
+                                                className="text-[10px] text-[#6078c4] transition-colors hover:text-[#4761b2] disabled:opacity-60 disabled:cursor-not-allowed"
+                                            >
+                                                {isRetryingFailed ? '补跑中...' : '只重试失败项'}
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="h-2 rounded-full bg-[#e8efeb] overflow-hidden">
@@ -387,6 +440,12 @@ const EmbeddingSettings: React.FC = () => {
                             <div>排队中：{activeJob.queuedItems}</div>
                             <div>失败：{activeJob.failedItems}</div>
                         </div>
+
+                        {canRetryFailedItems && (
+                            <p className="text-[10px] text-[#6078c4] leading-relaxed">
+                                已成功的旧记忆会保留，点击“只重试失败项”只补跑失败那一批。
+                            </p>
+                        )}
 
                         {activeJob.error && (
                             <p className="text-[10px] text-[#c06767] leading-relaxed">错误：{activeJob.error}</p>

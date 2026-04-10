@@ -9,6 +9,7 @@ import { useLyrics } from '../../hooks/useLyrics';
 import { AppID } from '../../types';
 import { useApp } from '../../context/AppContext';
 import {
+    getLyricColorVars,
     type FloatingLyricsSettings,
     type LyricPosition,
     readFloatingLyricsSettings,
@@ -22,9 +23,11 @@ const FloatingLyrics: React.FC = () => {
     const [settings, setSettings] = useState<FloatingLyricsSettings>(() =>
         readFloatingLyricsSettings(),
     );
+    const [toolbarExpanded, setToolbarExpanded] = useState(false);
     const [trackOffset, setTrackOffset] = useState(0);
     const viewportRef = useRef<HTMLDivElement>(null);
     const lineRefs = useRef<Array<HTMLDivElement | null>>([]);
+    const toolbarHideTimerRef = useRef<number | null>(null);
 
     const { lines, currentIndex } = useLyrics({
         songId: currentSong?.id,
@@ -39,6 +42,28 @@ const FloatingLyrics: React.FC = () => {
 
         window.addEventListener('storage', handleStorage);
         return () => window.removeEventListener('storage', handleStorage);
+    }, []);
+
+    const clearToolbarHideTimer = () => {
+        if (toolbarHideTimerRef.current !== null) {
+            window.clearTimeout(toolbarHideTimerRef.current);
+            toolbarHideTimerRef.current = null;
+        }
+    };
+
+    const scheduleToolbarAutoHide = () => {
+        clearToolbarHideTimer();
+        toolbarHideTimerRef.current = window.setTimeout(() => {
+            setToolbarExpanded(false);
+            toolbarHideTimerRef.current = null;
+        }, 2600);
+    };
+
+    useEffect(() => () => {
+        if (toolbarHideTimerRef.current !== null) {
+            window.clearTimeout(toolbarHideTimerRef.current);
+            toolbarHideTimerRef.current = null;
+        }
     }, []);
 
     useEffect(() => {
@@ -91,6 +116,7 @@ const FloatingLyrics: React.FC = () => {
                 position: nextPosition,
             }),
         );
+        scheduleToolbarAutoHide();
     };
 
     const handleToggleTranslation = () => {
@@ -99,6 +125,7 @@ const FloatingLyrics: React.FC = () => {
                 showTranslation: !settings.showTranslation,
             }),
         );
+        scheduleToolbarAutoHide();
     };
 
     const handleToggleEnabled = () => {
@@ -109,14 +136,27 @@ const FloatingLyrics: React.FC = () => {
         );
     };
 
+    const handleRevealToolbar = () => {
+        setToolbarExpanded(true);
+        scheduleToolbarAutoHide();
+    };
+
     if (!shouldShow) return null;
 
     return (
         <div
+            data-testid="floating-lyrics"
             className={`floating-lyrics floating-lyrics--${settings.position}`}
-            style={{ opacity: settings.opacity }}
+            style={{
+                opacity: settings.opacity,
+                ...getLyricColorVars(settings.textColor),
+            } as React.CSSProperties}
         >
-            <div className="floating-lyrics-scroll" ref={viewportRef}>
+            <div
+                className="floating-lyrics-scroll"
+                ref={viewportRef}
+                onPointerDown={handleRevealToolbar}
+            >
                 <div
                     className="floating-lyrics-track"
                     style={{
@@ -144,48 +184,56 @@ const FloatingLyrics: React.FC = () => {
                 </div>
             </div>
 
-            <div className="floating-lyrics-toolbar">
-                <button
-                    className="fl-tool-btn"
-                    onClick={handleCyclePosition}
-                    title="切换位置"
-                >
-                    <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
+            {toolbarExpanded && (
+                <div className="floating-lyrics-toolbar-wrap">
+                    <div
+                        className="floating-lyrics-toolbar"
+                        onPointerEnter={clearToolbarHideTimer}
+                        onPointerLeave={scheduleToolbarAutoHide}
                     >
-                        <path d="M12 2v20M2 12h20" />
-                    </svg>
-                    <span>{positionLabels[settings.position]}</span>
-                </button>
-                <button
-                    className="fl-tool-btn"
-                    onClick={handleToggleTranslation}
-                    title="翻译"
-                >
-                    <span>{settings.showTranslation ? '译✓' : '译'}</span>
-                </button>
-                <button
-                    className="fl-tool-btn fl-tool-btn--close"
-                    onClick={handleToggleEnabled}
-                    title="关闭歌词"
-                >
-                    <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                    >
-                        <path d="M18 6 6 18M6 6l12 12" />
-                    </svg>
-                </button>
-            </div>
+                        <button
+                            className="fl-tool-btn"
+                            onClick={handleCyclePosition}
+                            title="切换位置"
+                        >
+                            <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                            >
+                                <path d="M12 2v20M2 12h20" />
+                            </svg>
+                            <span>{positionLabels[settings.position]}</span>
+                        </button>
+                        <button
+                            className="fl-tool-btn"
+                            onClick={handleToggleTranslation}
+                            title="翻译"
+                        >
+                            <span>{settings.showTranslation ? '译✓' : '译'}</span>
+                        </button>
+                        <button
+                            className="fl-tool-btn fl-tool-btn--close"
+                            onClick={handleToggleEnabled}
+                            title="关闭歌词"
+                        >
+                            <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                            >
+                                <path d="M18 6 6 18M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

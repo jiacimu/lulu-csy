@@ -36,6 +36,7 @@ export const DB = {
     getMessagesFromId: characterStore.getMessagesFromId,
     getMessagesByIds: characterStore.getMessagesByIds,
     saveMessage: characterStore.saveMessage,
+    saveMessageOnceByBackendId: characterStore.saveMessageOnceByBackendId,
     updateMessage: characterStore.updateMessage,
     updateMessageMetadata: characterStore.updateMessageMetadata,
     updateMessageType: characterStore.updateMessageType,

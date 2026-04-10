@@ -23,13 +23,57 @@ export type ChatResponsePart =
     | { type: 'emoji'; content: string }
     | { type: 'song'; content: SongShareCard };
 
+function stripOuterTagJunk(value: string): string {
+    return value
+        .replace(/`+/g, '')
+        .replace(/^[\s\[\]【】]+/, '')
+        .replace(/[\s\[\]【】]+$/, '')
+        .trim();
+}
+
+function isToolWrapperJunk(value: string): boolean {
+    return /^[\s`[\]【】]+$/.test(value);
+}
+
+function normalizeSongShareTags(text: string): string {
+    let result = text.replace(
+        /(?:\[\[|\[|【)\s*(?:分享(?:歌曲|音乐)|(?:share[-_]?)?song)\s*[:：]\s*([\s\S]*?)\s*(?:\]\]|]|】)/gi,
+        (_fullMatch, content: string) => `[[SHARE_SONG: ${stripOuterTagJunk(content)}]]`,
+    );
+
+    result = result.replace(
+        /(?:\[\[|\[|【)\s*SHARE_SONG\s*[:：]\s*([\s\S]*?)\s*(?:\]\]|]|】)/gi,
+        (_fullMatch, content: string) => `[[SHARE_SONG: ${stripOuterTagJunk(content)}]]`,
+    );
+
+    if (/\[\[(?:SEND_EMOJI|SHARE_SONG):/i.test(result)) {
+        result = result
+            .split(/(?:\r\n|\r|\n)/)
+            .filter((line) => !isToolWrapperJunk(line))
+            .join('\n')
+            .trim();
+    }
+
+    return result;
+}
+
 function parseSongShareContent(content: string): SongShareCard | null {
-    const parts = content.split('|').map((part) => part.trim());
-    const songName = parts[0] || '';
-    const artist = parts[1] || '';
+    const cleaned = stripOuterTagJunk(content)
+        .replace(/^(?:SHARE_SONG|分享(?:歌曲|音乐)|(?:share[-_]?)?song)\s*[:：]\s*/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const rawParts = cleaned.includes('|') || cleaned.includes('｜')
+        ? cleaned.split(/[|｜]/)
+        : cleaned.split(/\s+(?:-|—|－)\s+/);
+    const parts = rawParts.map((part) => stripOuterTagJunk(part));
+
+    const songName = parts[0]?.replace(/^(?:歌名|歌曲名|歌曲|song(?:\s*name)?)\s*[:：]\s*/i, '').trim() || '';
+    const artist = parts[1]?.replace(/^(?:歌手|歌手名|artist)\s*[:：]\s*/i, '').trim() || '';
     if (!songName || !artist) return null;
 
-    const rawSongId = Number(parts[2] || '0');
+    const songIdText = parts[2]?.replace(/^(?:(?:歌曲)?ID|song\s*id)\s*[:：]\s*/i, '') || '0';
+    const rawSongId = Number(songIdText.match(/\d+/)?.[0] || '0');
     const songId = Number.isFinite(rawSongId) ? Math.max(0, Math.trunc(rawSongId)) : 0;
 
     return {
@@ -167,10 +211,7 @@ export const ChatParser = {
             .replace(/\[\d{4}[-/年]\d{1,2}[-/月]\d{1,2}.*?\]/g, '')
             .replace(/^[\w\u4e00-\u9fa5]+:\s*/, '')
             .replace(/[【\[](?:(?:你|User|用户|System|我)\s*)?发送了?表情包?[:：]\s*(.*?)[】\]]/g, '[[SEND_EMOJI: $1]]');
-        result = result.replace(
-            /[\[【]\s*(?:分享(?:歌曲|音乐)|(?:share[-_]?)?song)\s*[:：]\s*([^\]】]+)\s*[\]】]/gi,
-            (_fullMatch, content: string) => `[[SHARE_SONG: ${content.trim()}]]`,
-        );
+        result = normalizeSongShareTags(result);
         // Strip any CoT protocol residual that leaked through (e.g. from Gemini native thinking)
         result = stripCoTResidual(result);
         return result;
@@ -245,6 +286,7 @@ export const ChatParser = {
     parseSongShareContent,
 
     splitResponse: (content: string): ChatResponsePart[] => {
+        content = normalizeSongShareTags(content);
         const tokenPattern = /\[\[(SEND_EMOJI|SHARE_SONG):\s*([\s\S]*?)\]\]/g;
         const parts: ChatResponsePart[] = [];
         let lastIndex = 0;
@@ -253,7 +295,7 @@ export const ChatParser = {
         while ((tokenMatch = tokenPattern.exec(content)) !== null) {
             if (tokenMatch.index > lastIndex) {
                 const textBefore = content.slice(lastIndex, tokenMatch.index).trim();
-                if (textBefore) parts.push({ type: 'text', content: textBefore });
+                if (textBefore && !isToolWrapperJunk(textBefore)) parts.push({ type: 'text', content: textBefore });
             }
 
             if (tokenMatch[1] === 'SEND_EMOJI') {
@@ -273,7 +315,7 @@ export const ChatParser = {
 
         if (lastIndex < content.length) {
             const remaining = content.slice(lastIndex).trim();
-            if (remaining) parts.push({ type: 'text', content: remaining });
+            if (remaining && !isToolWrapperJunk(remaining)) parts.push({ type: 'text', content: remaining });
         }
 
         if (parts.length === 0 && content.trim()) parts.push({ type: 'text', content: content.trim() });

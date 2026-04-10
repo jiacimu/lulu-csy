@@ -10,6 +10,7 @@ import {
     type CloudHormoneBackfillItem,
     type MemoryEmbeddingEngineId,
     type MemoryEmbeddingEngineStatus,
+    type RetryFailedMemoryEngineReindexResult,
     type SwitchMemoryEmbeddingEngineResult,
 } from './backendCore';
 export async function getMemoryEmbeddingEngineStatus(): Promise<MemoryEmbeddingEngineStatus | null> {
@@ -112,6 +113,71 @@ export async function cancelMemoryEngineReindex(jobId: string): Promise<boolean>
         console.error('[Backend] Cancel memory engine reindex failed:', err.message);
         clearBackendHealthCache();
         return false;
+    }
+}
+
+export async function retryFailedMemoryEngineReindex(
+    jobId?: string,
+): Promise<RetryFailedMemoryEngineReindexResult> {
+    if (!await isBackendAlive()) {
+        return { ok: false, reason: 'backend_unavailable' };
+    }
+
+    try {
+        const resp = await fetch(
+            buildBackendUrl('/api/agent/memory-engine/retry-failed'),
+            {
+                method: 'POST',
+                headers: buildHeaders(),
+                body: JSON.stringify(jobId ? { jobId } : {}),
+                signal: AbortSignal.timeout(15000),
+            },
+        );
+
+        if (resp.status === 409) {
+            const { payload, detail } = await readBackendPayload(resp);
+            return {
+                ok: false,
+                reason: payload?.code === 'engine_reindex_in_progress' ? 'switch_in_progress' : 'request_failed',
+                detail,
+                status: payload?.status,
+            };
+        }
+
+        if (resp.status === 400) {
+            const { payload, detail } = await readBackendPayload(resp);
+            return {
+                ok: false,
+                reason: payload?.code === 'no_failed_items' ? 'no_failed_items' : 'request_failed',
+                detail,
+                status: payload?.status,
+            };
+        }
+
+        if (!resp.ok) {
+            return {
+                ok: false,
+                reason: 'request_failed',
+                detail: await readBackendErrorDetail(resp),
+            };
+        }
+
+        const data = await resp.json();
+        return {
+            ok: true,
+            changed: data.changed === true,
+            reused: data.reused === true,
+            retriedItems: typeof data.retriedItems === 'number' ? data.retriedItems : undefined,
+            status: data.status,
+        };
+    } catch (err: any) {
+        console.error('[Backend] Retry failed reindex failed:', err.message);
+        clearBackendHealthCache();
+        return {
+            ok: false,
+            reason: 'request_failed',
+            detail: err?.message || 'Unknown error',
+        };
     }
 }
 

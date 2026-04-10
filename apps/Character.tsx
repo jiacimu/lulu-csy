@@ -1020,6 +1020,7 @@ ${isInitialGeneration ? `
                                     cityReferenceReal={formData.cityReferenceReal}
                                     onFieldChange={handleChange}
                                     onImmediatePatchCommit={(patch) => commitCharacterPatch(patch as Partial<CharacterProfile>, { persistImmediately: true })}
+                                    onSaved={(didSave) => addToast(didSave ? '地理设定已保存' : '没有需要保存的更改', didSave ? 'success' : 'info')}
                                 />
                             </div>
                         )}

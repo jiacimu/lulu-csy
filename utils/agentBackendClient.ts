@@ -1,6 +1,7 @@
 import {
   buildBackendAuthQuery,
   buildBackendHeaders,
+  getBackendResolutionDebug,
   buildBackendUrl,
   buildBackendUrlObject,
   getBackendToken,
@@ -30,6 +31,7 @@ type AgentStartPayload = {
 };
 
 const STOP_REQUEST_DEDUPE_WINDOW_MS = 1500;
+const AGENT_PROTOCOL_VERSION = '2';
 const lastStopRequestAt = new Map<string, number>();
 
 export type AgentBackendMessage = {
@@ -53,6 +55,15 @@ export type LifeStreamSyncState = {
     visibleInChat: boolean;
 };
 
+function withAgentProtocolQuery(
+    query?: Record<string, string | number | boolean | null | undefined>,
+): Record<string, string | number | boolean | null | undefined> {
+    return {
+        ...(query || {}),
+        agentProtocol: AGENT_PROTOCOL_VERSION,
+    };
+}
+
 function getTimeoutMs(path: string): number {
     if (path.startsWith('/api/agent/start')) return 45000;
     return 15000;
@@ -65,8 +76,20 @@ async function agentFetch<T = any>(
 ): Promise<T> {
     const baseUrl = getBackendUrl();
     const token = getBackendToken();
-    if (!baseUrl) throw new Error('Backend URL not configured');
-    if (!token) throw new Error('Backend token not configured');
+    if (!baseUrl || !token) {
+        const resolution = getBackendResolutionDebug();
+        const missing: string[] = [];
+        if (!baseUrl) {
+            missing.push(`backend URL (source=${resolution.backendUrlSource})`);
+        }
+        if (!token) {
+            missing.push(`backend token (source=${resolution.backendTokenSource})`);
+        }
+        throw new Error(
+            `Backend config missing: ${missing.join(', ')}. `
+            + 'Check VITE_CSYOS_BACKEND_URL / VITE_CSYOS_BACKEND_TOKEN or localStorage overrides csyos_backend_url / csyos_backend_token.',
+        );
+    }
 
     const headers = new Headers(buildBackendHeaders());
     for (const [key, value] of new Headers(options.headers || {})) {
@@ -178,6 +201,7 @@ export function buildAgentSseUrl(charId: string): string | null {
     try {
         const url = buildBackendUrlObject('/api/agent/stream', { charId });
         if (!url) return null;
+        url.searchParams.set('agentProtocol', AGENT_PROTOCOL_VERSION);
 
         const authParams = new URLSearchParams(buildBackendAuthQuery());
         for (const [key, value] of authParams.entries()) {
@@ -204,7 +228,7 @@ export async function fetchPendingAgentMessages(charId: string): Promise<AgentBa
     const data = await agentFetch<{ messages?: AgentBackendMessage[] }>(
         '/api/agent/messages',
         {},
-        { charId },
+        withAgentProtocolQuery({ charId }),
     );
     return data.messages || [];
 }

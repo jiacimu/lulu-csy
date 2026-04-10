@@ -1,0 +1,86 @@
+// @vitest-environment jsdom
+
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
+import {
+    buildAgentSseUrl,
+    fetchPendingAgentMessages,
+    startAgentOnBackend,
+} from './agentBackendClient';
+import { getBackendToken } from './backendConfig';
+
+const BACKEND_URL = 'https://csyos-backend-staging.sully-tts-proxy.workers.dev';
+
+describe('agentBackendClient', () => {
+    beforeEach(() => {
+        localStorage.clear();
+        vi.unstubAllEnvs();
+        vi.stubEnv('VITE_CSYOS_BACKEND_URL', BACKEND_URL);
+        vi.stubEnv('VITE_CSYOS_BACKEND_TOKEN', 'staging-token');
+        localStorage.setItem('csyos_user_id', 'csy-user-1');
+
+        if (typeof AbortSignal.timeout !== 'function') {
+            (AbortSignal as typeof AbortSignal & { timeout: (ms: number) => AbortSignal }).timeout =
+                () => new AbortController().signal;
+        }
+    });
+
+    afterEach(() => {
+        localStorage.clear();
+        vi.unstubAllEnvs();
+        vi.restoreAllMocks();
+    });
+
+    it('negotiates polling protocol through the query string without a custom request header', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ messages: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        }));
+
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(fetchPendingAgentMessages('char-1')).resolves.toEqual([]);
+
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            `${BACKEND_URL}/api/agent/messages?charId=char-1&agentProtocol=2`,
+        );
+
+        const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+        expect(headers.get('X-Agent-Protocol')).toBeNull();
+    });
+
+    it('keeps start requests free of the protocol header for older beta backends', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        }));
+
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(startAgentOnBackend({
+            charId: 'char-1',
+            apiConfig: {
+                baseUrl: 'https://llm.example.com',
+                apiKey: 'sub-key',
+                model: 'gpt-test',
+            },
+        })).resolves.toBeUndefined();
+
+        expect(String(fetchMock.mock.calls[0][0])).toBe(`${BACKEND_URL}/api/agent/start`);
+
+        const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+        expect(headers.get('X-Agent-Protocol')).toBeNull();
+    });
+
+    it('adds the protocol query param to the SSE URL', () => {
+        const sseUrl = buildAgentSseUrl('char-1');
+        expect(sseUrl).not.toBeNull();
+
+        const parsed = new URL(sseUrl!);
+        expect(parsed.origin).toBe(BACKEND_URL);
+        expect(parsed.pathname).toBe('/api/agent/stream');
+        expect(parsed.searchParams.get('charId')).toBe('char-1');
+        expect(parsed.searchParams.get('agentProtocol')).toBe('2');
+        expect(parsed.searchParams.get('userId')).toBe('csy-user-1');
+        expect(parsed.searchParams.get('token')).toBe(getBackendToken());
+    });
+});

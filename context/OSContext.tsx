@@ -290,12 +290,16 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     const isDataLoaded = isSettingsLoaded && isCharacterDataLoaded && isConfigLoaded;
 
     const schedulerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const schedulerRunningRef = useRef(false);
+    const charactersRef = useRef<CharacterProfile[]>([]);
+    const characterIdsKey = characters.map(char => char.id).join('|');
 
     // Ref mirrors for scheduler
     const activeAppRef = useRef(appCtx.activeApp);
     const activeCharIdRef = useRef(activeCharacterId);
     useEffect(() => { activeAppRef.current = appCtx.activeApp; }, [appCtx.activeApp]);
     useEffect(() => { activeCharIdRef.current = activeCharacterId; }, [activeCharacterId]);
+    useEffect(() => { charactersRef.current = characters; }, [characters]);
 
     // --- Helper to inject custom font ---
     const applyCustomFont = (fontData: string | undefined) => {
@@ -474,104 +478,125 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
     // --- Scheduled Messages with Unread Flags & Web Notifications ---
     useEffect(() => {
-        if (!isDataLoaded || characters.length === 0) return;
+        if (!isDataLoaded || charactersRef.current.length === 0) return;
         const checkAllSchedules = async () => {
-            let hasNewMessage = false;
-            const pendingUnreads: Record<string, number> = {};
+            if (schedulerRunningRef.current) return;
+            schedulerRunningRef.current = true;
 
-            for (const char of characters) {
-                try {
-                    const dueMessages = await DB.getDueScheduledMessages(char.id);
-                    if (dueMessages.length > 0) {
-                        const recentMessages = await DB.getRecentMessagesByCharId(
-                            char.id,
-                            Math.max(100, dueMessages.length * 10),
-                        );
-                        const existingBackendIds = new Set(
-                            recentMessages
-                                .map(message => message.metadata?.backendMessageId)
-                                .filter((id): id is string => typeof id === 'string' && id.length > 0),
-                        );
-                        let savedCount = 0;
-                        let firstSavedContent = '';
+            try {
+                let hasNewMessage = false;
+                const pendingUnreads: Record<string, number> = {};
+                const currentCharacters = charactersRef.current;
 
-                        for (const msg of dueMessages) {
-                            const backendMessageId = typeof msg.metadata?.backendMessageId === 'string'
-                                ? msg.metadata.backendMessageId
-                                : null;
+                for (const char of currentCharacters) {
+                    try {
+                        const dueMessages = await DB.getDueScheduledMessages(char.id);
+                        if (dueMessages.length > 0) {
+                            const recentMessages = await DB.getRecentMessagesByCharId(
+                                char.id,
+                                Math.max(100, dueMessages.length * 10),
+                            );
+                            const existingBackendIds = new Set(
+                                recentMessages
+                                    .map(message => message.metadata?.backendMessageId)
+                                    .filter((id): id is string => typeof id === 'string' && id.length > 0),
+                            );
+                            let savedCount = 0;
+                            let firstSavedContent = '';
 
-                            if (backendMessageId && existingBackendIds.has(backendMessageId)) {
+                            for (const msg of dueMessages) {
+                                const backendMessageId = typeof msg.metadata?.backendMessageId === 'string'
+                                    ? msg.metadata.backendMessageId
+                                    : null;
+
+                                if (backendMessageId && existingBackendIds.has(backendMessageId)) {
+                                    await DB.deleteScheduledMessage(msg.id);
+                                    continue;
+                                }
+
+                                const saveResult = backendMessageId
+                                    ? await DB.saveMessageOnceByBackendId({
+                                        charId: msg.charId,
+                                        role: 'assistant',
+                                        type: 'text',
+                                        content: msg.content,
+                                        timestamp: msg.createdAt,
+                                        ...(msg.metadata ? { metadata: msg.metadata } : {}),
+                                    })
+                                    : { saved: true, id: await DB.saveMessage({
+                                        charId: msg.charId,
+                                        role: 'assistant',
+                                        type: 'text',
+                                        content: msg.content,
+                                        timestamp: msg.createdAt,
+                                        ...(msg.metadata ? { metadata: msg.metadata } : {}),
+                                    }) };
                                 await DB.deleteScheduledMessage(msg.id);
-                                continue;
+
+                                if (backendMessageId) {
+                                    existingBackendIds.add(backendMessageId);
+                                }
+                                if (!saveResult.saved) {
+                                    continue;
+                                }
+
+                                if (!firstSavedContent) {
+                                    firstSavedContent = msg.content;
+                                }
+                                savedCount++;
                             }
+                            if (savedCount === 0) continue;
+                            hasNewMessage = true;
+                            const isChattingWithThisChar = activeAppRef.current === AppID.Chat && activeCharIdRef.current === char.id;
 
-                            await DB.saveMessage({
-                                charId: msg.charId,
-                                role: 'assistant',
-                                type: 'text',
-                                content: msg.content,
-                                timestamp: msg.createdAt,
-                                ...(msg.metadata ? { metadata: msg.metadata } : {}),
-                            });
-                            await DB.deleteScheduledMessage(msg.id);
+                            if (!isChattingWithThisChar) {
+                                addToast(`${char.name} 发来了一条消息`, 'success');
+                                pendingUnreads[char.id] = (pendingUnreads[char.id] || 0) + savedCount;
 
-                            if (!firstSavedContent) {
-                                firstSavedContent = msg.content;
-                            }
-                            if (backendMessageId) {
-                                existingBackendIds.add(backendMessageId);
-                            }
-                            savedCount++;
-                        }
-                        if (savedCount === 0) continue;
-                        hasNewMessage = true;
-                        const isChattingWithThisChar = activeAppRef.current === AppID.Chat && activeCharIdRef.current === char.id;
+                                // 仅对非 autonomous 消息使用 new Notification()
+                                // autonomous 消息已由后端通过 Web Push 推送到 Service Worker，不需要重复弹窗
+                                const isAutonomous = dueMessages.some(m => m.metadata?.source === 'autonomous');
+                                if (!isAutonomous && window.Notification && Notification.permission === 'granted') {
+                                    try {
+                                        const notif = new Notification(char.name, {
+                                            body: firstSavedContent,
+                                            icon: char.avatar,
+                                            silent: false
+                                        });
 
-                        if (!isChattingWithThisChar) {
-                            addToast(`${char.name} 发来了一条消息`, 'success');
-                            pendingUnreads[char.id] = (pendingUnreads[char.id] || 0) + savedCount;
-
-                            // 仅对非 autonomous 消息使用 new Notification()
-                            // autonomous 消息已由后端通过 Web Push 推送到 Service Worker，不需要重复弹窗
-                            const isAutonomous = dueMessages.some(m => m.metadata?.source === 'autonomous');
-                            if (!isAutonomous && window.Notification && Notification.permission === 'granted') {
-                                try {
-                                    const notif = new Notification(char.name, {
-                                        body: firstSavedContent,
-                                        icon: char.avatar,
-                                        silent: false
-                                    });
-
-                                    notif.onclick = () => {
-                                        window.focus();
-                                        appCtx.openApp(AppID.Chat);
-                                        setActiveCharacterId(char.id);
-                                    };
-                                } catch (e) {
-                                    // console.error("Web Notification failed", e);
+                                        notif.onclick = () => {
+                                            window.focus();
+                                            appCtx.openApp(AppID.Chat);
+                                            setActiveCharacterId(char.id);
+                                        };
+                                    } catch (e) {
+                                        // console.error("Web Notification failed", e);
+                                    }
                                 }
                             }
                         }
+                    } catch (e) {
+                        // console.error("Schedule check failed for", char.name, e);
                     }
-                } catch (e) {
-                    // console.error("Schedule check failed for", char.name, e);
                 }
-            }
-            if (hasNewMessage) {
-                setLastMsgTimestamp(Date.now());
-                setUnreadMessages(prev => {
-                    const next = { ...prev };
-                    for (const [cid, count] of Object.entries(pendingUnreads)) {
-                        next[cid] = (next[cid] || 0) + count;
-                    }
-                    return next;
-                });
+                if (hasNewMessage) {
+                    setLastMsgTimestamp(Date.now());
+                    setUnreadMessages(prev => {
+                        const next = { ...prev };
+                        for (const [cid, count] of Object.entries(pendingUnreads)) {
+                            next[cid] = (next[cid] || 0) + count;
+                        }
+                        return next;
+                    });
+                }
+            } finally {
+                schedulerRunningRef.current = false;
             }
         };
         schedulerRef.current = setInterval(checkAllSchedules, 5000);
         checkAllSchedules();
         return () => { if (schedulerRef.current) clearInterval(schedulerRef.current); };
-    }, [isDataLoaded, characters]);
+    }, [isDataLoaded, characterIdsKey]);
 
     // --- Service Worker: 通知点击 → 切换角色 + 打开聊天 ---
     useEffect(() => {
@@ -591,17 +616,18 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
     // --- URL 参数: 从通知新窗口打开时自动导航 ---
     useEffect(() => {
-        if (!isDataLoaded || characters.length === 0) return;
+        const currentCharacters = charactersRef.current;
+        if (!isDataLoaded || currentCharacters.length === 0) return;
         const params = new URLSearchParams(window.location.search);
         const notifCharId = params.get('notif_charId');
-        if (notifCharId && characters.find(c => c.id === notifCharId)) {
+        if (notifCharId && currentCharacters.find(c => c.id === notifCharId)) {
             setActiveCharacterId(notifCharId);
             appCtx.openApp(AppID.Chat);
             setUnreadMessages(prev => ({ ...prev, [notifCharId]: 0 }));
             // 清理 URL（避免刷新后重复触发）
             window.history.replaceState({}, '', window.location.pathname);
         }
-    }, [isDataLoaded, characters]);
+    }, [isDataLoaded, characterIdsKey]);
 
     const updateTheme = async (updates: Partial<OSTheme>) => {
         const { wallpaper, launcherWidgetImage, launcherWidgets, desktopDecorations, customFont } = updates;

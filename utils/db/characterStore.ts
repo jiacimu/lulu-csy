@@ -184,6 +184,59 @@ export const saveMessage = async (msg: Omit<Message, 'id' | 'timestamp'> & { tim
     });
 };
 
+export const saveMessageOnceByBackendId = async (
+    msg: Omit<Message, 'id' | 'timestamp'> & { timestamp?: number },
+): Promise<{ saved: boolean; id?: number }> => {
+    const backendMessageId = typeof msg.metadata?.backendMessageId === 'string'
+        ? msg.metadata.backendMessageId
+        : '';
+
+    if (!backendMessageId) {
+        const id = await saveMessage(msg);
+        return { saved: true, id };
+    }
+
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(STORE_MESSAGES, 'readwrite');
+        const store = transaction.objectStore(STORE_MESSAGES);
+        const index = store.index('charId');
+        let settled = false;
+
+        const settle = (result: { saved: boolean; id?: number }) => {
+            if (settled) return;
+            settled = true;
+            resolve(result);
+        };
+
+        const request = index.openCursor(IDBKeyRange.only(msg.charId));
+        request.onsuccess = () => {
+            const cursor = request.result;
+            if (cursor) {
+                const existing = cursor.value as Message;
+                if (existing.metadata?.backendMessageId === backendMessageId) {
+                    settle({ saved: false, id: existing.id });
+                    return;
+                }
+                cursor.continue();
+                return;
+            }
+
+            const addRequest = store.add({ ...msg, timestamp: msg.timestamp ?? Date.now() });
+            addRequest.onsuccess = () => settle({ saved: true, id: addRequest.result as number });
+            addRequest.onerror = () => {
+                if (!settled) reject(addRequest.error);
+            };
+        };
+        request.onerror = () => {
+            if (!settled) reject(request.error);
+        };
+        transaction.onerror = () => {
+            if (!settled) reject(transaction.error);
+        };
+    });
+};
+
 export const updateMessage = async (id: number, content: string): Promise<void> => {
     const db = await openDB();
     const transaction = db.transaction(STORE_MESSAGES, 'readwrite');

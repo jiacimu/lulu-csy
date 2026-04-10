@@ -4,8 +4,9 @@ import { fireEvent,render,screen,waitFor } from '@testing-library/react';
 import { beforeEach,describe,expect,it,vi } from 'vitest';
 import MemoryCenter from './MemoryCenter';
 import { DB } from '../../utils/db';
-import { pullMemories } from '../../utils/backendClient';
+import { pullMemories,pushMemories } from '../../utils/backendClient';
 import { runHormoneBackfillJobFlow } from './memoryCenterBackfill';
+import { VectorMemoryExtractor } from '../../utils/vectorMemoryExtractor';
 
 vi.mock('../../utils/db', () => ({
     DB: {
@@ -34,9 +35,17 @@ vi.mock('./memoryCenterBackfill', () => ({
     runHormoneBackfillJobFlow: vi.fn(),
 }));
 
+vi.mock('../../utils/vectorMemoryExtractor', () => ({
+    VectorMemoryExtractor: {
+        backfillHormoneSnapshots: vi.fn(),
+    },
+}));
+
 const mockedDB = vi.mocked(DB);
 const mockedPullMemories = vi.mocked(pullMemories);
+const mockedPushMemories = vi.mocked(pushMemories);
 const mockedRunHormoneBackfillJobFlow = vi.mocked(runHormoneBackfillJobFlow);
+const mockedBackfillHormoneSnapshots = vi.mocked(VectorMemoryExtractor.backfillHormoneSnapshots);
 
 function makeMemory(overrides: Record<string, unknown> = {}) {
     return {
@@ -127,10 +136,16 @@ describe('MemoryCenter hormone backfill flow', () => {
         localStorage.setItem('sub_api_key', 'sub-key');
         localStorage.setItem('sub_api_base_url', 'https://llm.example.com');
         localStorage.setItem('sub_api_model', 'gpt-test');
+        localStorage.setItem('csyos_backend_token', 'backend-token');
         localMemories = [makeMemory()];
         cloudMemories = [];
 
         mockedPullMemories.mockImplementation(async () => cloudMemories as any);
+        mockedPushMemories.mockResolvedValue({ synced: 1, skipped: 0 });
+        mockedBackfillHormoneSnapshots.mockImplementation(async () => {
+            localMemories = [makeMemory({ hormoneSnapshot: { dopamine: 0.7 } })];
+            return { success: 1, skipped: 0, failed: 0 };
+        });
         mockedDB.replaceVectorMemories.mockImplementation(async (_charId, memories) => {
             localMemories = Array.isArray(memories) ? [...memories] : [];
         });
@@ -259,6 +274,31 @@ describe('MemoryCenter hormone backfill flow', () => {
             expect(addToast).toHaveBeenCalledWith(
                 'Recovered 1 hormone snapshots from cloud. All memories are already up to date',
                 'info',
+            );
+        });
+    });
+
+    it('falls back to local hormone backfill when backend job creation fails', async () => {
+        mockedRunHormoneBackfillJobFlow.mockRejectedValue(
+            new Error('Failed to create hormone backfill job'),
+        );
+
+        const { addToast } = renderMemoryCenter();
+
+        await openVectorTabAndStartBackfill();
+
+        await waitFor(() => {
+            expect(mockedRunHormoneBackfillJobFlow).toHaveBeenCalledTimes(1);
+            expect(mockedBackfillHormoneSnapshots).toHaveBeenCalledWith(
+                [expect.objectContaining({ id: 'vm-1' })],
+                'Sully',
+                expect.objectContaining({ apiKey: 'sub-key' }),
+                expect.any(Function),
+                expect.any(AbortSignal),
+            );
+            expect(addToast).toHaveBeenCalledWith(
+                'Emotion backfill completed locally: 1 memories updated and synced to cloud',
+                'success',
             );
         });
     });

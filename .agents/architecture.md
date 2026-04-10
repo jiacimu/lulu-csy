@@ -194,7 +194,6 @@ SULLYTEST2/
 │   ├── mindSnapshotExtractor.ts  # 心智快照提取
 │   │
 │   ├── autonomousAgent.ts     # 自主体 Agent (后端驱动, SSE 轮询)
-│   ├── brainAgent.ts          # 脑内代理 (子任务调度)
 │   ├── hormoneDynamics.ts     # 激素动力学系统
 │   ├── bodySignalRenderer.ts  # 体感信号渲染
 │   │

@@ -1,11 +1,13 @@
 
 import { CharacterProfile,UserProfile,Message,Emoji,EmojiCategory,GroupProfile,RealtimeConfig,APIConfig } from '../types';
+import { isSongPlayable,type MusicPlayable } from '../types/music';
 import { ContextBuilder } from './context';
 import { DB } from './db';
 import { RealtimeContextManager,NotionManager,FeishuManager,defaultRealtimeConfig } from './realtimeContext';
 import { buildCharacterHotSearch } from './hotSearchContext';
 import { VectorMemoryRetriever } from './vectorMemoryRetriever';
 import { buildTemporalContext } from './temporalContext';
+import type { PlaybackLyricSnapshot } from './playbackLyricsRuntime';
 
 export const ChatPrompts = {
     // 格式化时间戳
@@ -51,6 +53,47 @@ export const ChatPrompts = {
             const cName = catMap[cid] || '其他';
             return `${cName}: [${names.join(', ')}]`;
         }).join('; ');
+    },
+
+    buildPlaybackContextPrompt: (
+        userName: string,
+        currentSong: MusicPlayable | null,
+        isPlaying: boolean,
+        lyricSnapshot?: PlaybackLyricSnapshot | null,
+    ) => {
+        if (!currentSong) return '';
+
+        let prompt = '';
+
+        if (isSongPlayable(currentSong)) {
+            const artistNames = currentSong.artists.map((artist) => artist.name).join('/') || '未知歌手';
+            const shareVerb = isPlaying ? '正在听的' : '刚刚还在听的';
+
+            prompt += `\n\n[情境补充：此刻，${userName}开启了线上一起听。${userName}${shareVerb}《${currentSong.name}》- ${artistNames}，这段旋律也已经落进了你的耳边。对你来说，这是一段你正和${userName}一起听着的声音。你知道，${userName}想把这一刻的旋律、情绪和心事分享给你。]`;
+        } else {
+            const sourceName = currentSong.radioName
+                || currentSong.radio?.name
+                || currentSong.dj?.nickname
+                || '一段声音';
+            const shareVerb = isPlaying ? '正在听的' : '刚刚还在听的';
+
+            prompt += `\n\n[情境补充：此刻，${userName}开启了线上一起听。${userName}${shareVerb}《${currentSong.name}》，它来自${sourceName}，这段声音也已经落进了你的耳边。对你来说，这是你正和${userName}一起听着的一段内容。你知道，${userName}也想把这一刻的感受分享给你。]`;
+        }
+
+        prompt += `\n\n你不用刻意提歌，也不用每次都围着它说话。只要记住，你此刻是一边听着这段正与${userName}共享的旋律或声音，一边和${userName}聊天。它会自然影响你的心情、语气、联想和停顿，也会让你更容易接住${userName}想分享给你的那一点情绪。若它刚好碰到了你的回忆、感受或想说的话，你可以很自然地顺着它回应；若没有，也没关系，就让它安静地陪在你们对话旁边。`;
+
+        if (!lyricSnapshot?.currentText) {
+            prompt += `\n\n如果你此刻还没有听清更具体的歌词、段落或声音细节，就先停留在这段共享旋律带来的整体感受里。你可以先把它当作一种仍在缓慢展开的情绪，不急着替这首歌概括主题、判断意味，等更具体的内容真正落进耳边，再自然说出更明确的感受。`;
+        }
+
+        if (lyricSnapshot?.currentText) {
+            const translationBlock = lyricSnapshot.currentTranslation
+                ? `\n${lyricSnapshot.currentTranslation}`
+                : '';
+            prompt += `\n\n此刻正和${userName}一起流进你耳边的是：\n\n「${lyricSnapshot.currentText}」${translationBlock}\n\n这一句也和${userName}一起落进了你的耳边。你不需要复述它，只要让它自然成为你此刻感受的一部分；如果它刚好碰到了你的心绪，就让那一点余韵自然渗进你的回复里。`;
+        }
+
+        return prompt;
     },
 
     // 构建 System Prompt

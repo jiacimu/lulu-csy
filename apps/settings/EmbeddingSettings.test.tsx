@@ -5,11 +5,12 @@ import { beforeEach,describe,expect,it,vi } from 'vitest';
 import EmbeddingSettings from './EmbeddingSettings';
 import { getEmbeddingConfig,setEmbeddingConfig } from '../../utils/runtimeConfig';
 
-const { addToast,getMemoryEmbeddingEngineStatus,switchMemoryEmbeddingEngine,cancelMemoryEngineReindex } = vi.hoisted(() => ({
+const { addToast,getMemoryEmbeddingEngineStatus,switchMemoryEmbeddingEngine,cancelMemoryEngineReindex,retryFailedMemoryEngineReindex } = vi.hoisted(() => ({
     addToast: vi.fn(),
     getMemoryEmbeddingEngineStatus: vi.fn(),
     switchMemoryEmbeddingEngine: vi.fn(),
     cancelMemoryEngineReindex: vi.fn(),
+    retryFailedMemoryEngineReindex: vi.fn(),
 }));
 
 vi.mock('../../context/OSContext', () => ({
@@ -24,6 +25,7 @@ vi.mock('../../utils/backendClient', () => ({
     getMemoryEmbeddingEngineStatus,
     switchMemoryEmbeddingEngine,
     cancelMemoryEngineReindex,
+    retryFailedMemoryEngineReindex,
 }));
 
 describe('EmbeddingSettings', () => {
@@ -33,6 +35,7 @@ describe('EmbeddingSettings', () => {
         getMemoryEmbeddingEngineStatus.mockReset();
         switchMemoryEmbeddingEngine.mockReset();
         cancelMemoryEngineReindex.mockReset();
+        retryFailedMemoryEngineReindex.mockReset();
         getMemoryEmbeddingEngineStatus.mockResolvedValue(null);
     });
 
@@ -74,5 +77,75 @@ describe('EmbeddingSettings', () => {
             rerankUsePaid: false,
         });
         expect(addToast).toHaveBeenCalledWith('记忆引擎凭证已保存', 'success');
+    });
+
+    it('retries only failed reindex items from the status card', async () => {
+        getMemoryEmbeddingEngineStatus.mockResolvedValue({
+            engineId: 'enhanced',
+            engine: {
+                id: 'enhanced',
+                embeddingModel: 'Qwen/Qwen3-Embedding-8B',
+                rerankModel: 'Qwen/Qwen3-Reranker-8B',
+                vectorizeBinding: 'VECTOR_INDEX',
+                defaultMinRawSimilarity: 0.35,
+            },
+            updatedAt: Date.now(),
+            reindexJob: {
+                id: 'semjob-1',
+                userId: 'user-1',
+                type: 'index-memory',
+                status: 'failed',
+                totalItems: 10,
+                queuedItems: 0,
+                processingItems: 0,
+                completedItems: 4,
+                failedItems: 6,
+                cancelledItems: 0,
+                error: 'Embedding API error 429',
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+            },
+        });
+        retryFailedMemoryEngineReindex.mockResolvedValue({
+            ok: true,
+            retriedItems: 6,
+            status: {
+                engineId: 'enhanced',
+                engine: {
+                    id: 'enhanced',
+                    embeddingModel: 'Qwen/Qwen3-Embedding-8B',
+                    rerankModel: 'Qwen/Qwen3-Reranker-8B',
+                    vectorizeBinding: 'VECTOR_INDEX',
+                    defaultMinRawSimilarity: 0.35,
+                },
+                updatedAt: Date.now(),
+                reindexJob: {
+                    id: 'semjob-2',
+                    userId: 'user-1',
+                    type: 'index-memory',
+                    status: 'processing',
+                    totalItems: 6,
+                    queuedItems: 6,
+                    processingItems: 0,
+                    completedItems: 0,
+                    failedItems: 0,
+                    cancelledItems: 0,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                },
+            },
+        });
+
+        render(<EmbeddingSettings />);
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: '只重试失败项' })).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: '只重试失败项' }));
+
+        await waitFor(() => {
+            expect(retryFailedMemoryEngineReindex).toHaveBeenCalledWith('semjob-1');
+        });
+        expect(addToast).toHaveBeenCalledWith('已重新排队 6 条失败记忆', 'success');
     });
 });

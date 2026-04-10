@@ -21,7 +21,7 @@ import { handleDiaryRead } from './handlers/handleDiaryRead';
 import { handleFeishuDiary } from './handlers/handleFeishuDiary';
 import { handleFeishuDiaryRead } from './handlers/handleFeishuDiaryRead';
 import { handleXhsActions } from './handlers/handleXhsActions';
-import type { SongCardMetadata } from '../types/music';
+import { isSongPlayable, type SongCardMetadata } from '../types/music';
 import { searchSongs } from '../utils/musicService';
 import { getCurrentPlayback } from './useAudioPlayer';
 import {
@@ -29,6 +29,7 @@ import {
     getPlaybackLyricSnapshot,
     shouldInjectPlaybackLyricSnapshot,
 } from '../utils/playbackLyricsRuntime';
+import { shouldInjectPlaybackContextFromState } from '../utils/playbackContextRuntime';
 
 interface UseChatAIProps {
     char: CharacterProfile | undefined;
@@ -130,7 +131,14 @@ export const useChatAI = ({
             const playbackContextPromise = injectPlaybackContext
                 ? (async () => {
                     const playback = getCurrentPlayback();
-                    if (!playback.currentSong || !playback.isPlaying) return null;
+                    if (!shouldInjectPlaybackContextFromState(playback)) return null;
+
+                    if (!isSongPlayable(playback.currentSong)) {
+                        return {
+                            playback,
+                            lyricSnapshot: null,
+                        };
+                    }
 
                     return {
                         playback,
@@ -213,6 +221,8 @@ mode 可选值：
 - 只在聊到音乐、情绪、回忆、陪伴或推荐相关话题时自然使用，不需要每次都分享
 - 如果知道真实歌曲 ID，优先填写真实 ID
 - 如果暂时不知道歌曲 ID，可以写 0，系统仍会按歌名和歌手生成分享卡片
+- 歌曲标签必须保持完整的一行，不要拆成多行，不要放进代码块
+- 标签外不要再额外套任何中括号、引号、列表符号或说明文字
 
 示例：
 [[SHARE_SONG: 晴天 | 周杰伦 | 0]]`;
@@ -220,23 +230,23 @@ mode 可选值：
 
             if (injectPlaybackContext) {
                 const playback = playbackContext?.playback;
-                if (playback?.currentSong && playback.isPlaying) {
-                    const song = playback.currentSong;
-                    const artistNames = song.artists.map((artist) => artist.name).join('/');
-
-                    systemPrompt += `\n\n[情境补充：此刻你和${userProfile.name}耳边流着同一首歌，《${song.name}》- ${artistNames}。]`;
-                    systemPrompt += `\n\n这首歌不需要被反复提起，它只是此刻安静流过你们对话的背景。你知道，${userProfile.name}此刻也听见了同样的旋律、同样的停顿，以及那些一闪而过、还没来得及说破的情绪。`;
-                    systemPrompt += `\n\n你不用刻意聊歌，不用解释歌，也不用把这件事挂在嘴边。只要记住，你和${userProfile.name}现在正被同一首歌轻轻连着；这会自然影响你的语气、心情、停顿，和那些差一点就要说出口的话。`;
-
-                    const lyricSnapshot = playbackContext?.lyricSnapshot ?? null;
-                    if (shouldInjectPlaybackLyricSnapshot(
-                        lyricSnapshot,
+                if (playback?.currentSong) {
+                    const rawLyricSnapshot = playbackContext?.lyricSnapshot ?? null;
+                    const lyricSnapshot = rawLyricSnapshot && shouldInjectPlaybackLyricSnapshot(
+                        rawLyricSnapshot,
                         lastInjectedPlaybackLyricKeyRef.current,
-                    )) {
-                        const translationBlock = lyricSnapshot.currentTranslation
-                            ? `\n${lyricSnapshot.currentTranslation}`
-                            : '';
-                        systemPrompt += `\n\n此刻歌里正好唱到：\n\n「${lyricSnapshot.currentText}」${translationBlock}\n\n这一句也落在你耳边。你不必说破，也不要复述或解释它；若它恰好碰到你此刻的心绪，就让那一点点余韵自然落进你的回复里。若没有，就让它留在背景。`;
+                    )
+                        ? rawLyricSnapshot
+                        : null;
+
+                    systemPrompt += ChatPrompts.buildPlaybackContextPrompt(
+                        userProfile.name,
+                        playback.currentSong,
+                        playback.isPlaying,
+                        lyricSnapshot,
+                    );
+
+                    if (lyricSnapshot) {
                         lastInjectedPlaybackLyricKeyRef.current = getPlaybackLyricKey(lyricSnapshot);
                     }
                 }
