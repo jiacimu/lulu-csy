@@ -1,8 +1,17 @@
 import { buildBackendAuthQuery, buildBackendHeaders, buildBackendUrl, buildBackendUrlObject } from './backendClient';
 import { safeResponseJson } from './safeApi';
 import type {
-    NeteaseAlbum,
+    MusicPlayable,
+    MusicSearchBundle,
+    MusicSearchItem,
+    MusicSearchSection,
+    MusicSearchTab,
+    NeteaseAlbumSummary,
     NeteaseArtist,
+    NeteaseArtistSummary,
+    NeteaseDjCreator,
+    NeteaseDjProgram,
+    NeteaseDjRadio,
     NeteaseLyric,
     NeteasePlaylist,
     NeteasePlaylistCreator,
@@ -15,13 +24,58 @@ import type {
 const COOKIE_KEY = 'netease_music_cookie';
 const NETEASE_DETAIL_PROXY_PATH = '/netease-api/song-detail';
 const MUSIC_SERVICE_NAME = '音乐服务';
+const SONG_FALLBACK_LEVEL = 'exhigh';
+const PROGRAM_FALLBACK_LEVEL = 'standard';
 
 type JsonRecord = Record<string, unknown>;
+type SearchableMusicTab = Exclude<MusicSearchTab, 'all'>;
+
+export const MUSIC_SEARCH_TABS: MusicSearchTab[] = [
+    'all',
+    'song',
+    'playlist',
+    'album',
+    'artist',
+    'radio',
+    'program',
+];
+
+export const MUSIC_SEARCH_SECTION_ORDER: SearchableMusicTab[] = [
+    'song',
+    'playlist',
+    'album',
+    'artist',
+    'radio',
+    'program',
+];
+
+export const MUSIC_SEARCH_TAB_LABELS: Record<MusicSearchTab, string> = {
+    all: '综合',
+    song: '单曲',
+    playlist: '歌单',
+    album: '专辑',
+    artist: '歌手',
+    radio: '播客台',
+    program: '声音',
+};
+
+const SEARCH_TAB_TYPES: Record<SearchableMusicTab, number> = {
+    song: 1,
+    album: 10,
+    artist: 100,
+    playlist: 1000,
+    radio: 1009,
+    program: 2000,
+};
 
 function asRecord(value: unknown): JsonRecord | null {
     return value && typeof value === 'object' && !Array.isArray(value)
         ? value as JsonRecord
         : null;
+}
+
+function asArray(value: unknown): unknown[] {
+    return Array.isArray(value) ? value : [];
 }
 
 function readString(value: unknown): string {
@@ -60,6 +114,7 @@ function extractErrorMessage(value: unknown, fallback: string): string {
         readString(record.error),
         readString(record.detail),
         readString(record.message),
+        readString(record.msg),
     ].filter(Boolean);
 
     return parts.length > 0 ? parts.join(' | ') : fallback;
@@ -79,6 +134,18 @@ function assertMusicApiSuccess(value: unknown, fallback: string): void {
     }
 }
 
+function readCoverUrl(record: JsonRecord | null): string {
+    if (!record) return '';
+
+    return normalizeUrl(record.picUrl)
+        || normalizeUrl(record.coverImgUrl)
+        || normalizeUrl(record.img1v1Url)
+        || normalizeUrl(record.avatarUrl)
+        || normalizeUrl(record.coverUrl)
+        || normalizeUrl(record.blurCoverUrl)
+        || normalizeUrl(record.intervenePicUrl);
+}
+
 function normalizeArtist(value: unknown): NeteaseArtist | null {
     const record = asRecord(value);
     if (!record) return null;
@@ -87,27 +154,72 @@ function normalizeArtist(value: unknown): NeteaseArtist | null {
     const id = readNumber(record.id) ?? 0;
     if (!name) return null;
 
-    return { id, name };
+    const artist: NeteaseArtist = { id, name };
+    const avatarUrl = readCoverUrl(record);
+    if (avatarUrl) {
+        artist.avatarUrl = avatarUrl;
+    }
+
+    return artist;
 }
 
-function normalizeAlbum(value: unknown): NeteaseAlbum | null {
+function normalizeArtistSummary(value: unknown): NeteaseArtistSummary | null {
+    const artist = normalizeArtist(value);
+    const record = asRecord(value);
+    if (!artist || !record) return null;
+
+    return {
+        kind: 'artist',
+        ...artist,
+        picUrl: readCoverUrl(record) || artist.avatarUrl,
+        musicSize: readNumber(record.musicSize) ?? undefined,
+        albumSize: readNumber(record.albumSize) ?? undefined,
+        briefDesc: readString(record.briefDesc) || undefined,
+        description: readString(record.description) || readString(record.briefDesc) || undefined,
+    };
+}
+
+function readArtistName(value: unknown): string {
+    const record = asRecord(value);
+    if (!record) return '';
+
+    const directArtist = normalizeArtist(record.artist);
+    if (directArtist?.name) {
+        return directArtist.name;
+    }
+
+    const artists = [
+        ...asArray(record.artists),
+        ...asArray(record.ar),
+    ]
+        .map(normalizeArtist)
+        .filter((artist): artist is NeteaseArtist => Boolean(artist));
+
+    if (artists.length > 0) {
+        return artists.map((artist) => artist.name).join(' / ');
+    }
+
+    return readString(record.artistName);
+}
+
+function normalizeAlbumSummary(value: unknown): NeteaseAlbumSummary | null {
     const record = asRecord(value);
     if (!record) return null;
 
     const name = readString(record.name);
-    if (!name) return null;
+    const id = readNumber(record.id) ?? 0;
+    if (!name || id <= 0) return null;
 
-    const album: NeteaseAlbum = {
-        id: readNumber(record.id) ?? 0,
+    return {
+        kind: 'album',
+        id,
         name,
+        picUrl: readCoverUrl(record) || undefined,
+        artistName: readArtistName(record) || undefined,
+        publishTime: readNumber(record.publishTime) ?? undefined,
+        songCount: readNumber(record.size) ?? readNumber(record.songCount) ?? undefined,
+        description: readString(record.description) || readString(record.desc) || undefined,
     };
-
-    const picUrl = normalizeUrl(record.picUrl);
-    if (picUrl) {
-        album.picUrl = picUrl;
-    }
-
-    return album;
 }
 
 function normalizeSong(value: unknown): NeteaseSong | null {
@@ -127,17 +239,24 @@ function normalizeSong(value: unknown): NeteaseSong | null {
         .map(normalizeArtist)
         .filter((artist): artist is NeteaseArtist => Boolean(artist));
 
-    const album = normalizeAlbum(record.album) || normalizeAlbum(record.al) || {
+    const album = normalizeAlbumSummary(record.album) || normalizeAlbumSummary(record.al) || {
+        kind: 'album' as const,
         id: 0,
         name: '',
     };
 
+    const alias = asArray(record.alia)
+        .map(readString)
+        .filter(Boolean);
+
     return {
+        kind: 'song',
         id,
         name,
         artists,
         album,
         duration: readNumber(record.duration) ?? readNumber(record.dt) ?? 0,
+        ...(alias.length > 0 ? { alias } : {}),
     };
 }
 
@@ -177,7 +296,7 @@ async function enrichSongsWithAlbumCovers(songs: NeteaseSong[]): Promise<Netease
             assertMusicApiSuccess(detailResponse, `${MUSIC_SERVICE_NAME}歌曲详情暂时不可用`);
 
             const detailMap = new Map(
-                (Array.isArray(detailResponse.songs) ? detailResponse.songs : [])
+                asArray(detailResponse.songs)
                     .map(normalizeSong)
                     .filter((song): song is NeteaseSong => Boolean(song))
                     .map((song) => [song.id, song] as const),
@@ -218,7 +337,7 @@ function normalizePlaylistCreator(value: unknown): NeteasePlaylistCreator | unde
     return {
         userId: readNumber(record.userId) ?? 0,
         nickname,
-        avatarUrl: normalizeUrl(record.avatarUrl),
+        avatarUrl: readCoverUrl(record),
     };
 }
 
@@ -231,10 +350,13 @@ function normalizePlaylist(value: unknown): NeteasePlaylist | null {
     if (id <= 0 || !name) return null;
 
     const playlist: NeteasePlaylist = {
+        kind: 'playlist',
         id,
         name,
-        coverImgUrl: normalizeUrl(record.coverImgUrl),
+        coverImgUrl: readCoverUrl(record),
         trackCount: readNumber(record.trackCount) ?? 0,
+        description: readString(record.description) || undefined,
+        playCount: readNumber(record.playCount) ?? undefined,
     };
 
     if (Array.isArray(record.tracks)) {
@@ -249,6 +371,86 @@ function normalizePlaylist(value: unknown): NeteasePlaylist | null {
     }
 
     return playlist;
+}
+
+function normalizeDjCreator(value: unknown): NeteaseDjCreator | undefined {
+    const record = asRecord(value);
+    if (!record) return undefined;
+
+    const nickname = readString(record.nickname);
+    const userId = readNumber(record.userId) ?? 0;
+    if (!nickname && userId <= 0) return undefined;
+
+    return {
+        userId,
+        nickname: nickname || '播客主播',
+        avatarUrl: readCoverUrl(record) || undefined,
+    };
+}
+
+function normalizeDjRadio(value: unknown): NeteaseDjRadio | null {
+    const record = asRecord(value);
+    if (!record) return null;
+
+    const id = readNumber(record.id) ?? readNumber(record.rid) ?? 0;
+    const name = readString(record.name);
+    if (id <= 0 || !name) return null;
+
+    const radio: NeteaseDjRadio = {
+        kind: 'radio',
+        id,
+        name,
+        picUrl: readCoverUrl(record),
+        description: readString(record.desc) || readString(record.description) || readString(record.rcmdtext) || undefined,
+        category: readString(record.category) || undefined,
+        programCount: readNumber(record.programCount) ?? undefined,
+        subCount: readNumber(record.subCount) ?? readNumber(record.subedCount) ?? undefined,
+        lastProgramName: readString(record.lastProgramName) || undefined,
+    };
+
+    const dj = normalizeDjCreator(record.dj);
+    if (dj) {
+        radio.dj = dj;
+    }
+
+    if (Array.isArray(record.programs)) {
+        radio.programs = record.programs
+            .map(normalizeDjProgram)
+            .filter((program): program is NeteaseDjProgram => Boolean(program));
+    }
+
+    return radio;
+}
+
+function normalizeDjProgram(value: unknown): NeteaseDjProgram | null {
+    const record = asRecord(value);
+    if (!record) return null;
+
+    const base = asRecord(record.baseInfo) || record;
+    const mainSong = normalizeSong(base.mainSong) || normalizeSong(record.mainSong) || undefined;
+    const radio = normalizeDjRadio(base.radio) || normalizeDjRadio(record.radio) || normalizeDjRadio(base.djRadio) || normalizeDjRadio(record.djRadio) || undefined;
+    const dj = normalizeDjCreator(base.dj) || normalizeDjCreator(record.dj) || radio?.dj;
+    const id = readNumber(base.id) ?? readNumber(record.id) ?? 0;
+    const name = readString(base.name) || readString(record.name) || mainSong?.name || '';
+
+    if (id <= 0 || !name) return null;
+
+    return {
+        kind: 'program',
+        id,
+        name,
+        duration: readNumber(base.duration) ?? readNumber(record.duration) ?? mainSong?.duration ?? 0,
+        description: readString(base.description) || readString(record.description) || readString(base.desc) || readString(record.desc) || undefined,
+        coverUrl: readCoverUrl(base) || readCoverUrl(record) || mainSong?.album.picUrl || undefined,
+        serialNum: readNumber(base.serialNum) ?? readNumber(record.serialNum) ?? undefined,
+        listenerCount: readNumber(base.listenerCount) ?? readNumber(record.listenerCount) ?? readNumber(record.subscribedCount) ?? undefined,
+        createTime: readNumber(base.createTime) ?? readNumber(record.createTime) ?? undefined,
+        radioId: radio?.id ?? readNumber(base.radioId) ?? readNumber(record.radioId) ?? undefined,
+        radioName: radio?.name || readString(base.radioName) || readString(record.radioName) || undefined,
+        ...(radio ? { radio } : {}),
+        ...(dj ? { dj } : {}),
+        ...(mainSong ? { mainSong } : {}),
+    };
 }
 
 function normalizeUserAccount(value: unknown): NeteaseUserAccount | null {
@@ -272,7 +474,7 @@ function normalizeUserAccount(value: unknown): NeteaseUserAccount | null {
     return {
         userId,
         nickname,
-        avatarUrl: normalizeUrl(profile.avatarUrl),
+        avatarUrl: readCoverUrl(profile),
         backgroundUrl: normalizeUrl(profile.backgroundUrl) || undefined,
         follows: readNumber(profile.follows) ?? 0,
         followeds: readNumber(profile.followeds) ?? 0,
@@ -282,6 +484,80 @@ function normalizeUserAccount(value: unknown): NeteaseUserAccount | null {
         vipLevel,
         isVip: vipType > 0 || vipLevel > 0,
     };
+}
+
+function getSearchEntries(result: JsonRecord, tab: SearchableMusicTab): unknown[] {
+    switch (tab) {
+        case 'song':
+            return asArray(result.songs);
+        case 'playlist':
+            return asArray(result.playlists);
+        case 'album':
+            return asArray(result.albums);
+        case 'artist':
+            return asArray(result.artists);
+        case 'radio':
+            return asArray(result.djRadios);
+        case 'program':
+            return asArray(result.programs).length > 0
+                ? asArray(result.programs)
+                : asArray(result.djprograms).length > 0
+                    ? asArray(result.djprograms)
+                    : asArray(result.resources);
+        default:
+            return [];
+    }
+}
+
+function getSearchCount(result: JsonRecord, tab: SearchableMusicTab, fallback: number): number {
+    const candidates: Record<SearchableMusicTab, string[]> = {
+        song: ['songCount'],
+        playlist: ['playlistCount'],
+        album: ['albumCount'],
+        artist: ['artistCount'],
+        radio: ['djRadiosCount', 'radioCount'],
+        program: ['programCount', 'resourceCount'],
+    };
+
+    for (const key of candidates[tab]) {
+        const value = readNumber(result[key]);
+        if (value !== null) return value;
+    }
+
+    return fallback;
+}
+
+async function normalizeSearchItems(tab: SearchableMusicTab, entries: unknown[]): Promise<MusicSearchItem[]> {
+    switch (tab) {
+        case 'song':
+            return enrichSongsWithAlbumCovers(
+                entries
+                    .map(normalizeSong)
+                    .filter((song): song is NeteaseSong => Boolean(song)),
+            );
+        case 'playlist':
+            return entries
+                .map(normalizePlaylist)
+                .filter((item): item is NeteasePlaylist => Boolean(item));
+        case 'album':
+            return entries
+                .map(normalizeAlbumSummary)
+                .filter((item): item is NeteaseAlbumSummary => Boolean(item));
+        case 'artist':
+            return entries
+                .map(normalizeArtistSummary)
+                .filter((item): item is NeteaseArtistSummary => Boolean(item));
+        case 'radio':
+            return entries
+                .map(normalizeDjRadio)
+                .filter((item): item is NeteaseDjRadio => Boolean(item));
+        case 'program':
+            return entries
+                .map(normalizeDjProgram)
+                .filter((item): item is NeteaseDjProgram => Boolean(item));
+        default:
+            return [];
+    }
 }
 
 async function musicPost<T>(path: string, body: Record<string, unknown>): Promise<T> {
@@ -318,6 +594,16 @@ async function sameOriginPost<T>(path: string, body: Record<string, unknown>): P
     return data;
 }
 
+function buildSongFallbackUrl(songId: number): string {
+    return `https://music.163.com/song/media/outer/url?id=${songId}.mp3`;
+}
+
+function maybeProxyAudioUrl(rawUrl: string | null | undefined): string | null {
+    const trimmedUrl = typeof rawUrl === 'string' ? normalizeUrl(rawUrl) : '';
+    if (!trimmedUrl) return null;
+    return getAudioProxyUrl(trimmedUrl) || trimmedUrl;
+}
+
 export function getMusicCookie(): string {
     try {
         return localStorage.getItem(COOKIE_KEY) || '';
@@ -346,43 +632,117 @@ export function isMusicLoggedIn(): boolean {
     return Boolean(getMusicCookie());
 }
 
-export async function searchSongs(keyword: string, limit = 30, offset = 0): Promise<NeteaseSearchResult> {
+export async function searchMusicByType(
+    keyword: string,
+    tab: SearchableMusicTab,
+    limit = 30,
+    offset = 0,
+): Promise<MusicSearchSection> {
     const trimmedKeyword = keyword.trim();
     if (!trimmedKeyword) {
-        return { songs: [], songCount: 0 };
+        return {
+            tab,
+            title: MUSIC_SEARCH_TAB_LABELS[tab],
+            items: [],
+            total: 0,
+        };
     }
 
     const data = await musicPost<{ result?: unknown }>('/api/music/search', {
         keyword: trimmedKeyword,
         limit,
         offset,
-        type: 1,
+        type: SEARCH_TAB_TYPES[tab],
     });
-    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}搜索暂时不可用`);
-    const result = asRecord(data.result);
-    const rawSongs = Array.isArray(result?.songs) ? result.songs : [];
-    const songs = rawSongs
-        .map(normalizeSong)
-        .filter((song): song is NeteaseSong => Boolean(song));
-    const enrichedSongs = await enrichSongsWithAlbumCovers(songs);
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}${MUSIC_SEARCH_TAB_LABELS[tab]}搜索暂时不可用`);
+
+    const result = asRecord(data.result) || {};
+    const items = await normalizeSearchItems(tab, getSearchEntries(result, tab));
 
     return {
-        songs: enrichedSongs,
-        songCount: readNumber(result?.songCount) ?? enrichedSongs.length,
+        tab,
+        title: MUSIC_SEARCH_TAB_LABELS[tab],
+        items,
+        total: getSearchCount(result, tab, items.length),
     };
 }
 
-export async function getSongUrl(ids: number[]): Promise<NeteaseSongUrl[]> {
+export async function searchMusicAll(keyword: string): Promise<MusicSearchBundle> {
+    const trimmedKeyword = keyword.trim();
+    if (!trimmedKeyword) {
+        return { keyword: '', sections: [] };
+    }
+
+    const settled = await Promise.allSettled(
+        MUSIC_SEARCH_SECTION_ORDER.map((tab) => searchMusicByType(trimmedKeyword, tab, 6, 0)),
+    );
+
+    return {
+        keyword: trimmedKeyword,
+        sections: settled.map((result, index) => {
+            const tab = MUSIC_SEARCH_SECTION_ORDER[index];
+            if (result.status === 'fulfilled') {
+                return result.value;
+            }
+
+            return {
+                tab,
+                title: MUSIC_SEARCH_TAB_LABELS[tab],
+                items: [],
+                total: 0,
+                error: result.reason instanceof Error
+                    ? result.reason.message
+                    : '搜索失败，请稍后重试',
+            };
+        }),
+    };
+}
+
+export async function searchSongs(keyword: string, limit = 30, offset = 0): Promise<NeteaseSearchResult> {
+    const result = await searchMusicByType(keyword, 'song', limit, offset);
+    const songs = result.items.filter((song): song is NeteaseSong => song.kind === 'song');
+
+    return {
+        songs,
+        songCount: result.total,
+    };
+}
+
+export async function getSongUrl(
+    ids: number[],
+    options: { resourceType?: 'song' | 'program'; level?: string; br?: number } = {},
+): Promise<NeteaseSongUrl[]> {
+    const resourceType = options.resourceType === 'program' ? 'program' : 'song';
+    const level = options.level || (resourceType === 'program' ? PROGRAM_FALLBACK_LEVEL : SONG_FALLBACK_LEVEL);
+    const br = options.br ?? 320000;
+
     const data = await musicPost<{ data?: unknown }>('/api/music/song/url', {
         ids,
         cookie: getMusicCookie(),
-        br: 320000,
+        level,
+        br,
+        resourceType,
     });
     assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}播放链接暂时不可用`);
-    const entries = Array.isArray(data.data) ? data.data : [];
-    return entries
+    return asArray(data.data)
         .map(normalizeSongUrl)
         .filter((item): item is NeteaseSongUrl => Boolean(item));
+}
+
+export async function resolvePlayableUrl(playable: MusicPlayable): Promise<string | null> {
+    const urls = await getSongUrl([playable.id], {
+        resourceType: playable.kind === 'program' ? 'program' : 'song',
+    });
+    const targetUrl = urls.find((item) => item.id === playable.id)?.url;
+    if (targetUrl) {
+        return maybeProxyAudioUrl(targetUrl);
+    }
+
+    if (playable.kind === 'song') {
+        return maybeProxyAudioUrl(buildSongFallbackUrl(playable.id));
+    }
+
+    return null;
 }
 
 export function getAudioProxyUrl(rawUrl: string | null | undefined): string | null {
@@ -424,8 +784,7 @@ export async function getLyric(id: number): Promise<NeteaseLyric> {
 export async function getSongDetail(ids: number[]): Promise<NeteaseSong[]> {
     const data = await musicPost<{ songs?: unknown }>('/api/music/song/detail', { ids });
     assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}歌曲详情暂时不可用`);
-    const songs = Array.isArray(data.songs) ? data.songs : [];
-    return songs
+    return asArray(data.songs)
         .map(normalizeSong)
         .filter((song): song is NeteaseSong => Boolean(song));
 }
@@ -439,11 +798,101 @@ export async function getPlaylistDetail(id: number): Promise<NeteasePlaylist | n
     return normalizePlaylist(data.playlist);
 }
 
+export async function getAlbumDetail(id: number): Promise<NeteaseAlbumSummary | null> {
+    const data = await musicPost<JsonRecord>('/api/music/album/detail', { id });
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}专辑详情暂时不可用`);
+
+    const album = normalizeAlbumSummary(data.album);
+    if (!album) return null;
+
+    const songs = asArray(data.songs)
+        .map(normalizeSong)
+        .filter((song): song is NeteaseSong => Boolean(song));
+
+    return {
+        ...album,
+        ...(songs.length > 0 ? { songs } : {}),
+        description: album.description || readString(asRecord(data.album)?.description) || undefined,
+    };
+}
+
+export async function getArtistDetail(id: number): Promise<NeteaseArtistSummary | null> {
+    const data = await musicPost<JsonRecord>('/api/music/artist/detail', { id });
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}歌手详情暂时不可用`);
+
+    const dataRecord = asRecord(data.data);
+    const artist = normalizeArtistSummary(dataRecord?.artist || data.artist);
+    if (!artist) return null;
+
+    const description = readString(dataRecord?.briefDesc)
+        || readString(asRecord(dataRecord?.artist)?.briefDesc)
+        || readString(asRecord(data.artist)?.briefDesc)
+        || artist.description;
+
+    return {
+        ...artist,
+        ...(description ? { description } : {}),
+    };
+}
+
+export async function getArtistTopSongs(id: number): Promise<NeteaseSong[]> {
+    const data = await musicPost<JsonRecord>('/api/music/artist/top/song', { id });
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}歌手热门歌曲暂时不可用`);
+    return enrichSongsWithAlbumCovers(
+        asArray(data.songs)
+            .map(normalizeSong)
+            .filter((song): song is NeteaseSong => Boolean(song)),
+    );
+}
+
+export async function getArtistAlbums(id: number, limit = 30, offset = 0): Promise<NeteaseAlbumSummary[]> {
+    const data = await musicPost<JsonRecord>('/api/music/artist/album', { id, limit, offset });
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}歌手专辑暂时不可用`);
+    return asArray(data.hotAlbums)
+        .map(normalizeAlbumSummary)
+        .filter((album): album is NeteaseAlbumSummary => Boolean(album));
+}
+
+export async function getArtistDesc(id: number): Promise<string> {
+    const data = await musicPost<JsonRecord>('/api/music/artist/desc', { id });
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}歌手简介暂时不可用`);
+    return readString(data.briefDesc);
+}
+
+export async function getDjRadioDetail(id: number): Promise<NeteaseDjRadio | null> {
+    const data = await musicPost<JsonRecord>('/api/music/dj/detail', { id });
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}播客详情暂时不可用`);
+    return normalizeDjRadio(data.data || data.djRadio);
+}
+
+export async function getDjPrograms(
+    rid: number,
+    limit = 30,
+    offset = 0,
+    asc = false,
+): Promise<NeteaseDjProgram[]> {
+    const data = await musicPost<JsonRecord>('/api/music/dj/program', {
+        rid,
+        limit,
+        offset,
+        asc,
+    });
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}节目列表暂时不可用`);
+    return asArray(data.programs)
+        .map(normalizeDjProgram)
+        .filter((program): program is NeteaseDjProgram => Boolean(program));
+}
+
+export async function getDjProgramDetail(id: number): Promise<NeteaseDjProgram | null> {
+    const data = await musicPost<JsonRecord>('/api/music/dj/program/detail', { id });
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}节目详情暂时不可用`);
+    return normalizeDjProgram(data.program || data.data);
+}
+
 export async function getTopPlaylists(cat = '全部', limit = 30): Promise<NeteasePlaylist[]> {
     const data = await musicPost<{ playlists?: unknown }>('/api/music/top/playlist', { cat, limit });
     assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}推荐歌单暂时不可用`);
-    const playlists = Array.isArray(data.playlists) ? data.playlists : [];
-    return playlists
+    return asArray(data.playlists)
         .map(normalizePlaylist)
         .filter((playlist): playlist is NeteasePlaylist => Boolean(playlist));
 }

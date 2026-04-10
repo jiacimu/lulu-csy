@@ -14,6 +14,7 @@ import {
     readFloatingLyricsSettings,
     updateFloatingLyricsSettings,
 } from './floatingLyricsSettings';
+import { isSongPlayable } from '../../types/music';
 import './FloatingLyrics.css';
 
 const FloatingLyrics: React.FC = () => {
@@ -27,7 +28,7 @@ const FloatingLyrics: React.FC = () => {
     const lineRefs = useRef<Array<HTMLDivElement | null>>([]);
 
     const { lines, currentIndex } = useLyrics({
-        songId: currentSong?.id,
+        songId: currentSong && isSongPlayable(currentSong) ? currentSong.id : undefined,
         currentTime,
         enabled: settings.enabled && activeApp !== AppID.Music,
     });
@@ -73,6 +74,7 @@ const FloatingLyrics: React.FC = () => {
     const shouldShow =
         settings.enabled &&
         currentSong !== null &&
+        isSongPlayable(currentSong) &&
         activeApp !== AppID.Music &&
         lines.length > 0;
 
@@ -134,11 +136,13 @@ const FloatingLyrics: React.FC = () => {
                             <span className="floating-lyric-text">
                                 {line.text}
                             </span>
-                            {settings.showTranslation && line.translation && (
+                            {settings.showTranslation &&
+                                index === currentIndex &&
+                                line.translation && (
                                 <span className="floating-lyric-translation">
                                     {line.translation}
                                 </span>
-                            )}
+                                )}
                         </div>
                     ))}
                 </div>

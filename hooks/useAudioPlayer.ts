@@ -1,15 +1,24 @@
 import { useEffect, useState } from 'react';
-import type { NeteaseSong } from '../types/music';
-import { getSongUrl } from '../utils/musicService';
+import type {
+    MusicPlayable,
+    NeteaseAlbumSummary,
+    NeteaseArtist,
+    NeteaseDjCreator,
+    NeteaseDjProgram,
+    NeteaseDjRadio,
+    NeteaseSong,
+} from '../types/music';
+import { isSongPlayable } from '../types/music';
+import { resolvePlayableUrl } from '../utils/musicService';
 
 export interface PlaybackState {
     isPlaying: boolean;
-    currentSong: NeteaseSong | null;
+    currentSong: MusicPlayable | null;
     currentTime: number;
     duration: number;
     progress: number;
     volume: number;
-    playlist: NeteaseSong[];
+    playlist: MusicPlayable[];
     currentIndex: number;
 }
 
@@ -38,19 +47,64 @@ function buildOuterSongUrl(songId: number): string {
     return `https://music.163.com/song/media/outer/url?id=${songId}.mp3`;
 }
 
-function normalizePlaybackUrl(url: string): string {
-    return url.replace(/^http:\/\//i, 'https://');
+function cloneArtist(artist: NeteaseArtist): NeteaseArtist {
+    return { ...artist };
 }
 
-function buildFallbackPlaybackUrl(songId: number): string {
-    return buildOuterSongUrl(songId);
+function cloneAlbum(album: NeteaseAlbumSummary): NeteaseAlbumSummary {
+    return {
+        ...album,
+        ...(album.songs ? { songs: album.songs.map(cloneSong) } : {}),
+    };
+}
+
+function cloneDjCreator(creator: NeteaseDjCreator): NeteaseDjCreator {
+    return { ...creator };
+}
+
+function cloneRadio(radio: NeteaseDjRadio): NeteaseDjRadio {
+    return {
+        ...radio,
+        ...(radio.dj ? { dj: cloneDjCreator(radio.dj) } : {}),
+        ...(radio.programs ? { programs: radio.programs.map(cloneProgram) } : {}),
+    };
+}
+
+function cloneSong(song: NeteaseSong): NeteaseSong {
+    return {
+        ...song,
+        artists: song.artists.map(cloneArtist),
+        album: cloneAlbum(song.album),
+        ...(song.alias ? { alias: [...song.alias] } : {}),
+    };
+}
+
+function cloneProgram(program: NeteaseDjProgram): NeteaseDjProgram {
+    return {
+        ...program,
+        ...(program.radio ? { radio: cloneRadio(program.radio) } : {}),
+        ...(program.dj ? { dj: cloneDjCreator(program.dj) } : {}),
+        ...(program.mainSong ? { mainSong: cloneSong(program.mainSong) } : {}),
+    };
+}
+
+function clonePlayable(playable: MusicPlayable): MusicPlayable {
+    return isSongPlayable(playable) ? cloneSong(playable) : cloneProgram(playable);
+}
+
+function buildFallbackPlaybackUrl(playable: MusicPlayable): string | null {
+    return isSongPlayable(playable) ? buildOuterSongUrl(playable.id) : null;
+}
+
+function getPlayableDuration(playable: MusicPlayable): number {
+    return playable.duration > 0 ? playable.duration / 1000 : 0;
 }
 
 function cloneState(state: PlaybackState): PlaybackState {
     return {
         ...state,
-        currentSong: state.currentSong ? { ...state.currentSong, album: { ...state.currentSong.album }, artists: [...state.currentSong.artists] } : null,
-        playlist: [...state.playlist],
+        currentSong: state.currentSong ? clonePlayable(state.currentSong) : null,
+        playlist: state.playlist.map(clonePlayable),
     };
 }
 
@@ -149,14 +203,17 @@ function syncStateFromAudio(overrides: Partial<PlaybackState> = {}): void {
     }));
 }
 
-async function playSongInternal(song: NeteaseSong, playlist?: NeteaseSong[]): Promise<void> {
+async function playSongInternal(song: MusicPlayable, playlist?: MusicPlayable[]): Promise<void> {
     const audio = getAudio();
     if (!audio) return;
 
     bindAudioEvents();
     primeAudioPlayback(audio);
 
-    const queue = playlist && playlist.length > 0 ? [...playlist] : [song];
+    const sourceQueue = playlist && playlist.length > 0 ? playlist : [song];
+    const queue = sourceQueue
+        .filter((item) => item.kind === song.kind)
+        .map(clonePlayable);
     const queueIndex = queue.findIndex((item) => item.id === song.id);
     const currentIndex = queueIndex >= 0 ? queueIndex : 0;
     const requestId = ++currentRequestId;
@@ -164,27 +221,28 @@ async function playSongInternal(song: NeteaseSong, playlist?: NeteaseSong[]): Pr
     audio.volume = currentState.volume;
     updateState((state) => ({
         ...state,
-        currentSong: song,
+        currentSong: clonePlayable(song),
         playlist: queue,
         currentIndex,
         isPlaying: false,
         currentTime: 0,
-        duration: song.duration > 0 ? song.duration / 1000 : 0,
+        duration: getPlayableDuration(song),
         progress: 0,
     }));
 
     try {
-        const urls = await getSongUrl([song.id]);
+        const targetUrl = await resolvePlayableUrl(song);
         if (requestId !== currentRequestId) return;
+        if (!targetUrl) {
+            throw new Error('没有可用的播放链接');
+        }
 
-        const targetUrl = urls.find((item) => item.id === song.id)?.url;
-        const fallbackUrl = buildFallbackPlaybackUrl(song.id);
-        audio.src = targetUrl ? normalizePlaybackUrl(targetUrl) : fallbackUrl;
+        audio.src = targetUrl;
         audio.currentTime = 0;
         audio.load();
         await audio.play();
         syncStateFromAudio({
-            currentSong: song,
+            currentSong: clonePlayable(song),
             playlist: queue,
             currentIndex,
             isPlaying: true,
@@ -192,22 +250,24 @@ async function playSongInternal(song: NeteaseSong, playlist?: NeteaseSong[]): Pr
     } catch (error) {
         console.error('[AudioPlayer] Play error:', error);
         if (requestId === currentRequestId) {
-            const fallbackUrl = buildFallbackPlaybackUrl(song.id);
+            const fallbackUrl = buildFallbackPlaybackUrl(song);
 
-            try {
-                audio.src = fallbackUrl;
-                audio.currentTime = 0;
-                audio.load();
-                await audio.play();
-                syncStateFromAudio({
-                    currentSong: song,
-                    playlist: queue,
-                    currentIndex,
-                    isPlaying: true,
-                });
-                return;
-            } catch (fallbackError) {
-                console.error('[AudioPlayer] Fallback play error:', fallbackError);
+            if (fallbackUrl) {
+                try {
+                    audio.src = fallbackUrl;
+                    audio.currentTime = 0;
+                    audio.load();
+                    await audio.play();
+                    syncStateFromAudio({
+                        currentSong: clonePlayable(song),
+                        playlist: queue,
+                        currentIndex,
+                        isPlaying: true,
+                    });
+                    return;
+                } catch (fallbackError) {
+                    console.error('[AudioPlayer] Fallback play error:', fallbackError);
+                }
             }
 
             syncStateFromAudio({ isPlaying: false });

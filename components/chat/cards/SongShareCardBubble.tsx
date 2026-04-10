@@ -29,6 +29,7 @@ const SongShareCardBubble: React.FC<SongShareCardBubbleProps> = ({ metadata }) =
 
         // Build a minimal NeteaseSong object for the player
         const song = {
+            kind: 'song' as const,
             id: metadata.songId,
             name: metadata.songName,
             artists: [{ id: 0, name: metadata.artist }],

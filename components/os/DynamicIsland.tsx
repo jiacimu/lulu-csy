@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useAudioPlayer } from '../../hooks/useAudioPlayer';
 import { AppID } from '../../types';
+import { isSongPlayable } from '../../types/music';
 import {
     readFloatingLyricsSettings,
     toggleFloatingLyricsEnabled,
@@ -112,8 +113,13 @@ const DynamicIsland: React.FC = () => {
 
     if (!shouldShow || !currentSong) return null;
 
-    const artistText =
-        currentSong.artists.map((artist) => artist.name).join(' / ') || '未知歌手';
+    const artistText = isSongPlayable(currentSong)
+        ? currentSong.artists.map((artist) => artist.name).join(' / ') || '未知歌手'
+        : currentSong.radioName
+            || currentSong.radio?.name
+            || currentSong.dj?.nickname
+            || currentSong.radio?.dj?.nickname
+            || '播客节目';
 
     const formatTime = (seconds: number): string => {
         const safeSeconds = Math.max(0, Math.floor(seconds));
@@ -122,7 +128,9 @@ const DynamicIsland: React.FC = () => {
             .padStart(2, '0')}`;
     };
 
-    const coverUrl = currentSong.album.picUrl;
+    const coverUrl = isSongPlayable(currentSong)
+        ? currentSong.album.picUrl
+        : currentSong.coverUrl || currentSong.radio?.picUrl || currentSong.mainSong?.album.picUrl;
     const coverSeed = currentSong.id || 0;
     const fallbackHue = ((coverSeed % 360) + 360) % 360;
 
