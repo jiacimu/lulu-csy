@@ -91,6 +91,7 @@ export async function deleteVectorMemoryManaged(
 ): Promise<ManagedMemoryMutationResult> {
     const cloudResult = await deps.deleteCloudMemory(memoryId);
     if (cloudResult.ok) {
+        await deps.deleteLocalMemory(memoryId);
         const refreshed = await refreshVectorMemoryCache(charId, deps);
         return {
             memories: refreshed.memories,

@@ -95,6 +95,37 @@ describe('memoryCenterActions', () => {
         expect(result.memories).toEqual(remainingLocalMemories);
     });
 
+    it('removes stale local pending memories after a successful cloud deletion refresh', async () => {
+        let localMemories = [
+            makeMemory({
+                id: 'mem-1',
+                syncState: 'pending_sync' as const,
+                cloudSynced: false,
+            }),
+        ];
+        const deleteLocalMemory = vi.fn().mockImplementation(async (memoryId: string) => {
+            localMemories = localMemories.filter((memory) => memory.id !== memoryId);
+        });
+        const replaceLocalMemories = vi.fn().mockImplementation(async (_charId: string, memories: VectorMemory[]) => {
+            localMemories = [...memories];
+        });
+
+        const result = await deleteVectorMemoryManaged('char-1', 'mem-1', {
+            deleteCloudMemory: vi.fn().mockResolvedValue({ ok: true, reason: 'not_found' }),
+            deleteLocalMemory,
+            pullCloudMemories: vi.fn().mockResolvedValue([]),
+            replaceLocalMemories,
+            listLocalMemories: vi.fn().mockImplementation(async () => localMemories),
+        });
+
+        expect(deleteLocalMemory).toHaveBeenCalledWith('mem-1');
+        expect(replaceLocalMemories).toHaveBeenCalledWith('char-1', []);
+        expect(result).toEqual({
+            memories: [],
+            mode: 'cloud',
+        });
+    });
+
     it('stores imported memories locally as pending_sync when cloud upsert fails', async () => {
         const saveLocalMemory = vi.fn().mockResolvedValue(undefined);
         const importedMemory = makeMemory({ id: 'mem-import-1' });
