@@ -31,6 +31,16 @@ function getLocalWriteSyncState() {
     return resolveLocalFallbackSyncState(hasCloudSyncTarget());
 }
 
+function syncMemorySnapshot(allMemories: VectorMemory[], memory: VectorMemory): void {
+    const existingIndex = allMemories.findIndex((item) => item.id === memory.id);
+    if (existingIndex >= 0) {
+        allMemories[existingIndex] = memory;
+        return;
+    }
+
+    allMemories.push(memory);
+}
+
 export function findDuplicate(newVec: number[], vectorCache: Map<string, number[]>): string | null {
     if (vectorCache.size === 0) return null;
 
@@ -99,6 +109,7 @@ export async function processResult(
                 updatedAt: Date.now(),
             }, localWriteSyncState);
             await DB.saveVectorMemory(updatedMem);
+            syncMemorySnapshot(allMemories, updatedMem);
             vectorCache.delete(result.targetId);
             console.log(`🧠 [VectorExtract] Invalidated: "${target.title}" — ${updatedMem.deprecatedReason}`);
             return target.id;
@@ -134,6 +145,7 @@ export async function processResult(
                     sourceMessageIds: mergedSourceIds,
                 }, localWriteSyncState);
                 await DB.saveVectorMemory(updatedMem);
+                syncMemorySnapshot(allMemories, updatedMem);
                 vectorCache.set(duplicateId, vector);
                 console.log(`🧠 [VectorExtract] Dedup-updated: "${updatedMem.title}"`);
                 return duplicateId;
@@ -156,6 +168,7 @@ export async function processResult(
             sourceMessageIds,
         }, localWriteSyncState);
         await DB.saveVectorMemory(newMem);
+        syncMemorySnapshot(allMemories, newMem);
         vectorCache.set(newMem.id, vector);
         console.log(`🧠 [VectorExtract] Created: "${result.title}" (imp: ${newMem.importance})`);
         return newMem.id;
@@ -179,6 +192,7 @@ export async function processResult(
                 sourceMessageIds: mergedSourceIds,
             }, localWriteSyncState);
             await DB.saveVectorMemory(updatedMem);
+            syncMemorySnapshot(allMemories, updatedMem);
             vectorCache.set(result.targetId, vector);
             console.log(`🧠 [VectorExtract] Updated: "${updatedMem.title}"`);
             return result.targetId;
@@ -201,6 +215,7 @@ export async function processResult(
             sourceMessageIds,
         }, localWriteSyncState);
         await DB.saveVectorMemory(newMem);
+        syncMemorySnapshot(allMemories, newMem);
         vectorCache.set(fallbackId, vector);
         console.log(`🧠 [VectorExtract] Target not found, created as new: "${result.title}"`);
         return fallbackId;
