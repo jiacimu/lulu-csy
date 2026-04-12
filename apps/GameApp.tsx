@@ -773,13 +773,29 @@ Output: A concise summary in Chinese (e.g. "探索了地牢并击败了史莱姆
         }
     };
 
+    const deleteGameById = async (id: string, options?: { exitAfterDelete?: boolean }) => {
+        if (!window.confirm('确定要删除这个存档吗？')) return;
+
+        await DB.deleteGame(id);
+        setGames(prev => prev.filter(g => g.id !== id));
+
+        if (options?.exitAfterDelete || activeGame?.id === id) {
+            setShowSystemMenu(false);
+            setActiveGame(null);
+            setView('lobby');
+        }
+
+        addToast('存档已删除', 'success');
+    };
+
     const handleDeleteGame = async (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
-        if (window.confirm('确定要删除这个存档吗？')) {
-            await DB.deleteGame(id);
-            setGames(prev => prev.filter(g => g.id !== id));
-            addToast('存档已删除', 'success');
-        }
+        await deleteGameById(id);
+    };
+
+    const handleDeleteActiveGame = async () => {
+        if (!activeGame) return;
+        await deleteGameById(activeGame.id, { exitAfterDelete: true });
     };
 
     // --- Renderers ---
@@ -846,7 +862,11 @@ Output: A concise summary in Chinese (e.g. "探索了地牢并击败了史莱姆
                                 </div>
 
                                 {/* Delete Button */}
-                                <button onClick={(e) => handleDeleteGame(e, g.id)} className="absolute top-2 right-2 p-2 text-white/20 hover:text-red-400 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                    onClick={(e) => handleDeleteGame(e, g.id)}
+                                    aria-label={`删除存档 ${g.title}`}
+                                    className="absolute top-3 right-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/35 text-white/70 shadow-sm backdrop-blur-sm transition-all hover:bg-red-950/50 hover:text-red-300 active:scale-95"
+                                >
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg>
                                 </button>
                             </div>
@@ -1179,6 +1199,9 @@ Output: A concise summary in Chinese (e.g. "探索了地牢并击败了史莱姆
                     </button>
                     <button onClick={handleRestart} className="w-full py-3 bg-orange-500 text-white font-bold rounded-2xl shadow-lg flex items-center justify-center gap-2">
                         <span>🔄</span> 重置当前游戏
+                    </button>
+                    <button onClick={handleDeleteActiveGame} className="w-full py-3 bg-red-500 text-white font-bold rounded-2xl shadow-lg flex items-center justify-center gap-2">
+                        <span>🗑️</span> 删除当前存档
                     </button>
                     <button onClick={handleLeave} className="w-full py-3 bg-slate-100 text-slate-600 font-bold rounded-2xl flex items-center justify-center gap-2">
                         <span>🚪</span> 暂时离开 (不归档)
