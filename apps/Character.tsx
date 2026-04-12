@@ -1,6 +1,5 @@
 
-import React,{ useState,useRef,useEffect } from 'react';
-import { useOS } from '../context/OSContext';
+import React,{ memo,useCallback,useState,useRef,useEffect } from 'react';
 import { AppID,CharacterProfile,CharacterExportData,UserImpression,MemoryFragment } from '../types';
 import Modal from '../components/os/Modal';
 import { processImage } from '../utils/file';
@@ -16,15 +15,42 @@ import CharacterCitySection from '../components/character/CharacterCitySection';
 import type { CharacterCitySectionHandle } from '../components/character/CharacterCitySection';
 import CharacterLocationSummaryCard from '../components/character/CharacterLocationSummaryCard';
 import { safeResponseJson } from '../utils/safeApi';
+import { useCharacterScreenDeps } from '../hooks/useCharacterScreenDeps';
 
+const CHARACTER_AUTO_SAVE_DEBOUNCE_MS = 350;
+type MountedWorldbook = NonNullable<CharacterProfile['mountedWorldbooks']>[number];
+
+function getWorldbookPositionBadgeClass(position?: MountedWorldbook['position']): string {
+    if (position === 'top') {
+        return 'bg-amber-50 text-amber-600 border border-amber-100';
+    }
+
+    if (position === 'bottom') {
+        return 'bg-rose-50 text-rose-600 border border-rose-100';
+    }
+
+    return 'bg-sky-50 text-sky-600 border border-sky-100';
+}
+
+function getWorldbookPositionLabel(position?: MountedWorldbook['position']): string {
+    if (position === 'top') {
+        return '人设之前';
+    }
+
+    if (position === 'bottom') {
+        return '记忆之后';
+    }
+
+    return '印象之后';
+}
 
 const CharacterCard: React.FC<{
     char: CharacterProfile;
-    onClick: () => void;
-    onDelete: (e: React.MouseEvent) => void;
-}> = ({ char, onClick, onDelete }) => (
+    onOpenCharacter: (characterId: string) => void;
+    onRequestDelete: (characterId: string) => void;
+}> = memo(({ char, onOpenCharacter, onRequestDelete }) => (
     <div
-        onClick={onClick}
+        onClick={() => onOpenCharacter(char.id)}
         className="relative p-4 rounded-3xl border bg-white/40 border-white/40 hover:bg-white/60 hover:scale-[1.01] transition-all duration-300 cursor-pointer group shadow-sm shrink-0"
     >
         <div className="flex items-center gap-4">
@@ -42,7 +68,10 @@ const CharacterCard: React.FC<{
             </div>
         </div>
         <button
-            onClick={onDelete}
+            onClick={(event) => {
+                event.stopPropagation();
+                onRequestDelete(char.id);
+            }}
             className="absolute top-3 right-3 p-2 rounded-full text-slate-300 hover:bg-red-50 hover:text-red-400 active:bg-red-100 active:text-red-500 transition-all z-10"
         >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
@@ -50,10 +79,87 @@ const CharacterCard: React.FC<{
             </svg>
         </button>
     </div>
-);
+));
+CharacterCard.displayName = 'CharacterCard';
 
-const Character: React.FC = () => {
-    const { closeApp, openApp, characters, setActiveCharacterId, addCharacter, updateCharacter, deleteCharacter, apiConfig, addToast, userProfile, customThemes, addCustomTheme, worldbooks } = useOS();
+const CharacterIdentitySupportPanels: React.FC<{
+    cityOverride?: string;
+    cityAdcode?: string;
+    isFictionalCity?: boolean;
+    cityReferenceReal?: string;
+    mountedWorldbooks?: CharacterProfile['mountedWorldbooks'];
+    onEditLocation: () => void;
+    onOpenWorldbookModal: () => void;
+    onMoveWorldbook: (index: number, direction: 'up' | 'down') => void;
+    onUnmountWorldbook: (bookId: string) => void;
+}> = memo(({
+    cityOverride,
+    cityAdcode,
+    isFictionalCity,
+    cityReferenceReal,
+    mountedWorldbooks,
+    onEditLocation,
+    onOpenWorldbookModal,
+    onMoveWorldbook,
+    onUnmountWorldbook,
+}) => (
+    <>
+        <CharacterLocationSummaryCard
+            cityOverride={cityOverride}
+            cityAdcode={cityAdcode}
+            isFictionalCity={isFictionalCity}
+            cityReferenceReal={cityReferenceReal}
+            onEdit={onEditLocation}
+        />
+
+        <div>
+            <div className="flex justify-between items-center mb-2 px-1">
+                <label className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest block">📚 扩展设定 (Worldbooks)</label>
+                <button onClick={onOpenWorldbookModal} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold hover:bg-indigo-100">+ 挂载</button>
+            </div>
+            <div className="space-y-2">
+                {mountedWorldbooks && mountedWorldbooks.length > 0 ? (
+                    mountedWorldbooks.map((wb, index) => (
+                        <div key={wb.id} className="flex items-center justify-between bg-white px-3 py-2.5 rounded-2xl border border-indigo-50 shadow-sm group">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-[10px] font-mono text-slate-300 w-4 text-center shrink-0">{index + 1}</span>
+                                <span className="text-lg shrink-0">📖</span>
+                                <div className="flex flex-col min-w-0">
+                                    <span className="text-sm font-bold text-slate-700 truncate">{wb.title}</span>
+                                    <div className="flex items-center gap-1.5">
+                                        {wb.category && <span className="text-[9px] text-slate-400">{wb.category}</span>}
+                                        {wb.position && wb.position !== 'after_worldview' && (
+                                            <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${getWorldbookPositionBadgeClass(wb.position)}`}>
+                                                {getWorldbookPositionLabel(wb.position)}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-0.5 shrink-0 ml-2">
+                                <button onClick={() => onMoveWorldbook(index, 'up')} disabled={index === 0} className="text-slate-300 hover:text-indigo-500 disabled:opacity-20 disabled:cursor-not-allowed p-1 transition-colors" title="上移">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" /></svg>
+                                </button>
+                                <button onClick={() => onMoveWorldbook(index, 'down')} disabled={index === mountedWorldbooks.length - 1} className="text-slate-300 hover:text-indigo-500 disabled:opacity-20 disabled:cursor-not-allowed p-1 transition-colors" title="下移">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+                                </button>
+                                <button onClick={() => onUnmountWorldbook(wb.id)} className="text-slate-300 hover:text-red-400 p-1 transition-colors" title="卸载">×</button>
+                            </div>
+                        </div>
+                    ))
+                ) : (
+                    <div className="text-center py-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-slate-400 text-xs">
+                        暂未挂载任何世界书
+                    </div>
+                )}
+            </div>
+        </div>
+    </>
+));
+CharacterIdentitySupportPanels.displayName = 'CharacterIdentitySupportPanels';
+
+const CharacterComponent: React.FC = () => {
+    const { closeApp, openApp, characters, setActiveCharacterId, addCharacter, updateCharacter, deleteCharacter, apiConfig, addToast, userProfile, customThemes, addCustomTheme, worldbooks } = useCharacterScreenDeps();
     const [view, setView] = useState<'list' | 'detail'>('list');
     const [detailTab, setDetailTab] = useState<'identity' | 'memory' | 'impression'>('identity');
     const [identitySubView, setIdentitySubView] = useState<'main' | 'location'>('main');
@@ -67,7 +173,9 @@ const Character: React.FC = () => {
     // Race Condition Guards
     const editingIdRef = useRef<string | null>(null);
     const formDataRef = useRef<CharacterProfile | null>(null);
+    const updateCharacterRef = useRef(updateCharacter);
     const skipNextAutoSaveRef = useRef(false);
+    const autoSaveTimerRef = useRef<number | null>(null);
 
     // Modals
     const [showImportModal, setShowImportModal] = useState(false);
@@ -118,12 +226,57 @@ const Character: React.FC = () => {
         formDataRef.current = formData;
     }, [formData]);
 
+    useEffect(() => {
+        updateCharacterRef.current = updateCharacter;
+    }, [updateCharacter]);
+
+    const cancelPendingAutoSave = useCallback(() => {
+        if (autoSaveTimerRef.current !== null) {
+            window.clearTimeout(autoSaveTimerRef.current);
+            autoSaveTimerRef.current = null;
+        }
+    }, []);
+
+    const flushPendingAutoSave = useCallback(() => {
+        if (autoSaveTimerRef.current === null) {
+            return false;
+        }
+
+        const activeEditingId = editingIdRef.current;
+        const activeFormData = formDataRef.current;
+
+        cancelPendingAutoSave();
+
+        if (!activeEditingId || !activeFormData || activeFormData.id !== activeEditingId) {
+            return false;
+        }
+
+        updateCharacterRef.current(activeEditingId, activeFormData);
+        return true;
+    }, [cancelPendingAutoSave]);
+
+    const schedulePendingAutoSave = useCallback(() => {
+        cancelPendingAutoSave();
+        autoSaveTimerRef.current = window.setTimeout(() => {
+            autoSaveTimerRef.current = null;
+            const activeEditingId = editingIdRef.current;
+            const activeFormData = formDataRef.current;
+
+            if (!activeEditingId || !activeFormData || activeFormData.id !== activeEditingId) {
+                return;
+            }
+
+            updateCharacterRef.current(activeEditingId, activeFormData);
+        }, CHARACTER_AUTO_SAVE_DEBOUNCE_MS);
+    }, [cancelPendingAutoSave]);
+
     // Only sync global character data into the local form when we
     // enter detail mode or switch to a different character ID.
     useEffect(() => {
         if (editingId && view === 'detail') {
             // Only if formData is not set OR the ID doesn't match
             if (!formData || formData.id !== editingId) {
+                cancelPendingAutoSave();
                 const target = characters.find(c => c.id === editingId);
                 if (target) {
                     skipNextAutoSaveRef.current = true;
@@ -145,46 +298,66 @@ const Character: React.FC = () => {
         // SAFETY GUARD: Only save if the formData ID matches the currently active editing ID.
         // This prevents overwriting Character B with Character A's data if a delayed async call updates formData.
         if (formData.id === editingId) {
-            updateCharacter(editingId, formData);
+            schedulePendingAutoSave();
         } else {
             console.warn(`Race condition prevented: Tried to save data for ${formData.id} into slot ${editingId}`);
         }
-    }, [formData, editingId, updateCharacter]);
+    }, [formData, editingId]);
 
-    const commitCharacterPatch = (patch: Partial<CharacterProfile>, options?: { persistImmediately?: boolean }) => {
+    useEffect(() => {
+        return () => {
+            flushPendingAutoSave();
+        };
+    }, [flushPendingAutoSave]);
+
+    const commitCharacterPatch = useCallback((patch: Partial<CharacterProfile>, options?: { persistImmediately?: boolean }) => {
         const activeEditingId = editingIdRef.current;
         const activeFormData = formDataRef.current;
         const canUpdateLocalForm = Boolean(activeFormData && activeEditingId && activeFormData.id === activeEditingId);
 
         if (canUpdateLocalForm) {
+            const nextFormData = { ...activeFormData!, ...patch };
+
             if (options?.persistImmediately) {
                 skipNextAutoSaveRef.current = true;
+                cancelPendingAutoSave();
+                formDataRef.current = nextFormData;
+                setFormData(nextFormData);
+                updateCharacterRef.current(activeEditingId!, nextFormData);
+                return;
             }
 
             setFormData(prev => {
                 if (!prev || prev.id !== activeEditingId) {
                     return prev;
                 }
-                return { ...prev, ...patch };
+                const nextFormData = { ...prev, ...patch };
+                formDataRef.current = nextFormData;
+                return nextFormData;
             });
         }
 
         if (activeEditingId && (options?.persistImmediately || !canUpdateLocalForm)) {
-            updateCharacter(activeEditingId, patch);
+            updateCharacterRef.current(activeEditingId, patch);
         }
-    };
+    }, [cancelPendingAutoSave]);
 
-    const handleChange = (field: keyof CharacterProfile, value: any) => {
+    const handleChange = useCallback((field: keyof CharacterProfile, value: any) => {
         commitCharacterPatch({ [field]: value } as Partial<CharacterProfile>);
-    };
+    }, [commitCharacterPatch]);
 
-    const flushLocationDraftBeforeLeave = () => {
+    const flushLocationDraftBeforeLeave = useCallback(() => {
         locationEditorRef.current?.flushPendingDraft();
-    };
+    }, []);
 
-    const handleBack = () => {
+    const flushPendingCharacterEditsBeforeLeave = useCallback(() => {
+        flushLocationDraftBeforeLeave();
+        flushPendingAutoSave();
+    }, [flushLocationDraftBeforeLeave, flushPendingAutoSave]);
+
+    const handleBack = useCallback(() => {
         if (view === 'detail') {
-            flushLocationDraftBeforeLeave();
+            flushPendingCharacterEditsBeforeLeave();
             skipNextAutoSaveRef.current = false;
             setDetailTab('identity');
             setIdentitySubView('main');
@@ -192,7 +365,52 @@ const Character: React.FC = () => {
             setView('list');
             setEditingId(null);
         } else closeApp();
-    };
+    }, [closeApp, flushPendingCharacterEditsBeforeLeave, view]);
+
+    const handleOpenLocationView = useCallback(() => {
+        setIdentitySubView('location');
+    }, []);
+
+    const handleReturnToIdentityMain = useCallback(() => {
+        flushPendingCharacterEditsBeforeLeave();
+        setIdentitySubView('main');
+    }, [flushPendingCharacterEditsBeforeLeave]);
+
+    const handleOpenWorldbookModal = useCallback(() => {
+        setShowWorldbookModal(true);
+    }, []);
+
+    const handleShowIdentityTab = useCallback(() => {
+        flushPendingCharacterEditsBeforeLeave();
+        setDetailTab('identity');
+        setIdentitySubView('main');
+    }, [flushPendingCharacterEditsBeforeLeave]);
+
+    const handleShowMemoryTab = useCallback(() => {
+        flushPendingCharacterEditsBeforeLeave();
+        setDetailTab('memory');
+        setIdentitySubView('main');
+    }, [flushPendingCharacterEditsBeforeLeave]);
+
+    const handleShowImpressionTab = useCallback(() => {
+        flushPendingCharacterEditsBeforeLeave();
+        setDetailTab('impression');
+        setIdentitySubView('main');
+    }, [flushPendingCharacterEditsBeforeLeave]);
+
+    const handleOpenCharacterDetail = useCallback((characterId: string) => {
+        flushPendingCharacterEditsBeforeLeave();
+        skipNextAutoSaveRef.current = false;
+        setDetailTab('identity');
+        setIdentitySubView('main');
+        setFormData(null);
+        setEditingId(characterId);
+        setView('detail');
+    }, [flushPendingCharacterEditsBeforeLeave]);
+
+    const handleRequestDeleteCharacter = useCallback((characterId: string) => {
+        setDeleteConfirmTarget(characterId);
+    }, []);
 
     // Worldbook Logic
     const mountWorldbook = (bookId: string) => {
@@ -251,23 +469,43 @@ const Character: React.FC = () => {
         setShowWorldbookModal(false);
     };
 
-    const unmountWorldbook = (bookId: string) => {
-        if (!formData) return;
-        const currentBooks = formData.mountedWorldbooks || [];
-        handleChange('mountedWorldbooks', currentBooks.filter(b => b.id !== bookId));
-    };
+    const updateMountedWorldbooks = useCallback((updater: (currentBooks: MountedWorldbook[]) => MountedWorldbook[]) => {
+        const activeFormData = formDataRef.current;
+        const activeEditingId = editingIdRef.current;
+        if (!activeFormData || !activeEditingId || activeFormData.id !== activeEditingId) {
+            return;
+        }
+
+        const currentBooks = activeFormData.mountedWorldbooks || [];
+        const nextBooks = updater(currentBooks);
+        if (nextBooks === currentBooks) {
+            return;
+        }
+
+        commitCharacterPatch({ mountedWorldbooks: nextBooks });
+    }, [commitCharacterPatch]);
+
+    const unmountWorldbook = useCallback((bookId: string) => {
+        updateMountedWorldbooks((currentBooks) => currentBooks.filter(book => book.id !== bookId));
+    }, [updateMountedWorldbooks]);
 
     // 世界书排序：上移/下移
-    const moveWorldbook = (index: number, direction: 'up' | 'down') => {
-        if (!formData?.mountedWorldbooks) return;
-        const items = [...formData.mountedWorldbooks];
-        if (direction === 'up' && index > 0) {
-            [items[index - 1], items[index]] = [items[index], items[index - 1]];
-        } else if (direction === 'down' && index < items.length - 1) {
-            [items[index + 1], items[index]] = [items[index], items[index + 1]];
-        }
-        handleChange('mountedWorldbooks', items);
-    };
+    const moveWorldbook = useCallback((index: number, direction: 'up' | 'down') => {
+        updateMountedWorldbooks((currentBooks) => {
+            if (currentBooks.length <= 1) {
+                return currentBooks;
+            }
+
+            const targetIndex = direction === 'up' ? index - 1 : index + 1;
+            if (targetIndex < 0 || targetIndex >= currentBooks.length) {
+                return currentBooks;
+            }
+
+            const nextBooks = [...currentBooks];
+            [nextBooks[targetIndex], nextBooks[index]] = [nextBooks[index], nextBooks[targetIndex]];
+            return nextBooks;
+        });
+    }, [updateMountedWorldbooks]);
 
     // ... (Other handlers unchanged)
     const handleToggleActiveMonth = (year: string, month: string) => {
@@ -859,19 +1097,8 @@ ${isInitialGeneration ? `
                             <CharacterCard
                                 key={char.id}
                                 char={char}
-                                onClick={() => {
-                                    flushLocationDraftBeforeLeave();
-                                    skipNextAutoSaveRef.current = false;
-                                    setDetailTab('identity');
-                                    setIdentitySubView('main');
-                                    setFormData(null);
-                                    setEditingId(char.id);
-                                    setView('detail');
-                                }}
-                                onDelete={(e) => {
-                                    e.stopPropagation();
-                                    setDeleteConfirmTarget(char.id);
-                                }}
+                                onOpenCharacter={handleOpenCharacterDetail}
+                                onRequestDelete={handleRequestDeleteCharacter}
                             />
                         ))}
                         <button onClick={addCharacter} className="w-full py-4 rounded-3xl border border-dashed border-slate-300 text-slate-400 text-sm hover:bg-white/30 transition-all flex items-center justify-center gap-2 shrink-0">
@@ -885,12 +1112,12 @@ ${isInitialGeneration ? `
                     <div className="h-32 bg-gradient-to-b from-white/90 to-transparent backdrop-blur-sm flex flex-col justify-end px-5 pb-2 shrink-0 z-40 sticky top-0">
                         <div className="flex justify-between items-center mb-3">
                             <button onClick={handleBack} className="p-2 -ml-2 rounded-full hover:bg-white/60 flex items-center gap-1 text-slate-600"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg><span className="text-sm font-medium">列表</span></button>
-                            <button onClick={() => { flushLocationDraftBeforeLeave(); setActiveCharacterId(formData.id); openApp(AppID.Chat); }} className="text-xs px-3 py-1.5 bg-primary text-white rounded-full font-bold shadow-sm shadow-primary/30 flex items-center gap-1 active:scale-95 transition-transform"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3"><path d="M3.105 2.288a.75.75 0 0 0-.826.95l1.414 4.926H16.5a.75.75 0 0 1 0 1.5H3.693l-1.414 4.926a.75.75 0 0 0 .826.95 28.897 28.897 0 0 0 15.293-7.155.75.75 0 0 0 0-1.114A28.897 28.897 0 0 0 3.105 2.288Z" /></svg>发消息</button>
+                            <button onClick={() => { flushPendingCharacterEditsBeforeLeave(); setActiveCharacterId(formData.id); openApp(AppID.Chat); }} className="text-xs px-3 py-1.5 bg-primary text-white rounded-full font-bold shadow-sm shadow-primary/30 flex items-center gap-1 active:scale-95 transition-transform"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3"><path d="M3.105 2.288a.75.75 0 0 0-.826.95l1.414 4.926H16.5a.75.75 0 0 1 0 1.5H3.693l-1.414 4.926a.75.75 0 0 0 .826.95 28.897 28.897 0 0 0 15.293-7.155.75.75 0 0 0 0-1.114A28.897 28.897 0 0 0 3.105 2.288Z" /></svg>发消息</button>
                         </div>
                         <div className="flex gap-6 text-sm font-medium text-slate-400 pl-1">
-                            <button onClick={() => { flushLocationDraftBeforeLeave(); setDetailTab('identity'); setIdentitySubView('main'); }} className={`pb-2 transition-colors relative ${detailTab === 'identity' ? 'text-slate-800' : ''}`}>设定{detailTab === 'identity' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-full"></div>}</button>
-                            <button onClick={() => { flushLocationDraftBeforeLeave(); setDetailTab('memory'); setIdentitySubView('main'); }} className={`pb-2 transition-colors relative ${detailTab === 'memory' ? 'text-slate-800' : ''}`}>记忆 ({(formData.memories || []).length}){detailTab === 'memory' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-full"></div>}</button>
-                            <button onClick={() => { flushLocationDraftBeforeLeave(); setDetailTab('impression'); setIdentitySubView('main'); }} className={`pb-2 transition-colors relative ${detailTab === 'impression' ? 'text-slate-800' : ''}`}>印象{detailTab === 'impression' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-full"></div>}</button>
+                            <button onClick={handleShowIdentityTab} className={`pb-2 transition-colors relative ${detailTab === 'identity' ? 'text-slate-800' : ''}`}>设定{detailTab === 'identity' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-full"></div>}</button>
+                            <button onClick={handleShowMemoryTab} className={`pb-2 transition-colors relative ${detailTab === 'memory' ? 'text-slate-800' : ''}`}>记忆 ({(formData.memories || []).length}){detailTab === 'memory' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-full"></div>}</button>
+                            <button onClick={handleShowImpressionTab} className={`pb-2 transition-colors relative ${detailTab === 'impression' ? 'text-slate-800' : ''}`}>印象{detailTab === 'impression' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-full"></div>}</button>
                         </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-5 no-scrollbar pb-10">
@@ -922,60 +1149,17 @@ ${isInitialGeneration ? `
                                     />
                                 </div>
 
-                                <CharacterLocationSummaryCard
+                                <CharacterIdentitySupportPanels
                                     cityOverride={formData.cityOverride}
                                     cityAdcode={formData.cityAdcode}
                                     isFictionalCity={formData.isFictionalCity}
                                     cityReferenceReal={formData.cityReferenceReal}
-                                    onEdit={() => setIdentitySubView('location')}
+                                    mountedWorldbooks={formData.mountedWorldbooks}
+                                    onEditLocation={handleOpenLocationView}
+                                    onOpenWorldbookModal={handleOpenWorldbookModal}
+                                    onMoveWorldbook={moveWorldbook}
+                                    onUnmountWorldbook={unmountWorldbook}
                                 />
-
-                                {/* Worldbook Section */}
-                                <div>
-                                    <div className="flex justify-between items-center mb-2 px-1">
-                                        <label className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest block">📚 扩展设定 (Worldbooks)</label>
-                                        <button onClick={() => setShowWorldbookModal(true)} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold hover:bg-indigo-100">+ 挂载</button>
-                                    </div>
-                                    <div className="space-y-2">
-                                        {formData.mountedWorldbooks && formData.mountedWorldbooks.length > 0 ? (
-                                            formData.mountedWorldbooks.map((wb, index) => (
-                                                <div key={wb.id} className="flex items-center justify-between bg-white px-3 py-2.5 rounded-2xl border border-indigo-50 shadow-sm group">
-                                                    <div className="flex items-center gap-2 min-w-0">
-                                                        <span className="text-[10px] font-mono text-slate-300 w-4 text-center shrink-0">{index + 1}</span>
-                                                        <span className="text-lg shrink-0">📖</span>
-                                                        <div className="flex flex-col min-w-0">
-                                                            <span className="text-sm font-bold text-slate-700 truncate">{wb.title}</span>
-                                                            <div className="flex items-center gap-1.5">
-                                                                {wb.category && <span className="text-[9px] text-slate-400">{wb.category}</span>}
-                                                                {wb.position && wb.position !== 'after_worldview' && (
-                                                                    <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${wb.position === 'top' ? 'bg-amber-50 text-amber-600 border border-amber-100' :
-                                                                        wb.position === 'bottom' ? 'bg-rose-50 text-rose-600 border border-rose-100' :
-                                                                            'bg-sky-50 text-sky-600 border border-sky-100'
-                                                                        }`}>
-                                                                        {wb.position === 'top' ? '人设之前' : wb.position === 'bottom' ? '记忆之后' : '印象之后'}
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex items-center gap-0.5 shrink-0 ml-2">
-                                                        <button onClick={() => moveWorldbook(index, 'up')} disabled={index === 0} className="text-slate-300 hover:text-indigo-500 disabled:opacity-20 disabled:cursor-not-allowed p-1 transition-colors" title="上移">
-                                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" /></svg>
-                                                        </button>
-                                                        <button onClick={() => moveWorldbook(index, 'down')} disabled={index === (formData.mountedWorldbooks?.length ?? 0) - 1} className="text-slate-300 hover:text-indigo-500 disabled:opacity-20 disabled:cursor-not-allowed p-1 transition-colors" title="下移">
-                                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
-                                                        </button>
-                                                        <button onClick={() => unmountWorldbook(wb.id)} className="text-slate-300 hover:text-red-400 p-1 transition-colors" title="卸载">×</button>
-                                                    </div>
-                                                </div>
-                                            ))
-                                        ) : (
-                                            <div className="text-center py-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-slate-400 text-xs">
-                                                暂未挂载任何世界书
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
 
                                 {/* Export Card Button */}
                                 <div className="pt-4">
@@ -997,7 +1181,7 @@ ${isInitialGeneration ? `
                             <div className="space-y-5 animate-fade-in">
                                 <div className="flex items-center gap-3">
                                     <button
-                                        onClick={() => { flushLocationDraftBeforeLeave(); setIdentitySubView('main'); }}
+                                        onClick={handleReturnToIdentityMain}
                                         aria-label="返回设定"
                                         className="p-2 -ml-2 rounded-full hover:bg-white/60 text-slate-600 transition-colors"
                                     >
@@ -1226,4 +1410,8 @@ ${isInitialGeneration ? `
         </div>
     );
 };
+
+const Character = memo(CharacterComponent);
+Character.displayName = 'Character';
+
 export default Character;

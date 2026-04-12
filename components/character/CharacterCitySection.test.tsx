@@ -74,7 +74,7 @@ describe('CharacterCitySection', () => {
         vi.useRealTimers();
     });
 
-    it('shows city suggestions after debounce and writes the selected city back', async () => {
+    it('keeps a real city selection local until the save button is pressed', async () => {
         mockedGetCityInputTips.mockResolvedValue([
             makeTip('上海', '上海市', '310000'),
         ]);
@@ -94,6 +94,11 @@ describe('CharacterCitySection', () => {
         );
         const suggestion = screen.getByText('上海');
         fireEvent.mouseDown(suggestion.closest('button')!);
+
+        expect(onFieldChange).not.toHaveBeenCalled();
+        expect(screen.getByText('已绑定地区编码：310000')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: '保存城市' }));
 
         expect(onFieldChange).toHaveBeenCalledWith('cityOverride', '上海');
         expect(onFieldChange).toHaveBeenCalledWith('cityAdcode', '310000');

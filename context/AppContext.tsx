@@ -1,5 +1,5 @@
 
-import React,{ createContext,useContext,useState,useRef,useCallback } from 'react';
+import React,{ createContext,useContext,useState,useRef,useCallback,useMemo } from 'react';
 import { AppID } from '../types';
 import { haptic } from '../utils/haptics';
 
@@ -17,6 +17,7 @@ export interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+const AppNavigationContext = createContext<Pick<AppContextType, 'openApp' | 'closeApp'> | undefined>(undefined);
 
 export const AppProvider: React.FC<{
     children: React.ReactNode;
@@ -59,11 +60,14 @@ export const AppProvider: React.FC<{
         registerBackHandler, handleBack,
         hapticsEnabled, setHapticsEnabled
     };
+    const navigationValue = useMemo(() => ({ openApp, closeApp }), [openApp, closeApp]);
 
     return (
-        <AppContext.Provider value={value}>
-            {children}
-        </AppContext.Provider>
+        <AppNavigationContext.Provider value={navigationValue}>
+            <AppContext.Provider value={value}>
+                {children}
+            </AppContext.Provider>
+        </AppNavigationContext.Provider>
     );
 };
 
@@ -71,6 +75,14 @@ export const useApp = () => {
     const context = useContext(AppContext);
     if (context === undefined) {
         throw new Error('useApp must be used within an AppProvider');
+    }
+    return context;
+};
+
+export const useAppNavigation = () => {
+    const context = useContext(AppNavigationContext);
+    if (context === undefined) {
+        throw new Error('useAppNavigation must be used within an AppProvider');
     }
     return context;
 };

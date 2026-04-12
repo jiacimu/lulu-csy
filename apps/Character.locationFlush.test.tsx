@@ -5,10 +5,10 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Character from './Character';
 import { AppID } from '../types';
-import { useOS } from '../context/OSContext';
+import { useCharacterScreenDeps } from '../hooks/useCharacterScreenDeps';
 
-vi.mock('../context/OSContext', () => ({
-    useOS: vi.fn(),
+vi.mock('../hooks/useCharacterScreenDeps', () => ({
+    useCharacterScreenDeps: vi.fn(),
 }));
 
 vi.mock('../components/os/Modal', () => ({
@@ -71,7 +71,7 @@ vi.mock('@capacitor/share', () => ({
     },
 }));
 
-const mockedUseOS = vi.mocked(useOS);
+const mockedUseCharacterScreenDeps = vi.mocked(useCharacterScreenDeps);
 
 const mockAddCharacter = vi.fn();
 const mockAddCustomTheme = vi.fn();
@@ -94,10 +94,13 @@ const baseCharacter = {
     isFictionalCity: true,
 } as any;
 
-function renderCharacterApp() {
+function renderCharacterDetail() {
     render(<Character />);
-
     fireEvent.click(screen.getByText('Sully'));
+}
+
+function renderCharacterApp() {
+    renderCharacterDetail();
     const summaryCard = screen.getByText('未命名架空城市').closest('[role="button"]');
     if (!summaryCard) {
         throw new Error('Could not find the location summary card.');
@@ -113,7 +116,7 @@ describe('Character location draft flush', () => {
         vi.useFakeTimers();
         localStorage.clear();
 
-        mockedUseOS.mockReturnValue({
+        mockedUseCharacterScreenDeps.mockReturnValue({
             closeApp: mockCloseApp,
             openApp: mockOpenApp,
             characters: [baseCharacter],
@@ -204,5 +207,48 @@ describe('Character location draft flush', () => {
             cityOverride: '夜航城',
         }));
         expect(screen.getByText('夜航城')).toBeInTheDocument();
+    });
+
+    it('debounces identity auto-save so rapid typing only persists once', async () => {
+        renderCharacterDetail();
+
+        const nameInput = screen.getByPlaceholderText('名称');
+        fireEvent.change(nameInput, { target: { value: 'S' } });
+        fireEvent.change(nameInput, { target: { value: 'Su' } });
+        fireEvent.change(nameInput, { target: { value: 'Sully Prime' } });
+
+        act(() => {
+            vi.advanceTimersByTime(349);
+        });
+
+        expect(mockUpdateCharacter).not.toHaveBeenCalled();
+
+        await act(async () => {
+            vi.advanceTimersByTime(1);
+            await Promise.resolve();
+        });
+
+        expect(mockUpdateCharacter).toHaveBeenCalledTimes(1);
+        expect(mockUpdateCharacter).toHaveBeenLastCalledWith('char-1', expect.objectContaining({
+            name: 'Sully Prime',
+        }));
+    });
+
+    it('flushes a pending identity auto-save before opening chat', async () => {
+        renderCharacterDetail();
+
+        const nameInput = screen.getByPlaceholderText('名称');
+        fireEvent.change(nameInput, { target: { value: 'Sully Prime' } });
+        fireEvent.click(screen.getByRole('button', { name: /发消息/ }));
+
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        expect(mockUpdateCharacter).toHaveBeenCalledWith('char-1', expect.objectContaining({
+            name: 'Sully Prime',
+        }));
+        expect(mockSetActiveCharacterId).toHaveBeenCalledWith('char-1');
+        expect(mockOpenApp).toHaveBeenCalledWith(AppID.Chat);
     });
 });

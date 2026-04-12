@@ -217,10 +217,16 @@ const CharacterCitySectionComponent = ({
     onSaved,
 }: CharacterCitySectionProps, ref: React.ForwardedRef<CharacterCitySectionHandle>) => {
     const [cityKeyword, setCityKeyword] = useState(cityOverride || '');
+    const [draftCityAdcode, setDraftCityAdcode] = useState(cityAdcode);
+    const [draftIsFictionalCity, setDraftIsFictionalCity] = useState(Boolean(isFictionalCity));
     const [referenceCityKeyword, setReferenceCityKeyword] = useState(cityReferenceReal || '');
 
-    const cityAutocomplete = useCityAutocomplete(cityKeyword, !isFictionalCity, cityOverride);
-    const referenceAutocomplete = useCityAutocomplete(referenceCityKeyword, Boolean(isFictionalCity), cityReferenceReal);
+    const cityAutocomplete = useCityAutocomplete(
+        cityKeyword,
+        !draftIsFictionalCity,
+        draftCityAdcode ? cityKeyword : cityOverride,
+    );
+    const referenceAutocomplete = useCityAutocomplete(referenceCityKeyword, draftIsFictionalCity, cityReferenceReal);
 
     const callbacksRef = useRef({ onFieldChange, onImmediatePatchCommit, onSaved });
     const commitCurrentDraftRef = useRef<(immediate: boolean, announce?: boolean) => boolean>(() => false);
@@ -245,25 +251,28 @@ const CharacterCitySectionComponent = ({
     const buildDraftPatch = (): CityFieldPatch | null => {
         const nextCityValue = normalizeOptionalText(cityKeyword);
         const currentCityValue = normalizeOptionalText(cityOverride);
-        const nextReferenceValue = normalizeOptionalText(referenceCityKeyword);
+        const nextCityAdcode = draftIsFictionalCity ? undefined : normalizeOptionalText(draftCityAdcode);
+        const currentCityAdcode = normalizeOptionalText(cityAdcode);
+        const nextIsFictionalCity = draftIsFictionalCity ? true : undefined;
+        const currentIsFictionalCity = isFictionalCity ? true : undefined;
+        const nextReferenceValue = draftIsFictionalCity ? normalizeOptionalText(referenceCityKeyword) : undefined;
         const currentReferenceValue = normalizeOptionalText(cityReferenceReal);
         const patch: CityFieldPatch = {};
 
         if (nextCityValue !== currentCityValue) {
             patch.cityOverride = nextCityValue;
-
-            if (!nextCityValue || !isFictionalCity) {
-                patch.cityAdcode = undefined;
-            }
         }
 
-        if (isFictionalCity) {
-            if (cityAdcode) {
-                patch.cityAdcode = undefined;
-            }
-            if (nextReferenceValue !== currentReferenceValue) {
-                patch.cityReferenceReal = nextReferenceValue;
-            }
+        if (nextCityAdcode !== currentCityAdcode) {
+            patch.cityAdcode = nextCityAdcode;
+        }
+
+        if (nextIsFictionalCity !== currentIsFictionalCity) {
+            patch.isFictionalCity = nextIsFictionalCity;
+        }
+
+        if (nextReferenceValue !== currentReferenceValue) {
+            patch.cityReferenceReal = nextReferenceValue;
         }
 
         return Object.keys(patch).length > 0 ? patch : null;
@@ -294,6 +303,14 @@ const CharacterCitySectionComponent = ({
     }, [characterId, cityOverride]);
 
     useEffect(() => {
+        setDraftCityAdcode(cityAdcode);
+    }, [characterId, cityAdcode]);
+
+    useEffect(() => {
+        setDraftIsFictionalCity(Boolean(isFictionalCity));
+    }, [characterId, isFictionalCity]);
+
+    useEffect(() => {
         setReferenceCityKeyword(cityReferenceReal || '');
     }, [characterId, cityReferenceReal]);
 
@@ -307,40 +324,36 @@ const CharacterCitySectionComponent = ({
     const hasUnsavedDraft = Boolean(buildDraftPatch());
 
     const cityHasKeyword = cityAutocomplete.debouncedKeyword.length > 0;
-    const showCitySuggestions = cityAutocomplete.isFocused && !isFictionalCity && cityHasKeyword && cityAutocomplete.suggestions.length > 0;
-    const showCityEmptyState = cityAutocomplete.isFocused && !isFictionalCity && cityHasKeyword && !cityAutocomplete.isLoading && !cityAutocomplete.error && cityAutocomplete.suggestions.length === 0;
-    const showCityError = cityAutocomplete.isFocused && !isFictionalCity && cityHasKeyword && Boolean(cityAutocomplete.error);
-    const showCityKeywordHint = cityAutocomplete.isFocused && !isFictionalCity && cityAutocomplete.isKeywordTooShort;
+    const showCitySuggestions = cityAutocomplete.isFocused && !draftIsFictionalCity && cityHasKeyword && cityAutocomplete.suggestions.length > 0;
+    const showCityEmptyState = cityAutocomplete.isFocused && !draftIsFictionalCity && cityHasKeyword && !cityAutocomplete.isLoading && !cityAutocomplete.error && cityAutocomplete.suggestions.length === 0;
+    const showCityError = cityAutocomplete.isFocused && !draftIsFictionalCity && cityHasKeyword && Boolean(cityAutocomplete.error);
+    const showCityKeywordHint = cityAutocomplete.isFocused && !draftIsFictionalCity && cityAutocomplete.isKeywordTooShort;
 
     const referenceHasKeyword = referenceAutocomplete.debouncedKeyword.length > 0;
-    const showReferenceSuggestions = referenceAutocomplete.isFocused && Boolean(isFictionalCity) && referenceHasKeyword && referenceAutocomplete.suggestions.length > 0;
-    const showReferenceEmptyState = referenceAutocomplete.isFocused && Boolean(isFictionalCity) && referenceHasKeyword && !referenceAutocomplete.isLoading && !referenceAutocomplete.error && referenceAutocomplete.suggestions.length === 0;
-    const showReferenceError = referenceAutocomplete.isFocused && Boolean(isFictionalCity) && referenceHasKeyword && Boolean(referenceAutocomplete.error);
-    const showReferenceKeywordHint = referenceAutocomplete.isFocused && Boolean(isFictionalCity) && referenceAutocomplete.isKeywordTooShort;
+    const showReferenceSuggestions = referenceAutocomplete.isFocused && draftIsFictionalCity && referenceHasKeyword && referenceAutocomplete.suggestions.length > 0;
+    const showReferenceEmptyState = referenceAutocomplete.isFocused && draftIsFictionalCity && referenceHasKeyword && !referenceAutocomplete.isLoading && !referenceAutocomplete.error && referenceAutocomplete.suggestions.length === 0;
+    const showReferenceError = referenceAutocomplete.isFocused && draftIsFictionalCity && referenceHasKeyword && Boolean(referenceAutocomplete.error);
+    const showReferenceKeywordHint = referenceAutocomplete.isFocused && draftIsFictionalCity && referenceAutocomplete.isKeywordTooShort;
 
     const handleSelectCityTip = (tip: CityTip) => {
         setCityKeyword(tip.name);
-        onFieldChange('cityOverride', tip.name);
-        onFieldChange('cityAdcode', tip.adcode || undefined);
+        setDraftCityAdcode(tip.adcode || undefined);
         cityAutocomplete.reset();
     };
 
     const handleSelectReferenceCityTip = (tip: CityTip) => {
         setReferenceCityKeyword(tip.name);
-        onFieldChange('cityReferenceReal', tip.name);
         referenceAutocomplete.reset();
     };
 
     const handleClearCity = () => {
         setCityKeyword('');
-        onFieldChange('cityOverride', undefined);
-        onFieldChange('cityAdcode', undefined);
+        setDraftCityAdcode(undefined);
         cityAutocomplete.reset();
     };
 
     const handleClearReferenceCity = () => {
         setReferenceCityKeyword('');
-        onFieldChange('cityReferenceReal', undefined);
         referenceAutocomplete.reset();
     };
 
@@ -353,7 +366,7 @@ const CharacterCitySectionComponent = ({
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">📍 角色所在城市</label>
             <div className="bg-white rounded-3xl p-5 shadow-sm space-y-4">
                 <div className="relative">
-                    {isFictionalCity && (
+                    {draftIsFictionalCity && (
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">城市名称</label>
                     )}
                     <div className="relative">
@@ -363,16 +376,18 @@ const CharacterCitySectionComponent = ({
                                 const nextValue = event.target.value;
                                 setCityKeyword(nextValue);
 
-                                if (!isFictionalCity && !nextValue.trim()) {
-                                    onFieldChange('cityOverride', undefined);
-                                    onFieldChange('cityAdcode', undefined);
+                                if (!draftIsFictionalCity) {
+                                    setDraftCityAdcode(undefined);
+                                }
+
+                                if (!draftIsFictionalCity && !nextValue.trim()) {
                                     cityAutocomplete.reset();
                                 }
                             }}
                             onFocus={cityAutocomplete.handleFocus}
                             onBlur={cityAutocomplete.handleBlur}
                             className="w-full bg-slate-50 rounded-2xl border border-slate-100 px-4 py-3 pr-10 text-sm text-slate-700 outline-none focus:ring-1 focus:ring-primary/20 transition-all"
-                            placeholder={isFictionalCity ? '输入架空城市名...' : '输入城市名搜索...'}
+                            placeholder={draftIsFictionalCity ? '输入架空城市名...' : '输入城市名搜索...'}
                         />
                         {cityKeyword && (
                             <button
@@ -390,7 +405,7 @@ const CharacterCitySectionComponent = ({
                     {showCitySuggestions && (
                         <SuggestionList suggestions={cityAutocomplete.suggestions} onSelect={handleSelectCityTip} />
                     )}
-                    {!isFictionalCity && cityAutocomplete.isLoading && cityHasKeyword && (
+                    {!draftIsFictionalCity && cityAutocomplete.isLoading && cityHasKeyword && (
                         <div className="mt-2 text-[10px] text-slate-400">正在搜索城市...</div>
                     )}
                     {showCityKeywordHint && (
@@ -402,20 +417,20 @@ const CharacterCitySectionComponent = ({
                     {showCityEmptyState && (
                         <div className="mt-2 text-[10px] text-slate-400">未找到匹配城市，请换个关键词试试。</div>
                     )}
-                    {!isFictionalCity && cityOverride && cityAdcode && (
-                        <div className="mt-2 text-[10px] text-slate-400">已绑定地区编码：{cityAdcode}</div>
+                    {!draftIsFictionalCity && cityKeyword && draftCityAdcode && (
+                        <div className="mt-2 text-[10px] text-slate-400">已绑定地区编码：{draftCityAdcode}</div>
                     )}
                 </div>
 
                 <label className="flex items-center gap-2 text-xs text-slate-500">
                     <input
                         type="checkbox"
-                        checked={Boolean(isFictionalCity)}
+                        checked={draftIsFictionalCity}
                         onChange={(event) => {
                             const checked = event.target.checked;
-                            onFieldChange('isFictionalCity', checked ? true : undefined);
+                            setDraftIsFictionalCity(checked);
                             if (checked) {
-                                onFieldChange('cityAdcode', undefined);
+                                setDraftCityAdcode(undefined);
                                 cityAutocomplete.reset();
                             } else {
                                 referenceAutocomplete.reset();
@@ -426,7 +441,7 @@ const CharacterCitySectionComponent = ({
                     <span>这是一个架空 / 虚构城市</span>
                 </label>
 
-                {isFictionalCity && (
+                {draftIsFictionalCity && (
                     <div className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
                         <div className="relative">
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">现实参照城市</label>
@@ -437,7 +452,7 @@ const CharacterCitySectionComponent = ({
                                         const nextValue = event.target.value;
                                         setReferenceCityKeyword(nextValue);
                                         if (!nextValue.trim()) {
-                                            handleClearReferenceCity();
+                                            referenceAutocomplete.reset();
                                         }
                                     }}
                                     onFocus={referenceAutocomplete.handleFocus}

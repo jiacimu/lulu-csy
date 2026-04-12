@@ -131,7 +131,7 @@ describe('MemoryCenter hormone backfill flow', () => {
     let cloudMemories: any[];
 
     beforeEach(() => {
-        vi.clearAllMocks();
+        vi.resetAllMocks();
         localStorage.clear();
         localStorage.setItem('sub_api_key', 'sub-key');
         localStorage.setItem('sub_api_base_url', 'https://llm.example.com');

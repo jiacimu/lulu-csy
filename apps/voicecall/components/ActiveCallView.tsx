@@ -3,6 +3,7 @@ import CallControls from './CallControls';
 import AudioVisualizer from './AudioVisualizer';
 import AvatarPulse from './AvatarPulse';
 import { formatDuration } from '../utils';
+import { sanitizeVoiceCallAssistantText } from '../voiceCallTextSanitizer';
 import type { EngineState } from '../useVoiceCallEngine';
 import type { VoiceCallMode } from '../voiceCallTypes';
 
@@ -62,10 +63,6 @@ const TypewriterText: React.FC<{ text: string; speed?: number }> = ({ text, spee
         </>
     );
 };
-
-// ─── stripInterjections 工具 ─────────────────────────────────
-const stripInterjections = (s: string) =>
-    s.replace(/\([a-zA-Z]+\)/g, '').replace(/\s{2,}/g, ' ').trim();
 
 interface ActiveCallViewProps {
     avatarUrl: string;
@@ -155,11 +152,12 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
 
     // 降级文字区自动滚动到底部
     const degradedScrollRef = useRef<HTMLDivElement>(null);
+    const visibleAiResponse = sanitizeVoiceCallAssistantText(displayedAiResponse);
     useEffect(() => {
         if (ttsDegraded && degradedScrollRef.current) {
             degradedScrollRef.current.scrollTop = degradedScrollRef.current.scrollHeight;
         }
-    }, [displayedAiResponse, ttsDegraded]);
+    }, [visibleAiResponse, ttsDegraded]);
 
     // ─── 响应延迟预警（processing 状态超时提示）───────────────
     const [delayHint, setDelayHint] = useState<'' | 'thinking' | 'slow'>('');
@@ -267,7 +265,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
             <div className="flex-[3] flex flex-col items-center justify-start w-full min-h-0 pt-2 overflow-y-auto overflow-x-hidden pb-2" style={{ scrollbarWidth: 'none' }}>
 
                 {/* ── TTS 降级 — 魅魔沉浸文字区 ── */}
-                {ttsDegraded && displayedAiResponse ? (
+                {ttsDegraded && visibleAiResponse ? (
                     <div className="vc-degraded-zone" ref={degradedScrollRef}>
                         {/* 酒红→黑渐变背景 */}
                         <div className="vc-degraded-bg" />
@@ -283,7 +281,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                         <div className="vc-degraded-card">
                             <span className="vc-subtitle-label vc-subtitle-label--ai">{name}</span>
                             <p className="vc-degraded-text">
-                                <TypewriterText text={stripInterjections(displayedAiResponse)} speed={40} />
+                                <TypewriterText text={visibleAiResponse} speed={40} />
                             </p>
                         </div>
                     </div>
@@ -303,12 +301,12 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                         )}
 
                         {/* STT 空结果提示 */}
-                        {sttEmptyHint && !displayedTranscript && !displayedAiResponse && (
+                        {sttEmptyHint && !displayedTranscript && !visibleAiResponse && (
                             <p className="vc-quality-hint vc-animate-fade">没有听清，再说一次？</p>
                         )}
 
                         {/* 响应延迟预警 */}
-                        {delayHint && engineState === 'processing' && !displayedAiResponse && (
+                        {delayHint && engineState === 'processing' && !visibleAiResponse && (
                             <p className={`vc-quality-hint vc-animate-fade ${delayHint === 'slow' ? 'vc-quality-hint--warn' : ''}`}>
                                 {delayHint === 'thinking' ? '思考中，请稍等…' : '网络可能不稳定'}
                             </p>
@@ -330,7 +328,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                         )}
 
                         {/* AI 回复 — 悬浮字幕 */}
-                        {displayedAiResponse && (
+                        {visibleAiResponse && (
                             <div key={`ai-${aiResponseKey}`} className="flex flex-col items-center mt-2">
                                 {/* TTS 降级提示（非降级沉浸模式时的 fallback，理论上不会走到这里） */}
                                 {ttsDegraded && (
@@ -339,7 +337,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                                     </span>
                                 )}
                                 <span className="vc-subtitle-label vc-subtitle-label--ai">{name}</span>
-                                <p className="vc-subtitle vc-subtitle--ai">{displayedAiResponse}</p>
+                                <p className="vc-subtitle vc-subtitle--ai">{visibleAiResponse}</p>
                                 {/* ─── 外语模式翻译字幕 (Foreign Language) ─── */}
                                 {aiTranslation && (
                                     <p className="vc-subtitle vc-subtitle--translation">{aiTranslation}</p>

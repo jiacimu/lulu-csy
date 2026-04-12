@@ -28,6 +28,12 @@ import type { CharacterProfile,UserProfile } from '../../types';
 import type { VoiceCallMode } from './voiceCallTypes';
 import type { MessageType } from '../../types';
 import { getEmbeddingConfig,getSecondaryApiConfig } from '../../utils/runtimeConfig';
+import {
+    buildPersistedCallAudioEntries,
+    buildPersistedCallConversation,
+    filterPersistedCallHistory,
+} from './callLogPersistence';
+import { getVoiceCallVisibleText } from './voiceCallTextSanitizer';
 
 interface VoiceCallScreenProps {
     avatarUrl: string;
@@ -200,11 +206,12 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                 const modeText = MODE_LABELS[mode] || mode;
 
                 // 过滤掉系统自动发送的开场白提示词，避免出现在通话记录卡片中
-                const filteredHistory = history.filter(h => h.content !== '[系统：电话接通，请说开场白]');
+                const filteredHistory = filterPersistedCallHistory(history);
+                const persistedConversation = buildPersistedCallConversation(history);
 
                 // 拼接给模型读 + 卡片展示的文本版
                 const lines = filteredHistory.map(h =>
-                    `${h.role === 'user' ? userProfile.name : name}: ${h.content.replace(/\[\[翻译\s*[：:]\s*.*?\]\]/g, '').trim()}`
+                    `${h.role === 'user' ? userProfile.name : name}: ${getVoiceCallVisibleText(h.role, h.content)}`
                 );
                 const content = [
                     `[电话记录 | ${modeText} | ${formatDuration(duration)}]`,
@@ -223,18 +230,17 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                         mode,
                         turns: filteredHistory.length,
                         // 剥离 audioBlob，防止撑爆主存
-                        conversation: filteredHistory.map(h => ({ role: h.role, content: h.content })),
-                        hasCallAudio: filteredHistory.some(h => !!h.audioBlob),
+                        conversation: persistedConversation,
+                        hasCallAudio: persistedConversation.some(h => h.hasAudio === true),
                     },
                 }).then(async (savedMsgId) => {
                     // ── 将音频 Blob 存入专用的 STORE_VOICE_AUDIO ──
-                    for (let i = 0; i < history.length; i++) {
-                        if (history[i].audioBlob) {
-                            try {
-                                await saveVoiceAudio(`call_${savedMsgId}_${i}`, history[i].audioBlob!);
-                            } catch (e) {
-                                console.warn(`[VoiceCall] Failed to save audio for turn ${i}:`, e);
-                            }
+                    const audioEntries = buildPersistedCallAudioEntries(savedMsgId, history);
+                    for (const [i, entry] of audioEntries.entries()) {
+                        try {
+                            await saveVoiceAudio(entry.key, entry.blob);
+                        } catch (e) {
+                            console.warn(`[VoiceCall] Failed to save audio for persisted turn ${i}:`, e);
                         }
                     }
                     addToast('通话记录已保存', 'info');

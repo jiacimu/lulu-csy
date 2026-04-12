@@ -2,6 +2,8 @@ import React,{ useState,useRef,useCallback,useEffect } from 'react';
 import { Message } from '../../../types';
 import { formatDuration } from '../../../apps/voicecall/utils';
 import { MODE_LABELS } from '../../../apps/voicecall/voiceCallTypes';
+import { buildVoiceCallAudioLookupKeys } from '../../../apps/voicecall/callLogPersistence';
+import { getVoiceCallVisibleText } from '../../../apps/voicecall/voiceCallTextSanitizer';
 import type { VoiceCallMode } from '../../../apps/voicecall/voiceCallTypes';
 import { getVoiceAudio } from '../../../utils/db/contentStore';
 
@@ -11,10 +13,6 @@ import { getVoiceAudio } from '../../../utils/db/contentStore';
  * 折叠态: 📞 + 模式标签 + 通话时长
  * 展开态: 完整对话列表（按角色渲染）+ AI 消息可播放/下载
  */
-
-/** 剥离外语模式 [[翻译:...]] 标记（兼容旧数据） */
-const stripTranslationTags = (text: string) =>
-    text.replace(/\[\[翻译\s*[：:]\s*.*?\]\]/g, '').trim();
 
 interface VoiceCallSummaryCardProps {
     message: Message;
@@ -33,8 +31,11 @@ const VoiceCallSummaryCard: React.FC<VoiceCallSummaryCardProps> = ({ message }) 
 
     const duration = message.metadata?.duration ?? 0;
     const mode = message.metadata?.mode as string | undefined;
-    const conversation = message.metadata?.conversation as { role: string; content: string }[] | undefined;
+    const conversation = message.metadata?.conversation as { role: string; content: string; hasAudio?: boolean }[] | undefined;
     const hasCallAudio = message.metadata?.hasCallAudio === true;
+    const isLegacyConversation = hasCallAudio
+        && (conversation?.length ?? 0) > 0
+        && conversation!.every((entry) => entry.hasAudio === undefined);
 
     const modeText = mode ? (MODE_LABELS[mode as VoiceCallMode] || mode) : '';
     const durationText = formatDuration(duration);
@@ -62,6 +63,19 @@ const VoiceCallSummaryCard: React.FC<VoiceCallSummaryCardProps> = ({ message }) 
         return () => { cleanupAudio(); };
     }, [cleanupAudio]);
 
+    const loadAudioBlob = useCallback(async (index: number) => {
+        const candidateKeys = buildVoiceCallAudioLookupKeys(message.id, index, isLegacyConversation);
+
+        for (const key of candidateKeys) {
+            const blob = await getVoiceAudio(key);
+            if (blob) {
+                return { blob, key };
+            }
+        }
+
+        return { blob: null as Blob | null, key: candidateKeys[0], attemptedKeys: candidateKeys };
+    }, [message.id, isLegacyConversation]);
+
     // ── 播放指定 index 的音频 ──
     const handlePlay = useCallback(async (index: number, e: React.MouseEvent) => {
         e.stopPropagation(); // 阻止展开/折叠
@@ -78,14 +92,13 @@ const VoiceCallSummaryCard: React.FC<VoiceCallSummaryCardProps> = ({ message }) 
         setLoadingIndex(index);
 
         try {
-            const key = `call_${message.id}_${index}`;
-            const blob = await getVoiceAudio(key);
+            const { blob, attemptedKeys } = await loadAudioBlob(index);
 
             // 版本已变（用户点了别的按钮或组件卸载），放弃本次
             if (version !== playVersionRef.current) return;
 
             if (!blob) {
-                console.warn(`[VoiceCallCard] No audio found for key: ${key}`);
+                console.warn('[VoiceCallCard] No audio found for keys:', attemptedKeys);
                 setLoadingIndex(null);
                 return;
             }
@@ -117,15 +130,14 @@ const VoiceCallSummaryCard: React.FC<VoiceCallSummaryCardProps> = ({ message }) 
                 cleanupAudio();
             }
         }
-    }, [message.id, playingIndex, cleanupAudio]);
+    }, [playingIndex, cleanupAudio, loadAudioBlob]);
 
     // ── 下载指定 index 的音频 ──
     const handleDownload = useCallback(async (index: number, e: React.MouseEvent) => {
         e.stopPropagation();
 
         try {
-            const key = `call_${message.id}_${index}`;
-            const blob = await getVoiceAudio(key);
+            const { blob } = await loadAudioBlob(index);
             if (!blob) return;
 
             const url = URL.createObjectURL(blob);
@@ -139,7 +151,7 @@ const VoiceCallSummaryCard: React.FC<VoiceCallSummaryCardProps> = ({ message }) 
         } catch (err) {
             console.error('[VoiceCallCard] Failed to download audio:', err);
         }
-    }, [message.id]);
+    }, [loadAudioBlob]);
 
     return (
         <div
@@ -181,9 +193,8 @@ const VoiceCallSummaryCard: React.FC<VoiceCallSummaryCardProps> = ({ message }) 
                         const isAssistant = msg.role === 'assistant';
                         const isPlaying = playingIndex === i;
                         const isLoading = loadingIndex === i;
-                        const showAudioBtn = isAssistant && hasCallAudio;
-                        // 防御性剥离翻译标记（兼容旧数据）
-                        const displayContent = stripTranslationTags(msg.content);
+                        const showAudioBtn = isAssistant && (msg.hasAudio ?? hasCallAudio);
+                        const displayContent = getVoiceCallVisibleText(msg.role, msg.content);
 
                         return (
                             <div

@@ -43,6 +43,11 @@ function normalizeCloudMemories(memories: VectorMemory[]): VectorMemory[] {
     return memories.map(memory => markVectorMemoryAsBackendGenerated(memory));
 }
 
+function shouldPreserveLocalMemory(memory: VectorMemory): boolean {
+    const syncState = getVectorMemorySyncState(memory);
+    return syncState === 'pending_sync' || syncState === 'local_only';
+}
+
 async function listLocalMemoriesNormalized(
     charId: string,
     deps: Pick<MemoryCenterActionDeps, 'listLocalMemories'>,
@@ -62,12 +67,19 @@ export async function refreshVectorMemoryCache(
 
     if (cloudMemories) {
         const normalized = normalizeCloudMemories(cloudMemories);
-        const preservedLocalOnly = localMemories.filter((memory) => {
+        const mergedMap = new Map<string, VectorMemory>(
+            normalized.map((memory) => [memory.id, memory]),
+        );
+        for (const memory of localMemories) {
             const syncState = getVectorMemorySyncState(memory);
-            return (syncState === 'pending_sync' || syncState === 'local_only')
-                && !normalized.some((cloudMemory) => cloudMemory.id === memory.id);
-        });
-        const merged = [...normalized, ...preservedLocalOnly];
+            const shouldPreserveConflict = syncState === 'pending_sync';
+            const shouldPreserveNewLocal = syncState === 'local_only' && !mergedMap.has(memory.id);
+
+            if (shouldPreserveLocalMemory(memory) && (shouldPreserveConflict || shouldPreserveNewLocal)) {
+                mergedMap.set(memory.id, memory);
+            }
+        }
+        const merged = Array.from(mergedMap.values());
         await deps.replaceLocalMemories(charId, merged);
         return {
             memories: merged,
@@ -96,6 +108,7 @@ export async function deleteVectorMemoryManaged(
         return {
             memories: refreshed.memories,
             mode: 'cloud',
+            reason: cloudResult.reason,
         };
     }
 

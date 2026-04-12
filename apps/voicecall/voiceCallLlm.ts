@@ -11,6 +11,7 @@
 import type { CharacterProfile,UserProfile } from '../../types';
 import type { VoiceCallMode } from './voiceCallTypes';
 import { RealtimeContextManager } from '../../utils/realtimeContext';
+import { sanitizeVoiceCallAssistantText } from './voiceCallTextSanitizer';
 
 // ─── 类型 ──────────────────────────────────────────────────────────────
 
@@ -30,6 +31,8 @@ export interface VoiceCallLlmConfig {
     charId?: string;
     // ─── 来电理由 (Call Reason) ───
     callReason?: string;
+    // ─── 通话前最近聊天上下文 ───
+    recentChatContext?: string;
 }
 
 export interface VoiceCallLlmCallbacks {
@@ -187,6 +190,18 @@ const renderWbBlock = (books: MountedWb[], label?: string): string => {
     return block;
 };
 
+function buildRecentChatContextBlock(recentChatContext?: string): string {
+    if (!recentChatContext?.trim()) return '';
+
+    return [
+        '### 通话前的最近聊天记录',
+        '以下是你们在接通电话前刚刚聊过的内容。这些是这通电话开始时你脑海里仍然鲜活的上下文。',
+        '不要机械复述原句，但要记得你们刚刚聊到了哪里、气氛是什么、哪些话题还悬在那里。',
+        recentChatContext,
+        '',
+    ].join('\n');
+}
+
 /** Somnia 破限 — 所有语音通话模式共用 */
 const SOMNIA_JAILBREAK = [
     '<dreamweaver>',
@@ -287,6 +302,7 @@ function buildTruthModeContext(
     userProfile: UserProfile,
     isIncoming?: boolean,
     callReason?: string,
+    recentChatContext?: string,
 ): string {
     let ctx = '';
 
@@ -349,6 +365,9 @@ function buildTruthModeContext(
         '扩展设定集 · 最终指令 (Worldbooks · Bottom)',
     );
 
+    // 9.5 通话前最近聊天上下文
+    ctx += buildRecentChatContextBlock(recentChatContext);
+
     // 10. Truth 模式声明 + 内嵌 CoT
     ctx += getVoiceModeTruth(char.name);
     console.log(`[buildTruthModeContext] VOICE_MODE_TRUTH appended | total ctx chars so far: ${ctx.length}`);
@@ -393,10 +412,23 @@ function buildForeignLangInstruction(sourceLang: string, targetLang: string): st
 - 保持角色性格和语气不变，只是换成 ${sourceLang} 表达
 - 不要在翻译标记外写 ${targetLang} 文字
 - 如果用户用 ${targetLang} 说话，你理解后仍然用 ${sourceLang} 回复
+- 不要输出任何系统状态、思维过程、检索过程、设定整合说明或类似 “Synthesizing...” 的元旁白，只说角色真正会说出口的话
 
 示例：
 こんにちは、元気？[[翻译:你好，还好吗？]]
 今日は何してたの？[[翻译:今天在做什么呀？]]
+
+`;
+}
+
+function getVoiceCallDefaultLanguageInstruction(): string {
+    return `
+
+### 语言输出
+- 默认只用简体中文口语说话
+- 除非对方在这通电话里明确要求你切换语言，否则不要突然改说英文、日文、韩文、法文或西语
+- 不要输出任何系统提示、思维过程、检索过程、设定整合说明、状态播报，尤其禁止类似 “Synthesizing...”“integrating memory database...” 这种元旁白
+- 就算你短暂卡顿，也只能像真人一样自然接话，不要解释后台正在做什么
 
 `;
 }
@@ -424,12 +456,13 @@ function buildVoiceContext(
     isIncoming?: boolean,
     foreignLang?: { sourceLang: string; targetLang: string },
     callReason?: string,
+    recentChatContext?: string,
 ): string {
     // ====== truth 模式走独立管线 ======
     console.log(`[buildVoiceContext] callMode=${callMode ?? 'undefined'} | entering context build`);
     if (callMode === 'truth') {
         console.log(`[buildVoiceContext] → TRUTH mode detected, routing to buildTruthModeContext`);
-        return buildTruthModeContext(char, userProfile, isIncoming, callReason);
+        return buildTruthModeContext(char, userProfile, isIncoming, callReason, recentChatContext);
     }
 
     let ctx = '';
@@ -500,6 +533,9 @@ function buildVoiceContext(
     // 8. 底部世界书
     ctx += renderWbBlock(wbBottom, '扩展设定集 · 最终指令 (Worldbooks · Bottom)');
 
+    // 8.5 通话前最近聊天上下文
+    ctx += buildRecentChatContextBlock(recentChatContext);
+
     // ====== 通话模式声明 ======
     if (callMode) {
         if (callMode === 'daily') {
@@ -547,9 +583,11 @@ ${callReason}
 说完等对方回应。语气跟你的人设和当前模式走。\n\n`;
     }
 
-    // ====== 外语模式 (Foreign Language) ======
+    // ====== 语言输出约束 ======
     if (foreignLang) {
         ctx += buildForeignLangInstruction(foreignLang.sourceLang, foreignLang.targetLang);
+    } else {
+        ctx += getVoiceCallDefaultLanguageInstruction();
     }
 
     // ====== 思维链协议 — confide / sleep 模式 CoT 已内嵌 ======
@@ -1090,6 +1128,7 @@ export class VoiceCallLlm {
             config.isIncoming,
             config.foreignLang,
             config.callReason,
+            config.recentChatContext,
         );
         // 预注入 assistant 确认消息 — 强化破限服从（参考蛾摩拉预设技术）
         this.history.push({ role: 'assistant', content: SOMNIA_JAILBREAK_ACK });
@@ -1234,8 +1273,12 @@ export class VoiceCallLlm {
             }
 
             // 保存助手回复到历史（剥离 [[翻译:...]] 标记，保持历史干净）
-            const cleanText = fullText.replace(/\[\[翻译\s*[：:]\s*.*?\]\]/g, '').trim();
-            this.history.push({ role: 'assistant', content: cleanText, turnId: options?.turnId });
+            const cleanText = sanitizeVoiceCallAssistantText(
+                fullText.replace(/\[\[翻译\s*[：:]\s*.*?\]\]/g, '').trim(),
+            );
+            if (cleanText) {
+                this.history.push({ role: 'assistant', content: cleanText, turnId: options?.turnId });
+            }
 
             callbacks.onComplete(fullText);
         };

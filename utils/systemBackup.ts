@@ -3,6 +3,8 @@ import { APIConfig,OSTheme,CharacterProfile,ChatTheme,FullBackupData,UserProfile
 import { DB } from './db';
 import { buildBackendHeaders,getBackendUrl } from './backendClient';
 import { loadJSZip } from './lazyThirdParty';
+import { hasCloudSyncTarget } from './runtimeConfig';
+import { rebaseImportedVectorMemories } from './vectorMemorySyncState';
 
 // ─── JSZip Dynamic Loader ───────────────────────────────────────────────
 
@@ -423,6 +425,16 @@ export async function importSystemData(
 
     if (zip) {
         data = await restoreAssetsFromZip(data, zip);
+    }
+
+    if (Array.isArray(data.vectorMemories) && data.vectorMemories.length > 0) {
+        // A system backup may come from another frontend/backend environment.
+        // Rebase imported memories onto the current sync target so the next
+        // cloud refresh cannot treat them as already-authoritative cloud data.
+        data.vectorMemories = rebaseImportedVectorMemories(
+            data.vectorMemories,
+            hasCloudSyncTarget(),
+        );
     }
 
     await DB.importFullData(data);

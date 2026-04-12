@@ -22,14 +22,21 @@
 import { useState,useRef,useCallback,useEffect } from 'react';
 import type { SttConfig } from '../../types/stt';
 import type { TtsConfig } from '../../types/tts';
-import type { CharacterProfile,UserProfile } from '../../types';
+import type { CharacterProfile,UserProfile,Message } from '../../types';
 import { CloudStt } from '../../utils/cloudStt';
 import { MinimaxTtsWs } from '../../utils/minimaxTtsWs';
 import { VoiceCallLlm,VoiceCallLlmConfig } from './voiceCallLlm';
 import { VoiceCallAudioPlayer } from './voiceCallAudioPlayer';
+import { sanitizeVoiceCallAssistantText } from './voiceCallTextSanitizer';
 import type { VoiceCallMode } from './voiceCallTypes';
 import { VectorMemoryRetriever } from '../../utils/vectorMemoryRetriever';
+import { DB } from '../../utils/db';
 import { pcmChunksToWavBlob } from './pcmToWav';
+import {
+    buildVoiceCallRecentContextMessages,
+    buildVoiceCallRecentContextTranscript,
+    type VoiceCallRecentContextMessage,
+} from './voiceCallRecentContext';
 
 // ─── 类型 ──────────────────────────────────────────────────────────────
 
@@ -96,6 +103,7 @@ export interface UseVoiceCallEngineReturn {
 // ─── 通话专用 TTS 采样率 ─────────────────────────────────────────────
 
 const VOICE_CALL_SAMPLE_RATE = 24000;
+const RECENT_CHAT_CONTEXT_LIMIT = 50;
 
 // ─── Float32Array → WAV Blob ──────────────────────────────────────────
 
@@ -151,6 +159,44 @@ function buildVoiceCallTtsConfig(base: TtsConfig): TtsConfig {
             audio_sample_rate: VOICE_CALL_SAMPLE_RATE,
         },
     };
+}
+
+function buildVoiceCallRetrievalMessages(
+    recentContextMessages: VoiceCallRecentContextMessage[],
+    history: Array<{ role: string; content: string }>,
+    charId: string,
+    extraUserText?: string,
+): Message[] {
+    const liveHistoryMessages = history
+        .filter((entry): entry is { role: 'user' | 'assistant'; content: string } => (
+            (entry.role === 'user' || entry.role === 'assistant') && !!entry.content?.trim()
+        ))
+        .map((entry, index, all) => ({
+            id: recentContextMessages.length + index,
+            role: entry.role,
+            content: entry.content,
+            type: 'text' as const,
+            timestamp: Date.now() - (all.length - index) * 1000,
+            charId,
+        }));
+
+    const combined = [
+        ...recentContextMessages,
+        ...liveHistoryMessages,
+    ];
+
+    if (extraUserText?.trim()) {
+        combined.push({
+            id: combined.length,
+            role: 'user',
+            content: extraUserText.trim(),
+            type: 'text',
+            timestamp: Date.now(),
+            charId,
+        });
+    }
+
+    return combined;
 }
 
 // ─── Hook ──────────────────────────────────────────────────────────────
@@ -215,6 +261,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
     // ── 音频缓存：收集每轮 AI 的 TTS PCM 数据用于日后回听 ──
     const turnAudioChunksRef = useRef<Uint8Array[]>([]);
     const turnAudioBlobsRef = useRef<Map<number, Blob>>(new Map());
+    const recentContextMessagesRef = useRef<VoiceCallRecentContextMessage[]>([]);
 
     // ── 语音拼接模式：缓冲用户连续语音段 + 去抖定时器 ──
     const pendingAudioSegmentsRef = useRef<Float32Array[]>([]);
@@ -254,14 +301,11 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             ) {
                 const llmForRetrieval = llmRef.current;
                 const history = llmForRetrieval.getHistory();
-                const msgs = history.map((h, i) => ({
-                    id: i,
-                    role: h.role as 'user' | 'assistant',
-                    content: h.content,
-                    type: 'text' as const,
-                    timestamp: Date.now() - (history.length - i) * 1000,
-                    charId: opts.char.id,
-                }));
+                const msgs = buildVoiceCallRetrievalMessages(
+                    recentContextMessagesRef.current,
+                    history,
+                    opts.char.id,
+                );
                 // fire-and-forget：与 LLM 并行执行，结果到达后注入（影响后续句子）
                 VectorMemoryRetriever.retrieve(
                     opts.char.id, opts.char.name, opts.userProfile.name, msgs, opts.embeddingApiKey, opts.apiConfig, opts.char.moodState as any,
@@ -339,7 +383,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                 }
                 degradedDisplaying = true;
                 const sentence = degradedSentenceQueue.shift()!;
-                setAiResponse(stripInterjections(sentence));
+                setAiResponse(sanitizeVoiceCallAssistantText(sentence));
                 // 显示时长：按字数计算，模拟阅读节奏
                 const displayMs = Math.max(2000, Math.min(6000, sentence.length * 120));
                 setTimeout(() => {
@@ -369,13 +413,10 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                 }
             };
 
-            const stripInterjections = (s: string) =>
-                s.replace(/\([a-zA-Z]+\)/g, '').replace(/\s{2,}/g, ' ').trim();
-
             player.onSentenceStart = (idx) => {
                 if (gen !== generationRef.current) return;
                 if (idx < sentenceQueue.length) {
-                    setAiResponse(stripInterjections(sentenceQueue[idx]));
+                    setAiResponse(sanitizeVoiceCallAssistantText(sentenceQueue[idx]));
                 }
             };
 
@@ -513,27 +554,34 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                         translationText = foreignLangMatch[1].trim();
                         ttsText = sentence.replace(/\[\[翻译\s*[：:]\s*.*?\]\]/g, '').trim();
                     }
+                    const visibleTtsText = sanitizeVoiceCallAssistantText(ttsText);
+                    if (!visibleTtsText) {
+                        setAiTranslation('');
+                        console.warn(`[Engine] Dropped voice-call meta narration: "${ttsText}"`);
+                        return;
+                    }
+
                     // 始终同步翻译状态（无标记时清空，防止残留上一句的翻译）
                     setAiTranslation(translationText);
                     // ─── /外语模式 ───
 
-                    console.log(`[Engine] LLM sentence: "${ttsText}"${translationText ? ` (翻译: ${translationText})` : ''}`);
-                    sentenceQueue.push(ttsText);
+                    console.log(`[Engine] LLM sentence: "${visibleTtsText}"${translationText ? ` (翻译: ${translationText})` : ''}`);
+                    sentenceQueue.push(visibleTtsText);
 
                     // TTS 已失败 → 降级为逐句文字展示
                     if (ttsConnectFailed) {
-                        enqueueDegradedSentence(ttsText);
+                        enqueueDegradedSentence(visibleTtsText);
                         return;
                     }
 
                     // TTS 预连接已完成 → 直接发送
                     if (ttsReady) {
-                        try { ttsWs.sendText(ttsText); sentSentCount++; } catch (err) {
+                        try { ttsWs.sendText(visibleTtsText); sentSentCount++; } catch (err) {
                             console.error('[Engine] TTS sendText error:', err);
                         }
                     } else {
                         // 预连接尚未完成 → 缓冲，连接成功后自动 flush
-                        pendingSentences.push(ttsText);
+                        pendingSentences.push(visibleTtsText);
                     }
                 },
                 onComplete: (full) => {
@@ -726,15 +774,35 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         generationRef.current = 0;
 
         try {
+            const recentContextPromise = DB.getRecentMessagesByCharId(opts.char.id, RECENT_CHAT_CONTEXT_LIMIT)
+                .then((messages) => buildVoiceCallRecentContextMessages(messages, {
+                    limit: RECENT_CHAT_CONTEXT_LIMIT,
+                    hideBeforeMessageId: opts.char.hideBeforeMessageId,
+                }))
+                .catch((error) => {
+                    console.warn('[VoiceCall] Failed to load recent chat context:', error);
+                    return [] as VoiceCallRecentContextMessage[];
+                });
+
             // 1. 获取麦克风
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    sampleRate: 16000,
-                },
-            });
+            const [stream, recentContextMessages] = await Promise.all([
+                navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        sampleRate: 16000,
+                    },
+                }),
+                recentContextPromise,
+            ]);
             streamRef.current = stream;
+            recentContextMessagesRef.current = recentContextMessages;
+            const recentChatContext = buildVoiceCallRecentContextTranscript(
+                recentContextMessages,
+                opts.userProfile.name,
+                opts.char.name,
+            );
+            console.log(`[VoiceCall] Loaded ${recentContextMessages.length} recent chat messages for call context`);
 
             // 2. 初始化 LLM
             console.log(`[Engine] startEngine: opts.callMode=${opts.callMode ?? 'undefined'}`);
@@ -754,6 +822,8 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                 charId: opts.char.id,
                 // ─── 来电理由 (Call Reason) ───
                 callReason: opts.callReason,
+                // ─── 通话前最近聊天上下文 ───
+                recentChatContext,
             };
             llmRef.current = new VoiceCallLlm(llmConfig, opts.char, opts.userProfile);
 
@@ -858,26 +928,15 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                 if (!engineActiveRef.current) return;
 
                 // ── 来电（AI 主叫）：用 callReason 做向量记忆检索 ──
-                if (opts.isIncoming && opts.callReason && opts.embeddingApiKey && opts.char.vectorMemoryEnabled && llmRef.current) {
+                if (opts.embeddingApiKey && opts.char.vectorMemoryEnabled && llmRef.current) {
                     try {
                         const history = llmRef.current.getHistory();
-                        const msgs = history.map((h, i) => ({
-                            id: i,
-                            role: h.role as 'user' | 'assistant',
-                            content: h.content,
-                            type: 'text' as const,
-                            timestamp: Date.now() - (history.length - i) * 1000,
-                            charId: opts.char.id,
-                        }));
-                        // 用 callReason 作为额外的用户消息，提供检索语义
-                        msgs.push({
-                            id: msgs.length,
-                            role: 'user' as const,
-                            content: opts.callReason,
-                            type: 'text' as const,
-                            timestamp: Date.now(),
-                            charId: opts.char.id,
-                        });
+                        const msgs = buildVoiceCallRetrievalMessages(
+                            recentContextMessagesRef.current,
+                            history,
+                            opts.char.id,
+                            opts.callReason,
+                        );
                         const memBlock = await VectorMemoryRetriever.retrieve(
                             opts.char.id,
                             opts.char.name,
@@ -969,6 +1028,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             return { role: h.role, content: h.content };
         });
         turnAudioBlobsRef.current = new Map();
+        recentContextMessagesRef.current = [];
         console.log(`[Engine] Call history: ${rawHistory.length} turns, ${blobCount} audio blobs attached (map size was ${audioBlobMap.size})`);
 
         // 中止 LLM

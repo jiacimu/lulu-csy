@@ -79,6 +79,81 @@ describe('memoryCenterActions', () => {
         ]));
     });
 
+    it('prefers a local pending memory over the cloud copy when ids collide', async () => {
+        const cloudMemory = makeMemory({
+            id: 'shared-1',
+            source: 'sync',
+            content: 'cloud copy',
+            syncState: 'backend_generated' as const,
+        });
+        const localPendingMemory = makeMemory({
+            id: 'shared-1',
+            content: 'local imported copy',
+            syncState: 'pending_sync' as const,
+            cloudSynced: false,
+        });
+        const replaceLocalMemories = vi.fn().mockResolvedValue(undefined);
+
+        const result = await refreshVectorMemoryCache('char-1', {
+            pullCloudMemories: vi.fn().mockResolvedValue([cloudMemory]),
+            replaceLocalMemories,
+            listLocalMemories: vi.fn().mockResolvedValue([localPendingMemory]),
+        });
+
+        expect(result.memories).toEqual([
+            expect.objectContaining({
+                id: 'shared-1',
+                content: 'local imported copy',
+                syncState: 'pending_sync',
+            }),
+        ]);
+        expect(replaceLocalMemories).toHaveBeenCalledWith('char-1', [
+            expect.objectContaining({
+                id: 'shared-1',
+                content: 'local imported copy',
+                syncState: 'pending_sync',
+            }),
+        ]);
+    });
+
+    it('prefers the cloud copy when a local-only memory collides by id', async () => {
+        const cloudMemory = makeMemory({
+            id: 'shared-1',
+            source: 'sync',
+            content: 'cloud copy',
+            hormoneSnapshot: { dopamine: 0.7 } as any,
+        });
+        const localOnlyMemory = makeMemory({
+            id: 'shared-1',
+            content: 'stale local copy',
+            syncState: 'local_only' as const,
+            cloudSynced: false,
+        });
+        const replaceLocalMemories = vi.fn().mockResolvedValue(undefined);
+
+        const result = await refreshVectorMemoryCache('char-1', {
+            pullCloudMemories: vi.fn().mockResolvedValue([cloudMemory]),
+            replaceLocalMemories,
+            listLocalMemories: vi.fn().mockResolvedValue([localOnlyMemory]),
+        });
+
+        expect(result.memories).toEqual([
+            expect.objectContaining({
+                id: 'shared-1',
+                content: 'cloud copy',
+                syncState: 'backend_generated',
+                hormoneSnapshot: { dopamine: 0.7 },
+            }),
+        ]);
+        expect(replaceLocalMemories).toHaveBeenCalledWith('char-1', [
+            expect.objectContaining({
+                id: 'shared-1',
+                content: 'cloud copy',
+                syncState: 'backend_generated',
+            }),
+        ]);
+    });
+
     it('falls back to deleting the local cache when cloud deletion fails', async () => {
         const remainingLocalMemories = [makeMemory({ id: 'mem-2', syncState: 'pending_sync' as const })];
 
@@ -95,7 +170,7 @@ describe('memoryCenterActions', () => {
         expect(result.memories).toEqual(remainingLocalMemories);
     });
 
-    it('removes stale local pending memories after a successful cloud deletion refresh', async () => {
+    it('removes stale local pending memories when cloud deletion resolves as not_found', async () => {
         let localMemories = [
             makeMemory({
                 id: 'mem-1',
@@ -123,6 +198,7 @@ describe('memoryCenterActions', () => {
         expect(result).toEqual({
             memories: [],
             mode: 'cloud',
+            reason: 'not_found',
         });
     });
 

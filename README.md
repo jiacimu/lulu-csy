@@ -140,6 +140,13 @@ Beta 预发:
 - `VITE_CSYOS_TTS_WS_PROXY_URL`
 - `VITE_CSYOS_FRONTEND_ORIGIN`
 
+构建防呆规则:
+
+- `staging` 和 `production` 构建现在会强制校验 `VITE_CSYOS_BACKEND_URL` 与 `VITE_CSYOS_BACKEND_TOKEN`
+- 只要这两个变量缺失、为空或还是占位值，`vite build` 会直接失败，不再允许“先上线再发现后端连不上”
+- `push main` 触发的 Cloudflare Pages 自动构建不会读取你本机的 `.env.production.local`
+- 所以正式环境需要的 `VITE_*` 变量，除了保存在本地文件里，也必须同步配置到 Cloudflare Pages 的对应环境变量中
+
 ## 部署真相源
 
 当前前端部署以以下文件为准:

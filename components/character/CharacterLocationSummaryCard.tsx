@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 
 interface CharacterLocationSummaryCardProps {
     cityOverride?: string;
@@ -33,7 +33,7 @@ function getSummaryText(props: Pick<CharacterLocationSummaryCardProps, 'cityOver
     return { title: cityOverride!, subtitle };
 }
 
-const CharacterLocationSummaryCard: React.FC<CharacterLocationSummaryCardProps> = ({
+const CharacterLocationSummaryCard: React.FC<CharacterLocationSummaryCardProps> = memo(({
     cityOverride,
     cityAdcode,
     isFictionalCity,
@@ -72,6 +72,7 @@ const CharacterLocationSummaryCard: React.FC<CharacterLocationSummaryCardProps> 
             </div>
         </div>
     );
-};
+});
+CharacterLocationSummaryCard.displayName = 'CharacterLocationSummaryCard';
 
 export default CharacterLocationSummaryCard;

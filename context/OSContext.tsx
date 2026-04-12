@@ -1,5 +1,5 @@
 
-import React,{ createContext,useContext,useEffect,useState,useRef } from 'react';
+import React,{ createContext,useContext,useEffect,useState,useRef,useCallback,useMemo } from 'react';
 import { AppID,OSTheme,CharacterProfile,ChatTheme,UserProfile,SystemLog } from '../types';
 import { DB } from '../utils/db';
 import { onSystemLog } from '../utils/systemInterceptor';
@@ -235,6 +235,7 @@ Sully是小手机的内置AI。
 const initialCharacter = sullyV2;
 
 const OSContext = createContext<OSContextType | undefined>(undefined);
+const OSPersonalizationContext = createContext<Pick<OSContextType, 'addCustomTheme' | 'customThemes' | 'userProfile'> | undefined>(undefined);
 
 /**
  * Inner provider that holds all the "data/config" state.
@@ -719,7 +720,14 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     const updateApiConfig = configUpdateApiConfig;
     const updateRealtimeConfig = configUpdateRealtimeConfig;
     const updateUserProfile = async (updates: Partial<UserProfile>) => { setUserProfile(prev => { const next = { ...prev, ...updates }; DB.saveUserProfile(next); return next; }); };
-    const addCustomTheme = async (theme: ChatTheme) => { setCustomThemes(prev => { const exists = prev.find(t => t.id === theme.id); if (exists) return prev.map(t => t.id === theme.id ? theme : t); return [...prev, theme]; }); await DB.saveTheme(theme); };
+    const addCustomTheme = useCallback(async (theme: ChatTheme) => {
+        setCustomThemes(prev => {
+            const exists = prev.find(t => t.id === theme.id);
+            if (exists) return prev.map(t => t.id === theme.id ? theme : t);
+            return [...prev, theme];
+        });
+        await DB.saveTheme(theme);
+    }, []);
     const removeCustomTheme = async (id: string) => { setCustomThemes(prev => prev.filter(t => t.id !== id)); await DB.deleteTheme(id); };
     const setCustomIcon = async (appId: string, iconUrl: string | undefined) => { setCustomIcons(prev => { const next = { ...prev }; if (iconUrl) next[appId] = iconUrl; else delete next[appId]; return next; }); if (iconUrl) { await DB.saveAsset(`icon_${appId}`, iconUrl); } else { await DB.deleteAsset(`icon_${appId}`); } };
     // --- System Export/Import ---
@@ -786,11 +794,18 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
         systemLogs,
         clearLogs,
     };
+    const personalizationValue = useMemo(() => ({
+        userProfile,
+        customThemes,
+        addCustomTheme,
+    }), [userProfile, customThemes, addCustomTheme]);
 
     return (
-        <OSContext.Provider value={value}>
-            {children}
-        </OSContext.Provider>
+        <OSPersonalizationContext.Provider value={personalizationValue}>
+            <OSContext.Provider value={value}>
+                {children}
+            </OSContext.Provider>
+        </OSPersonalizationContext.Provider>
     );
 };
 
@@ -837,6 +852,14 @@ export const useOS = () => {
     const context = useContext(OSContext);
     if (context === undefined) {
         throw new Error('useOS must be used within an OSProvider');
+    }
+    return context;
+};
+
+export const useOSPersonalization = () => {
+    const context = useContext(OSPersonalizationContext);
+    if (context === undefined) {
+        throw new Error('useOSPersonalization must be used within an OSProvider');
     }
     return context;
 };

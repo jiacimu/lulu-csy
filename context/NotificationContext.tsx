@@ -14,6 +14,7 @@ export interface NotificationContextType {
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
+const AddToastContext = createContext<NotificationContextType['addToast'] | undefined>(undefined);
 
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [toasts, setToasts] = useState<Toast[]>([]);
@@ -45,9 +46,11 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     };
 
     return (
-        <NotificationContext.Provider value={value}>
-            {children}
-        </NotificationContext.Provider>
+        <AddToastContext.Provider value={addToast}>
+            <NotificationContext.Provider value={value}>
+                {children}
+            </NotificationContext.Provider>
+        </AddToastContext.Provider>
     );
 };
 
@@ -55,6 +58,14 @@ export const useNotification = () => {
     const context = useContext(NotificationContext);
     if (context === undefined) {
         throw new Error('useNotification must be used within a NotificationProvider');
+    }
+    return context;
+};
+
+export const useAddToast = () => {
+    const context = useContext(AddToastContext);
+    if (context === undefined) {
+        throw new Error('useAddToast must be used within a NotificationProvider');
     }
     return context;
 };
