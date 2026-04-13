@@ -2,9 +2,7 @@
 import React,{ useEffect,useState } from 'react';
 import {
     getAgentConfig,
-    getAutonomousDebugEnabled,
     saveAgentConfig,
-    setAutonomousDebugEnabled,
     type AgentConfig,
 } from '../../utils/autonomousAgent';
 import { haptic } from '../../utils/haptics';
@@ -16,7 +14,6 @@ import { forceResubscribe,getPushDebugInfo } from '../../utils/pushSubscription'
  */
 const AgentSettings: React.FC = () => {
     const [config, setConfig] = useState<AgentConfig>(getAgentConfig);
-    const [autonomousDebugEnabled, setAutonomousDebugState] = useState(getAutonomousDebugEnabled);
     const [saved, setSaved] = useState(false);
     const [pushInfo, setPushInfo] = useState(getPushDebugInfo);
     const [pushBusy, setPushBusy] = useState(false);
@@ -240,24 +237,34 @@ const AgentSettings: React.FC = () => {
                             <span className="text-sm font-bold text-[#b8aaa0]">🐛 调试模式</span>
                         </div>
                         <p className="text-[10px] text-[#b8aaa0] leading-relaxed max-w-[240px]">
-                            开启后检查间隔缩短到 30 秒，方便测试。控制台会输出详细日志
+                            开启后当前页面会按下方秒数主动触发检查，并更频繁同步上下文，方便测试。页面关闭后仍由后端 10 分钟计划兜底。
                         </p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer shrink-0">
                         <input
                             type="checkbox"
-                            checked={autonomousDebugEnabled}
+                            checked={config.debugMode}
                             onChange={e => {
                                 haptic.medium();
-                                const nextValue = e.target.checked;
-                                setAutonomousDebugEnabled(nextValue);
-                                setAutonomousDebugState(nextValue);
-                                window.dispatchEvent(new Event('agent-config-changed'));
+                                update({ debugMode: e.target.checked });
                             }}
                             className="sr-only peer"
                         />
                         <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#b8aaa0]"></div>
                     </label>
+                </div>
+
+                <div className="mt-4">
+                    <SliderRow
+                        label="调试检查间隔"
+                        desc="只在调试模式开启时生效。你可以自己决定前台每隔多少秒主动触发一次检查"
+                        value={config.debugIntervalSec}
+                        min={10} max={120} step={5} unit="秒"
+                        onChange={v => {
+                            haptic.light();
+                            update({ debugIntervalSec: v });
+                        }}
+                    />
                 </div>
             </section>
         </div>

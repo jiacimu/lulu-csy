@@ -88,6 +88,6 @@ describe('voice call recent context', () => {
 
         expect(recentContext).toHaveLength(46);
         expect(recentContext[0]?.id).toBe(10);
-        expect(recentContext.at(-1)?.id).toBe(55);
+        expect(recentContext[recentContext.length - 1]?.id).toBe(55);
     });
 });

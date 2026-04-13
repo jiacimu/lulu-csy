@@ -6,6 +6,20 @@ import {
     didCharacterContextRelevantFieldsChange,
 } from '../utils/agentContextSnapshot';
 
+const TEST_INTERNAL_STATE = {
+    dopamine: 0.5,
+    serotonin: 0.5,
+    cortisol: 0.5,
+    oxytocin: 0.5,
+    norepinephrine: 0.5,
+    endorphin: 0.5,
+    energy: 0.5,
+    innerVoice: '',
+    surfaceEmotion: '平静',
+    roundCount: 1,
+    updatedAt: 1,
+};
+
 describe('agentContextSnapshot', () => {
     it('prefers refinedMemories over topMemory fallback', () => {
         const digest = buildCoreMemoryDigest(
@@ -69,10 +83,7 @@ describe('agentContextSnapshot', () => {
             mountedWorldbooks: [],
             refinedMemories: {},
             activeMemoryMonths: [],
-            moodState: {
-                dopamine: 0.5,
-                updatedAt: 1,
-            },
+            moodState: TEST_INTERNAL_STATE,
         };
         const next = {
             ...previous,
@@ -92,10 +103,7 @@ describe('agentContextSnapshot', () => {
             mountedWorldbooks: [],
             refinedMemories: {},
             activeMemoryMonths: [],
-            moodState: {
-                dopamine: 0.5,
-                updatedAt: 1,
-            },
+            moodState: TEST_INTERNAL_STATE,
         };
         const next = {
             ...previous,

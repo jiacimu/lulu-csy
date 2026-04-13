@@ -55,6 +55,17 @@ export type LifeStreamSyncState = {
     visibleInChat: boolean;
 };
 
+export type AgentTickResult = {
+    action: string;
+    messageGenerated: boolean;
+    messageContent?: string;
+    messageBubbles?: string[];
+    charName?: string;
+    reason?: string;
+    skipped?: string;
+    nextCheckAt?: number;
+};
+
 function withAgentProtocolQuery(
     query?: Record<string, string | number | boolean | null | undefined>,
 ): Record<string, string | number | boolean | null | undefined> {
@@ -254,6 +265,15 @@ export async function fetchAgentLifeStream(charId: string): Promise<LifeStreamSy
         fragments: data.fragments || [],
         visibleInChat: data.visibleInChat === true,
     };
+}
+
+export async function requestAgentTick(
+    charId: string,
+): Promise<{ ok: boolean; result?: AgentTickResult }> {
+    return agentFetch('/api/agent/tick', {
+        method: 'POST',
+        body: JSON.stringify({ charId }),
+    });
 }
 
 export async function notifyAgentUserReplied(charId: string): Promise<void> {

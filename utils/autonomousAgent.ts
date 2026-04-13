@@ -7,6 +7,7 @@
  *   3. Receives backend-generated messages via SSE or polling
  *   4. Mirrors LifeStream fragments into the local message store
  *   5. Notifies the backend when the user replies
+ *   6. Triggers foreground ticks while the app is open so local debug / interval settings take effect
  */
 
 import { DB } from './db';
@@ -30,6 +31,7 @@ import {
   fetchPendingAgentMessages,
   notifyAgentUserReplied,
   pushAgentContextSnapshot,
+  requestAgentTick,
   startAgentOnBackend,
   stopAgentOnBackend,
 } from './agentBackendClient';
@@ -55,6 +57,8 @@ export interface AgentConfig {
     maxConsecutiveIgnored: number;
     baseProb: number;
     notificationsEnabled: boolean;
+    debugMode: boolean;
+    debugIntervalSec: number;
 }
 
 type ContextSnapshot = {
@@ -92,6 +96,8 @@ const AGENT_CONFIG_DEFAULTS: AgentConfig = {
     maxConsecutiveIgnored: 2,
     baseProb: 0.15,
     notificationsEnabled: true,
+    debugMode: false,
+    debugIntervalSec: 30,
 };
 
 const AGENT_CONFIG_STORAGE_KEY = 'agent_config';
@@ -104,12 +110,88 @@ type MemorySummary = Pick<
     'title' | 'content' | 'importance' | 'createdAt' | 'deprecated' | 'salienceScore'
 >;
 
+function clampAgentNumber(value: unknown, min: number, max: number, fallback: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+    return Math.min(max, Math.max(min, value));
+}
+
+export function normalizeAgentConfig(value?: Partial<AgentConfig> | null): AgentConfig {
+    const merged = {
+        ...AGENT_CONFIG_DEFAULTS,
+        ...(value || {}),
+    };
+
+    merged.minIntervalMin = clampAgentNumber(
+        merged.minIntervalMin,
+        3,
+        60,
+        AGENT_CONFIG_DEFAULTS.minIntervalMin,
+    );
+    merged.maxIntervalMin = Math.max(
+        merged.minIntervalMin,
+        clampAgentNumber(
+            merged.maxIntervalMin,
+            merged.minIntervalMin,
+            120,
+            AGENT_CONFIG_DEFAULTS.maxIntervalMin,
+        ),
+    );
+    merged.cooldownHours = clampAgentNumber(
+        merged.cooldownHours,
+        0.5,
+        8,
+        AGENT_CONFIG_DEFAULTS.cooldownHours,
+    );
+    merged.maxDailyActions = Math.round(clampAgentNumber(
+        merged.maxDailyActions,
+        1,
+        20,
+        AGENT_CONFIG_DEFAULTS.maxDailyActions,
+    ));
+    merged.maxConsecutiveIgnored = Math.round(clampAgentNumber(
+        merged.maxConsecutiveIgnored,
+        1,
+        10,
+        AGENT_CONFIG_DEFAULTS.maxConsecutiveIgnored,
+    ));
+    merged.baseProb = clampAgentNumber(
+        merged.baseProb,
+        0.05,
+        0.95,
+        AGENT_CONFIG_DEFAULTS.baseProb,
+    );
+    merged.notificationsEnabled = merged.notificationsEnabled !== false;
+    merged.debugMode = merged.debugMode === true;
+    merged.debugIntervalSec = Math.round(clampAgentNumber(
+        merged.debugIntervalSec,
+        10,
+        120,
+        AGENT_CONFIG_DEFAULTS.debugIntervalSec,
+    ));
+
+    return merged;
+}
+
+export function getForegroundTickIntervalMs(config: AgentConfig): number {
+    if (config.debugMode) {
+        return normalizeAgentConfig(config).debugIntervalSec * 1000;
+    }
+
+    return Math.min(
+        5 * 60_000,
+        Math.max(60_000, Math.floor((normalizeAgentConfig(config).minIntervalMin * 60_000) / 3)),
+    );
+}
+
 export function getAutonomousDebugEnabled(): boolean {
+    const config = getAgentConfig();
+    if (typeof config.debugMode === 'boolean') return config.debugMode;
     return safeLocalStorageGet(AUTONOMOUS_DEBUG_STORAGE_KEY) === 'true';
 }
 
 export function setAutonomousDebugEnabled(enabled: boolean): void {
     safeLocalStorageSet(AUTONOMOUS_DEBUG_STORAGE_KEY, String(enabled));
+    saveAgentConfig({ debugMode: enabled });
 }
 
 function parseBackendMetadata(
@@ -197,15 +279,22 @@ function getPrimaryApiConfig(): SecondaryApiConfig | undefined {
 export function getAgentConfig(): AgentConfig {
     const parsed = readJsonStorage<Partial<AgentConfig>>(AGENT_CONFIG_STORAGE_KEY);
     if (parsed) {
-        return { ...AGENT_CONFIG_DEFAULTS, ...parsed };
+        const normalized = normalizeAgentConfig(parsed);
+        if (typeof parsed.debugMode !== 'boolean' && safeLocalStorageGet(AUTONOMOUS_DEBUG_STORAGE_KEY) === 'true') {
+            return normalizeAgentConfig({ ...normalized, debugMode: true });
+        }
+        return normalized;
     }
-    return { ...AGENT_CONFIG_DEFAULTS };
+    return normalizeAgentConfig({
+        debugMode: safeLocalStorageGet(AUTONOMOUS_DEBUG_STORAGE_KEY) === 'true',
+    });
 }
 
 export function saveAgentConfig(config: Partial<AgentConfig>): void {
     const current = getAgentConfig();
-    const merged = { ...current, ...config };
+    const merged = normalizeAgentConfig({ ...current, ...config });
     writeJsonStorage(AGENT_CONFIG_STORAGE_KEY, merged);
+    safeLocalStorageSet(AUTONOMOUS_DEBUG_STORAGE_KEY, String(merged.debugMode));
 }
 
 export function getLifeStreamVisibleInChat(charId: string): boolean {
@@ -308,6 +397,7 @@ let activeInstance: BackendAgentManager | null = null;
 export class BackendAgentManager {
     private contextTimer: ReturnType<typeof setInterval> | null = null;
     private pollTimer: ReturnType<typeof setInterval> | null = null;
+    private tickTimer: ReturnType<typeof setInterval> | null = null;
     private eventSource: EventSource | null = null;
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     private stopped = false;
@@ -316,6 +406,8 @@ export class BackendAgentManager {
     private sseFailCount = 0;
     private useFallbackPolling = false;
     private reconnectDelay = 1000;
+    private foregroundTickInFlight = false;
+    private lastContextPushAt = 0;
 
     start(
         charId: string,
@@ -334,7 +426,8 @@ export class BackendAgentManager {
         this.useFallbackPolling = false;
         this.reconnectDelay = 1000;
 
-        const isDebug = getAutonomousDebugEnabled();
+        const agentConfig = getAgentConfig();
+        const isDebug = agentConfig.debugMode;
 
         (async () => {
             try {
@@ -351,14 +444,16 @@ export class BackendAgentManager {
                     mainApiConfig,
                     weatherConfig: getCharWeatherConfig(),
                     contextSnapshot,
-                    agentConfig: getAgentConfig(),
+                    agentConfig,
                 });
+                this.lastContextPushAt = Date.now();
 
                 console.log(`[Agent] Backend agent started for ${char.name}`);
 
                 if (this.stopped) return;
 
                 this.connectSSE();
+                this.startForegroundTickLoop(agentConfig);
                 this.contextTimer = setInterval(() => {
                     if (this.stopped) return;
                     this.pushContext().catch(error => {
@@ -366,7 +461,7 @@ export class BackendAgentManager {
                             console.warn('[Agent] Context push error:', error.message);
                         }
                     });
-                }, 5 * 60 * 1000);
+                }, agentConfig.debugMode ? 60_000 : 5 * 60 * 1000);
             } catch (error: any) {
                 console.error('[Agent] Failed to start backend agent:', error.message);
             }
@@ -391,9 +486,54 @@ export class BackendAgentManager {
             clearInterval(this.pollTimer);
             this.pollTimer = null;
         }
+        if (this.tickTimer) {
+            clearInterval(this.tickTimer);
+            this.tickTimer = null;
+        }
         if (this.contextTimer) {
             clearInterval(this.contextTimer);
             this.contextTimer = null;
+        }
+    }
+
+    private startForegroundTickLoop(config: AgentConfig): void {
+        if (this.tickTimer || this.stopped) return;
+
+        const intervalMs = getForegroundTickIntervalMs(config);
+        if (config.debugMode) {
+            console.log(`[Agent] Foreground tick loop started (${intervalMs}ms)`);
+        }
+
+        this.tickTimer = setInterval(() => {
+            if (this.stopped) return;
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+
+            this.triggerForegroundTick().catch((error: any) => {
+                if (getAutonomousDebugEnabled()) {
+                    console.warn('[Agent] Foreground tick failed:', error.message);
+                }
+            });
+        }, intervalMs);
+    }
+
+    private async triggerForegroundTick(): Promise<void> {
+        if (!this.charId || this.foregroundTickInFlight) return;
+
+        this.foregroundTickInFlight = true;
+        try {
+            const isDebug = getAutonomousDebugEnabled();
+            const shouldRefreshContext = isDebug || Date.now() - this.lastContextPushAt > 2 * 60_000;
+            if (shouldRefreshContext) {
+                await this.pushContext();
+            }
+
+            const tick = await requestAgentTick(this.charId);
+            if (isDebug) {
+                const summary = tick.result?.skipped || tick.result?.action || 'none';
+                console.log(`[Agent] Foreground tick result: ${summary}`);
+            }
+        } finally {
+            this.foregroundTickInFlight = false;
         }
     }
 
@@ -638,6 +778,7 @@ export class BackendAgentManager {
 
             const contextSnapshot = await buildContextSnapshot(this.charId, freshChar);
             await pushAgentContextSnapshot(contextSnapshot);
+            this.lastContextPushAt = Date.now();
 
             if (getAutonomousDebugEnabled()) {
                 console.log('[Agent] Context pushed to backend');

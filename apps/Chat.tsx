@@ -661,6 +661,10 @@ const Chat: React.FC = () => {
     };
 
     const handleBgUpload = async (file: File) => {
+        if (!char) {
+            addToast('角色资料同步中，请稍后再试', 'error');
+            return;
+        }
         try {
             const dataUrl = await processImage(file, { skipCompression: true });
             updateCharacter(char.id, { chatBackground: dataUrl });
@@ -671,6 +675,10 @@ const Chat: React.FC = () => {
     };
 
     const saveSettings = () => {
+        if (!char) {
+            addToast('角色资料同步中，请稍后再试', 'error');
+            return;
+        }
         updateCharacter(char.id, {
             contextLimit: settingsContextLimit,
             hideSystemLogs: settingsHideSysLogs
@@ -708,6 +716,10 @@ const Chat: React.FC = () => {
     };
 
     const handleSetHistoryStart = (messageId: number | undefined) => {
+        if (!char) {
+            addToast('角色资料同步中，请稍后再试', 'error');
+            return;
+        }
         updateCharacter(char.id, { hideBeforeMessageId: messageId });
         setModalType('none');
         addToast(messageId ? '已隐藏历史消息' : '已恢复全部历史记录', 'success');
@@ -832,7 +844,10 @@ const Chat: React.FC = () => {
         if (!selectedMessage) return;
         setReplyTarget({
             ...selectedMessage,
-            metadata: { ...selectedMessage.metadata, senderName: selectedMessage.role === 'user' ? '我' : char.name }
+            metadata: {
+                ...selectedMessage.metadata,
+                senderName: selectedMessage.role === 'user' ? '我' : (char?.name || '角色'),
+            }
         });
         setModalType('none');
     };
@@ -935,7 +950,7 @@ const Chat: React.FC = () => {
             return;
         }
 
-        const filename = `voice_${char.name}_${new Date().toISOString().slice(0, 10)}_${msgId}.mp3`;
+        const filename = `voice_${char?.name || 'character'}_${new Date().toISOString().slice(0, 10)}_${msgId}.mp3`;
 
         // Try navigator.share first (works on mobile PWA)
         if (navigator.share && navigator.canShare) {

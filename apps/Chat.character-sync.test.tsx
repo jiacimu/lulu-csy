@@ -209,7 +209,12 @@ describe('Chat character sync fallback', () => {
 
         expect(screen.getByText('正在载入最近的聊天记录...')).toBeInTheDocument();
 
-        resolveRecentMessages?.({ messages: [], totalCount: 0 });
+        const fulfillRecentMessages = resolveRecentMessages as
+            | ((value: { messages: any[]; totalCount: number }) => void)
+            | null;
+        if (fulfillRecentMessages) {
+            fulfillRecentMessages({ messages: [], totalCount: 0 });
+        }
 
         await waitFor(() => {
             expect(screen.queryByText('正在载入最近的聊天记录...')).not.toBeInTheDocument();

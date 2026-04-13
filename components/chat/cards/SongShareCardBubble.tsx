@@ -1,5 +1,6 @@
 import React, { useCallback } from 'react';
 import type { SongCardMetadata } from '../../../types/music';
+import type { NeteaseSong } from '../../../types/music';
 
 // Import module-level play function to avoid unnecessary hook re-renders
 // playSongInternal is a plain async function, not a hook
@@ -28,7 +29,8 @@ const SongShareCardBubble: React.FC<SongShareCardBubbleProps> = ({ metadata }) =
         if (!metadata.songId || metadata.songId === 0) return;
 
         // Build a minimal NeteaseSong object for the player
-        const song = {
+        const song: NeteaseSong = {
+            kind: 'song',
             id: metadata.songId,
             name: metadata.songName,
             artists: [{ id: 0, name: metadata.artist }],
