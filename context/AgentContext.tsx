@@ -4,9 +4,10 @@ import {
     getAgentConfig,
     type SecondaryApiConfig,
 } from '../utils/autonomousAgent';
+import { didCharacterContextRelevantFieldsChange } from '../utils/agentContextSnapshot';
 import { disablePushSubscription,initPushSubscription } from '../utils/pushSubscription';
 import { getSecondaryApiConfig as getRuntimeSecondaryApiConfig } from '../utils/runtimeConfig';
-import { useCharacter } from './CharacterContext';
+import { consumeCharacterUpdateOptions,useCharacter } from './CharacterContext';
 import { useConfig } from './ConfigContext';
 
 export interface AgentContextType {}
@@ -102,6 +103,18 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (!isAgentReady || !activeCharacter) return;
         if (!previousCharacter || previousCharacter.id !== activeCharacter.id) return;
         if (previousCharacter === activeCharacter) return;
+
+        const didContextRelevantFieldsChange = didCharacterContextRelevantFieldsChange(
+            previousCharacter,
+            activeCharacter,
+        );
+        const updateOptions = consumeCharacterUpdateOptions(activeCharacter.id);
+        if (!didContextRelevantFieldsChange) {
+            return;
+        }
+        if (updateOptions?.skipImmediateAgentContextPush) {
+            return;
+        }
 
         managerRef.current?.pushContext(activeCharacter).catch((error) => {
             console.warn('[Agent] Failed to push refreshed character context:', error);

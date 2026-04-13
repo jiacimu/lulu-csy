@@ -1,6 +1,10 @@
 import { describe,expect,it } from 'vitest';
 
-import { buildCoreMemoryDigest,buildMountedWorldbooksDigest } from '../utils/agentContextSnapshot';
+import {
+    buildCoreMemoryDigest,
+    buildMountedWorldbooksDigest,
+    didCharacterContextRelevantFieldsChange,
+} from '../utils/agentContextSnapshot';
 
 describe('agentContextSnapshot', () => {
     it('prefers refinedMemories over topMemory fallback', () => {
@@ -51,5 +55,53 @@ describe('agentContextSnapshot', () => {
         expect(digest).toContain('旧城区规则');
         expect(digest).toContain('生活习惯');
         expect(digest!.length).toBeLessThanOrEqual(1200);
+    });
+
+    it('ignores location-only changes when deciding whether to push context immediately', () => {
+        const previous = {
+            name: 'Sully',
+            description: '测试角色',
+            systemPrompt: 'stay in character',
+            worldview: '现代都市',
+            cityOverride: '上海',
+            cityAdcode: '310000',
+            isFictionalCity: false,
+            mountedWorldbooks: [],
+            refinedMemories: {},
+            activeMemoryMonths: [],
+            moodState: {
+                dopamine: 0.5,
+                updatedAt: 1,
+            },
+        };
+        const next = {
+            ...previous,
+            cityOverride: '杭州',
+            cityAdcode: '330100',
+        };
+
+        expect(didCharacterContextRelevantFieldsChange(previous, next)).toBe(false);
+    });
+
+    it('detects prompt-relevant changes when deciding whether to push context immediately', () => {
+        const previous = {
+            name: 'Sully',
+            description: '测试角色',
+            systemPrompt: 'stay in character',
+            worldview: '现代都市',
+            mountedWorldbooks: [],
+            refinedMemories: {},
+            activeMemoryMonths: [],
+            moodState: {
+                dopamine: 0.5,
+                updatedAt: 1,
+            },
+        };
+        const next = {
+            ...previous,
+            description: '更新后的角色描述',
+        };
+
+        expect(didCharacterContextRelevantFieldsChange(previous, next)).toBe(true);
     });
 });

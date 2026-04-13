@@ -4,13 +4,30 @@ import { DB } from '../utils/db';
 import { preloadImages } from '../utils/preloadResources';
 import { useNotification } from './NotificationContext';
 
+export interface CharacterUpdateOptions {
+    skipImmediateAgentContextPush?: boolean;
+    reason?: 'location' | 'default';
+}
+
+const pendingCharacterUpdateOptions = new Map<string, CharacterUpdateOptions>();
+
+export function consumeCharacterUpdateOptions(id: string): CharacterUpdateOptions | null {
+    const options = pendingCharacterUpdateOptions.get(id) || null;
+    pendingCharacterUpdateOptions.delete(id);
+    return options;
+}
+
 export interface CharacterContextType {
     characters: CharacterProfile[];
     setCharacters: React.Dispatch<React.SetStateAction<CharacterProfile[]>>;
     activeCharacterId: string;
     setActiveCharacterId: (id: string) => void;
     addCharacter: () => void;
-    updateCharacter: (id: string, updates: Partial<CharacterProfile>) => void;
+    updateCharacter: (
+        id: string,
+        updates: Partial<CharacterProfile>,
+        options?: CharacterUpdateOptions,
+    ) => void;
     deleteCharacter: (id: string) => void;
 
     worldbooks: Worldbook[];
@@ -202,7 +219,17 @@ export const CharacterProvider: React.FC<CharacterProviderProps> = ({
         await DB.saveCharacter(newChar);
     };
 
-    const updateCharacter = async (id: string, updates: Partial<CharacterProfile>) => {
+    const updateCharacter = async (
+        id: string,
+        updates: Partial<CharacterProfile>,
+        options?: CharacterUpdateOptions,
+    ) => {
+        if (options && (options.skipImmediateAgentContextPush || options.reason)) {
+            pendingCharacterUpdateOptions.set(id, { ...options });
+        } else {
+            pendingCharacterUpdateOptions.delete(id);
+        }
+
         setCharacters(prev => {
             const updated = prev.map(c => c.id === id ? { ...c, ...updates } : c);
             const target = updated.find(c => c.id === id);

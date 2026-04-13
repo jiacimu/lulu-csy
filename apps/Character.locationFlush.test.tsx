@@ -157,6 +157,9 @@ describe('Character location draft flush', () => {
 
         expect(mockUpdateCharacter).toHaveBeenCalledWith('char-1', expect.objectContaining({
             cityOverride: '新月城',
+        }), expect.objectContaining({
+            skipImmediateAgentContextPush: true,
+            reason: 'location',
         }));
     });
 
@@ -172,6 +175,9 @@ describe('Character location draft flush', () => {
 
         expect(mockUpdateCharacter).toHaveBeenCalledWith('char-1', expect.objectContaining({
             cityOverride: '白露城',
+        }), expect.objectContaining({
+            skipImmediateAgentContextPush: true,
+            reason: 'location',
         }));
         expect(mockSetActiveCharacterId).toHaveBeenCalledWith('char-1');
         expect(mockOpenApp).toHaveBeenCalledWith(AppID.Chat);
@@ -189,6 +195,9 @@ describe('Character location draft flush', () => {
 
         expect(mockUpdateCharacter).toHaveBeenCalledWith('char-1', expect.objectContaining({
             cityOverride: '流云城',
+        }), expect.objectContaining({
+            skipImmediateAgentContextPush: true,
+            reason: 'location',
         }));
         expect(screen.getByText('Memory Center')).toBeInTheDocument();
     });
@@ -205,6 +214,9 @@ describe('Character location draft flush', () => {
 
         expect(mockUpdateCharacter).toHaveBeenCalledWith('char-1', expect.objectContaining({
             cityOverride: '夜航城',
+        }), expect.objectContaining({
+            skipImmediateAgentContextPush: true,
+            reason: 'location',
         }));
         expect(screen.getByText('夜航城')).toBeInTheDocument();
     });

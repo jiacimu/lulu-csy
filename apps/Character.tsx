@@ -16,9 +16,13 @@ import type { CharacterCitySectionHandle } from '../components/character/Charact
 import CharacterLocationSummaryCard from '../components/character/CharacterLocationSummaryCard';
 import { safeResponseJson } from '../utils/safeApi';
 import { useCharacterScreenDeps } from '../hooks/useCharacterScreenDeps';
+import type { CharacterUpdateOptions } from '../context/CharacterContext';
 
 const CHARACTER_AUTO_SAVE_DEBOUNCE_MS = 350;
 type MountedWorldbook = NonNullable<CharacterProfile['mountedWorldbooks']>[number];
+type CharacterPatchCommitOptions = CharacterUpdateOptions & {
+    persistImmediately?: boolean;
+};
 
 function getWorldbookPositionBadgeClass(position?: MountedWorldbook['position']): string {
     if (position === 'top') {
@@ -310,10 +314,16 @@ const CharacterComponent: React.FC = () => {
         };
     }, [flushPendingAutoSave]);
 
-    const commitCharacterPatch = useCallback((patch: Partial<CharacterProfile>, options?: { persistImmediately?: boolean }) => {
+    const commitCharacterPatch = useCallback((patch: Partial<CharacterProfile>, options?: CharacterPatchCommitOptions) => {
         const activeEditingId = editingIdRef.current;
         const activeFormData = formDataRef.current;
         const canUpdateLocalForm = Boolean(activeFormData && activeEditingId && activeFormData.id === activeEditingId);
+        const updateOptions: CharacterUpdateOptions | undefined = options
+            ? {
+                skipImmediateAgentContextPush: options.skipImmediateAgentContextPush,
+                reason: options.reason,
+            }
+            : undefined;
 
         if (canUpdateLocalForm) {
             const nextFormData = { ...activeFormData!, ...patch };
@@ -323,7 +333,7 @@ const CharacterComponent: React.FC = () => {
                 cancelPendingAutoSave();
                 formDataRef.current = nextFormData;
                 setFormData(nextFormData);
-                updateCharacterRef.current(activeEditingId!, nextFormData);
+                updateCharacterRef.current(activeEditingId!, nextFormData, updateOptions);
                 return;
             }
 
@@ -338,7 +348,7 @@ const CharacterComponent: React.FC = () => {
         }
 
         if (activeEditingId && (options?.persistImmediately || !canUpdateLocalForm)) {
-            updateCharacterRef.current(activeEditingId, patch);
+            updateCharacterRef.current(activeEditingId, patch, updateOptions);
         }
     }, [cancelPendingAutoSave]);
 
@@ -1203,7 +1213,11 @@ ${isInitialGeneration ? `
                                     isFictionalCity={formData.isFictionalCity}
                                     cityReferenceReal={formData.cityReferenceReal}
                                     onFieldChange={handleChange}
-                                    onImmediatePatchCommit={(patch) => commitCharacterPatch(patch as Partial<CharacterProfile>, { persistImmediately: true })}
+                                    onImmediatePatchCommit={(patch) => commitCharacterPatch(patch as Partial<CharacterProfile>, {
+                                        persistImmediately: true,
+                                        skipImmediateAgentContextPush: true,
+                                        reason: 'location',
+                                    })}
                                     onSaved={(didSave) => addToast(didSave ? '地理设定已保存' : '没有需要保存的更改', didSave ? 'success' : 'info')}
                                 />
                             </div>
