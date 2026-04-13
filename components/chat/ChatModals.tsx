@@ -167,6 +167,18 @@ const ChatModals: React.FC<ChatModalsProps> = ({
         setModalType('none');
     };
 
+    const handleOpenWorkshop = (template?: CustomStatusTemplate) => {
+        if (template) {
+            onSaveCustomTemplate?.({
+                ...template,
+                _setActiveOnly: true,
+            });
+        }
+
+        setModalType('none');
+        window.setTimeout(() => openApp(AppID.StatusWorkshop), 0);
+    };
+
     return (
         <>
             <Modal
@@ -368,10 +380,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                             <div className="flex items-center justify-between mb-2">
                                 <span className="text-[11px] font-bold text-slate-500">自定义模板</span>
                                 <button
-                                    onClick={() => {
-                                        setModalType('none');
-                                        openApp(AppID.StatusWorkshop);
-                                    }}
+                                    onClick={() => handleOpenWorkshop()}
                                     className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-primary/10 text-primary hover:bg-primary/20 transition-all active:scale-95"
                                 >
                                     编辑工坊 →
@@ -384,30 +393,45 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                             || (!activeCharacter.activeCustomTemplateId && tpl.id === customStatusTemplates[0].id);
 
                                         return (
-                                            <button
+                                            <div
                                                 key={tpl.id}
-                                                onClick={() => onSaveCustomTemplate?.({
-                                                    ...tpl,
-                                                    _setActiveOnly: true,
-                                                })}
-                                                className={`w-full text-left p-3 rounded-xl transition-all border ${
+                                                className={`flex items-start gap-2 rounded-xl border p-3 transition-all ${
                                                     isActive
                                                         ? 'bg-primary/8 border-primary/25 ring-1 ring-primary/15'
                                                         : 'bg-white border-slate-100 hover:bg-slate-50 active:scale-[0.97]'
                                                 }`}
                                             >
-                                                <div className="flex items-center gap-2">
-                                                    <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-primary' : 'bg-slate-300'}`} />
-                                                    <span className={`text-[13px] font-bold ${isActive ? 'text-primary' : 'text-slate-600'}`}>
-                                                        {tpl.name || '未命名方案'}
-                                                    </span>
-                                                </div>
-                                                {tpl.systemPrompt && (
-                                                    <p className="text-[10px] text-slate-400 mt-1 pl-3.5 truncate">
-                                                        {tpl.systemPrompt.substring(0, 60)}…
-                                                    </p>
-                                                )}
-                                            </button>
+                                                <button
+                                                    onClick={() => onSaveCustomTemplate?.({
+                                                        ...tpl,
+                                                        _setActiveOnly: true,
+                                                    })}
+                                                    className="min-w-0 flex-1 text-left"
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-primary' : 'bg-slate-300'}`} />
+                                                        <span className={`text-[13px] font-bold ${isActive ? 'text-primary' : 'text-slate-600'}`}>
+                                                            {tpl.name || '未命名方案'}
+                                                        </span>
+                                                    </div>
+                                                    {tpl.systemPrompt && (
+                                                        <p className="text-[10px] text-slate-400 mt-1 pl-3.5 truncate">
+                                                            {tpl.systemPrompt.substring(0, 60)}…
+                                                        </p>
+                                                    )}
+                                                </button>
+                                                <button
+                                                    onClick={() => handleOpenWorkshop(tpl)}
+                                                    className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-all ${
+                                                        isActive
+                                                            ? 'bg-primary/12 text-primary hover:bg-primary/18'
+                                                            : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                                    }`}
+                                                    title="在工坊中编辑这个方案"
+                                                >
+                                                    编辑
+                                                </button>
+                                            </div>
                                         );
                                     })}
                                 </div>

@@ -8,6 +8,8 @@
     "preview": "vite preview",
     "cap:sync": "cap sync",
     "cap:android": "cap open android",
+    "audit:pages-git": "node ./scripts/audit-pages-git-build.mjs",
+    "sync:pages-env": "node ./scripts/sync-pages-env.mjs",
     "test": "vitest",
     "test:run": "vitest run"
   },

@@ -135,8 +135,11 @@ const StatusWorkshopApp: React.FC = () => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [previewHeight, setPreviewHeight] = useState(240);
     const [previewReady, setPreviewReady] = useState(false);
+    const [showMobilePreview, setShowMobilePreview] = useState(false);
 
     const previewRef = useRef<HTMLIFrameElement>(null);
+    const templateNameInputRef = useRef<HTMLInputElement>(null);
+    const systemPromptRef = useRef<HTMLTextAreaElement>(null);
 
     useEffect(() => {
         const nextTemplates = activeChar?.customStatusTemplates || [];
@@ -199,6 +202,24 @@ const StatusWorkshopApp: React.FC = () => {
             return next;
         });
     }, [activeTemplateId]);
+
+    const handleEditCurrentTemplate = useCallback(() => {
+        if (!activeTemplate) {
+            addToast('请先选择一个方案', 'error');
+            return;
+        }
+
+        setActiveTab('prompt');
+
+        window.setTimeout(() => {
+            if (!activeTemplate.name.trim()) {
+                templateNameInputRef.current?.focus();
+                return;
+            }
+
+            systemPromptRef.current?.focus();
+        }, 0);
+    }, [activeTemplate, addToast]);
 
     const buildPreviewHtml = useCallback((template: CustomStatusTemplate | null) => {
         if (!template) {
@@ -413,13 +434,13 @@ ${fieldListStr}
                 <div className="rounded-[28px] border border-white/[0.06] bg-white/[0.04] backdrop-blur-sm">
                     <button
                         onClick={() => setShowGenerator(prev => !prev)}
-                        className="flex w-full items-center justify-between px-5 py-4 text-left"
+                        className="flex w-full items-start justify-between gap-3 px-4 py-4 text-left sm:items-center sm:px-5"
                     >
-                        <div>
+                        <div className="min-w-0 flex-1">
                             <div className="text-[13px] font-semibold text-white/80">AI 生成</div>
                             <p className="mt-1 text-[11px] leading-5 text-white/30">描述风格、配置字段，一键让副 API 生成 prompt / regex / HTML 三件套。</p>
                         </div>
-                        <div className={`text-white/40 transition-transform ${showGenerator ? 'rotate-180' : ''}`}>
+                        <div className={`mt-1 shrink-0 text-white/40 transition-transform sm:mt-0 ${showGenerator ? 'rotate-180' : ''}`}>
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.7} stroke="currentColor" className="h-4 w-4">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
                             </svg>
@@ -427,7 +448,7 @@ ${fieldListStr}
                     </button>
 
                     {showGenerator && (
-                        <div className="space-y-4 border-t border-white/[0.05] px-5 pb-5 pt-4">
+                        <div className="space-y-4 border-t border-white/[0.05] px-4 pb-5 pt-4 sm:px-5">
                             <div>
                                 <label className="mb-2 block text-[11px] font-semibold tracking-wide text-white/45">风格描述</label>
                                 <textarea
@@ -451,7 +472,11 @@ ${fieldListStr}
 
                                 <div className="space-y-2">
                                     {genFields.map((field, index) => (
-                                        <div key={`${index}-${field.name}`} className="grid grid-cols-[108px,1fr,40px] gap-2">
+                                        <div
+                                            key={`${index}-${field.name}`}
+                                            className="rounded-2xl border border-white/[0.04] bg-white/[0.02] p-2.5 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0"
+                                        >
+                                            <div className="grid grid-cols-[minmax(0,1fr),40px] gap-2 sm:grid-cols-[108px,minmax(0,1fr),40px]">
                                             <input
                                                 value={field.name}
                                                 onChange={e => setGenFields(prev => prev.map((item, itemIndex) => (
@@ -460,8 +485,19 @@ ${fieldListStr}
                                                         : item
                                                 )))}
                                                 placeholder="字段名"
-                                                className="rounded-xl border border-white/[0.05] bg-white/[0.03] px-3 py-2.5 text-[12px] text-white/75 outline-none transition-colors placeholder:text-white/20 focus:border-white/15"
+                                                className="min-w-0 rounded-xl border border-white/[0.05] bg-white/[0.03] px-3 py-2.5 text-[12px] text-white/75 outline-none transition-colors placeholder:text-white/20 focus:border-white/15"
                                             />
+                                            <button
+                                                onClick={() => setGenFields(prev => prev.filter((_, itemIndex) => itemIndex !== index))}
+                                                disabled={genFields.length === 1}
+                                                className={`flex h-10 w-10 items-center justify-center rounded-xl border text-[12px] transition-all sm:order-3 ${
+                                                    genFields.length === 1
+                                                        ? 'cursor-not-allowed border-white/[0.04] bg-white/[0.03] text-white/15'
+                                                        : 'border-white/[0.05] bg-white/[0.05] text-white/40 hover:bg-white/[0.08]'
+                                                }`}
+                                            >
+                                                ×
+                                            </button>
                                             <input
                                                 value={field.desc}
                                                 onChange={e => setGenFields(prev => prev.map((item, itemIndex) => (
@@ -470,19 +506,9 @@ ${fieldListStr}
                                                         : item
                                                 )))}
                                                 placeholder="字段说明"
-                                                className="rounded-xl border border-white/[0.05] bg-white/[0.03] px-3 py-2.5 text-[12px] text-white/75 outline-none transition-colors placeholder:text-white/20 focus:border-white/15"
+                                                className="col-span-2 rounded-xl border border-white/[0.05] bg-white/[0.03] px-3 py-2.5 text-[12px] text-white/75 outline-none transition-colors placeholder:text-white/20 focus:border-white/15 sm:order-2 sm:col-span-1"
                                             />
-                                            <button
-                                                onClick={() => setGenFields(prev => prev.filter((_, itemIndex) => itemIndex !== index))}
-                                                disabled={genFields.length === 1}
-                                                className={`rounded-xl border text-[12px] transition-all ${
-                                                    genFields.length === 1
-                                                        ? 'cursor-not-allowed border-white/[0.04] bg-white/[0.03] text-white/15'
-                                                        : 'border-white/[0.05] bg-white/[0.05] text-white/40 hover:bg-white/[0.08]'
-                                                }`}
-                                            >
-                                                ×
-                                            </button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -530,10 +556,11 @@ ${fieldListStr}
                 <div className="rounded-[28px] border border-white/[0.06] bg-white/[0.04] p-5 backdrop-blur-sm">
                     <label className="mb-3 block text-[11px] font-semibold tracking-wide text-white/45">System Prompt</label>
                     <textarea
+                        ref={systemPromptRef}
                         value={activeTemplate.systemPrompt}
                         onChange={e => updateActiveTemplate({ systemPrompt: e.target.value })}
                         placeholder="告诉角色 AI 应该如何在回复末尾输出 <status>...</status> 结构化数据。"
-                        className="h-56 w-full resize-none rounded-2xl border border-white/[0.05] bg-white/[0.03] px-4 py-4 text-[12px] leading-6 text-white/80 outline-none transition-colors placeholder:text-white/18 focus:border-white/15"
+                        className="h-48 w-full resize-none rounded-2xl border border-white/[0.05] bg-white/[0.03] px-4 py-4 text-[12px] leading-6 text-white/80 outline-none transition-colors placeholder:text-white/18 focus:border-white/15 sm:h-56"
                         spellCheck={false}
                     />
                     <p className="mt-3 text-[11px] leading-6 text-white/28">这段提示会注入到副模型，决定它输出的状态块格式和字段顺序。</p>
@@ -545,7 +572,7 @@ ${fieldListStr}
                         value={activeTemplate.extractRegex}
                         onChange={e => updateActiveTemplate({ extractRegex: e.target.value })}
                         placeholder="<status>\\s*时间:\\s*(.*?)\\s*地点:\\s*(.*?)\\s*动作:\\s*(.*?)\\s*<\\/status>"
-                        className="h-28 w-full resize-none rounded-2xl border border-white/[0.05] bg-[#0d0d1a] px-4 py-4 font-mono text-[12px] leading-6 text-emerald-300/60 outline-none transition-colors placeholder:text-white/15 focus:border-white/15"
+                        className="h-24 w-full resize-none rounded-2xl border border-white/[0.05] bg-[#0d0d1a] px-4 py-4 font-mono text-[12px] leading-6 text-emerald-300/60 outline-none transition-colors placeholder:text-white/15 focus:border-white/15 sm:h-28"
                         spellCheck={false}
                     />
                 </div>
@@ -592,7 +619,7 @@ ${fieldListStr}
                         value={activeTemplate.htmlTemplate || ''}
                         onChange={e => updateActiveTemplate({ htmlTemplate: e.target.value })}
                         placeholder="<html><head><meta charset='UTF-8'></head><body>...</body></html>"
-                        className="h-[460px] w-full resize-none rounded-2xl border border-white/[0.05] bg-[#0d0d1a] px-4 py-4 font-mono text-[12px] leading-6 text-emerald-300/60 outline-none transition-colors placeholder:text-white/15 focus:border-white/15"
+                        className="h-[42svh] min-h-[280px] w-full resize-none rounded-2xl border border-white/[0.05] bg-[#0d0d1a] px-4 py-4 font-mono text-[12px] leading-6 text-emerald-300/60 outline-none transition-colors placeholder:text-white/15 focus:border-white/15 sm:h-[460px] sm:min-h-0"
                         spellCheck={false}
                     />
                 </div>
@@ -611,82 +638,93 @@ ${fieldListStr}
                 <div className="absolute bottom-[-90px] left-[-70px] h-72 w-72 rounded-full bg-emerald-500/[0.05] blur-[110px]" />
             </div>
 
-            <div className="relative z-10 flex shrink-0 items-center justify-between px-5 pb-3 pt-4">
+            <div className="relative z-10 flex shrink-0 items-start justify-between gap-3 px-4 pb-3 pt-3 sm:px-5 sm:pt-4">
                 <button
                     onClick={closeApp}
-                    className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.05] bg-white/[0.06] backdrop-blur-sm transition-all hover:bg-white/10 active:scale-90"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/[0.05] bg-white/[0.06] backdrop-blur-sm transition-all hover:bg-white/10 active:scale-90"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-4 w-4 text-white/70">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
                     </svg>
                 </button>
 
-                <div className="px-4 text-center">
+                <div className="min-w-0 flex-1 px-1 text-center">
                     <h1 className="text-[15px] font-semibold tracking-wide text-white/90">状态栏工坊</h1>
-                    <p className="mt-0.5 text-[10px] text-white/30">
+                    <p className="mt-0.5 truncate text-[10px] text-white/30">
                         {activeChar ? `为 ${activeChar.name} 管理多套方案` : '请先选择角色'}
                     </p>
                 </div>
 
                 <button
                     onClick={handleSave}
-                    className="rounded-full border border-white/[0.06] bg-white/[0.08] px-4 py-2 text-[12px] font-semibold text-white/80 transition-all hover:bg-white/12 active:scale-95"
+                    className="min-h-[42px] shrink-0 rounded-full border border-white/[0.06] bg-white/[0.08] px-4 py-2 text-[12px] font-semibold text-white/80 transition-all hover:bg-white/12 active:scale-95"
                 >
                     保存
                 </button>
             </div>
 
-            <div className="relative z-10 px-4 pb-4">
+            <div className="relative z-10 px-4 pb-3 sm:pb-4">
                 <div className="rounded-[30px] border border-white/[0.06] bg-white/[0.04] p-4 backdrop-blur-sm">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <div className="flex-1 overflow-x-auto pb-1">
-                            <div className="flex min-w-max gap-2">
-                                {templates.map(template => {
-                                    const isActive = template.id === activeTemplateId;
-                                    return (
-                                        <div
-                                            key={template.id}
-                                            className={`flex items-center gap-1 rounded-2xl border px-2 py-1 ${
-                                                isActive
-                                                    ? 'bg-white/10 border-white/15 text-white/80'
-                                                    : 'bg-white/[0.04] border-white/[0.05] text-white/45'
-                                            }`}
+                    <div className="overflow-x-auto pb-1">
+                        <div className="flex min-w-max gap-2">
+                            {templates.map(template => {
+                                const isActive = template.id === activeTemplateId;
+                                return (
+                                    <div
+                                        key={template.id}
+                                        className={`flex items-center gap-1 rounded-2xl border px-2 py-1 ${
+                                            isActive
+                                                ? 'bg-white/10 border-white/15 text-white/80'
+                                                : 'bg-white/[0.04] border-white/[0.05] text-white/45'
+                                        }`}
+                                    >
+                                        <button
+                                            onClick={() => setActiveTemplateId(template.id)}
+                                            className="rounded-xl px-2 py-1 text-[12px] font-medium transition-opacity hover:opacity-100"
                                         >
-                                            <button
-                                                onClick={() => setActiveTemplateId(template.id)}
-                                                className="rounded-xl px-2 py-1 text-[12px] font-medium transition-opacity hover:opacity-100"
-                                            >
-                                                {template.name || '未命名方案'}
-                                            </button>
-                                            <button
-                                                onClick={() => handleDeleteTemplate(template.id)}
-                                                className="flex h-6 w-6 items-center justify-center rounded-lg text-[14px] text-white/35 transition-all hover:bg-white/[0.08] hover:text-white/70"
-                                                title="删除方案"
-                                            >
-                                                ×
-                                            </button>
-                                        </div>
-                                    );
-                                })}
-
-                                {templates.length === 0 && (
-                                    <div className="rounded-2xl border border-dashed border-white/[0.08] px-4 py-2 text-[12px] text-white/28">
-                                        还没有任何方案
+                                            {template.name || '未命名方案'}
+                                        </button>
+                                        <button
+                                            onClick={() => handleDeleteTemplate(template.id)}
+                                            className="flex h-6 w-6 items-center justify-center rounded-lg text-[14px] text-white/35 transition-all hover:bg-white/[0.08] hover:text-white/70"
+                                            title="删除方案"
+                                        >
+                                            ×
+                                        </button>
                                     </div>
-                                )}
-                            </div>
-                        </div>
+                                );
+                            })}
 
+                            {templates.length === 0 && (
+                                <div className="rounded-2xl border border-dashed border-white/[0.08] px-4 py-2 text-[12px] text-white/28">
+                                    还没有任何方案
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
                         <button
                             onClick={handleCreateTemplate}
-                            className="rounded-2xl border border-white/[0.05] bg-white/[0.06] px-3 py-2 text-[12px] font-semibold text-white/75 transition-all hover:bg-white/10 active:scale-[0.98]"
+                            className="min-h-[42px] flex-1 rounded-2xl border border-white/[0.05] bg-white/[0.06] px-3 py-2 text-[12px] font-semibold text-white/75 transition-all hover:bg-white/10 active:scale-[0.98] sm:flex-none"
                         >
                             + 新建方案
                         </button>
                         <button
+                            onClick={handleEditCurrentTemplate}
+                            disabled={!activeTemplate}
+                            className={`min-h-[42px] flex-1 rounded-2xl border px-3 py-2 text-[12px] font-semibold transition-all sm:flex-none ${
+                                activeTemplate
+                                    ? 'border-white/[0.05] bg-white/[0.05] text-white/75 hover:bg-white/10 active:scale-[0.98]'
+                                    : 'cursor-not-allowed border-white/[0.04] bg-white/[0.03] text-white/20'
+                            }`}
+                        >
+                            编辑当前方案
+                        </button>
+                        <button
                             onClick={handleCopyTemplate}
                             disabled={!activeTemplate}
-                            className={`rounded-2xl border px-3 py-2 text-[12px] font-semibold transition-all ${
+                            className={`min-h-[42px] flex-1 rounded-2xl border px-3 py-2 text-[12px] font-semibold transition-all sm:flex-none ${
                                 activeTemplate
                                     ? 'border-white/[0.05] bg-white/[0.04] text-white/65 hover:bg-white/[0.08] active:scale-[0.98]'
                                     : 'cursor-not-allowed border-white/[0.04] bg-white/[0.03] text-white/20'
@@ -698,8 +736,14 @@ ${fieldListStr}
 
                     {activeTemplate && (
                         <div className="mt-3">
-                            <label className="mb-2 block text-[11px] font-semibold tracking-wide text-white/40">方案名称</label>
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                                <label className="block text-[11px] font-semibold tracking-wide text-white/40">方案名称</label>
+                                <span className="truncate text-[10px] text-white/28">
+                                    当前编辑: {activeTemplate.name || '未命名方案'}
+                                </span>
+                            </div>
                             <input
+                                ref={templateNameInputRef}
                                 value={activeTemplate.name}
                                 onChange={e => updateActiveTemplate({ name: e.target.value })}
                                 placeholder="给当前方案起个名字"
@@ -710,9 +754,50 @@ ${fieldListStr}
                 </div>
             </div>
 
-            <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-4 px-4 pb-4 lg:flex-row">
-                <div className="min-h-0 flex-1 rounded-[32px] border border-white/[0.06] bg-white/[0.03] p-4 backdrop-blur-sm">
-                    <div className="mb-4 flex gap-2">
+            <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-3 px-4 pb-4 sm:gap-4 lg:flex-row">
+                <div className="lg:order-2 lg:w-[400px] lg:shrink-0">
+                    <div className="rounded-[32px] border border-white/[0.06] bg-white/[0.03] p-4 backdrop-blur-sm">
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                                <div className="text-[13px] font-semibold text-white/80">实时预览</div>
+                                <p className="mt-1 text-[11px] text-white/28">iframe 只加载一次，后续通过 postMessage 更新内容。</p>
+                            </div>
+                            <button
+                                onClick={() => setShowMobilePreview(prev => !prev)}
+                                className="min-h-[42px] shrink-0 rounded-full border border-white/[0.05] bg-white/[0.05] px-3 py-2 text-[11px] font-semibold text-white/65 transition-all hover:bg-white/[0.09] active:scale-[0.98] lg:hidden"
+                                aria-expanded={showMobilePreview}
+                            >
+                                {showMobilePreview ? '收起预览' : '展开预览'}
+                            </button>
+                            <div className="hidden rounded-full border border-white/[0.05] bg-white/[0.05] px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-white/30 lg:block">
+                                preview
+                            </div>
+                        </div>
+
+                        <div
+                            className={`overflow-hidden transition-all duration-300 ${
+                                showMobilePreview
+                                    ? 'mt-3 max-h-[960px] opacity-100'
+                                    : 'max-h-0 opacity-0 pointer-events-none'
+                            } lg:mt-3 lg:max-h-none lg:opacity-100 lg:pointer-events-auto`}
+                        >
+                            <div className="flex min-h-[200px] items-center justify-center overflow-hidden rounded-[28px] border border-white/[0.05] bg-[#06060d] px-3 py-5 sm:min-h-[220px]">
+                                <iframe
+                                    ref={previewRef}
+                                    srcDoc={PREVIEW_SHELL}
+                                    sandbox="allow-scripts"
+                                    title="状态栏预览"
+                                    className="w-full rounded-[24px] border-0 bg-transparent"
+                                    style={{ height: `${previewHeight}px` }}
+                                    onLoad={() => setPreviewReady(true)}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="min-h-0 flex flex-1 flex-col rounded-[32px] border border-white/[0.06] bg-white/[0.03] p-4 backdrop-blur-sm lg:order-1">
+                    <div className="mb-4 flex flex-wrap gap-2">
                         {([
                             { id: 'prompt', label: 'Prompt / 提取' },
                             { id: 'html', label: 'HTML 模板' },
@@ -720,7 +805,7 @@ ${fieldListStr}
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
-                                className={`rounded-2xl px-4 py-2.5 text-[12px] font-semibold transition-all ${
+                                className={`min-h-[44px] flex-1 rounded-2xl px-4 py-2.5 text-[12px] font-semibold transition-all sm:flex-none ${
                                     activeTab === tab.id
                                         ? 'bg-white/10 border border-white/15 text-white/80'
                                         : 'bg-white/[0.03] text-white/35 hover:bg-white/[0.06]'
@@ -731,34 +816,8 @@ ${fieldListStr}
                         ))}
                     </div>
 
-                    <div className="h-[calc(100%-52px)] overflow-y-auto pr-1">
+                    <div className="min-h-0 flex-1 overflow-y-auto pr-1 pb-3 sm:pb-4">
                         {activeTab === 'prompt' ? renderPromptTab() : renderHtmlTab()}
-                    </div>
-                </div>
-
-                <div className="lg:w-[400px]">
-                    <div className="rounded-[32px] border border-white/[0.06] bg-white/[0.03] p-4 backdrop-blur-sm">
-                        <div className="mb-3 flex items-center justify-between">
-                            <div>
-                                <div className="text-[13px] font-semibold text-white/80">实时预览</div>
-                                <p className="mt-1 text-[11px] text-white/28">iframe 只加载一次，后续通过 postMessage 更新内容。</p>
-                            </div>
-                            <div className="rounded-full border border-white/[0.05] bg-white/[0.05] px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-white/30">
-                                preview
-                            </div>
-                        </div>
-
-                        <div className="flex min-h-[220px] items-center justify-center overflow-hidden rounded-[28px] border border-white/[0.05] bg-[#06060d] px-3 py-5">
-                            <iframe
-                                ref={previewRef}
-                                srcDoc={PREVIEW_SHELL}
-                                sandbox="allow-scripts"
-                                title="状态栏预览"
-                                className="w-full rounded-[24px] border-0 bg-transparent"
-                                style={{ height: `${previewHeight}px` }}
-                                onLoad={() => setPreviewReady(true)}
-                            />
-                        </div>
                     </div>
                 </div>
             </div>

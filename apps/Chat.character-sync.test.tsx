@@ -158,34 +158,46 @@ function buildOsContext(overrides: Record<string, unknown> = {}) {
         realtimeConfig: {},
         ttsConfig: null,
         sttConfig: null,
+        isDataLoaded: true,
         ...overrides,
     } as any;
 }
 
-describe('Chat character sync fallback', () => {
+describe('Chat active character fallback', () => {
     beforeEach(() => {
         vi.clearAllMocks();
 
         mockedUseOS.mockReturnValue(buildOsContext());
     });
 
-    it('renders a loading fallback instead of crashing when the active character is still syncing', async () => {
+    it('falls back to the first available character when the active character id is stale', async () => {
+        const setActiveCharacterId = vi.fn();
+        mockedUseOS.mockReturnValue(buildOsContext({ setActiveCharacterId }));
+
         render(<Chat />);
 
-        expect(screen.getByText('角色资料同步中')).toBeInTheDocument();
-        expect(screen.getByText('刚刚的人设改动还在切换到聊天页，等角色信息就绪后会自动进入对话。')).toBeInTheDocument();
+        expect(screen.getByText('Chat Header')).toBeInTheDocument();
+        expect(screen.getByText('Chat Input')).toBeInTheDocument();
+        expect(screen.queryByText('角色资料同步中')).not.toBeInTheDocument();
 
         await waitFor(() => {
-            expect(mockedDB.getRecentMessagesWithCount).toHaveBeenCalledWith('char-missing', 30);
+            expect(setActiveCharacterId).toHaveBeenCalledWith('char-2');
         });
     });
 
-    it('lets the user close the fallback view', async () => {
+    it('renders a loading fallback while character data is still booting', async () => {
         const closeApp = vi.fn();
-        mockedUseOS.mockReturnValue(buildOsContext({ closeApp }));
+        mockedUseOS.mockReturnValue(buildOsContext({
+            characters: [],
+            activeCharacterId: '',
+            isDataLoaded: false,
+            closeApp,
+        }));
 
         render(<Chat />);
+
         await waitFor(() => {
+            expect(screen.getByText('角色资料同步中')).toBeInTheDocument();
             expect(screen.getByRole('button', { name: '返回桌面' })).toBeInTheDocument();
         });
         fireEvent.click(screen.getByRole('button', { name: '返回桌面' }));

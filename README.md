@@ -111,6 +111,27 @@ Beta 预发:
 .\deploy-prod.ps1
 ```
 
+Git 自动构建审计:
+
+```powershell
+npm run audit:pages-git
+```
+
+- 这个脚本会直接检查 Cloudflare Pages 上 `sully-frontend` 项目的 Git 构建配置
+- 它会核对生产分支、构建命令、输出目录、Production / Preview 环境变量是否齐全
+- 它会顺带抓最近一次失败的 Git production build 日志摘要，快速判断是不是“站点已被手动救活，但 `push main` 仍会继续失败”
+- 它不会打印 Cloudflare token，也不会打印环境变量值
+
+同步 Pages 远端环境变量:
+
+```powershell
+npm run sync:pages-env
+```
+
+- 这个脚本会把 `.env.production.local` 的必填构建变量同步到 Cloudflare Pages `Production`
+- 它会把 `.env.staging.local` 的必填构建变量同步到 Cloudflare Pages `Preview`
+- 它只同步当前构建强制要求的键，不会打印任何 secret 明文
+
 ## 当前已验证基线
 
 最近一次本地验证时间: 2026-04-07

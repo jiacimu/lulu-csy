@@ -26,7 +26,7 @@ import {
 } from '../utils/autonomousAgent';
 
 const Chat: React.FC = () => {
-    const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, closeApp, openApp, customThemes, removeCustomTheme, addToast, userProfile, lastMsgTimestamp, groups, clearUnread, realtimeConfig, ttsConfig, sttConfig } = useOS();
+    const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, closeApp, openApp, customThemes, removeCustomTheme, addToast, userProfile, lastMsgTimestamp, groups, clearUnread, realtimeConfig, ttsConfig, sttConfig, isDataLoaded } = useOS();
     const [messages, setMessages] = useState<Message[]>([]);
     const [totalMsgCount, setTotalMsgCount] = useState(0);
     const [isHistoryLoading, setIsHistoryLoading] = useState(false);
@@ -146,11 +146,20 @@ const Chat: React.FC = () => {
         };
     }, [activeCharacterId]);
 
-    const char = activeCharacterId
+    const matchedChar = activeCharacterId
         ? characters.find(c => c.id === activeCharacterId)
-        : characters[0];
+        : undefined;
+    const char = matchedChar || (isDataLoaded ? characters[0] : undefined);
     const currentThemeId = char?.bubbleStyle || 'default';
     const activeTheme = useMemo(() => customThemes.find(t => t.id === currentThemeId) || PRESET_THEMES[currentThemeId] || PRESET_THEMES.default, [currentThemeId, customThemes]);
+
+    useEffect(() => {
+        if (!isDataLoaded || characters.length === 0) return;
+
+        if (!activeCharacterId || !characters.some(candidate => candidate.id === activeCharacterId)) {
+            setActiveCharacterId(characters[0].id);
+        }
+    }, [isDataLoaded, characters, activeCharacterId, setActiveCharacterId]);
 
     // Timestamp: theme can force-enable (e.g. WeChat), otherwise per-character user setting
     const isTimestampForced = !!activeTheme.showTimestamp;
@@ -1150,8 +1159,9 @@ const Chat: React.FC = () => {
         .filter(m => {
             if (char?.hideSystemLogs && m.role === 'system' && m.type !== 'call_log') return false;
             return true;
-        }),
-        [messages, char?.hideBeforeMessageId, char?.hideSystemLogs, lifeStreamVisibleInChat]);
+        })
+        .slice(-visibleCount),
+        [messages, char?.hideBeforeMessageId, char?.hideSystemLogs, lifeStreamVisibleInChat, visibleCount]);
 
     const collapsedCount = Math.max(0, totalMsgCount - displayMessages.length);
 
@@ -1380,10 +1390,27 @@ const Chat: React.FC = () => {
                 onSaveCustomTemplate={(tpl) => {
                     const { _setActiveOnly, ...templateToSave } = tpl;
                     if (_setActiveOnly) {
-                        updateCharacter(char.id, { activeCustomTemplateId: tpl.id });
+                        updateCharacter(char.id, {
+                            activeCustomTemplateId: tpl.id,
+                            statusBarMode: 'custom',
+                        });
                     } else {
-                        updateCharacter(char.id, { customStatusTemplates: [templateToSave] });
-                        addToast('自定义模板已保存', 'success');
+                        const currentTemplates = char.customStatusTemplates || [];
+                        const hasExistingTemplate = currentTemplates.some(existing => existing.id === templateToSave.id);
+                        const nextTemplates = hasExistingTemplate
+                            ? currentTemplates.map(existing => (
+                                existing.id === templateToSave.id
+                                    ? { ...existing, ...templateToSave }
+                                    : existing
+                            ))
+                            : [...currentTemplates, templateToSave];
+
+                        updateCharacter(char.id, {
+                            customStatusTemplates: nextTemplates,
+                            activeCustomTemplateId: templateToSave.id,
+                            statusBarMode: 'custom',
+                        });
+                        addToast('自定义方案已保存', 'success');
                     }
                 }}
                 showThinking={char.showThinking !== false}
