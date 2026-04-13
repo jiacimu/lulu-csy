@@ -4,7 +4,7 @@ import StatusCardRenderer from '../components/chat/StatusCardRenderer';
 import type { StatusCardData } from '../types/statusCard';
 
 describe('StatusCardRenderer', () => {
-    it('expands freeform cards after receiving a preview-height message', async () => {
+    it('sizes freeform cards from the reported html width and height', async () => {
         const data: StatusCardData = {
             cardType: 'freeform',
             body: 'Custom card',
@@ -17,7 +17,7 @@ describe('StatusCardRenderer', () => {
         render(<StatusCardRenderer data={data} />);
 
         const frame = screen.getByTitle('Freeform creative card');
-        expect(frame).toHaveStyle({ height: '220px' });
+        expect(frame).toHaveStyle({ height: '1px' });
 
         fireEvent.load(frame);
 
@@ -26,12 +26,13 @@ describe('StatusCardRenderer', () => {
 
         act(() => {
             window.dispatchEvent(new MessageEvent('message', {
-                data: { type: 'preview-height', channel, height: 360 },
+                data: { type: 'preview-height', channel, width: 286, height: 360 },
             }));
         });
 
         await waitFor(() => {
-            expect(frame).toHaveStyle({ height: '376px' });
+            expect(frame).toHaveStyle({ width: '294px' });
+            expect(frame).toHaveStyle({ height: '368px' });
         });
     });
 

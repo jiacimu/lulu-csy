@@ -422,10 +422,10 @@ const MessageItem = React.memo(({
                             }}
                             onClick={() => setShowInnerVoice(false)}
                         >
-                            <div className="flex min-h-full items-start justify-center sm:items-center">
+                            <div className="flex min-h-full flex-col items-center">
                                 <div
                                     data-testid={statusCardData ? 'status-card-overlay-shell' : 'inner-voice-overlay-shell'}
-                                    className={`relative w-full ${
+                                    className={`relative my-auto flex w-full justify-center ${
                                         statusCardData
                                             ? 'max-w-[360px] animate-status-card-in'
                                             : 'max-w-[330px] animate-inner-voice-in'

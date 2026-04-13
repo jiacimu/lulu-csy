@@ -2,6 +2,8 @@ export const STATUS_CARD_WIDTH_PX = 330;
 export const STATUS_CARD_MIN_HEIGHT_PX = 220;
 export const STATUS_CARD_MAX_HEIGHT_PX = 560;
 export const STATUS_CARD_MAX_VIEWPORT_HEIGHT = 'calc(100vh - 120px)';
+export const STATUS_CARD_VIEWPORT_WIDTH_PADDING_PX = 48;
+export const STATUS_CARD_MEASURE_BUFFER_PX = 8;
 
 export const STATUS_CARD_IFRAME_SHELL = `<!DOCTYPE html>
 <html>
@@ -13,12 +15,19 @@ html, body {
     padding: 0;
     background: transparent;
     overflow: hidden;
+    width: max-content;
+    height: max-content;
 }
 body {
-    min-height: 100%;
+    min-height: 0;
+    display: inline-flex;
+    align-items: flex-start;
+    justify-content: flex-start;
 }
 #root {
-    width: 100%;
+    display: inline-block;
+    width: max-content;
+    max-width: none;
 }
 </style>
 </head>
@@ -32,22 +41,29 @@ body {
     var activeChannel = null;
     var resizeObserver = null;
 
-    function reportHeight() {
+    function reportSize() {
+        var nextWidth = Math.max(
+            Math.ceil(root ? root.getBoundingClientRect().width || 0 : 0),
+            document.documentElement.scrollWidth || 0,
+            document.body.scrollWidth || 0,
+            root ? root.scrollWidth || 0 : 0
+        );
         var nextHeight = Math.max(
+            Math.ceil(root ? root.getBoundingClientRect().height || 0 : 0),
             document.documentElement.scrollHeight || 0,
             document.body.scrollHeight || 0,
             root ? root.scrollHeight || 0 : 0
         );
 
         parent.postMessage(
-            { type: 'preview-height', channel: activeChannel, height: nextHeight },
+            { type: 'preview-height', channel: activeChannel, width: nextWidth, height: nextHeight },
             '*'
         );
     }
 
     function scheduleReport() {
         requestAnimationFrame(function () {
-            requestAnimationFrame(reportHeight);
+            requestAnimationFrame(reportSize);
         });
     }
 
@@ -93,7 +109,7 @@ body {
 
             styles.innerHTML = headNodes.join('');
             root.innerHTML = parsed.body && parsed.body.innerHTML ? parsed.body.innerHTML : html;
-            document.body.style.cssText = 'margin:0;background:transparent;overflow:hidden;';
+            document.body.style.cssText = 'margin:0;background:transparent;overflow:hidden;min-height:0;display:inline-flex;align-items:flex-start;justify-content:flex-start;width:max-content;';
 
             if (parsed.body && parsed.body.getAttribute('style')) {
                 document.body.style.cssText += parsed.body.getAttribute('style');
@@ -101,7 +117,7 @@ body {
         } catch (error) {
             styles.innerHTML = '';
             root.innerHTML = html;
-            document.body.style.cssText = 'margin:0;background:transparent;overflow:hidden;';
+            document.body.style.cssText = 'margin:0;background:transparent;overflow:hidden;min-height:0;display:inline-flex;align-items:flex-start;justify-content:flex-start;width:max-content;';
         }
 
         reconnectObserver();

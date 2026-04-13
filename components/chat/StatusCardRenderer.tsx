@@ -9,9 +9,9 @@ import React,{ Suspense,useEffect,useId,useMemo,useRef,useState } from 'react';
 import { StatusCardData } from '../../types/statusCard';
 import {
     STATUS_CARD_IFRAME_SHELL,
-    STATUS_CARD_MAX_HEIGHT_PX,
-    STATUS_CARD_MAX_VIEWPORT_HEIGHT,
+    STATUS_CARD_MEASURE_BUFFER_PX,
     STATUS_CARD_MIN_HEIGHT_PX,
+    STATUS_CARD_VIEWPORT_WIDTH_PADDING_PX,
     STATUS_CARD_WIDTH_PX,
 } from './statusCardIframe';
 
@@ -59,22 +59,45 @@ const FreeformStatusCard: React.FC<{ html: string }> = ({ html }) => {
     const previewRef = useRef<HTMLIFrameElement>(null);
     const frameChannel = useId().replace(/:/g, '_');
     const [previewReady, setPreviewReady] = useState(false);
-    const [previewHeight, setPreviewHeight] = useState(STATUS_CARD_MIN_HEIGHT_PX);
+    const [previewSize, setPreviewSize] = useState({
+        width: STATUS_CARD_WIDTH_PX,
+        height: STATUS_CARD_MIN_HEIGHT_PX,
+    });
+    const [hasMeasuredSize, setHasMeasuredSize] = useState(false);
 
     useEffect(() => {
-        setPreviewHeight(STATUS_CARD_MIN_HEIGHT_PX);
+        setPreviewSize({
+            width: STATUS_CARD_WIDTH_PX,
+            height: STATUS_CARD_MIN_HEIGHT_PX,
+        });
+        setHasMeasuredSize(false);
     }, [html]);
 
     useEffect(() => {
-        const handleMessage = (event: MessageEvent<{ type?: string; channel?: string; height?: number }>) => {
+        const handleMessage = (event: MessageEvent<{ type?: string; channel?: string; width?: number; height?: number }>) => {
             if (event.data?.type !== 'preview-height') return;
             if (event.data.channel !== frameChannel) return;
 
+            const viewportWidthLimit = typeof window !== 'undefined'
+                ? Math.max(160, window.innerWidth - STATUS_CARD_VIEWPORT_WIDTH_PADDING_PX)
+                : STATUS_CARD_WIDTH_PX;
+
+            const nextWidth = typeof event.data.width === 'number'
+                ? Math.min(
+                    Math.max(event.data.width + STATUS_CARD_MEASURE_BUFFER_PX, 1),
+                    viewportWidthLimit,
+                )
+                : STATUS_CARD_WIDTH_PX;
+
             const nextHeight = typeof event.data.height === 'number'
-                ? Math.min(Math.max(event.data.height + 16, STATUS_CARD_MIN_HEIGHT_PX), STATUS_CARD_MAX_HEIGHT_PX)
+                ? Math.max(event.data.height + STATUS_CARD_MEASURE_BUFFER_PX, 1)
                 : STATUS_CARD_MIN_HEIGHT_PX;
 
-            setPreviewHeight(nextHeight);
+            setPreviewSize({
+                width: nextWidth,
+                height: nextHeight,
+            });
+            setHasMeasuredSize(true);
         };
 
         window.addEventListener('message', handleMessage);
@@ -98,16 +121,17 @@ const FreeformStatusCard: React.FC<{ html: string }> = ({ html }) => {
             title="Freeform creative card"
             data-preview-channel={frameChannel}
             style={{
-                width: `${STATUS_CARD_WIDTH_PX}px`,
+                width: hasMeasuredSize ? `${previewSize.width}px` : 'calc(100vw - 48px)',
                 maxWidth: 'calc(100vw - 48px)',
-                height: `${previewHeight}px`,
-                maxHeight: `min(${STATUS_CARD_MAX_HEIGHT_PX}px, ${STATUS_CARD_MAX_VIEWPORT_HEIGHT})`,
+                height: hasMeasuredSize ? `${previewSize.height}px` : '1px',
                 border: 'none',
                 borderRadius: '24px',
                 background: 'transparent',
                 colorScheme: 'light dark',
                 overflow: 'hidden',
                 display: 'block',
+                opacity: hasMeasuredSize ? 1 : 0,
+                transition: 'opacity 120ms ease',
             }}
             onLoad={() => setPreviewReady(true)}
         />

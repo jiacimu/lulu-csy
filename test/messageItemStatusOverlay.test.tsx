@@ -96,6 +96,8 @@ describe('MessageItem status overlay', () => {
 
         fireEvent.click(screen.getByAltText('avatar').parentElement!);
         expect(await screen.findByTestId('status-card-overlay-shell')).toHaveClass('animate-status-card-in');
+        expect(screen.getByTestId('status-card-overlay-shell')).toHaveClass('my-auto');
+        expect(screen.getByTestId('status-card-overlay-shell')).toHaveClass('justify-center');
 
         firstRender.unmount();
 
@@ -105,5 +107,7 @@ describe('MessageItem status overlay', () => {
 
         fireEvent.click(screen.getByAltText('avatar').parentElement!);
         expect(screen.getByTestId('inner-voice-overlay-shell')).toHaveClass('animate-inner-voice-in');
+        expect(screen.getByTestId('inner-voice-overlay-shell')).toHaveClass('my-auto');
+        expect(screen.getByTestId('inner-voice-overlay-shell')).toHaveClass('justify-center');
     });
 });
