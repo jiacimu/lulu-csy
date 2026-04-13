@@ -29,6 +29,7 @@ const Chat: React.FC = () => {
     const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, closeApp, openApp, customThemes, removeCustomTheme, addToast, userProfile, lastMsgTimestamp, groups, clearUnread, realtimeConfig, ttsConfig, sttConfig } = useOS();
     const [messages, setMessages] = useState<Message[]>([]);
     const [totalMsgCount, setTotalMsgCount] = useState(0);
+    const [isHistoryLoading, setIsHistoryLoading] = useState(false);
     const [lifeStreamVisibleInChat, setLifeStreamVisibleInChat] = useState(() => (
         activeCharacterId ? getLifeStreamVisibleInChat(activeCharacterId) : false
     ));
@@ -271,27 +272,35 @@ const Chat: React.FC = () => {
         if (!activeCharacterId) return;
 
         const charIdAtStart = activeCharacterId;
-        const allMsgs = await DB.getMessagesByCharId(activeCharacterId);
+        try {
+            const { messages: recentMsgs, totalCount } = await DB.getRecentMessagesWithCount(activeCharacterId, requestedVisibleCount);
 
-        // Guard against stale async results: if the user switched characters
-        // while the DB query was in flight, discard this result.
-        if (activeCharIdRef.current !== charIdAtStart) return;
+            // Guard against stale async results: if the user switched characters
+            // while the DB query was in flight, discard this result.
+            if (activeCharIdRef.current !== charIdAtStart) return;
 
-        const chatScopeMsgs = allMsgs
-            .filter(m => m.metadata?.source !== 'date')
-            .filter(m => !char?.hideBeforeMessageId || m.id >= char.hideBeforeMessageId)
-            .filter(m => !(char?.hideSystemLogs && m.role === 'system'))
-            .filter(m => lifeStreamVisibleRef.current || (m.type as string) !== 'lifestream');
-
-        setTotalMsgCount(chatScopeMsgs.length);
-        setMessages(chatScopeMsgs.slice(-requestedVisibleCount));
-    }, [activeCharacterId, char?.hideBeforeMessageId, char?.hideSystemLogs]);
+            setTotalMsgCount(totalCount);
+            setMessages(recentMsgs);
+        } catch (error) {
+            if (activeCharIdRef.current !== charIdAtStart) return;
+            console.error('[Chat] Failed to load recent messages:', error);
+            setMessages([]);
+            setTotalMsgCount(0);
+        } finally {
+            if (activeCharIdRef.current === charIdAtStart) {
+                setIsHistoryLoading(false);
+            }
+        }
+    }, [activeCharacterId]);
 
     useEffect(() => {
         if (activeCharacterId) {
             // Update ref BEFORE any async work so stale reloadMessages calls
             // from a previous character can detect the switch and bail out.
             activeCharIdRef.current = activeCharacterId;
+            setIsHistoryLoading(true);
+            setMessages([]);
+            setTotalMsgCount(0);
 
             reloadMessages(LOAD_BATCH_SIZE);
             loadEmojiData();
@@ -1126,9 +1135,8 @@ const Chat: React.FC = () => {
         .filter(m => {
             if (char?.hideSystemLogs && m.role === 'system' && m.type !== 'call_log') return false;
             return true;
-        })
-        .slice(-visibleCount),
-        [messages, char?.hideBeforeMessageId, char?.hideSystemLogs, lifeStreamVisibleInChat, visibleCount]);
+        }),
+        [messages, char?.hideBeforeMessageId, char?.hideSystemLogs, lifeStreamVisibleInChat]);
 
     const collapsedCount = Math.max(0, totalMsgCount - displayMessages.length);
 
@@ -1391,6 +1399,12 @@ const Chat: React.FC = () => {
                             setVisibleCount(nextVisibleCount);
                             await reloadMessages(nextVisibleCount);
                         }} className="px-4 py-2 bg-white/50 backdrop-blur-sm rounded-full text-xs text-slate-500 shadow-sm border border-white hover:bg-white transition-colors">加载历史消息 ({collapsedCount})</button>
+                    </div>
+                )}
+
+                {isHistoryLoading && displayMessages.length === 0 && (
+                    <div className="px-4 py-8 text-center text-xs text-slate-400">
+                        正在载入最近的聊天记录...
                     </div>
                 )}
 

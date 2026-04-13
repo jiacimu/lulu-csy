@@ -13,6 +13,7 @@ vi.mock('../context/OSContext', () => ({
 vi.mock('../utils/db', () => ({
     DB: {
         getMessagesByCharId: vi.fn(() => Promise.resolve([])),
+        getRecentMessagesWithCount: vi.fn(() => Promise.resolve({ messages: [], totalCount: 0 })),
         initializeEmojiData: vi.fn(() => Promise.resolve()),
         getEmojis: vi.fn(() => Promise.resolve([])),
         getEmojiCategories: vi.fn(() => Promise.resolve([])),
@@ -175,7 +176,7 @@ describe('Chat character sync fallback', () => {
         expect(screen.getByText('刚刚的人设改动还在切换到聊天页，等角色信息就绪后会自动进入对话。')).toBeInTheDocument();
 
         await waitFor(() => {
-            expect(mockedDB.getMessagesByCharId).toHaveBeenCalledWith('char-missing');
+            expect(mockedDB.getRecentMessagesWithCount).toHaveBeenCalledWith('char-missing', 30);
         });
     });
 
@@ -190,5 +191,28 @@ describe('Chat character sync fallback', () => {
         fireEvent.click(screen.getByRole('button', { name: '返回桌面' }));
 
         expect(closeApp).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows a loading state while the first page of chat history is still loading', async () => {
+        let resolveRecentMessages: ((value: { messages: any[]; totalCount: number }) => void) | null = null;
+        mockedUseOS.mockReturnValue(buildOsContext({
+            characters: [{ id: 'char-1', name: 'Sully', avatar: 'sully.png' }],
+            activeCharacterId: 'char-1',
+        }));
+        mockedDB.getRecentMessagesWithCount.mockImplementationOnce(() => (
+            new Promise((resolve) => {
+                resolveRecentMessages = resolve;
+            })
+        ));
+
+        render(<Chat />);
+
+        expect(screen.getByText('正在载入最近的聊天记录...')).toBeInTheDocument();
+
+        resolveRecentMessages?.({ messages: [], totalCount: 0 });
+
+        await waitFor(() => {
+            expect(screen.queryByText('正在载入最近的聊天记录...')).not.toBeInTheDocument();
+        });
     });
 });
