@@ -168,6 +168,8 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
                         getStream: async () => stream,
                         pauseStream: async () => { /* no-op: we manage the stream ourselves */ },
                         resumeStream: async () => stream,
+                        onnxWASMBasePath: '/vad/onnx/',
+                        baseAssetPath: '/vad/',
                         positiveSpeechThreshold: 0.8,
                         negativeSpeechThreshold: 0.3,
                         redemptionMs: 500,

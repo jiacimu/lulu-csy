@@ -79,6 +79,9 @@ export default defineConfig(({ mode, command }) => {
 
   return {
     plugins: [react() as any, buildInfoPlugin(buildInfo)],
+    optimizeDeps: {
+      exclude: ['onnxruntime-web'],
+    },
     define: {
       __APP_BUILD_ID__: JSON.stringify(buildInfo.buildId),
     },
@@ -118,7 +121,13 @@ export default defineConfig(({ mode, command }) => {
       outDir: 'dist',
       assetsDir: 'assets',
       rollupOptions: {
+        // Exclude onnxruntime-web from bundling — let @ricky0123/vad-web's
+        // pre-bundled copy resolve WASM files from public/vad/onnx/ at runtime
+        external: ['onnxruntime-web'],
         output: {
+          paths: {
+            'onnxruntime-web': '/vad/onnx/ort-wasm-simd-threaded.mjs',
+          },
           manualChunks(id) {
             if (id.includes('node_modules/three')) {
               return 'vendor-three';
