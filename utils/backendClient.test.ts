@@ -245,6 +245,28 @@ describe('backendClient', () => {
         expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({ method: 'POST' }));
     });
 
+    it('keeps cloud memory requests working when AbortSignal.timeout is unavailable', async () => {
+        const originalTimeout = (AbortSignal as typeof AbortSignal & { timeout?: typeof AbortSignal.timeout }).timeout;
+        Object.defineProperty(AbortSignal, 'timeout', {
+            configurable: true,
+            value: undefined,
+        });
+
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+            .mockResolvedValueOnce(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(cancelMemoryEngineReindex('job-no-timeout')).resolves.toBe(true);
+        expect(listCallsTo(fetchMock, '/api/semantic/jobs/job-no-timeout/cancel')).toHaveLength(1);
+
+        Object.defineProperty(AbortSignal, 'timeout', {
+            configurable: true,
+            value: originalTimeout,
+        });
+    });
+
     it('returns false when memory engine reindex cancellation fails', async () => {
         const fetchMock = vi.fn()
             .mockResolvedValueOnce(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))

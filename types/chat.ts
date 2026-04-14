@@ -162,7 +162,7 @@ export interface VectorMemory {
     updatedAt?: number;            // Timestamp (ms) of last update
     vector: number[];              // Embedding vector (dim depends on model, bge-m3=1024, cohere embed-v4=1536)
     modelId?: string;              // Embedding model used (e.g. "BAAI/bge-m3")
-    source: 'auto' | 'manual' | 'import' | 'sync' | 'call'; // How it was created
+    source: 'auto' | 'manual' | 'import' | 'sync' | 'call' | 'distillation'; // How it was created
     sourceMessageIds?: number[];           // IDs of messages that produced/updated this memory
     cloudSynced?: boolean;                 // Whether this memory has been pushed to cloud successfully
     syncState?: MemorySyncState;           // Local/cloud sync state for cache + offline fallback
@@ -170,4 +170,7 @@ export interface VectorMemory {
     deprecatedReason?: string;         // Why it was invalidated (e.g. "用户已声明不再喝奶茶")
     hormoneSnapshot?: HormoneSnapshot; // 情感基因：记忆产生时的 7 维激素状态快照
     salienceScore?: number;            // 情绪冲量 (0 ~ 7)：归一化偏离基线总和，越高越"刻骨铭心"
+    level?: number;                    // 记忆层级：0=原始提取，1=蒸馏认知（L1）
+    distilledInto?: string;            // L0 被蒸馏进了哪条 L1 记忆
+    sourceMemoryIds?: string[];        // L1 记忆由哪些 L0 记忆聚合而来
 }

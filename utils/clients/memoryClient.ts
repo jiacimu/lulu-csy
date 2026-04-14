@@ -24,6 +24,8 @@ type RawCloudMemory = Partial<VectorMemory> & {
     hormone_snapshot?: HormoneSnapshot | string | null;
     salience_score?: number;
     source_message_ids?: number[] | string | null;
+    distilled_into?: string;
+    source_memory_ids?: string[] | string | null;
 };
 
 const VECTOR_MEMORY_SOURCES: ReadonlySet<VectorMemory['source']> = new Set([
@@ -32,6 +34,7 @@ const VECTOR_MEMORY_SOURCES: ReadonlySet<VectorMemory['source']> = new Set([
     'import',
     'sync',
     'call',
+    'distillation',
 ]);
 
 function normalizeString(value: unknown): string {
@@ -130,6 +133,11 @@ function normalizeCloudMemory(memory: unknown, fallbackCharId: string): VectorMe
     const salienceScore = record.salienceScore ?? record.salience_score;
     const hormoneSnapshot = normalizeHormoneSnapshot(record.hormoneSnapshot ?? record.hormone_snapshot);
     const sourceMessageIds = normalizeNumberArray(record.sourceMessageIds ?? record.source_message_ids);
+    const distilledInto = normalizeString(record.distilledInto ?? record.distilled_into);
+    const rawSourceMemoryIds = parseJsonValue(record.sourceMemoryIds ?? record.source_memory_ids);
+    const sourceMemoryIds = Array.isArray(rawSourceMemoryIds)
+        ? rawSourceMemoryIds.filter((v): v is string => typeof v === 'string' && v.trim() !== '')
+        : [];
 
     const normalized: VectorMemory = {
         id,
@@ -152,6 +160,10 @@ function normalizeCloudMemory(memory: unknown, fallbackCharId: string): VectorMe
     if (deprecatedReason) normalized.deprecatedReason = deprecatedReason;
     if (hormoneSnapshot) normalized.hormoneSnapshot = hormoneSnapshot;
     if (typeof salienceScore === 'number' && Number.isFinite(salienceScore)) normalized.salienceScore = salienceScore;
+    const level = record.level;
+    if (typeof level === 'number' && Number.isFinite(level) && level > 0) normalized.level = level;
+    if (distilledInto) normalized.distilledInto = distilledInto;
+    if (sourceMemoryIds.length > 0) normalized.sourceMemoryIds = sourceMemoryIds;
 
     return normalized;
 }
