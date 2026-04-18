@@ -241,6 +241,11 @@ interface FetchWithRetryOptions {
     timeoutMs?: number;
 }
 
+const createOptionalTimeoutSignal = (timeoutMs: number): AbortSignal | undefined =>
+    typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(timeoutMs)
+        : undefined;
+
 function isRetryableNetworkError(err: unknown): boolean {
     if (err instanceof TypeError) return true; // network error
     if (err instanceof DOMException && err.name === 'AbortError') return true; // timeout
@@ -261,7 +266,7 @@ export async function fetchWithRetry(
             const fetchInit = { ...init };
             // Always use a fresh timeout signal per attempt
             if (timeoutMs) {
-                fetchInit.signal = AbortSignal.timeout(timeoutMs);
+                fetchInit.signal = createOptionalTimeoutSignal(timeoutMs);
             }
             return await fetch(input, fetchInit);
         } catch (err: any) {

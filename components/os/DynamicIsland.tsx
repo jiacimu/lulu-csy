@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AnimatePresence, motion, useWillChange } from 'motion/react';
 import { useApp } from '../../context/AppContext';
 import { useAudioPlayer } from '../../hooks/useAudioPlayer';
 import { AppID } from '../../types';
@@ -8,6 +9,41 @@ import {
     toggleFloatingLyricsEnabled,
 } from './floatingLyricsSettings';
 import './DynamicIsland.css';
+
+/** Cult UI 验证过的弹簧参数 — 果冻感但不过度弹跳 */
+const SPRING_CONFIG = {
+    type: 'spring' as const,
+    stiffness: 400,
+    damping: 30,
+};
+
+/** 胶囊态和展开态的尺寸预设 */
+const DI_PRESETS = {
+    capsule: {
+        width: 220,
+        maxWidth: 220,
+        height: 40,
+        borderRadius: 24,
+        padding: '4px 10px 4px 4px',
+    },
+    expanded: {
+        width: 'min(320px, 85vw)',
+        maxWidth: 320,
+        height: 'auto',
+        borderRadius: 28,
+        padding: '8px 16px 14px',
+    },
+};
+
+/** 内容进出场动画 */
+const CONTENT_ENTER = { opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' };
+const CONTENT_EXIT = { opacity: 0, scale: 0.95, y: 8, filter: 'blur(10px)' };
+const CONTENT_INITIAL = {
+    opacity: 0,
+    scale: 0.9,
+    y: 10,
+    filter: 'blur(6px)',
+};
 
 /**
  * 灵动岛 — 退出音乐 App 后的浮动迷你播放器。
@@ -21,6 +57,7 @@ import './DynamicIsland.css';
  * - expanded（展开）：显示封面 + 歌名 + 艺术家 + 进度条 + 上一首/播放/下一首
  */
 const DynamicIsland: React.FC = () => {
+    const willChange = useWillChange();
     const { activeApp, openApp } = useApp();
     const {
         currentSong,
@@ -130,75 +167,45 @@ const DynamicIsland: React.FC = () => {
 
     const coverUrl = isSongPlayable(currentSong)
         ? currentSong.album.picUrl
-        : currentSong.coverUrl || currentSong.radio?.picUrl || currentSong.mainSong?.album.picUrl;
+        : currentSong.coverUrl
+            || currentSong.radio?.picUrl
+            || currentSong.mainSong?.album.picUrl;
     const coverSeed = currentSong.id || 0;
     const fallbackHue = ((coverSeed % 360) + 360) % 360;
 
     return (
-        <div
+        <motion.div
+            layout
             className={`dynamic-island ${expanded ? 'dynamic-island--expanded' : 'dynamic-island--collapsed'}`}
+            animate={{
+                width: expanded
+                    ? DI_PRESETS.expanded.maxWidth
+                    : DI_PRESETS.capsule.width,
+                borderRadius: expanded
+                    ? DI_PRESETS.expanded.borderRadius
+                    : DI_PRESETS.capsule.borderRadius,
+            }}
+            transition={SPRING_CONFIG}
+            style={{
+                willChange,
+                maxWidth: expanded
+                    ? DI_PRESETS.expanded.width
+                    : DI_PRESETS.capsule.maxWidth,
+            }}
         >
-            {!expanded && (
-                <div className="di-capsule" onClick={handleToggleExpand}>
-                    <div
-                        className={`di-capsule-cover ${isPlaying ? '' : 'di-capsule-cover--paused'}`}
-                        style={
-                            coverUrl
-                                ? { backgroundImage: `url(${coverUrl})` }
-                                : {
-                                      background: `linear-gradient(135deg, hsl(${fallbackHue}, 70%, 60%), hsl(${(fallbackHue + 40) % 360}, 65%, 50%))`,
-                                  }
-                        }
-                    >
-                        {!coverUrl && (
-                            <span className="di-capsule-cover-note">♪</span>
-                        )}
-                    </div>
-
-                    <div className="di-capsule-info">
-                        <div className="di-capsule-title">
-                            <span className="di-capsule-title-text">
-                                {currentSong.name || '未知歌曲'}
-                            </span>
-                        </div>
-                    </div>
-
-                    {isPlaying ? (
-                        <div className="di-capsule-bars" onClick={handleTogglePlay}>
-                            <span className="di-bar" />
-                            <span className="di-bar" />
-                            <span className="di-bar" />
-                        </div>
-                    ) : (
-                        <div
-                            className="di-capsule-play-btn"
-                            onClick={handleTogglePlay}
-                        >
-                            <svg
-                                width="14"
-                                height="14"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path d="M8 5v14l11-7z" />
-                            </svg>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {expanded && (
-                <div className="di-expanded">
-                    <div
-                        className="di-expanded-handle"
+            <AnimatePresence mode="wait" initial={false}>
+                {!expanded ? (
+                    <motion.div
+                        key="capsule"
+                        className="di-capsule"
                         onClick={handleToggleExpand}
+                        initial={CONTENT_INITIAL}
+                        animate={CONTENT_ENTER}
+                        exit={CONTENT_EXIT}
+                        transition={{ ...SPRING_CONFIG, duration: 0.25 }}
                     >
-                        <div className="di-expanded-handle-bar" />
-                    </div>
-
-                    <div className="di-expanded-main">
                         <div
-                            className={`di-expanded-cover ${isPlaying ? 'di-expanded-cover--spinning' : ''}`}
+                            className={`di-capsule-cover ${isPlaying ? '' : 'di-capsule-cover--paused'}`}
                             style={
                                 coverUrl
                                     ? { backgroundImage: `url(${coverUrl})` }
@@ -208,94 +215,165 @@ const DynamicIsland: React.FC = () => {
                             }
                         >
                             {!coverUrl && (
-                                <span className="di-expanded-cover-note">♪</span>
+                                <span className="di-capsule-cover-note">♪</span>
                             )}
                         </div>
 
-                        <div className="di-expanded-info">
-                            <div className="di-expanded-name">
-                                {currentSong.name || '未知歌曲'}
+                        <div className="di-capsule-info">
+                            <div className="di-capsule-title">
+                                <span className="di-capsule-title-text">
+                                    {currentSong.name || '未知歌曲'}
+                                </span>
                             </div>
-                            <div className="di-expanded-artist">{artistText}</div>
                         </div>
-                    </div>
 
-                    <div
-                        className="di-expanded-progress"
-                        onClick={handleProgressClick}
-                    >
-                        <div
-                            className="di-expanded-progress-fill"
-                            style={{ width: `${progress}%` }}
-                        />
-                    </div>
-                    <div className="di-expanded-time">
-                        <span>{formatTime(currentTime)}</span>
-                        <span>{formatTime(duration)}</span>
-                    </div>
-
-                    <div className="di-expanded-controls">
-                        <div className="di-ctrl-btn" onClick={handlePrev}>
-                            <svg
-                                width="18"
-                                height="18"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
+                        {isPlaying ? (
+                            <div
+                                className="di-capsule-bars"
+                                onClick={handleTogglePlay}
                             >
-                                <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-                            </svg>
-                        </div>
-                        <div className="di-ctrl-play" onClick={handleTogglePlay}>
-                            {isPlaying ? (
+                                <span className="di-bar" />
+                                <span className="di-bar" />
+                                <span className="di-bar" />
+                            </div>
+                        ) : (
+                            <div
+                                className="di-capsule-play-btn"
+                                onClick={handleTogglePlay}
+                            >
                                 <svg
-                                    width="22"
-                                    height="22"
-                                    viewBox="0 0 24 24"
-                                    fill="currentColor"
-                                >
-                                    <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                                </svg>
-                            ) : (
-                                <svg
-                                    width="22"
-                                    height="22"
+                                    width="14"
+                                    height="14"
                                     viewBox="0 0 24 24"
                                     fill="currentColor"
                                 >
                                     <path d="M8 5v14l11-7z" />
                                 </svg>
-                            )}
-                        </div>
-                        <div className="di-ctrl-btn" onClick={handleNext}>
-                            <svg
-                                width="18"
-                                height="18"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path d="M6 18l8.5-6L6 6v12zm10-12v12h2V6z" />
-                            </svg>
-                        </div>
-                    </div>
-
-                    <div className="di-expanded-extras">
-                        <div
-                            className={`di-expanded-lyric-toggle ${lyricsEnabled ? 'di-expanded-lyric-toggle--active' : ''}`}
-                            onClick={handleToggleLyrics}
-                        >
-                            词
-                        </div>
-                    </div>
-
-                    <div
-                        className="di-expanded-open"
-                        onClick={handleOpenMusicApp}
+                            </div>
+                        )}
+                    </motion.div>
+                ) : (
+                    <motion.div
+                        key="expanded"
+                        className="di-expanded"
+                        initial={CONTENT_INITIAL}
+                        animate={CONTENT_ENTER}
+                        exit={CONTENT_EXIT}
+                        transition={{ ...SPRING_CONFIG, duration: 0.3 }}
                     >
-                        打开音乐
-                    </div>
-                </div>
-            )}
-        </div>
+                        <div
+                            className="di-expanded-handle"
+                            onClick={handleToggleExpand}
+                        >
+                            <div className="di-expanded-handle-bar" />
+                        </div>
+
+                        <div className="di-expanded-main">
+                            <div
+                                className={`di-expanded-cover ${isPlaying ? 'di-expanded-cover--spinning' : ''}`}
+                                style={
+                                    coverUrl
+                                        ? { backgroundImage: `url(${coverUrl})` }
+                                        : {
+                                              background: `linear-gradient(135deg, hsl(${fallbackHue}, 70%, 60%), hsl(${(fallbackHue + 40) % 360}, 65%, 50%))`,
+                                          }
+                                }
+                            >
+                                {!coverUrl && (
+                                    <span className="di-expanded-cover-note">♪</span>
+                                )}
+                            </div>
+
+                            <div className="di-expanded-info">
+                                <div className="di-expanded-name">
+                                    {currentSong.name || '未知歌曲'}
+                                </div>
+                                <div className="di-expanded-artist">
+                                    {artistText}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            className="di-expanded-progress"
+                            onClick={handleProgressClick}
+                        >
+                            <div
+                                className="di-expanded-progress-fill"
+                                style={{ width: `${progress}%` }}
+                            />
+                        </div>
+                        <div className="di-expanded-time">
+                            <span>{formatTime(currentTime)}</span>
+                            <span>{formatTime(duration)}</span>
+                        </div>
+
+                        <div className="di-expanded-controls">
+                            <div className="di-ctrl-btn" onClick={handlePrev}>
+                                <svg
+                                    width="18"
+                                    height="18"
+                                    viewBox="0 0 24 24"
+                                    fill="currentColor"
+                                >
+                                    <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                                </svg>
+                            </div>
+                            <div
+                                className="di-ctrl-play"
+                                onClick={handleTogglePlay}
+                            >
+                                {isPlaying ? (
+                                    <svg
+                                        width="22"
+                                        height="22"
+                                        viewBox="0 0 24 24"
+                                        fill="currentColor"
+                                    >
+                                        <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                                    </svg>
+                                ) : (
+                                    <svg
+                                        width="22"
+                                        height="22"
+                                        viewBox="0 0 24 24"
+                                        fill="currentColor"
+                                    >
+                                        <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                )}
+                            </div>
+                            <div className="di-ctrl-btn" onClick={handleNext}>
+                                <svg
+                                    width="18"
+                                    height="18"
+                                    viewBox="0 0 24 24"
+                                    fill="currentColor"
+                                >
+                                    <path d="M6 18l8.5-6L6 6v12zm10-12v12h2V6z" />
+                                </svg>
+                            </div>
+                        </div>
+
+                        <div className="di-expanded-extras">
+                            <div
+                                className={`di-expanded-lyric-toggle ${lyricsEnabled ? 'di-expanded-lyric-toggle--active' : ''}`}
+                                onClick={handleToggleLyrics}
+                            >
+                                词
+                            </div>
+                        </div>
+
+                        <div
+                            className="di-expanded-open"
+                            onClick={handleOpenMusicApp}
+                        >
+                            打开音乐
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </motion.div>
     );
 };
 

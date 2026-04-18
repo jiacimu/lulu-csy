@@ -13,6 +13,12 @@ import {
     type RetryFailedMemoryEngineReindexResult,
     type SwitchMemoryEmbeddingEngineResult,
 } from './backendCore';
+
+const createOptionalTimeoutSignal = (timeoutMs: number): AbortSignal | undefined =>
+    typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(timeoutMs)
+        : undefined;
+
 export async function getMemoryEmbeddingEngineStatus(): Promise<MemoryEmbeddingEngineStatus | null> {
     if (!await isBackendAlive()) return null;
 
@@ -98,7 +104,7 @@ export async function cancelMemoryEngineReindex(jobId: string): Promise<boolean>
             {
                 method: 'POST',
                 headers: buildHeaders(),
-                signal: AbortSignal.timeout(10000),
+                signal: createOptionalTimeoutSignal(10000),
             },
         );
 

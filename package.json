@@ -33,6 +33,7 @@
     "jszip": "^3.10.1",
     "katex": "^0.16.11",
     "modern-screenshot": "^4.6.8",
+    "motion": "^12.38.0",
     "onnxruntime-web": "^1.24.3",
     "pdfjs-dist": "5.4.624",
     "react": "^18.2.0",

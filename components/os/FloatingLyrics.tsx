@@ -4,6 +4,7 @@ import React, {
     useRef,
     useState,
 } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useAudioPlayer } from '../../hooks/useAudioPlayer';
 import { useLyrics } from '../../hooks/useLyrics';
 import { AppID } from '../../types';
@@ -101,6 +102,13 @@ const FloatingLyrics: React.FC = () => {
         activeApp !== AppID.Music &&
         lines.length > 0;
 
+    useEffect(() => {
+        if (!shouldShow) {
+            clearToolbarHideTimer();
+            setToolbarExpanded(false);
+        }
+    }, [shouldShow]);
+
     const positionLabels: Record<LyricPosition, string> = {
         top: '顶部',
         center: '居中',
@@ -141,100 +149,136 @@ const FloatingLyrics: React.FC = () => {
         scheduleToolbarAutoHide();
     };
 
-    if (!shouldShow) return null;
+    const baseTransform =
+        settings.position === 'center'
+            ? 'translate(-50%, -50%)'
+            : 'translateX(-50%)';
 
     return (
-        <div
-            data-testid="floating-lyrics"
-            className={`floating-lyrics floating-lyrics--${settings.position}`}
-            style={{
-                opacity: settings.opacity,
-                ...getLyricColorVars(settings.textColor),
-            } as React.CSSProperties}
-        >
-            <div
-                className="floating-lyrics-scroll"
-                ref={viewportRef}
-                onPointerDown={handleRevealToolbar}
-            >
-                <div
-                    className="floating-lyrics-track"
-                    style={{
-                        transform: `translate3d(0, ${trackOffset}px, 0)`,
-                    }}
+        <AnimatePresence>
+            {shouldShow && (
+                <motion.div
+                    data-testid="floating-lyrics"
+                    className={`floating-lyrics floating-lyrics--${settings.position}`}
+                    style={
+                        {
+                            ...getLyricColorVars(settings.textColor),
+                        } as React.CSSProperties
+                    }
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: settings.opacity, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                    transformTemplate={(_, generatedTransform) =>
+                        generatedTransform
+                            ? `${baseTransform} ${generatedTransform}`
+                            : baseTransform
+                    }
                 >
-                    {lines.map((line, index) => (
-                        <div
-                            key={`${line.time}-${index}`}
-                            ref={(node) => {
-                                lineRefs.current[index] = node;
-                            }}
-                            className={`floating-lyric-line ${index === currentIndex ? 'floating-lyric-line--active' : ''}`}
-                        >
-                            <span className="floating-lyric-text">
-                                {line.text}
-                            </span>
-                            {settings.showTranslation && line.translation && (
-                                <span className="floating-lyric-translation">
-                                    {line.translation}
-                                </span>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            {toolbarExpanded && (
-                <div className="floating-lyrics-toolbar-wrap">
                     <div
-                        className="floating-lyrics-toolbar"
-                        onPointerEnter={clearToolbarHideTimer}
-                        onPointerLeave={scheduleToolbarAutoHide}
+                        className="floating-lyrics-scroll"
+                        ref={viewportRef}
+                        onPointerDown={handleRevealToolbar}
                     >
-                        <button
-                            className="fl-tool-btn"
-                            onClick={handleCyclePosition}
-                            title="切换位置"
+                        <div
+                            className="floating-lyrics-track"
+                            style={{
+                                transform: `translate3d(0, ${trackOffset}px, 0)`,
+                            }}
                         >
-                            <svg
-                                width="14"
-                                height="14"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                            >
-                                <path d="M12 2v20M2 12h20" />
-                            </svg>
-                            <span>{positionLabels[settings.position]}</span>
-                        </button>
-                        <button
-                            className="fl-tool-btn"
-                            onClick={handleToggleTranslation}
-                            title="翻译"
-                        >
-                            <span>{settings.showTranslation ? '译✓' : '译'}</span>
-                        </button>
-                        <button
-                            className="fl-tool-btn fl-tool-btn--close"
-                            onClick={handleToggleEnabled}
-                            title="关闭歌词"
-                        >
-                            <svg
-                                width="12"
-                                height="12"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                            >
-                                <path d="M18 6 6 18M6 6l12 12" />
-                            </svg>
-                        </button>
+                            {lines.map((line, index) => (
+                                <div
+                                    key={`${line.time}-${index}`}
+                                    ref={(node) => {
+                                        lineRefs.current[index] = node;
+                                    }}
+                                    className={`floating-lyric-line ${index === currentIndex ? 'floating-lyric-line--active' : ''}`}
+                                >
+                                    <span className="floating-lyric-text">
+                                        {line.text}
+                                    </span>
+                                    {settings.showTranslation
+                                        && line.translation && (
+                                            <span className="floating-lyric-translation">
+                                                {line.translation}
+                                            </span>
+                                        )}
+                                </div>
+                            ))}
+                        </div>
                     </div>
-                </div>
+
+                    <AnimatePresence>
+                        {toolbarExpanded && (
+                            <motion.div
+                                className="floating-lyrics-toolbar-wrap"
+                                initial={{ opacity: 0, y: -4, scale: 0.95 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: -4, scale: 0.95 }}
+                                transition={{
+                                    type: 'spring',
+                                    stiffness: 400,
+                                    damping: 25,
+                                }}
+                            >
+                                <div
+                                    className="floating-lyrics-toolbar"
+                                    onPointerEnter={clearToolbarHideTimer}
+                                    onPointerLeave={scheduleToolbarAutoHide}
+                                >
+                                    <button
+                                        className="fl-tool-btn"
+                                        onClick={handleCyclePosition}
+                                        title="切换位置"
+                                    >
+                                        <svg
+                                            width="14"
+                                            height="14"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                        >
+                                            <path d="M12 2v20M2 12h20" />
+                                        </svg>
+                                        <span>
+                                            {positionLabels[settings.position]}
+                                        </span>
+                                    </button>
+                                    <button
+                                        className="fl-tool-btn"
+                                        onClick={handleToggleTranslation}
+                                        title="翻译"
+                                    >
+                                        <span>
+                                            {settings.showTranslation
+                                                ? '译✓'
+                                                : '译'}
+                                        </span>
+                                    </button>
+                                    <button
+                                        className="fl-tool-btn fl-tool-btn--close"
+                                        onClick={handleToggleEnabled}
+                                        title="关闭歌词"
+                                    >
+                                        <svg
+                                            width="12"
+                                            height="12"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                        >
+                                            <path d="M18 6 6 18M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </motion.div>
             )}
-        </div>
+        </AnimatePresence>
     );
 };
 
