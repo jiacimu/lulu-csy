@@ -1992,6 +1992,19 @@ export default function MusicApp() {
   const [showFullPlayer, setShowFullPlayer] = useState(false);
   const [showQrLogin, setShowQrLogin] = useState(false);
 
+  // 预加载皮肤
+  useEffect(() => {
+    let preloaded = false;
+    if (preloaded || typeof window === 'undefined') return;
+    preloaded = true;
+    for (const skin of BUILTIN_SKINS) {
+      if (skin.file) {
+        const img = new Image();
+        img.src = skin.file;
+      }
+    }
+  }, []);
+
   const [isLoggedIn, setIsLoggedIn] = useState(() => isMusicLoggedIn());
   const [account, setAccount] = useState<NeteaseUserAccount | null>(null);
   const [accountLoading, setAccountLoading] = useState(false);
