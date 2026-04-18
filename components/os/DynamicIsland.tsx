@@ -291,7 +291,7 @@ const DynamicIsland: React.FC = () => {
                         exit={CONTENT_EXIT}
                         transition={{ ...SPRING_CONFIG, duration: 0.3 }}
                         style={glowRgb ? {
-                            background: `linear-gradient(145deg, rgba(${glowRgb}, 0.12) 0%, rgba(0,0,0,0.92) 50%, rgba(${glowRgb}, 0.06) 100%)`,
+                            background: `linear-gradient(145deg, rgba(${glowRgb}, 0.45) 0%, rgba(0,0,0,0.95) 45%, rgba(${glowRgb}, 0.2) 100%)`,
                         } : undefined}
                     >
                         <div
