@@ -192,22 +192,51 @@ export const DEFAULT_NUTRIENT_TARGETS: DailyNutrientTargets = {
     fiber: 25,
 };
 
-export const MET_TABLE: Record<string, { label: string; met: number; emoji: string }> = {
-    walking_slow: { label: '散步', met: 2.0, emoji: '🚶' },
-    walking_fast: { label: '快走', met: 3.5, emoji: '🚶‍♂️' },
-    jogging: { label: '慢跑', met: 7.0, emoji: '🏃' },
-    running: { label: '跑步', met: 9.8, emoji: '🏃‍♂️' },
-    cycling_casual: { label: '骑行', met: 4.0, emoji: '🚴' },
-    cycling_fast: { label: '快骑', met: 8.0, emoji: '🚴‍♂️' },
-    swimming: { label: '游泳', met: 8.0, emoji: '🏊' },
-    yoga: { label: '瑜伽', met: 2.5, emoji: '🧘' },
-    dancing: { label: '跳舞', met: 5.0, emoji: '💃' },
-    jump_rope: { label: '跳绳', met: 12.3, emoji: '🤸' },
-    basketball: { label: '篮球', met: 6.5, emoji: '🏀' },
-    badminton: { label: '羽毛球', met: 5.5, emoji: '🏸' },
-    hiking: { label: '徒步', met: 6.0, emoji: '🥾' },
-    strength: { label: '力量训练', met: 6.0, emoji: '💪' },
-    stretching: { label: '拉伸', met: 2.3, emoji: '🙆' },
+/** SVG icon paths for monochrome exercise icons (Heroicons outline style) */
+const ICON = {
+    walk: 'M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z',
+    run: 'M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.047 8.287 8.287 0 009 9.601a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z',
+    cycle: 'M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z',
+    swim: 'M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12',
+    yoga: 'M12 3v17.25m0 0c-1.472 0-2.882.265-4.185.75M12 20.25c1.472 0 2.882.265 4.185.75',
+    dance: 'M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303',
+    jump: 'M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z',
+    ball: 'M12 2.25c5.385 0 9.75 4.365 9.75 9.75s-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12 6.615 2.25 12 2.25z',
+    racket: 'M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6z',
+    hike: 'M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941',
+    strength: 'M6.429 9.75L2.25 12l4.179 2.25m0-4.5l5.571 3 5.571-3m-11.142 0L2.25 7.5 12 2.25l9.75 5.25-4.179 2.25m0 0L21.75 12l-4.179 2.25m0 0L21.75 16.5 12 21.75 2.25 16.5l4.179-2.25m11.142 0l-5.571 3-5.571-3',
+    stretch: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z',
+    pilates: 'M12 3v17.25m0 0c-1.472 0-2.882.265-4.185.75M12 20.25c1.472 0 2.882.265 4.185.75M18.75 4.97A48.416 48.416 0 0012 4.5c-2.291 0-4.545.16-6.75.47',
+    elliptical: 'M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3',
+    stairs: 'M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15',
+    skate: 'M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z',
+    hula: 'M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+    custom: 'M12 4.5v15m7.5-7.5h-15',
+};
+
+export const MET_TABLE: Record<string, { label: string; met: number; icon: string }> = {
+    // Female-priority ordering
+    walking_slow: { label: '散步', met: 2.0, icon: ICON.walk },
+    walking_fast: { label: '快走', met: 3.5, icon: ICON.walk },
+    yoga: { label: '瑜伽', met: 2.5, icon: ICON.yoga },
+    pilates: { label: '普拉提', met: 3.0, icon: ICON.pilates },
+    dancing: { label: '跳舞', met: 5.0, icon: ICON.dance },
+    stretching: { label: '拉伸', met: 2.3, icon: ICON.stretch },
+    jogging: { label: '慢跑', met: 7.0, icon: ICON.run },
+    running: { label: '跑步', met: 9.8, icon: ICON.run },
+    swimming: { label: '游泳', met: 8.0, icon: ICON.swim },
+    cycling_casual: { label: '骑行', met: 4.0, icon: ICON.cycle },
+    cycling_fast: { label: '快骑', met: 8.0, icon: ICON.cycle },
+    hula_hoop: { label: '呼啦圈', met: 6.0, icon: ICON.hula },
+    jump_rope: { label: '跳绳', met: 12.3, icon: ICON.jump },
+    elliptical: { label: '椭圆机', met: 5.0, icon: ICON.elliptical },
+    stair_climber: { label: '爬楼梯', met: 4.0, icon: ICON.stairs },
+    roller_skating: { label: '轮滑', met: 7.0, icon: ICON.skate },
+    strength: { label: '力量训练', met: 6.0, icon: ICON.strength },
+    badminton: { label: '羽毛球', met: 5.5, icon: ICON.racket },
+    hiking: { label: '徒步', met: 6.0, icon: ICON.hike },
+    basketball: { label: '篮球', met: 6.5, icon: ICON.ball },
+    custom: { label: '自定义', met: 4.0, icon: ICON.custom },
 };
 
 const MEAL_TYPE_MAP = new Map(MEAL_TYPES.map((item) => [item.key, item]));
