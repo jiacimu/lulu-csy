@@ -2137,12 +2137,26 @@
     color: var(--hs-primary-dark);
 }
 
-/* Floating menu button in main content */
+/* Page header (menu btn + title) */
+.hs-page-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px 8px;
+    flex-shrink: 0;
+}
+
+.hs-page-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--hs-text);
+    letter-spacing: -0.02em;
+    margin: 0;
+    line-height: 1.2;
+}
+
+/* Menu button in header */
 .hs-menu-btn {
-    position: absolute;
-    top: 12px;
-    left: 14px;
-    z-index: 40;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2156,6 +2170,7 @@
     color: var(--hs-text-secondary);
     transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
     -webkit-tap-highlight-color: transparent;
+    flex-shrink: 0;
 }
 
 .hs-menu-btn:active {

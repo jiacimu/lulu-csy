@@ -135,10 +135,13 @@ const HalfSugarInner: React.FC = () => {
 
             {/* Main Content */}
             <div className="hs-main-content">
-                {/* Floating menu button */}
-                <button type="button" className="hs-menu-btn" onClick={toggleSidebar} aria-label="菜单">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" width="18" height="18"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
-                </button>
+                {/* Header: menu button + page title */}
+                <div className="hs-page-header">
+                    <button type="button" className="hs-menu-btn" onClick={toggleSidebar} aria-label="菜单">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" width="18" height="18"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
+                    </button>
+                    <h1 className="hs-page-title">{tabs.find((t) => t.id === activeTab)?.zh ?? '半糖主义'}</h1>
+                </div>
 
                 <Suspense fallback={<div className="hs-tab-content"><div className="hs-loading-card">加载中…</div></div>}>
                     {renderTab()}
