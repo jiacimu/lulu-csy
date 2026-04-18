@@ -32,6 +32,7 @@ import {
   TrendUp,
   Wrench,
   MusicNote,
+  Heartbeat,
 } from '@phosphor-icons/react';
 
 // SVG 图标库 - Phosphor Icons
@@ -67,6 +68,7 @@ export const Icons: Record<string, React.FC<{ className?: string }>> = {
   HotSearch: ({ className }) => <TrendUp className={className} weight="bold" />,
   StatusWorkshop: ({ className }) => <Wrench className={className} weight="bold" />,
   Music: ({ className }) => <MusicNote className={className} weight="bold" />,
+  HalfSugar: ({ className }) => <Heartbeat className={className} weight="bold" />,
 };
 
 export const INSTALLED_APPS: AppConfig[] = [
@@ -101,6 +103,7 @@ export const INSTALLED_APPS: AppConfig[] = [
   { id: AppID.CognitiveNetwork, name: '认知网络', icon: 'CognitiveNetwork', color: 'violet' },
   { id: AppID.StatusWorkshop, name: '状态栏工坊', icon: 'StatusWorkshop', color: 'slate' },
   { id: AppID.Music, name: 'Emo Cloud', icon: 'Music', color: 'red' },
+  { id: AppID.HalfSugar, name: '半糖主义', icon: 'HalfSugar', color: 'teal' },
 ];
 
 export const DOCK_APPS = [AppID.Chat, AppID.GroupChat, AppID.Social, AppID.Settings];

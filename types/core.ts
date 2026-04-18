@@ -32,6 +32,7 @@ export enum AppID {
     VoiceCall = 'voice_call', // 语音通话
     CognitiveNetwork = 'cognitive_network', // 认知网络
     StatusWorkshop = 'status_workshop', // 状态栏工坊
+    HalfSugar = 'half_sugar', // 半糖主义
 }
 
 export interface SystemLog {

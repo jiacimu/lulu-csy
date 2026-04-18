@@ -46,6 +46,7 @@ const CsyManualApp = React.lazy(() => import('../apps/CsyManualApp'));
 const CognitiveNetworkApp = React.lazy(() => import('../apps/CognitiveNetworkApp'));
 const StatusWorkshopApp = React.lazy(() => import('../apps/StatusWorkshopApp'));
 const MusicApp = React.lazy(() => import('../apps/music/MusicApp'));
+const HalfSugarApp = React.lazy(() => import('../apps/halfsugar/HalfSugarApp'));
 
 const LazyValentineEvent = React.lazy(() => import('./ValentineEvent').then(m => ({
   default: m.SpecialMomentsApp
@@ -302,6 +303,7 @@ function renderActiveApp(activeApp: AppID) {
     case AppID.CognitiveNetwork: return <CognitiveNetworkApp />;
     case AppID.StatusWorkshop: return <StatusWorkshopApp />;
     case AppID.Music: return <MusicApp />;
+    case AppID.HalfSugar: return <HalfSugarApp />;
     case AppID.Launcher:
     default: return <Launcher />;
   }
