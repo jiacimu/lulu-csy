@@ -727,6 +727,143 @@
   to { transform: rotate(360deg); }
 }
 
+/* ─── 液态玻璃模式 ─────────────────────────── */
+
+/* 玻璃盘面 — 覆盖默认样式 */
+.music-player-disc--glass {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(255, 255, 255, 0.02) 40%,
+    rgba(255, 255, 255, 0.08) 60%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  backdrop-filter: blur(24px) saturate(1.4) brightness(1.05);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4) brightness(1.05);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow:
+    /* 外层柔光 */
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.1),
+    /* 多层内阴影 — 液态光泽 */
+    inset 0 2px 4px rgba(255, 255, 255, 0.15),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.1),
+    inset 4px 0 8px rgba(255, 255, 255, 0.05),
+    inset -4px 0 8px rgba(255, 255, 255, 0.05),
+    inset 0 0 40px rgba(255, 255, 255, 0.03);
+  overflow: visible;
+}
+
+/* 玻璃盘面上的高光弧线 */
+.music-player-disc--glass::before {
+  content: '';
+  position: absolute;
+  top: 8%;
+  left: 15%;
+  width: 50%;
+  height: 30%;
+  border-radius: 50%;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.18) 0%,
+    rgba(255, 255, 255, 0.05) 40%,
+    transparent 100%
+  );
+  transform: rotate(-15deg);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* 玻璃盘面下方的次级反光 */
+.music-player-disc--glass::after {
+  content: '';
+  position: absolute;
+  bottom: 10%;
+  right: 12%;
+  width: 40%;
+  height: 20%;
+  border-radius: 50%;
+  background: linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    transparent 100%
+  );
+  transform: rotate(10deg);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* 玻璃模式下隐藏封面图 */
+.music-player-disc--glass .music-player-disc-cover {
+  opacity: 0;
+}
+
+/* 玻璃模式下的中心轴 — 实色黑胶核心 */
+.music-player-disc--glass .music-player-disc-center {
+  width: 22px;
+  height: 22px;
+  background: radial-gradient(
+    circle,
+    #2a2a30 0%,
+    #1a1a1f 50%,
+    #0f0f12 100%
+  );
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  box-shadow:
+    0 0 6px rgba(0, 0, 0, 0.5),
+    inset 0 1px 2px rgba(255, 255, 255, 0.1);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* 玻璃模式下的头像框 — 更透明更通透 */
+.music-player-vinyl-halo--glass::before {
+  background: conic-gradient(
+    from 0deg,
+    rgba(255, 255, 255, 0.02),
+    rgba(255, 255, 255, 0.12),
+    rgba(200, 230, 255, 0.15),
+    rgba(255, 255, 255, 0.12),
+    rgba(255, 220, 240, 0.15),
+    rgba(255, 255, 255, 0.12),
+    rgba(200, 230, 255, 0.15),
+    rgba(255, 255, 255, 0.12),
+    rgba(255, 255, 255, 0.02)
+  );
+}
+
+.music-player-vinyl-halo--glass::after {
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow:
+    0 0 24px rgba(255, 255, 255, 0.1),
+    0 0 48px rgba(255, 255, 255, 0.03),
+    inset 0 0 16px rgba(255, 255, 255, 0.06);
+}
+
+/* 液态玻璃切换按钮 */
+.music-glass-toggle {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.5);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: background 0.15s, color 0.15s;
+}
+
+.music-glass-toggle--active {
+  background: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.1);
+}
+
 /* 歌曲信息区 */
 .music-player-song-info {
   padding: 0 28px;
