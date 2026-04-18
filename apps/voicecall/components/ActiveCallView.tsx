@@ -243,6 +243,9 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                             </span>
                         ) : formatDuration(duration)}
                     </span>
+                    {ttsDegraded && (
+                        <span className="text-[10px] text-amber-300/60 tracking-wider">· 文字模式</span>
+                    )}
                 </div>
             </div>
 

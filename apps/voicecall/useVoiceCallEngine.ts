@@ -228,6 +228,8 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
     const ttsWsRef = useRef<MinimaxTtsWs | null>(null);
     const playerRef = useRef<VoiceCallAudioPlayer | null>(null);
     const engineActiveRef = useRef(false);
+    // TTS 是否可用（apiKey + groupId 都配置了才可用，否则纯文字降级模式）
+    const ttsAvailableRef = useRef(true);
 
     // 用 ref 跟踪最新 options 值（在 VAD 回调中使用）
     const optionsRef = useRef(options);
@@ -285,7 +287,10 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             // 系统内部触发词（如 AI 来电开场白）不显示在界面上
             setTranscript(text.startsWith('[系统：') ? '' : text);
             setAiResponse('');
-            setTtsDegraded(false);
+            // 仅 TTS 可用时才重置 ttsDegraded，避免纯文字模式下每轮闪烁
+            if (ttsAvailableRef.current) {
+                setTtsDegraded(false);
+            }
             // ─── 清空本轮音频缓存 ───
             turnAudioChunksRef.current = [];
             // ─── 外语模式 (Foreign Language): 重置翻译 ───
@@ -506,6 +511,60 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
 
                 tryMarkTtsFinished();
             };
+
+            // ─── TTS 不可用：直接走纯文字降级路径，跳过所有 WS 操作 ───
+            if (!ttsAvailableRef.current) {
+                setTtsDegraded(true);
+                opts.onAISpeakingChange(false);
+                setEngineState('processing');
+                engineStateRef.current = 'processing';
+
+                await llm.chat(text, {
+                    onSentence: (sentence) => {
+                        if (gen !== generationRef.current || !engineActiveRef.current) return;
+                        // 外语模式翻译标记处理
+                        let ttsText = sentence;
+                        let translationText = '';
+                        const foreignLangMatch = sentence.match(/\[\[翻译\s*[：:]\s*(.*?)\]\]/);
+                        if (foreignLangMatch) {
+                            translationText = foreignLangMatch[1].trim();
+                            ttsText = sentence.replace(/\[\[翻译\s*[：:]\s*.*?\]\]/g, '').trim();
+                        }
+                        const visibleText = sanitizeVoiceCallAssistantText(ttsText);
+                        if (!visibleText) {
+                            setAiTranslation('');
+                            return;
+                        }
+                        setAiTranslation(translationText);
+                        console.log(`[Engine] LLM sentence (text-only): "${visibleText}"`);
+                        sentenceQueue.push(visibleText);
+                        enqueueDegradedSentence(visibleText);
+                    },
+                    onComplete: (full) => {
+                        if (gen !== generationRef.current) return;
+                        console.log(`[Engine] LLM complete (text-only): "${full.slice(0, 80)}..."`);
+                        llmComplete = true;
+                        if (!degradedDisplaying && degradedSentenceQueue.length === 0 && engineActiveRef.current) {
+                            opts.onAISpeakingChange(false);
+                            setEngineState('listening');
+                            engineStateRef.current = 'listening';
+                        }
+                    },
+                    onError: (errMsg) => {
+                        if (gen !== generationRef.current) return;
+                        console.error('[Engine] LLM error (text-only):', errMsg);
+                        opts.onError?.(errMsg);
+                        opts.onAISpeakingChange(false);
+                        setEngineState('listening');
+                        engineStateRef.current = 'listening';
+                    },
+                    onRetrying: () => {
+                        if (gen !== generationRef.current) return;
+                        opts.onRetrying?.();
+                    },
+                }, { turnId: gen });
+                return;
+            }
 
             let ttsWs = new MinimaxTtsWs({
                 onAudioChunk: handleAudioChunk,
@@ -759,10 +818,11 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
 
         const opts = optionsRef.current;
 
-        // 检查配置
-        if (!opts.ttsConfig.apiKey) {
-            opts.onError?.('TTS API Key 未配置，请在设置中配置 MiniMax');
-            return;
+        // 检查配置：TTS 不可用时进入纯文字降级模式（不阻断引擎启动）
+        const ttsAvailable = !!(opts.ttsConfig.apiKey?.trim() && opts.ttsConfig.groupId?.trim());
+        ttsAvailableRef.current = ttsAvailable;
+        if (!ttsAvailable) {
+            console.log('[Engine] TTS not configured — starting in text-only degraded mode');
         }
         if (!opts.apiConfig.baseUrl) {
             opts.onError?.('LLM API 未配置，请在设置中配置');
