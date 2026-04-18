@@ -573,7 +573,7 @@
   flex-shrink: 0;
 }
 
-/* ─── 旋转唱片区域 ─────────────────────────── */
+/* ─── 旋转封面区域 ─────────────────────────── */
 .music-player-cover-area {
   display: flex;
   align-items: center;
@@ -582,7 +582,7 @@
   flex-shrink: 0;
 }
 
-/* 磨砂光晕外环 */
+/* 头像框容器 — 包含装饰环 + 旋转封面 */
 .music-player-vinyl-halo {
   position: relative;
   width: 260px;
@@ -591,81 +591,96 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(
-    circle,
-    rgba(255,255,255,0.08) 60%,
-    rgba(255,255,255,0.03) 75%,
-    transparent 100%
+}
+
+/* 装饰头像框 — 外环 */
+.music-player-vinyl-halo::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(255, 255, 255, 0.03),
+    rgba(255, 255, 255, 0.15),
+    rgba(255, 215, 180, 0.2),
+    rgba(255, 255, 255, 0.15),
+    rgba(200, 220, 255, 0.2),
+    rgba(255, 255, 255, 0.15),
+    rgba(255, 215, 180, 0.2),
+    rgba(255, 255, 255, 0.15),
+    rgba(255, 255, 255, 0.03)
   );
-  backdrop-filter: blur(20px) saturate(1.2);
-  -webkit-backdrop-filter: blur(20px) saturate(1.2);
-  box-shadow:
-    0 0 40px rgba(255,255,255,0.06),
-    0 0 80px rgba(255,255,255,0.03),
-    inset 0 0 30px rgba(255,255,255,0.04);
-  transition: box-shadow 0.6s ease;
+  animation: music-frame-spin 8s linear infinite;
+  z-index: 0;
 }
 
-.music-player-vinyl-halo--playing {
+/* 装饰头像框 — 内环光泽 */
+.music-player-vinyl-halo::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
   box-shadow:
-    0 0 50px rgba(255,255,255,0.1),
-    0 0 100px rgba(255,255,255,0.05),
-    inset 0 0 30px rgba(255,255,255,0.06);
+    0 0 20px rgba(255, 255, 255, 0.08),
+    inset 0 0 20px rgba(255, 255, 255, 0.05);
+  z-index: 2;
+  pointer-events: none;
 }
 
-/* 唱片主体（旋转） */
+.music-player-vinyl-halo--playing::before {
+  animation-play-state: running;
+  background: conic-gradient(
+    from 0deg,
+    rgba(255, 255, 255, 0.05),
+    rgba(255, 255, 255, 0.2),
+    rgba(255, 215, 180, 0.3),
+    rgba(255, 255, 255, 0.2),
+    rgba(200, 220, 255, 0.3),
+    rgba(255, 255, 255, 0.2),
+    rgba(255, 215, 180, 0.3),
+    rgba(255, 255, 255, 0.2),
+    rgba(255, 255, 255, 0.05)
+  );
+}
+
+.music-player-vinyl-halo--playing::after {
+  box-shadow:
+    0 0 30px rgba(255, 255, 255, 0.12),
+    0 0 60px rgba(255, 255, 255, 0.04),
+    inset 0 0 20px rgba(255, 255, 255, 0.08);
+}
+
+@keyframes music-frame-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 旋转封面主体 — 大圆形封面，无黑胶 */
 .music-player-disc {
-  width: 230px;
-  height: 230px;
+  width: 240px;
+  height: 240px;
   border-radius: 50%;
   position: relative;
-  background: radial-gradient(
-    circle,
-    rgba(30,30,35,0.95) 0%,
-    rgba(20,20,25,0.98) 100%
-  );
-  box-shadow:
-    inset 0 0 20px rgba(0,0,0,0.5),
-    0 8px 32px rgba(0,0,0,0.4);
-  animation: music-vinyl-spin 20s linear infinite;
   overflow: hidden;
+  z-index: 1;
+  animation: music-vinyl-spin 20s linear infinite;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .music-player-disc--paused {
   animation-play-state: paused;
 }
 
-/* 沟槽纹理 */
-.music-player-disc::before {
-  content: '';
+/* 封面填满整个圆 */
+.music-player-disc-cover {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background:
-    repeating-radial-gradient(
-      circle at center,
-      transparent 0px,
-      transparent 3px,
-      rgba(255,255,255,0.03) 3px,
-      rgba(255,255,255,0.03) 4px
-    );
-  pointer-events: none;
-  z-index: 1;
-}
-
-/* 中心封面 */
-.music-player-disc-cover {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 130px;
-  height: 130px;
-  border-radius: 50%;
   overflow: hidden;
-  z-index: 2;
-  border: 3px solid rgba(255,255,255,0.12);
-  box-shadow: 0 0 16px rgba(0,0,0,0.4);
 }
 
 .music-player-disc-cover img {
@@ -674,33 +689,37 @@
   object-fit: cover;
 }
 
-/* 中心圆点 */
+/* 中心小圆点装饰 */
 .music-player-disc-center {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: radial-gradient(
     circle,
-    rgba(255,255,255,0.5) 30%,
-    rgba(255,255,255,0.15) 100%
+    rgba(255, 255, 255, 0.6) 20%,
+    rgba(255, 255, 255, 0.2) 60%,
+    transparent 100%
   );
   z-index: 3;
-  box-shadow: 0 0 8px rgba(255,255,255,0.2);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
 .music-player-disc-note {
-  color: rgba(255,255,255,0.4);
-  font-size: 40px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 48px;
   font-weight: 200;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
   height: 100%;
+  background: linear-gradient(135deg, rgba(40,40,50,0.9), rgba(20,20,30,0.95));
 }
 
 @keyframes music-vinyl-spin {
