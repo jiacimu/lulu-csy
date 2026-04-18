@@ -6,6 +6,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { useApp } from '../../context/AppContext';
 import { useAudioPlayer } from '../../hooks/useAudioPlayer';
 import { useLyrics } from '../../hooks/useLyrics';
+import { useDominantColor } from '../../hooks/useDominantColor';
 import {
   isSongPlayable,
   type MusicPlayable,
@@ -1626,10 +1627,26 @@ const FullPlayer = ({
   const backgroundStyle = cover ? { backgroundImage: `url(${cover})` } : { background: getFallbackGradient(playable.id) };
   const displayDuration = duration > 0 ? duration : playable.duration / 1000;
 
+  // 提取封面主色调用于氛围光
+  const dominantColor = useDominantColor(cover);
+  const ambientStyle = dominantColor
+    ? {
+        background: `radial-gradient(ellipse at 30% 20%, rgba(${dominantColor.r}, ${dominantColor.g}, ${dominantColor.b}, 0.5) 0%, transparent 60%), radial-gradient(ellipse at 70% 80%, rgba(${dominantColor.r}, ${dominantColor.g}, ${dominantColor.b}, 0.3) 0%, transparent 50%)`,
+      }
+    : undefined;
+  const coverShadow = dominantColor
+    ? `0 20px 60px rgba(${dominantColor.r}, ${dominantColor.g}, ${dominantColor.b}, 0.5), 0 8px 24px rgba(0,0,0,0.3)`
+    : undefined;
+
   return (
     <div className="music-player-page">
+      {/* Layer 0+1: 封面极致模糊 */}
       <div className="music-player-bg" style={backgroundStyle} />
-      <div className="music-player-overlay" />
+      {/* Layer 2: 封面色氛围光 */}
+      <div className="music-player-ambient" style={ambientStyle} />
+      {/* Layer 3: 暗角 */}
+      <div className="music-player-vignette" />
+
       <div className="music-player-content">
         <div className="music-player-header">
           <button
@@ -1651,18 +1668,19 @@ const FullPlayer = ({
           <div className="music-player-header-spacer" />
         </div>
 
-        <div className="music-player-vinyl-area">
-          <div className={`music-player-tonearm ${isPlaying ? 'playing' : 'paused'}`}>
-            <div className="music-player-tonearm-pivot" />
-            <div className="music-player-tonearm-arm" />
-            <div className="music-player-tonearm-head" />
-          </div>
-          <div className={`music-player-vinyl ${isPlaying ? '' : 'paused'}`}>
-            <div className="music-vinyl-groove" />
-            <div className="music-vinyl-groove" />
-            <div className="music-vinyl-groove" />
-            <div className="music-vinyl-groove" />
-            <CoverArt src={cover} alt={playable.name} seed={playable.id} className="music-vinyl-center" note={isSongPlayable(playable) ? '♪' : '播'} />
+        {/* Hero 封面 */}
+        <div className="music-player-cover-area">
+          <div
+            className={`music-player-hero-cover ${isPlaying ? 'music-player-hero-cover--playing' : 'music-player-hero-cover--paused'}`}
+            style={coverShadow ? { '--cover-shadow': coverShadow } as React.CSSProperties : undefined}
+          >
+            {cover ? (
+              <img src={cover} alt={playable.name} />
+            ) : (
+              <span className="music-player-hero-cover-note">
+                {isSongPlayable(playable) ? '♪' : '播'}
+              </span>
+            )}
           </div>
         </div>
 
@@ -1672,12 +1690,11 @@ const FullPlayer = ({
               <div className="music-player-song-name">{playable.name}</div>
               <div className="music-player-song-artist">
                 {getPlayableSubtitle(playable)}
-                <span className="music-player-quality-badge">{isSongPlayable(playable) ? '单曲' : '声音'}</span>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 16, flexShrink: 0 }}>
-              <div style={{ color: 'rgba(255,255,255,0.6)', cursor: 'pointer' }}><IconHeart /></div>
-              <div style={{ color: 'rgba(255,255,255,0.6)', cursor: 'pointer' }}><IconMore /></div>
+              <div style={{ color: 'rgba(255,255,255,0.45)', cursor: 'pointer' }}><IconHeart /></div>
+              <div style={{ color: 'rgba(255,255,255,0.45)', cursor: 'pointer' }}><IconMore /></div>
             </div>
           </div>
         </div>
