@@ -985,6 +985,7 @@
 
 .music-player-lyrics-line-text {
   display: block;
+  font-family: var(--app-font);
   font-size: 14px;
   line-height: 1.5;
   font-weight: 400;
@@ -1004,6 +1005,7 @@
 
 .music-player-lyrics-line-translation {
   display: block;
+  font-family: var(--app-font);
   margin-top: 4px;
   font-size: 13px;
   font-weight: 400;
