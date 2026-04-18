@@ -1,5 +1,6 @@
 import { buildBackendHeaders,buildBackendUrl } from './backendClient';
 import { safeResponseJson } from './safeApi';
+import { safeTimeoutSignal } from './safeTimeout';
 
 export interface CityTip {
     name: string;
@@ -222,7 +223,7 @@ export async function getDistrictInfo(keyword: string, subdistrict = 1): Promise
                     contentType: false,
                     extra: { 'Accept': 'application/json' },
                 }),
-                signal: AbortSignal.timeout(8000),
+                signal: safeTimeoutSignal(8000),
             },
         );
 
@@ -264,7 +265,7 @@ export async function searchNearbyRestaurants(city: string, count = 15): Promise
                     contentType: false,
                     extra: { 'Accept': 'application/json' },
                 }),
-                signal: AbortSignal.timeout(8000),
+                signal: safeTimeoutSignal(8000),
             },
         );
 

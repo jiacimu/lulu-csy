@@ -5,6 +5,7 @@ import { buildBackendHeaders,getBackendUrl } from './backendClient';
 import { loadJSZip } from './lazyThirdParty';
 import { hasCloudSyncTarget } from './runtimeConfig';
 import { rebaseImportedVectorMemories } from './vectorMemorySyncState';
+import { safeTimeoutSignal } from './safeTimeout';
 
 // ─── JSZip Dynamic Loader ───────────────────────────────────────────────
 
@@ -342,7 +343,7 @@ export async function exportSystemData(
             if (backendUrl) {
                 const graphResp = await fetch(`${backendUrl}/api/graph/export`, {
                     headers: buildBackendHeaders({ contentType: false }),
-                    signal: AbortSignal.timeout(15000),
+                    signal: safeTimeoutSignal(15000),
                 });
                 if (graphResp.ok) {
                     const graphData = await graphResp.json();
@@ -503,7 +504,7 @@ export async function importSystemData(
                     body: JSON.stringify({
                         relations: graphData.relations || [],
                     }),
-                    signal: AbortSignal.timeout(30000),
+                    signal: safeTimeoutSignal(30000),
                 });
                 if (importResp.ok) {
                     const result = await importResp.json();

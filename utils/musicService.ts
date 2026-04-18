@@ -1,5 +1,6 @@
 import { buildBackendAuthQuery, buildBackendHeaders, buildBackendUrl, buildBackendUrlObject } from './backendClient';
 import { safeResponseJson } from './safeApi';
+import { safeTimeoutSignal } from './safeTimeout';
 import type {
     MusicPlayable,
     MusicSearchBundle,
@@ -565,7 +566,7 @@ async function musicPost<T>(path: string, body: Record<string, unknown>): Promis
         method: 'POST',
         headers: buildBackendHeaders(),
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15000),
+        signal: safeTimeoutSignal(15000),
     });
     const data = await safeResponseJson(response) as T;
 
@@ -583,7 +584,7 @@ async function sameOriginPost<T>(path: string, body: Record<string, unknown>): P
             'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15000),
+        signal: safeTimeoutSignal(15000),
     });
     const data = await safeResponseJson(response) as T;
 

@@ -7,6 +7,7 @@ import {
   getBackendToken,
   getBackendUrl,
 } from './backendClient';
+import { safeTimeoutSignal } from './safeTimeout';
 import type { AgentConfig } from './autonomousAgent';
 
 type AgentApiConfig = {
@@ -110,7 +111,7 @@ async function agentFetch<T = any>(
     const response = await fetch(buildBackendUrl(path, query), {
         ...options,
         headers,
-        signal: options.signal || AbortSignal.timeout(getTimeoutMs(path)),
+        signal: options.signal || safeTimeoutSignal(getTimeoutMs(path)),
     });
 
     if (!response.ok) {

@@ -8,6 +8,7 @@
 
 import { isBackendAlive, buildHeaders } from './clients/backendCore';
 import { getBackendUrl } from './backendConfig';
+import { safeTimeoutSignal } from './safeTimeout';
 
 export interface CharacterGoal {
     description: string;
@@ -51,7 +52,7 @@ export async function loadCharacterGoals(charId: string): Promise<CharacterGoal[
         const headers = buildHeaders();
         const resp = await fetch(`${url}/api/goals/${encodeURIComponent(charId)}`, {
             headers,
-            signal: AbortSignal.timeout(8000),
+            signal: safeTimeoutSignal(8000),
         });
 
         if (!resp.ok) {

@@ -5,6 +5,7 @@
  */
 
 import { buildBackendHeaders,getBackendUrl } from './backendClient';
+import { safeTimeoutSignal } from './safeTimeout';
 
 let _pushStatus = '未初始化';
 let _pushEndpoint = '';
@@ -127,7 +128,7 @@ export async function initPushSubscription(): Promise<void> {
             try {
                 const keyResponse = await fetch(`${backendUrl}/api/push/vapid-key`, {
                     headers: buildBackendHeaders({ contentType: false }),
-                    signal: AbortSignal.timeout(30000),
+                    signal: safeTimeoutSignal(30000),
                 });
 
                 if (!keyResponse.ok) {
@@ -238,7 +239,7 @@ async function syncSubscriptionToBackend(
                 method: 'POST',
                 headers,
                 body: JSON.stringify({ subscription: subscription.toJSON() }),
-                signal: AbortSignal.timeout(30000),
+                signal: safeTimeoutSignal(30000),
             });
 
             if (response.ok) {
@@ -283,7 +284,7 @@ async function syncUnsubscribeToBackend(subscription: PushSubscription): Promise
         method: 'POST',
         headers,
         body: JSON.stringify({ endpoint: subscription.endpoint }),
-        signal: AbortSignal.timeout(10000),
+        signal: safeTimeoutSignal(10000),
     });
 
     if (response.ok || response.status === 405) {
@@ -300,7 +301,7 @@ async function sendTestPush(backendUrl: string): Promise<void> {
     const response = await fetch(`${backendUrl}/api/push/test`, {
         method: 'POST',
         headers,
-        signal: AbortSignal.timeout(30000),
+        signal: safeTimeoutSignal(30000),
     });
 
     if (response.ok) {

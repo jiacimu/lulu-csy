@@ -9,6 +9,7 @@ import {
   getBackendToken,
   setBackendHealthCache,
 } from './backendConfig';
+import { safeTimeoutSignal } from './safeTimeout';
 
 let isKeepAliveStarted = false;
 let isHeartbeatStarted = false;
@@ -50,7 +51,7 @@ export function startBackendHeartbeat() {
     try {
       const resp = await fetch(buildBackendUrl('/health'), {
         headers: { 'Authorization': `Bearer ${token}` },
-        signal: AbortSignal.timeout(BACKEND_HEALTH_TIMEOUT_MS),
+        signal: safeTimeoutSignal(BACKEND_HEALTH_TIMEOUT_MS),
       });
       if (resp.ok) {
         setBackendHealthCache(true);
