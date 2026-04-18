@@ -1674,6 +1674,10 @@ function getRandomSkinId(): string {
   return wallpaperSkins[index].id;
 }
 
+const GLASS_MODE_KEY = 'music_player_glass';
+
+const IconGlass = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><ellipse cx="12" cy="9" rx="6" ry="3" opacity="0.5" /><path d="M6 15c0-1.5 2.7-3 6-3s6 1.5 6 3" opacity="0.3" /></svg>;
+
 const IconSkin = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" /><circle cx="12" cy="12" r="4" /><path d="M2 12h4M18 12h4M12 2v4M12 18v4" /></svg>;
 
 const SkinPicker = ({
@@ -1784,6 +1788,19 @@ const FullPlayer = ({
   const [customSkins, setCustomSkins] = useState<PlayerSkinEntry[]>([]);
   const [showSkinPicker, setShowSkinPicker] = useState(false);
 
+  // ── 液态玻璃模式 ──
+  const [glassMode, setGlassMode] = useState<boolean>(() => {
+    try { return localStorage.getItem(GLASS_MODE_KEY) === 'true'; } catch { return false; }
+  });
+
+  function toggleGlassMode(): void {
+    setGlassMode((prev) => {
+      const next = !prev;
+      try { localStorage.setItem(GLASS_MODE_KEY, String(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
+
   // 加载自定义皮肤
   useEffect(() => {
     void loadCustomSkins().then(setCustomSkins);
@@ -1851,6 +1868,14 @@ const FullPlayer = ({
           <div className="music-player-header-copy" />
           <button
             type="button"
+            className={`music-glass-toggle ${glassMode ? 'music-glass-toggle--active' : ''}`}
+            aria-label="液态玻璃"
+            onClick={toggleGlassMode}
+          >
+            <IconGlass />
+          </button>
+          <button
+            type="button"
             className="music-player-header-button"
             aria-label="播放器皮肤"
             onClick={() => setShowSkinPicker(true)}
@@ -1861,8 +1886,8 @@ const FullPlayer = ({
 
         {/* 旋转唱片 */}
         <div className="music-player-cover-area">
-          <div className={`music-player-vinyl-halo ${isPlaying ? 'music-player-vinyl-halo--playing' : ''}`}>
-            <div className={`music-player-disc ${isPlaying ? '' : 'music-player-disc--paused'}`}>
+          <div className={`music-player-vinyl-halo ${isPlaying ? 'music-player-vinyl-halo--playing' : ''}${glassMode ? ' music-player-vinyl-halo--glass' : ''}`}>
+            <div className={`music-player-disc ${isPlaying ? '' : 'music-player-disc--paused'}${glassMode ? ' music-player-disc--glass' : ''}`}>
               <div className="music-player-disc-cover">
                 {cover ? (
                   <img src={cover} alt={playable.name} />
