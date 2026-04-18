@@ -5,6 +5,7 @@ import { DB } from '../utils/db';
 import { useOS } from '../context/OSContext';
 import { haptic } from '../utils/haptics';
 import { getEmbeddingConfig,getSecondaryApiConfig } from '../utils/runtimeConfig';
+import { safeTimeoutSignal } from '../utils/safeTimeout';
 
 /* Recovered comment */
 
@@ -206,7 +207,7 @@ const CognitiveNetworkApp: React.FC = () => {
         try {
             const resp = await fetch(`${url}/api/graph/stats-by-char`, {
                 headers: authHeaders(),
-                signal: AbortSignal.timeout(60000), // 60s timeout
+                signal: safeTimeoutSignal(60000), // 60s timeout
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
@@ -273,10 +274,19 @@ const CognitiveNetworkApp: React.FC = () => {
             try {
                 const processBody: any = {};
                 if (selectedCharId) processBody.charId = selectedCharId;
-                const timeoutSignal = AbortSignal.timeout(120_000);
-                const combinedSignal = controller
-                    ? AbortSignal.any([controller.signal, timeoutSignal])
-                    : timeoutSignal;
+                const timeoutSignal = safeTimeoutSignal(120_000);
+                // AbortSignal.any is Safari 17.4+; fall back to manual wiring
+                let combinedSignal: AbortSignal;
+                if (controller && typeof AbortSignal.any === 'function') {
+                    combinedSignal = AbortSignal.any([controller.signal, timeoutSignal]);
+                } else if (controller) {
+                    // Manual fallback: listen for timeout and abort the main controller
+                    const onTimeout = () => { if (!controller.signal.aborted) controller.abort(); };
+                    timeoutSignal.addEventListener('abort', onTimeout, { once: true });
+                    combinedSignal = controller.signal;
+                } else {
+                    combinedSignal = timeoutSignal;
+                }
                 const r = await fetch(`${url}/api/graph/semantic-process-one`, {
                     method: 'POST',
                     headers: authHeaders(),

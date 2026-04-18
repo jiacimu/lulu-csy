@@ -13,11 +13,12 @@ import {
     type RetryFailedMemoryEngineReindexResult,
     type SwitchMemoryEmbeddingEngineResult,
 } from './backendCore';
+import { safeTimeoutSignal } from '../safeTimeout';
 
 const createOptionalTimeoutSignal = (timeoutMs: number): AbortSignal | undefined =>
     typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(timeoutMs)
-        : undefined;
+        : safeTimeoutSignal(timeoutMs);
 
 export async function getMemoryEmbeddingEngineStatus(): Promise<MemoryEmbeddingEngineStatus | null> {
     if (!await isBackendAlive()) return null;
@@ -55,7 +56,7 @@ export async function switchMemoryEmbeddingEngine(
                 method: 'POST',
                 headers: buildHeaders(),
                 body: JSON.stringify({ engineId }),
-                signal: AbortSignal.timeout(15000),
+                signal: safeTimeoutSignal(15000),
             },
         );
 
@@ -136,7 +137,7 @@ export async function retryFailedMemoryEngineReindex(
                 method: 'POST',
                 headers: buildHeaders(),
                 body: JSON.stringify(jobId ? { jobId } : {}),
-                signal: AbortSignal.timeout(15000),
+                signal: safeTimeoutSignal(15000),
             },
         );
 
@@ -256,7 +257,7 @@ export async function createHormoneBackfillJob(
             method: 'POST',
             headers,
             body: JSON.stringify({ charId, charName, items, overwrite }),
-            signal: AbortSignal.timeout(15000),
+            signal: safeTimeoutSignal(15000),
         });
 
         if (resp.status === 409) {
@@ -329,7 +330,7 @@ export async function cancelHormoneBackfillJob(jobId: string): Promise<HormoneBa
             {
                 method: 'POST',
                 headers: buildHeaders(),
-                signal: AbortSignal.timeout(10000),
+                signal: safeTimeoutSignal(10000),
             },
         );
 

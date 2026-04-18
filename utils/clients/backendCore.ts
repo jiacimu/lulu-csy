@@ -29,6 +29,7 @@ import {
     readJsonStorage,
     writeJsonStorage,
 } from '../storage';
+import { safeTimeoutSignal } from '../safeTimeout';
 
 export {
     getBackendResolutionDebug,
@@ -244,7 +245,7 @@ interface FetchWithRetryOptions {
 const createOptionalTimeoutSignal = (timeoutMs: number): AbortSignal | undefined =>
     typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(timeoutMs)
-        : undefined;
+        : safeTimeoutSignal(timeoutMs);
 
 function isRetryableNetworkError(err: unknown): boolean {
     if (err instanceof TypeError) return true; // network error
@@ -473,7 +474,7 @@ export async function clearCloudMemoriesLegacyFallback(
     try {
         const listResp = await fetch(listUrl.toString(), {
             headers: listHeaders,
-            signal: AbortSignal.timeout(15000),
+            signal: safeTimeoutSignal(15000),
         });
 
         if (listResp.status === 404) {
@@ -501,7 +502,7 @@ export async function clearCloudMemoriesLegacyFallback(
             const deleteResp = await fetch(`${url}/api/memories/${encodeURIComponent(memoryId)}`, {
                 method: 'DELETE',
                 headers: deleteHeaders,
-                signal: AbortSignal.timeout(10000),
+                signal: safeTimeoutSignal(10000),
             });
 
             if (deleteResp.status === 404) {
@@ -622,7 +623,7 @@ export async function tryBackendExtraction(
             method: 'POST',
             headers,
             body: JSON.stringify({ charId, charName, messages }),
-            signal: AbortSignal.timeout(120000),
+            signal: safeTimeoutSignal(120000),
         });
 
         if (!resp.ok) {
@@ -663,7 +664,7 @@ export async function tryBackendCallExtraction(
             method: 'POST',
             headers,
             body: JSON.stringify({ charId, charName, callHistory, callTimestamp }),
-            signal: AbortSignal.timeout(60000),
+            signal: safeTimeoutSignal(60000),
         });
 
         if (!resp.ok) return false;
