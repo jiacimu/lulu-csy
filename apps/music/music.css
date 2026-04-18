@@ -722,10 +722,11 @@
 }
 
 .music-player-lyrics-line {
-  padding: 5px 0;
-  text-align: center;
+  padding: 6px 0;
+  text-align: left;
   opacity: 0.28;
   transform: scale(0.96);
+  transform-origin: left center;
   transition:
     opacity 0.35s ease,
     transform 0.35s ease;
@@ -733,12 +734,12 @@
 
 .music-player-lyrics-line.active {
   opacity: 1;
-  transform: scale(1.05);
+  transform: scale(1.02);
 }
 
 .music-player-lyrics-line-text {
   display: block;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.5;
   font-weight: 400;
   color: rgba(255,255,255,0.28);
@@ -750,9 +751,9 @@
 
 .music-player-lyrics-line.active .music-player-lyrics-line-text {
   color: #fff;
-  font-size: 24px;
-  font-weight: 800;
-  text-shadow: 0 0 20px rgba(255,255,255,0.35), 0 0 40px rgba(255,255,255,0.12);
+  font-size: 20px;
+  font-weight: 700;
+  text-shadow: 0 0 10px rgba(255,255,255,0.3), 0 0 24px rgba(255,255,255,0.1);
 }
 
 .music-player-lyrics-line-translation {
@@ -768,9 +769,9 @@
   min-height: 96px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 0 18px;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 0;
   font-size: 13px;
   line-height: 1.7;
   color: rgba(255,255,255,0.35);

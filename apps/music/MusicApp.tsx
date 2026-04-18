@@ -1658,12 +1658,7 @@ const FullPlayer = ({
             <IconDown />
           </button>
           <div className="music-player-header-copy">
-            <span className="music-player-header-kicker">
-              {isSongPlayable(playable) ? '正在播放' : '播客播放'}
-            </span>
-            <span className="music-player-header-label">
-              {isSongPlayable(playable) ? '歌词视图' : '节目详情'}
-            </span>
+            {/* 留空以保持布局平衡，去除刻板的标题文字 */}
           </div>
           <div className="music-player-header-spacer" />
         </div>
@@ -1693,7 +1688,6 @@ const FullPlayer = ({
               </div>
             </div>
             <div style={{ display: 'flex', gap: 16, flexShrink: 0 }}>
-              <div style={{ color: 'rgba(255,255,255,0.45)', cursor: 'pointer' }}><IconHeart /></div>
               <div style={{ color: 'rgba(255,255,255,0.45)', cursor: 'pointer' }}><IconMore /></div>
             </div>
           </div>
