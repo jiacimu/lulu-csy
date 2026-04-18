@@ -334,12 +334,30 @@ export const ChatParser = {
 
         // Fallback: no line breaks found and text is long enough
         // Split on spaces that sit between CJK characters/punctuation (中文里不该有空格)
+        // NOTE: We avoid regex lookbehind (?<=...) because Safari ≤ 16.3 does not
+        // support it and would throw a SyntaxError at module parse time, killing the
+        // entire app.  Instead, we use a capture-group approach: match the CJK char
+        // before + space + CJK char after, then reconstruct the chunks by keeping the
+        // surrounding characters with their respective halves.
         if (chunks.length <= 1 && text.trim().length > 50) {
-            // Match a CJK char/punct, then space(s), then CJK char
-            // Split AFTER the first CJK char + space boundary using lookbehind/lookahead
-            chunks = text.split(/(?<=[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef\u2000-\u206f\u2e80-\u2eff\u3001-\u3003\u2018-\u201f\u300a-\u300f\uff01-\uff0f\uff1a-\uff20])\s+(?=[\u4e00-\u9fff\u3400-\u4dbf])/)
-                .map(c => c.trim())
-                .filter(c => c.length > 0);
+            const CJK_SPACE_CJK_RE = /([\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef\u2000-\u206f\u2e80-\u2eff\u3001-\u3003\u2018-\u201f\u300a-\u300f\uff01-\uff0f\uff1a-\uff20])\s+([\u4e00-\u9fff\u3400-\u4dbf])/g;
+            const parts: string[] = [];
+            let lastIdx = 0;
+            let m: RegExpExecArray | null;
+            while ((m = CJK_SPACE_CJK_RE.exec(text)) !== null) {
+                // Include the CJK char before the space in the current chunk
+                const splitPos = m.index + m[1].length;
+                parts.push(text.slice(lastIdx, splitPos));
+                lastIdx = splitPos;
+                // Skip the whitespace; the next CJK char starts a new chunk
+                const spaceLen = m[0].length - m[1].length - m[2].length;
+                lastIdx += spaceLen;
+                // Move the regex index back so the trailing CJK char can be matched
+                // as a leading char for the next split
+                CJK_SPACE_CJK_RE.lastIndex = m.index + m[1].length + spaceLen;
+            }
+            if (lastIdx < text.length) parts.push(text.slice(lastIdx));
+            chunks = parts.map(c => c.trim()).filter(c => c.length > 0);
         }
 
         return chunks;
