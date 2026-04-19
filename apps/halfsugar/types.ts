@@ -11,6 +11,7 @@ export interface HealthAwareUserProfile extends UserProfile {
     healthBirthYear?: number;
     healthSetupDone?: boolean;
     healthShareBodyInfo?: boolean;
+    healthActivityLevel?: ActivityLevel;
 }
 
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'afternoon_tea';
@@ -19,6 +20,7 @@ export type FoodConfidence = 'high' | 'medium' | 'low';
 export type NutrientKey = 'protein' | 'carbs' | 'fat' | 'fiber';
 export type WeightTimeOfDay = 'morning' | 'evening';
 export type SleepQuality = 'good' | 'fair' | 'poor';
+export type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'active';
 export type GoalType =
     | 'weight_target'
     | 'daily_calories'
@@ -150,6 +152,7 @@ export interface HealthProfile {
     height: string;
     weight: string;
     birthYear: string;
+    activityLevel: ActivityLevel;
     isSetup: boolean;
 }
 
@@ -191,6 +194,15 @@ export const DEFAULT_NUTRIENT_TARGETS: DailyNutrientTargets = {
     fat: 65,
     fiber: 25,
 };
+
+export const ACTIVITY_LEVELS: { key: ActivityLevel; label: string; multiplier: number; desc: string }[] = [
+    { key: 'sedentary', label: '久坐', multiplier: 1.2, desc: '办公室/在家，很少运动' },
+    { key: 'light', label: '轻度活动', multiplier: 1.375, desc: '每周 1-3 次轻运动' },
+    { key: 'moderate', label: '中度活动', multiplier: 1.55, desc: '每周 3-5 次运动' },
+    { key: 'active', label: '高度活动', multiplier: 1.725, desc: '每天运动或体力劳动' },
+];
+
+const ACTIVITY_LEVEL_MAP = new Map(ACTIVITY_LEVELS.map((a) => [a.key, a]));
 
 export const MET_TABLE: Record<string, { label: string; met: number; icon: string }> = {
     // Female-priority ordering
@@ -241,6 +253,7 @@ export function buildHealthProfileFromUserProfile(userProfile: HealthAwareUserPr
         height: userProfile.healthHeight?.toString() || '',
         weight: userProfile.healthWeight?.toString() || '',
         birthYear: userProfile.healthBirthYear?.toString() || '',
+        activityLevel: userProfile.healthActivityLevel || 'light',
         isSetup: Boolean(userProfile.healthSetupDone),
     };
 }
@@ -308,21 +321,31 @@ export function computeBmr(userProfile: HealthAwareUserProfile, now = new Date()
 
 export function computeCalorieTarget(userProfile: HealthAwareUserProfile, now = new Date()): number {
     const bmr = computeBmr(userProfile, now);
-    if (!bmr) {
-        return 2000;
-    }
-    return Math.round(bmr * 1.4);
+    if (!bmr) return 2000;
+    const level = userProfile.healthActivityLevel || 'light';
+    const multiplier = ACTIVITY_LEVEL_MAP.get(level)?.multiplier || 1.375;
+    return Math.round(bmr * multiplier);
 }
 
-export function computeDailyCalorieGoal(userProfile: HealthAwareUserProfile, targetWeightKg?: number, now = new Date()): number {
-    const bmr = computeBmr(userProfile, now);
-    if (!bmr) {
-        return 2000;
-    }
+export function computeDailyCalorieGoal(userProfile: HealthAwareUserProfile, _targetWeightKg?: number, now = new Date()): number {
+    return computeCalorieTarget(userProfile, now);
+}
 
-    const currentWeight = userProfile.healthWeight;
-    const multiplier = targetWeightKg && currentWeight && targetWeightKg < currentWeight ? 1.2 : 1.4;
-    return Math.round(bmr * multiplier);
+/**
+ * 根据《中国居民膳食指南(2022)》计算各营养素推荐最低值。
+ * 此值为用户不可下调的底线。
+ */
+export function computeGuidelineNutrients(
+    gender: 'male' | 'female' | '',
+    tdee: number,
+): DailyNutrientTargets {
+    const isMale = gender === 'male';
+    return {
+        protein: isMale ? 65 : 55,                // RNI (g/day)
+        carbs: Math.round(tdee * 0.55 / 4),        // 50-65% 能量，取中值 55%
+        fat: Math.round(tdee * 0.25 / 9),           // 20-30% 能量，取下限 25%
+        fiber: 25,                                   // 膳食指南推荐
+    };
 }
 
 export function sortMealsByCreatedAtDesc(meals: MealRecord[]): MealRecord[] {
