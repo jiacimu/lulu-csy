@@ -150,12 +150,12 @@
     box-shadow: var(--hs-neu-pressed);
 }
 
-/* ── Calorie Ring — Airy Glass ── */
+/* ── Calorie Ring — Three-Ring (Intake / Exercise / Net) ── */
 .hs-ring-container {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 24px 20px 16px;
+    padding: 24px 20px 12px;
 }
 
 .hs-ring-wrapper {
@@ -189,16 +189,28 @@
 .hs-ring-bg {
     fill: none;
     stroke: rgba(0, 0, 0, 0.03);
-    stroke-width: 6;
 }
 
 .hs-ring-progress {
     fill: none;
-    stroke: var(--hs-primary);
-    stroke-width: 6;
     stroke-linecap: round;
     transition: stroke-dashoffset 1.2s cubic-bezier(0.22, 1, 0.36, 1);
-    filter: drop-shadow(0 0 8px rgba(181, 217, 220, 0.45));
+}
+
+/* Three ring color variants */
+.hs-ring-intake {
+    stroke: var(--hs-sage);
+    filter: drop-shadow(0 0 6px rgba(142, 196, 200, 0.45));
+}
+
+.hs-ring-exercise {
+    stroke: var(--hs-clay);
+    filter: drop-shadow(0 0 6px rgba(212, 165, 116, 0.45));
+}
+
+.hs-ring-net {
+    stroke: var(--hs-ocean);
+    filter: drop-shadow(0 0 6px rgba(127, 176, 192, 0.45));
 }
 
 .hs-ring-center {
@@ -211,7 +223,7 @@
 }
 
 .hs-ring-value {
-    font-size: 36px;
+    font-size: 32px;
     font-weight: 700;
     letter-spacing: -0.04em;
     color: var(--hs-text);
@@ -235,10 +247,45 @@
     letter-spacing: 0.01em;
 }
 
+/* Stats row below ring */
+.hs-ring-stats {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    margin-top: 14px;
+}
+
+.hs-ring-stat {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.hs-ring-stat-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.hs-ring-stat-label {
+    font-size: 11px;
+    color: var(--hs-text-muted);
+    font-weight: 500;
+}
+
+.hs-ring-stat-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--hs-text);
+    font-variant-numeric: tabular-nums;
+}
+
 .hs-ring-narration {
     font-size: 12px;
     color: var(--hs-text-muted);
-    margin-top: 12px;
+    margin-top: 10px;
     font-weight: 400;
     letter-spacing: 0.02em;
     text-align: center;
