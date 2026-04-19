@@ -212,21 +212,27 @@ export function getRecommendations(gaps: NutrientGap[]): Array<{
         }));
 }
 
-// ── Always-Positive Narrations (no judgment, only warmth) ──
+// ── Always-Positive Narrations (internet-savvy, meme-friendly) ──
 
 const POSITIVE_NARRATIONS = [
-    '有在好好吃饭，真好 ☀️',
-    '认真生活的你，很棒 ✨',
-    '今天也辛苦了，好好吃饭吧 💛',
-    '会照顾自己的人最酷了 😎',
-    '记录生活的你，好认真呀 📝',
-    '吃饱了才有力气做喜欢的事 💪',
-    '好好吃饭的人，运气不会太差 🍀',
-    '今天也要开心哦 🌸',
-    '每一口都是对自己的温柔 🌷',
-    '好好吃饭就是好好爱自己 🥰',
-    '认真吃饭的样子很可爱 ✿',
-    '你值得所有好吃的 🌈',
+    '干饭人干饭魂，干饭都是人上人 🍚',
+    '今天也是为了吃饭而努力的一天 💪',
+    '认真记录的你，比想象中更酷 😎',
+    '食物面前没有体面，只有快乐 🤤',
+    '人生苦短，再来一碗 🍜',
+    '打工人的快乐就是吃 ☀️',
+    '有在好好吃饭，给你比心 🫰',
+    '你不吃饱，哪有力气搞事业 💼',
+    '好好吃饭的人运气不会差 🍀',
+    '今天也辛苦啦，你值得所有好吃的 🌈',
+    '吃饱了才有力气摆烂嘛 🛋️',
+    '认真干饭的样子很可爱 ✿',
+    '谁还不是个宝宝了，想吃就吃 🍰',
+    '你的胃在说谢谢 💛',
+    '卡路里是什么？不认识 🙈',
+    '这顿吃得很有格局 👏',
+    '每一口都是对自己的投资 📈',
+    '好好吃饭就是最大的自律 ✨',
 ];
 
 export function getDailyNarration(): string {
@@ -234,33 +240,184 @@ export function getDailyNarration(): string {
     return POSITIVE_NARRATIONS[seed % POSITIVE_NARRATIONS.length];
 }
 
-// ── Themed Suggestions (day-of-week / seasonal) ──
+// ── Themed Suggestions (day-of-week / holidays / seasonal / vibes) ──
+
+/** Pick one from an array using the daily seed */
+function pickDaily<T>(arr: T[], offset = 0): T {
+    const s = dailySeed() + offset;
+    return arr[((s * 1103515245 + 12345) & 0x7fffffff) % arr.length];
+}
+
+// Chinese lunar festival approximate dates (month-day, rough Gregorian mapping)
+// These shift each year but we use 2025-2027 approximate windows
+function getChineseFestival(month: number, date: number): string | null {
+    // 春节 (late Jan / early Feb)
+    if ((month === 1 && date >= 25) || (month === 2 && date <= 5)) return '过年好！饺子汤圆安排上 🧧';
+    // 元宵节 (~Feb 12-15)
+    if (month === 2 && date >= 10 && date <= 16) return '元宵节快乐，汤圆还是饺子？评论区打起来 🥟';
+    // 清明 (~Apr 4-6)
+    if (month === 4 && date >= 3 && date <= 6) return '清明时节，来个青团应个景 🍡';
+    // 端午 (~Jun 1-15 range)
+    if (month === 6 && date >= 1 && date <= 15) return '端午安康！甜粽咸粽，我全都要 🫡';
+    // 七夕 (~Aug 1-15)
+    if (month === 8 && date >= 1 && date <= 15) return '七夕快乐，没对象也要吃好的 🍫';
+    // 中秋 (~Sep 10-20)
+    if (month === 9 && date >= 10 && date <= 20) return '中秋快乐！五仁月饼退退退 🥮';
+    // 重阳 (~Oct 10-15)
+    if (month === 10 && date >= 10 && date <= 15) return '重阳节，来碗桂花糕敬自己 🌸';
+    // 腊八 (~Jan 10-20)
+    if (month === 1 && date >= 10 && date <= 20) return '腊八节，熬一碗腊八粥暖暖 🥣';
+    // 冬至 (~Dec 21-23)
+    if (month === 12 && date >= 20 && date <= 23) return '冬至了！北方饺子南方汤圆，你站哪队 🤔';
+    return null;
+}
+
+const WEEKDAY_THEMES: Record<number, string[]> = {
+    0: [ // 周日
+        '周日 = 合法赖床 + 暴饮暴食日 🛌',
+        '周末最后一天，brunch 走起 🥞',
+        '今天拒绝内卷，只卷春饼 🫔',
+        '周日限定：什么都不做也是一种努力 🧘',
+    ],
+    1: [ // 周一
+        '周一综合症？得靠碳水治 🍝',
+        '新的一周从吃饱开始，格局打开 📐',
+        '周一能准时干饭的都是狠人 🫡',
+        '我不是不想上班，我只是想吃饭 🥺',
+    ],
+    2: [ // 周二
+        '周二了，离周末又近了一步，吃串庆祝 🍢',
+        '摸鱼第二天，补充能量继续摸 🐟',
+        '今天适合来点重口的，麻辣烫走起 🌶️',
+    ],
+    3: [ // 周三
+        '周三，一周过半，下午茶安排上 ☕',
+        '驼峰日，需要甜食续命 🍩',
+        '熬过今天就是下坡路了，奶茶打气 🧋',
+    ],
+    4: [ // 周四
+        'V 我 50 🫴 疯狂星期四谁请我吃 🍗',
+        '疯四文学：今天不吃炸鸡，不配当打工人 🍟',
+        '周四了，肯德基已经在向你招手 🐔',
+        'KFC：你有一个未使用的星期四 📩',
+    ],
+    5: [ // 周五
+        '周五！摸鱼成功，奶茶犒劳自己 🧋',
+        '今天下班后的火锅，已经在脑子里点好了 🍲',
+        '周五 = 合法提前进入周末模式 🎉',
+        '摸鱼最后一天，吃好点对得起自己 🫰',
+    ],
+    6: [ // 周六
+        '周六快乐！没有什么是一顿火锅解决不了的 🍲',
+        '周末第一天，热量不存在的 🙈',
+        '今天的我：放肆吃、不后悔 💅',
+        '有一种快乐叫：周六 + 烤肉 🥩',
+    ],
+};
+
+const SEASONAL_VIBES: Array<{ months: number[]; lines: string[] }> = [
+    {
+        months: [3, 4],
+        lines: [
+            '春天来了，万物可爱，你也可爱 🌱',
+            '春日限定：草莓 + 樱花味的一切 🍓',
+        ],
+    },
+    {
+        months: [5, 6],
+        lines: [
+            '天热了，雪糕自由安排上 🍦',
+            '夏天的快乐就是空调 + 西瓜 + 冰可乐 🍉',
+        ],
+    },
+    {
+        months: [7, 8],
+        lines: [
+            '三伏天，靠冷饮续命中 🧊',
+            '这个温度出门就是铁板烧，在家吃凉面吧 🥶',
+            '秋天的第一杯奶茶，不如夏天的第 N 杯 🧋',
+        ],
+    },
+    {
+        months: [9, 10],
+        lines: [
+            '秋天的第一杯奶茶，你喝了吗 🧋',
+            '贴秋膘正式开始，不接受反驳 🫡',
+            '入秋了，糖炒栗子的味道好近 🌰',
+        ],
+    },
+    {
+        months: [11, 12],
+        lines: [
+            '降温了，没有什么是一碗热汤解决不了的 🍜',
+            '冬天的幸福 = 暖气 + 火锅 + 不上班 🔥',
+            '天冷就要吃热的，这是写进 DNA 的 🧬',
+        ],
+    },
+    {
+        months: [1, 2],
+        lines: [
+            '冬天嘛，多吃点没关系的 ❄️',
+            '窝在家里吃热汤，人生赢家 🏠',
+        ],
+    },
+];
+
+const PAYDAY_VIBES = [
+    '发工资了！今天配吃好的 💰',
+    '工资到账，火锅自由达成 🍲',
+    '这个月的第一顿好的，敬自己 🥂',
+];
+
+const MONTH_END_VIBES = [
+    '月底了，泡面也是一种生活态度 🍜',
+    '钱包：我已经尽力了。你：没事还有外卖红包 📱',
+    '月底穷到吃土？土也要加个蛋 🍳',
+];
+
+const DAILY_INSPIRATIONS = [
+    '今天也许适合来碗热干面 🥢',
+    '试试久违的街边烤串？🍢',
+    '要不要来个煎饼果子？🥚',
+    '今天感觉适合吃面 🍝',
+    '突然想吃包子了怎么办 🥟',
+    '今天的你值得一碗螺蛳粉 🐌',
+    '不如来份麻辣烫，丰俭由人 🌶️',
+    '生活建议：偶尔来杯豆浆 🥛',
+    '今天有没有想吃甜的 🍮',
+    '鸡蛋灌饼，永远的神 🫓',
+];
 
 export function getThemedSuggestion(): string | null {
     const now = new Date();
-    const day = now.getDay(); // 0=Sun
+    const day = now.getDay();
     const month = now.getMonth() + 1;
-    const hour = now.getHours();
+    const date = now.getDate();
 
-    // 1. Time-based priorities
-    if (hour >= 22 || hour <= 3) return '夜深了，喝杯热牛奶早点休息哦 🥛';
-    if (hour >= 14 && hour <= 16) return '下午茶时间！奖励自己一块小甜点吧 🍰';
-    if (hour >= 6 && hour <= 9) return '早安！记得吃一顿温暖丰盛的早餐 🍳';
+    // Priority 1: Chinese festivals
+    const festival = getChineseFestival(month, date);
+    if (festival) return festival;
 
-    // 2. Day-of-week based
-    if (day === 1) return '周一辛苦啦，用热气腾腾的美食开启新的一天吧 ☀️';
-    if (day === 3) return '周三啦，吃点坚果或者水果放松一下身体 🍎';
-    if (day === 4) return '疯狂星期四，来份炸鸡开心一下 🍗';
-    if (day === 5 && hour >= 17) return '终于周五啦！今晚吃顿大餐庆祝一下吧 🍲';
-    if (day === 5) return '快乐周五，点杯奶茶犒劳一下自己吧 🧋';
-    if (day === 6) return '周末快乐！去吃顿想了很久的美食吧 🎉';
-    if (day === 0) return '周日的早晨，睡到自然醒，吃一顿丰盛的Brunch 🥞';
+    // Priority 2: Payday / month-end vibes
+    if (date >= 1 && date <= 3) return pickDaily(PAYDAY_VIBES);
+    if (date >= 28) return pickDaily(MONTH_END_VIBES);
 
-    // 3. Seasonal based
-    if (month >= 6 && month <= 8) return '天气好热，来杯冰饮或者吃点西瓜降降温 🍉';
-    if (month >= 11 || month <= 2) return '天冷了，最适合捧着个热气腾腾的烤红薯 🍠';
-    if (month >= 9 && month <= 10) return '秋风起，喝杯温热的茶，吃点糖炒栗子 🌰';
-    if (month >= 3 && month <= 5) return '春暖花开，吃点清爽的无负担美食吧 🥗';
+    // Priority 3: Day-of-week memes
+    const weekdayOptions = WEEKDAY_THEMES[day];
+    if (weekdayOptions) {
+        const weekdayPick = pickDaily(weekdayOptions, 1);
+        // 50% chance to also append a seasonal vibe on weekdays
+        const seasonal = SEASONAL_VIBES.find((s) => s.months.includes(month));
+        if (seasonal && (dailySeed() % 3 === 0)) {
+            return pickDaily(seasonal.lines, 2);
+        }
+        return weekdayPick;
+    }
 
-    return null;
+    // Priority 4: Seasonal fallback
+    const seasonal = SEASONAL_VIBES.find((s) => s.months.includes(month));
+    if (seasonal) return pickDaily(seasonal.lines, 3);
+
+    // Priority 5: Random daily inspiration
+    return pickDaily(DAILY_INSPIRATIONS, 4);
 }
