@@ -30,7 +30,7 @@ const GOAL_FIELD_DEFINITIONS: GoalFieldDefinition[] = [
     { key: 'dailyProtein', goalType: 'daily_protein', label: '蛋白质参考', unit: 'g' },
     { key: 'dailyCarbs', goalType: 'daily_carbs', label: '碳水参考', unit: 'g' },
     { key: 'dailyFat', goalType: 'daily_fat', label: '脂肪参考', unit: 'g' },
-    { key: 'dailyFiber', goalType: 'daily_fiber', label: '纤维参考', unit: 'g' },
+    { key: 'dailyFiber', goalType: 'daily_fiber', label: '膳食纤维参考', unit: 'g' },
 ];
 
 function parsePositiveNumber(value: string): number | null {

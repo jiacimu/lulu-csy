@@ -492,7 +492,7 @@ export const MealRecordView: React.FC<{
                                         <span className="hs-unit" style={{ fontSize: 11 }}>g</span>
                                     </div>
                                     <div className="hs-form-input-with-unit">
-                                        <input className="hs-form-input" placeholder="纤维" value={editingFoodForm.fiber} onChange={(event) => updateEditingFoodField('fiber', event.target.value)} type="number" inputMode="decimal" style={{ height: 40, fontSize: 14 }} />
+                                        <input className="hs-form-input" placeholder="膳食纤维" value={editingFoodForm.fiber} onChange={(event) => updateEditingFoodField('fiber', event.target.value)} type="number" inputMode="decimal" style={{ height: 40, fontSize: 14 }} />
                                         <span className="hs-unit" style={{ fontSize: 11 }}>g</span>
                                     </div>
                                 </div>
@@ -529,7 +529,7 @@ export const MealRecordView: React.FC<{
                                 </div>
                                 <div style={{ fontSize: 11, color: 'var(--hs-text-muted)', marginTop: 4, lineHeight: 1.45 }}>
                                     {food.portion ? `${food.portion} · ` : ''}
-                                    蛋白 {food.protein}g · 碳水 {food.carbs}g · 脂肪 {food.fat}g{(food.fiber || 0) > 0 ? ` · 纤维 ${food.fiber}g` : ''}
+                                    蛋白 {food.protein}g · 碳水 {food.carbs}g · 脂肪 {food.fat}g{(food.fiber || 0) > 0 ? ` · 膳食纤维 ${food.fiber}g` : ''}
                                 </div>
                             </div>
                             <div className="hs-food-cal">
@@ -613,7 +613,7 @@ export const MealRecordView: React.FC<{
                                     <span className="hs-unit" style={{ fontSize: 11 }}>g</span>
                                 </div>
                                 <div className="hs-form-input-with-unit">
-                                    <input className="hs-form-input" placeholder="纤维" value={newFoodForm.fiber} onChange={(event) => updateNewFoodField('fiber', event.target.value)} type="number" inputMode="decimal" style={{ height: 40, fontSize: 16 }} />
+                                    <input className="hs-form-input" placeholder="膳食纤维" value={newFoodForm.fiber} onChange={(event) => updateNewFoodField('fiber', event.target.value)} type="number" inputMode="decimal" style={{ height: 40, fontSize: 16 }} />
                                     <span className="hs-unit" style={{ fontSize: 11 }}>g</span>
                                 </div>
                             </div>

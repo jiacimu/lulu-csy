@@ -26,7 +26,7 @@ const DashboardTab: React.FC = () => {
                 <MacroBar label="蛋白" value={proteinConsumed} target={nutrientTargets.protein} color="var(--hs-sage)" />
                 <MacroBar label="碳水" value={carbsConsumed} target={nutrientTargets.carbs} color="var(--hs-clay)" />
                 <MacroBar label="脂肪" value={fatConsumed} target={nutrientTargets.fat} color="var(--hs-rose)" />
-                <MacroBar label="纤维" value={fiberConsumed} target={nutrientTargets.fiber} color="var(--hs-ocean)" />
+                <MacroBar label="膳食纤维" value={fiberConsumed} target={nutrientTargets.fiber} color="var(--hs-ocean)" />
             </div>
 
             {/* Quick-access summary cards — 2x2 grid */}
