@@ -21,30 +21,39 @@ import { checkDosageAfterAdd, isLogOverThreshold, resetSessionAlerts } from '../
 import { getRotatingTip } from '../lunarTides/scienceTipsData';
 import { formatLocalDateKey } from '../types';
 
-// Lazy-load recharts components
-const RechartsBarChart = React.lazy(() =>
-    import('recharts').then((m) => ({ default: m.BarChart })),
-);
-const RechartsBar = React.lazy(() =>
-    import('recharts').then((m) => ({ default: m.Bar })),
-);
-const RechartsXAxis = React.lazy(() =>
-    import('recharts').then((m) => ({ default: m.XAxis })),
-);
-const RechartsYAxis = React.lazy(() =>
-    import('recharts').then((m) => ({ default: m.YAxis })),
-);
-const RechartsTooltip = React.lazy(() =>
-    import('recharts').then((m) => ({ default: m.Tooltip })),
-);
-const RechartsReferenceLine = React.lazy(() =>
-    import('recharts').then((m) => ({ default: m.ReferenceLine })),
-);
-const RechartsResponsiveContainer = React.lazy(() =>
-    import('recharts').then((m) => ({ default: m.ResponsiveContainer })),
-);
-const RechartsCell = React.lazy(() =>
-    import('recharts').then((m) => ({ default: m.Cell })),
+// Lazy-load the entire recharts chart as a single component to avoid
+// React.lazy _status collision when wrapping multiple named exports.
+const AnnualChart = React.lazy(() =>
+    import('recharts').then((recharts) => ({
+        default: function AnnualChartInner(props: {
+            data: MonthCycleStat[];
+            predictedCycleLength: number;
+        }) {
+            const { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, Cell } = recharts;
+            return (
+                <ResponsiveContainer width="100%" height={180}>
+                    <BarChart data={props.data} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
+                        <XAxis dataKey="monthLabel" tick={{ fontSize: 10, fill: 'var(--hs-text-muted)' }} />
+                        <YAxis tick={{ fontSize: 10, fill: 'var(--hs-text-muted)' }} domain={[0, 'auto']} />
+                        <Tooltip
+                            contentStyle={{ background: '#E8E8E8', border: 'none', borderRadius: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: 12 }}
+                            formatter={(value: any) => [`${value} 天`, '周期长度']}
+                        />
+                        <ReferenceLine y={props.predictedCycleLength} stroke="var(--hs-primary)" strokeDasharray="4 4" />
+                        <Bar dataKey="cycleLength" radius={[6, 6, 0, 0]} maxBarSize={24}>
+                            {props.data.map((entry) => (
+                                <Cell
+                                    key={entry.month}
+                                    fill={entry.isAnomaly ? 'var(--hs-rose)' : 'var(--hs-primary)'}
+                                    opacity={entry.isAnomaly ? 0.9 : 0.7}
+                                />
+                            ))}
+                        </Bar>
+                    </BarChart>
+                </ResponsiveContainer>
+            );
+        },
+    })),
 );
 
 interface Props {
@@ -208,10 +217,9 @@ const LunarTidesTab: React.FC<Props> = ({ addToast }) => {
                 const db = await getDB();
                 const log = await db.get('periods', showOutlierConfirm.logId);
                 if (log) {
-                    log.isOutlier = true;
-                    log.updatedAt = Date.now();
-                    await db.put('periods', log);
-                    setPeriods((prev) => prev.map((p) => p.id === log.id ? (log as PeriodLog) : p));
+                    const updated = { ...log, isOutlier: true, updatedAt: Date.now() };
+                    await db.put('periods', updated);
+                    setPeriods((prev) => prev.map((p) => p.id === updated.id ? (updated as PeriodLog) : p));
                 }
             } catch { /* silent */ }
         }
@@ -403,26 +411,10 @@ const LunarTidesTab: React.FC<Props> = ({ addToast }) => {
                             每个人的周期都是独特的节奏，波动 ±7 天以内都很正常。如果持续异常，建议咨询医生。
                         </div>
                         <React.Suspense fallback={<div className="hs-loading-card">加载图表…</div>}>
-                            <RechartsResponsiveContainer width="100%" height={180}>
-                                <RechartsBarChart data={annualStats} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
-                                    <RechartsXAxis dataKey="monthLabel" tick={{ fontSize: 10, fill: 'var(--hs-text-muted)' }} />
-                                    <RechartsYAxis tick={{ fontSize: 10, fill: 'var(--hs-text-muted)' }} domain={[0, 'auto']} />
-                                    <RechartsTooltip
-                                        contentStyle={{ background: '#E8E8E8', border: 'none', borderRadius: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: 12 }}
-                                        formatter={(value: any) => [`${value} 天`, '周期长度']}
-                                    />
-                                    <RechartsReferenceLine y={prediction?.predictedCycleLength || 28} stroke="var(--hs-primary)" strokeDasharray="4 4" />
-                                    <RechartsBar dataKey="cycleLength" radius={[6, 6, 0, 0]} maxBarSize={24}>
-                                        {annualStats.map((entry) => (
-                                            <RechartsCell
-                                                key={entry.month}
-                                                fill={entry.isAnomaly ? 'var(--hs-rose)' : 'var(--hs-primary)'}
-                                                opacity={entry.isAnomaly ? 0.9 : 0.7}
-                                            />
-                                        ))}
-                                    </RechartsBar>
-                                </RechartsBarChart>
-                            </RechartsResponsiveContainer>
+                            <AnnualChart
+                                data={annualStats}
+                                predictedCycleLength={prediction?.predictedCycleLength || 28}
+                            />
                         </React.Suspense>
                         <div style={{ fontSize: 11, color: 'var(--hs-text-muted)', textAlign: 'center', marginTop: 8 }}>
                             <span style={{ color: 'var(--hs-rose)' }}>■</span> 偏差 &gt;7天 &nbsp;
