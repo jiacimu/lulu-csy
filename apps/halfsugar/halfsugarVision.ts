@@ -65,13 +65,14 @@ function isConfidence(value: unknown): value is FoodConfidence {
 }
 
 function extractChoiceContent(choice: any): string {
-    const messageContent = choice?.message?.content;
-    if (typeof messageContent === 'string') {
+    const msg = choice?.message;
+    const messageContent = msg?.content;
+    if (typeof messageContent === 'string' && messageContent.trim()) {
         return messageContent.trim();
     }
 
     if (Array.isArray(messageContent)) {
-        return messageContent
+        const joined = messageContent
             .map((item) => {
                 if (typeof item === 'string') return item;
                 if (item && typeof item.text === 'string') return item.text;
@@ -79,10 +80,12 @@ function extractChoiceContent(choice: any): string {
             })
             .join('\n')
             .trim();
+        if (joined) return joined;
     }
 
-    if (typeof choice?.message?.reasoning_content === 'string') {
-        return choice.message.reasoning_content.trim();
+    // Some models put the real output in reasoning_content when content is null
+    if (typeof msg?.reasoning_content === 'string' && msg.reasoning_content.trim()) {
+        return msg.reasoning_content.trim();
     }
 
     if (typeof choice?.text === 'string') {
@@ -133,14 +136,33 @@ function extractVisionPayload(data: any): VisionResult {
         return normalizeVisionResult(data);
     }
 
-    const rawContent = extractChoiceContent(data?.choices?.[0]);
+    // Try all choices (some models put content in different indices)
+    const choices = Array.isArray(data?.choices) ? data.choices : [];
+    let rawContent = '';
+    for (const choice of choices) {
+        rawContent = extractChoiceContent(choice);
+        if (rawContent) break;
+    }
+
+    if (!rawContent) {
+        // Some endpoints return the content at the top level
+        if (typeof data?.content === 'string') rawContent = data.content.trim();
+        if (typeof data?.text === 'string') rawContent = data.text.trim();
+    }
+
     if (!rawContent) {
         throw new Error('识别结果为空，请更换模型或重试');
     }
 
     const parsed = extractJson(rawContent);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('AI 返回了无法解析的 JSON');
+    if (!parsed) {
+        console.warn('[extractVisionPayload] JSON parse failed, raw:', rawContent.slice(0, 500));
+        throw new Error('AI 返回了无法解析的内容，请重试');
+    }
+
+    // Handle case where AI returns an array directly: [{...}]
+    if (Array.isArray(parsed)) {
+        return normalizeVisionResult({ foods: parsed });
     }
 
     return normalizeVisionResult(parsed);
