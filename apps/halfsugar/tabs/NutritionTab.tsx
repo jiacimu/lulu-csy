@@ -1,10 +1,11 @@
 /**
  * NutritionTab — Meal recording, AI identification, favorites, recommendations
  */
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useHalfSugar } from '../HalfSugarContext';
 import { MealRecordView } from '../components/MealRecordView';
-import { MEAL_TYPES, type MealRecord, type MealTypeDefinition } from '../types';
+import { getRecommendations } from '../foodRecommendations';
+import { computeNutrientGaps, MEAL_TYPES, type MealRecord, type MealTypeDefinition } from '../types';
 
 function formatMealTime(timestamp: number): string {
     if (!timestamp) return '';
@@ -15,7 +16,8 @@ const NutritionTab: React.FC = () => {
     const {
         todayDate, todayLabel, meals, isMealsLoading, mealsByType,
         handleSaveMeal, handleDeleteMeal, handleSaveFavoriteFood, handleUseFavoriteFood,
-        topFavoriteFoods, apiConfig, addToast, recommendations,
+        handleDeleteFavoriteFood,
+        topFavoriteFoods, apiConfig, addToast, nutrientTargets,
     } = useHalfSugar();
 
     const [activeMealIdx, setActiveMealIdx] = useState(0);
@@ -38,6 +40,7 @@ const NutritionTab: React.FC = () => {
                 favorites={topFavoriteFoods}
                 onBack={() => { setEditingMeal(null); setRecordingMealType(null); }}
                 onDelete={handleDeleteMeal}
+                onDeleteFavorite={handleDeleteFavoriteFood}
                 onSaveFavorite={handleSaveFavoriteFood}
                 onSave={handleSaveMeal}
                 onUseFavorite={handleUseFavoriteFood}
@@ -47,6 +50,12 @@ const NutritionTab: React.FC = () => {
 
     const activeMealType = MEAL_TYPES[activeMealIdx];
     const activeRecords = mealsByType[activeMealType.key] || [];
+
+    // Compute meal-type-aware recommendations
+    const mealRecommendations = useMemo(
+        () => getRecommendations(computeNutrientGaps(meals, nutrientTargets), activeMealType.key),
+        [meals, nutrientTargets, activeMealType.key],
+    );
 
     return (
         <div className="hs-tab-content no-scrollbar">
@@ -98,10 +107,10 @@ const NutritionTab: React.FC = () => {
                 )}
             </section>
 
-            {recommendations.length > 0 && (
+            {mealRecommendations.length > 0 && (
                 <div className="hs-recommendation-section hs-animate-fade-in" style={{ marginTop: 8 }}>
                     <div className="hs-section-title">食谱灵感</div>
-                    {recommendations.map((rec) => (
+                    {mealRecommendations.map((rec) => (
                         <div key={rec.nutrient} className="hs-recommendation-card">
                             <div className="hs-rec-header" style={{ color: 'var(--hs-text)' }}>今天可以来点补充 <span style={{ color: 'var(--hs-primary-dark)' }}>{rec.label}</span></div>
                             <div className="hs-rec-foods">

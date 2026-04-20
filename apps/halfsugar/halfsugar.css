@@ -1915,6 +1915,42 @@
     padding: 2px 6px;
 }
 
+/* ── Favorite Chip Wrapper (with delete) ── */
+.hs-favorite-chip-wrap {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.hs-favorite-chip-delete {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: none;
+    background: var(--hs-rose-bg);
+    color: var(--hs-rose);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+    z-index: 2;
+    opacity: 0.85;
+}
+
+.hs-favorite-chip-delete:active {
+    transform: scale(0.85);
+    opacity: 1;
+    background: var(--hs-rose);
+    color: #fff;
+}
+
 /* ── Summary Generation Loading ── */
 .hs-summary-generating {
     display: flex;

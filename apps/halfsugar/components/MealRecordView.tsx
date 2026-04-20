@@ -102,6 +102,7 @@ export const MealRecordView: React.FC<{
     favorites: FavoriteFood[];
     onBack: () => void;
     onDelete: (mealId: string) => Promise<boolean>;
+    onDeleteFavorite: (favoriteId: string) => Promise<void>;
     onSaveFavorite: (food: FoodItem) => Promise<void>;
     onSave: (meal: MealRecord) => Promise<boolean>;
     onUseFavorite: (favoriteId: string) => Promise<void>;
@@ -114,6 +115,7 @@ export const MealRecordView: React.FC<{
     favorites,
     onBack,
     onDelete,
+    onDeleteFavorite,
     onSaveFavorite,
     onSave,
     onUseFavorite,
@@ -452,12 +454,25 @@ export const MealRecordView: React.FC<{
                 {favorites.length > 0 && (
                     <div className="hs-nutrition-summary hs-animate-fade-in" style={{ margin: '10px 20px 0' }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--hs-text-secondary)', marginBottom: 10 }}>常吃</div>
-                        <div className="hs-favorites-row">
+                    <div className="hs-favorites-row">
                             {favorites.slice(0, 5).map((favorite) => (
-                                <button key={favorite.id} type="button" className="hs-favorite-chip" onClick={() => handleFavoriteFill(favorite)}>
-                                    <span>{favorite.name}</span>
-                                    <span className="hs-favorite-chip-count">{favorite.useCount}</span>
-                                </button>
+                                <div key={favorite.id} className="hs-favorite-chip-wrap">
+                                    <button type="button" className="hs-favorite-chip" onClick={() => handleFavoriteFill(favorite)}>
+                                        <span>{favorite.name}</span>
+                                        <span className="hs-favorite-chip-count">{favorite.useCount}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="hs-favorite-chip-delete"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            void onDeleteFavorite(favorite.id);
+                                        }}
+                                        aria-label={`删除${favorite.name}`}
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
                             ))}
                         </div>
                     </div>

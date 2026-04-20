@@ -1,4 +1,4 @@
-import { type NutrientGap, type NutrientKey } from './types';
+import { type MealType, type NutrientGap, type NutrientKey } from './types';
 
 // ── Food Tag & Style System ──
 
@@ -146,6 +146,17 @@ const FOOD_DATABASE: FoodEntry[] = [
     { name: '麦辣鸡腿堡', tags: ['high_protein', 'high_carbs'], styles: ['fast_food'] },
 ];
 
+// ── Meal-Type Style Preferences ──
+// Each meal type prioritizes different food styles for more relevant recommendations.
+
+const MEAL_STYLE_PREFERENCES: Record<MealType, FoodStyle[]> = {
+    breakfast: ['daily', 'snack'],          // 蛋、粥、面包、牛奶
+    lunch: ['daily', 'fast_food'],          // 正餐、炒菜、快餐
+    dinner: ['daily', 'soup'],              // 家常、清淡、汤品
+    snack: ['snack', 'dessert', 'street_food'],  // 零食、甜品、小吃
+    afternoon_tea: ['dessert', 'snack'],    // 甜品、饮品
+};
+
 // ── Random Sampling (daily-seeded so recommendations feel fresh but stable within a day) ──
 
 const TAG_MAP: Record<NutrientKey, FoodTag> = {
@@ -158,6 +169,15 @@ const TAG_MAP: Record<NutrientKey, FoodTag> = {
 function dailySeed(): number {
     const today = new Date();
     return today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+}
+
+/** Simple hash for a string, used to mix mealType into the seed */
+function simpleHash(str: string): number {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash);
 }
 
 function seededShuffle<T>(arr: T[], seed: number): T[] {
@@ -175,9 +195,13 @@ function seededShuffle<T>(arr: T[], seed: number): T[] {
 function sampleFoods(
     nutrient: NutrientKey,
     count: number,
-    preferredStyles: FoodStyle[] = ['daily', 'snack'],
+    mealType?: MealType,
 ): RecommendedFood[] {
     const tag = TAG_MAP[nutrient];
+    const preferredStyles = mealType
+        ? MEAL_STYLE_PREFERENCES[mealType] || ['daily', 'snack']
+        : ['daily', 'snack'];
+
     // Preferred styles first
     const preferred = FOOD_DATABASE.filter(
         (f) => f.tags.includes(tag) && f.styles.some((s) => preferredStyles.includes(s)),
@@ -187,7 +211,9 @@ function sampleFoods(
         (f) => f.tags.includes(tag) && !preferred.includes(f),
     );
 
-    const seed = dailySeed() + nutrient.length; // vary seed per nutrient
+    // Mix mealType into the seed so different meals get different results
+    const mealSeedOffset = mealType ? simpleHash(mealType) : 0;
+    const seed = dailySeed() + nutrient.length + mealSeedOffset;
     const pool = [...seededShuffle(preferred, seed), ...seededShuffle(fallback, seed + 1)];
 
     return pool.slice(0, count).map((f) => ({ name: f.name }));
@@ -195,7 +221,7 @@ function sampleFoods(
 
 // ── Public API ──
 
-export function getRecommendations(gaps: NutrientGap[]): Array<{
+export function getRecommendations(gaps: NutrientGap[], mealType?: MealType): Array<{
     nutrient: NutrientKey;
     label: string;
     gap: number;
@@ -208,7 +234,7 @@ export function getRecommendations(gaps: NutrientGap[]): Array<{
             nutrient: gap.nutrient,
             label: gap.label,
             gap: gap.gap,
-            foods: sampleFoods(gap.nutrient, 4),
+            foods: sampleFoods(gap.nutrient, 4, mealType),
         }));
 }
 

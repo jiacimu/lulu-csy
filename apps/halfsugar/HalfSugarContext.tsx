@@ -6,6 +6,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { useOS } from '../../context/OSContext';
 import { deleteMeal, fetchMeals, saveMeal } from './halfsugarApi';
 import {
+    deleteFavorite,
     deleteSummary,
     fetchFavorites,
     fetchSummaries,
@@ -212,6 +213,7 @@ export interface HalfSugarContextValue {
     favorites: FavoriteFood[];
     topFavoriteFoods: FavoriteFood[];
     handleSaveFavoriteFood: (food: FoodItem) => Promise<void>;
+    handleDeleteFavoriteFood: (favoriteId: string) => Promise<void>;
     handleUseFavoriteFood: (favoriteId: string) => Promise<void>;
 
     // Nutrition targets
@@ -475,6 +477,18 @@ export const HalfSugarProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         try { await incrementFavoriteUse(favoriteId); } catch { /* silent */ }
     }, []);
 
+    const handleDeleteFavoriteFood = useCallback(async (favoriteId: string) => {
+        const prev = favorites;
+        setFavorites((current) => current.filter((f) => f.id !== favoriteId));
+        try {
+            await deleteFavorite(favoriteId);
+            addToast('已移除常吃食物', 'success');
+        } catch (error) {
+            setFavorites(prev);
+            addToast(`删除失败：${getErrorMessage(error, '请稍后重试')}`, 'error');
+        }
+    }, [addToast, favorites]);
+
     const reloadAllSummaries = useCallback(async () => {
         const next = await fetchSummaries(undefined, 24);
         setSummaries(sortSummariesByLatest(next));
@@ -629,7 +643,7 @@ export const HalfSugarProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         todayDate, todayLabel,
         meals, isMealsLoading, mealsByType, caloriesConsumed, proteinConsumed, carbsConsumed, fatConsumed, fiberConsumed,
         handleSaveMeal, handleDeleteMeal,
-        favorites, topFavoriteFoods, handleSaveFavoriteFood, handleUseFavoriteFood,
+        favorites, topFavoriteFoods, handleSaveFavoriteFood, handleDeleteFavoriteFood, handleUseFavoriteFood,
         activeCalorieTarget, nutrientTargets, recommendations,
         weightRecords, latestWeight, latestBmi, weightTarget: weightTargetVal, weightDelta, latestKnownWeightKg,
         handleSaveWeight, handleDeleteWeight,
@@ -647,7 +661,7 @@ export const HalfSugarProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         todayDate, todayLabel,
         meals, isMealsLoading, mealsByType, caloriesConsumed, proteinConsumed, carbsConsumed, fatConsumed, fiberConsumed,
         handleSaveMeal, handleDeleteMeal,
-        favorites, topFavoriteFoods, handleSaveFavoriteFood, handleUseFavoriteFood,
+        favorites, topFavoriteFoods, handleSaveFavoriteFood, handleDeleteFavoriteFood, handleUseFavoriteFood,
         activeCalorieTarget, nutrientTargets, recommendations,
         weightRecords, latestWeight, latestBmi, weightTargetVal, weightDelta, latestKnownWeightKg,
         handleSaveWeight, handleDeleteWeight,
