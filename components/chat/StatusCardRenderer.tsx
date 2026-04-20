@@ -65,6 +65,9 @@ const FreeformStatusCard: React.FC<{ html: string }> = ({ html }) => {
     });
     const [hasMeasuredSize, setHasMeasuredSize] = useState(false);
 
+    // Freeform cards get a much more generous viewport allowance than skeleton cards
+    const FREEFORM_VIEWPORT_PADDING_PX = 20;
+
     useEffect(() => {
         setPreviewSize({
             width: STATUS_CARD_WIDTH_PX,
@@ -79,7 +82,7 @@ const FreeformStatusCard: React.FC<{ html: string }> = ({ html }) => {
             if (event.data.channel !== frameChannel) return;
 
             const viewportWidthLimit = typeof window !== 'undefined'
-                ? Math.max(160, window.innerWidth - STATUS_CARD_VIEWPORT_WIDTH_PADDING_PX)
+                ? Math.max(160, window.innerWidth - FREEFORM_VIEWPORT_PADDING_PX)
                 : STATUS_CARD_WIDTH_PX;
 
             const nextWidth = typeof event.data.width === 'number'
@@ -87,7 +90,7 @@ const FreeformStatusCard: React.FC<{ html: string }> = ({ html }) => {
                     Math.max(event.data.width + STATUS_CARD_MEASURE_BUFFER_PX, 1),
                     viewportWidthLimit,
                 )
-                : STATUS_CARD_WIDTH_PX;
+                : viewportWidthLimit;
 
             const nextHeight = typeof event.data.height === 'number'
                 ? Math.max(event.data.height + STATUS_CARD_MEASURE_BUFFER_PX, 1)
@@ -121,8 +124,8 @@ const FreeformStatusCard: React.FC<{ html: string }> = ({ html }) => {
             title="Freeform creative card"
             data-preview-channel={frameChannel}
             style={{
-                width: hasMeasuredSize ? `${previewSize.width}px` : 'calc(100vw - 48px)',
-                maxWidth: 'calc(100vw - 48px)',
+                width: hasMeasuredSize ? `${previewSize.width}px` : `calc(100vw - ${FREEFORM_VIEWPORT_PADDING_PX}px)`,
+                maxWidth: `calc(100vw - ${FREEFORM_VIEWPORT_PADDING_PX}px)`,
                 height: hasMeasuredSize ? `${previewSize.height}px` : '1px',
                 border: 'none',
                 borderRadius: '24px',

@@ -83,8 +83,8 @@ const ReceiptSkeleton: React.FC<{ data: StatusCardData }> = ({ data }) => {
 
     return (
         <div style={{
-            width: '260px',
-            maxWidth: 'calc(100vw - 48px)',
+            width: 'min(88vw, 340px)',
+            maxWidth: 'calc(100vw - 32px)',
             position: 'relative' as const,
             transform: 'rotate(0.8deg)',
             /* 撕纸边 */
@@ -106,7 +106,7 @@ const ReceiptSkeleton: React.FC<{ data: StatusCardData }> = ({ data }) => {
                 background: paperBg,
                 color: textColor,
                 fontFamily,
-                padding: '22px 18px 24px',
+                padding: '26px 22px 28px',
                 position: 'relative' as const,
                 boxShadow:
                     '0 1px 3px rgba(0,0,0,0.05), ' +
@@ -168,10 +168,10 @@ const ReceiptSkeleton: React.FC<{ data: StatusCardData }> = ({ data }) => {
                     zIndex: 2,
                 }}>
                     <div style={{
-                        fontSize: '15px',
+                        fontSize: '17px',
                         fontWeight: 700,
                         letterSpacing: '2px',
-                        marginBottom: '4px',
+                        marginBottom: '6px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -199,11 +199,11 @@ const ReceiptSkeleton: React.FC<{ data: StatusCardData }> = ({ data }) => {
                 <div style={{
                     position: 'relative' as const,
                     zIndex: 2,
-                    fontSize: '12px',
-                    lineHeight: '2.1',
+                    fontSize: '14px',
+                    lineHeight: '2.0',
                     whiteSpace: 'pre-wrap' as const,
                     letterSpacing: '0.5px',
-                    padding: '2px 0',
+                    padding: '4px 0',
                 }}>
                     {body}
                 </div>
@@ -216,11 +216,11 @@ const ReceiptSkeleton: React.FC<{ data: StatusCardData }> = ({ data }) => {
                         <div style={{
                             display: 'flex',
                             justifyContent: 'space-between',
-                            fontSize: '9px',
+                            fontSize: '10px',
                             fontWeight: 700,
                             opacity: 0.40,
                             letterSpacing: '1px',
-                            marginBottom: '4px',
+                            marginBottom: '6px',
                             textTransform: 'uppercase' as const,
                         }}>
                             <span>ITEM</span>
@@ -232,9 +232,9 @@ const ReceiptSkeleton: React.FC<{ data: StatusCardData }> = ({ data }) => {
                                 display: 'flex',
                                 justifyContent: 'space-between',
                                 alignItems: 'baseline',
-                                fontSize: '11px',
+                                fontSize: '13px',
                                 lineHeight: '2.0',
-                                gap: '8px',
+                                gap: '10px',
                             }}>
                                 <span style={{
                                     flex: 1,
@@ -262,7 +262,7 @@ const ReceiptSkeleton: React.FC<{ data: StatusCardData }> = ({ data }) => {
                                     display: 'flex',
                                     justifyContent: 'space-between',
                                     alignItems: 'baseline',
-                                    fontSize: '13px',
+                                    fontSize: '15px',
                                     fontWeight: 700,
                                 }}>
                                     <span>合计 TOTAL</span>
@@ -279,12 +279,12 @@ const ReceiptSkeleton: React.FC<{ data: StatusCardData }> = ({ data }) => {
                 {footer && (
                     <div style={{
                         textAlign: 'center' as const,
-                        fontSize: '10px',
+                        fontSize: '11px',
                         opacity: 0.45,
                         letterSpacing: '1px',
                         position: 'relative' as const,
                         zIndex: 2,
-                        marginBottom: '4px',
+                        marginBottom: '6px',
                     }}>
                         {footer}
                     </div>
@@ -293,13 +293,13 @@ const ReceiptSkeleton: React.FC<{ data: StatusCardData }> = ({ data }) => {
                 {/* ═══  Thank you  ═══ */}
                 <div style={{
                     textAlign: 'center' as const,
-                    fontSize: '8px',
+                    fontSize: '9px',
                     letterSpacing: '4px',
                     opacity: 0.28,
                     textTransform: 'uppercase' as const,
                     position: 'relative' as const,
                     zIndex: 2,
-                    marginTop: '4px',
+                    marginTop: '6px',
                 }}>
                     THANK YOU
                 </div>

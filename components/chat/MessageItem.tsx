@@ -415,9 +415,12 @@ const MessageItem = React.memo(({
                                     data-testid={statusCardData ? 'status-card-overlay-shell' : 'inner-voice-overlay-shell'}
                                     className={`relative my-auto flex w-full flex-col items-center justify-center ${
                                         statusCardData
-                                            ? 'max-w-[360px] animate-status-card-in'
-                                            : 'max-w-[330px] animate-inner-voice-in'
+                                            ? 'animate-status-card-in'
+                                            : 'animate-inner-voice-in'
                                     }`}
+                                    style={{
+                                        maxWidth: statusCardData ? 'min(96vw, 560px)' : 'min(88vw, 360px)',
+                                    }}
                                     onClick={(e) => e.stopPropagation()}
                                 >
                                     {statusCardData ? (
