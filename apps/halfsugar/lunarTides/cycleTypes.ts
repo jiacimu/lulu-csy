@@ -7,7 +7,8 @@ export interface PeriodLog {
     id: string;
     startDate: string;        // YYYY-MM-DD
     endDate?: string;         // YYYY-MM-DD — undefined if still ongoing
-    flowIntensity?: FlowIntensity;
+    flowIntensity?: FlowIntensity;   // Legacy: overall flow (kept for backward compat)
+    dailyFlow?: Record<string, FlowIntensity>; // Per-day flow, key = YYYY-MM-DD
     symptoms?: string[];
     notes?: string;
     isOutlier: boolean;       // Flagged by 2σ outlier detection
