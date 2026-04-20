@@ -6,6 +6,7 @@ import { onSystemLog } from '../utils/systemInterceptor';
 import { exportSystemData,importSystemData,ExportStateSnapshot,ImportCallbacks } from '../utils/systemBackup';
 import { setHapticsEnabled as setHapticsEnabledGlobal } from '../utils/haptics';
 import { preloadImages } from '../utils/preloadResources';
+import { useAutoBackup } from '../hooks/useAutoBackup';
 
 // Sub-contexts
 import { NotificationProvider,useNotification,NotificationContextType } from './NotificationContext';
@@ -767,6 +768,9 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     };
 
     const resetSystem = async () => { try { await DB.deleteDB(); localStorage.clear(); window.location.reload(); } catch (e) { console.error(e); addToast('重置失败，请手动清除浏览器数据', 'error'); } };
+
+    // --- 每日自动云端备份 ---
+    useAutoBackup(exportSystem, isDataLoaded);
 
     // Compose the full value object, merging sub-contexts + data context
     const value: OSContextType = {

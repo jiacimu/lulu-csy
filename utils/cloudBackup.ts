@@ -19,6 +19,7 @@ export interface CloudBackupListResponse {
     backups: CloudBackupMeta[];
     count: number;
     maxCount: number;
+    maxSizeMB?: number;
 }
 
 async function backupFetch(
