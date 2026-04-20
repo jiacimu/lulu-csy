@@ -197,10 +197,13 @@ const LunarTidesTab: React.FC<Props> = ({ addToast }) => {
         setShowPeriodModal(true);
     }, []);
 
-    /** Mark the ongoing period as ended (today) */
+    /** Mark the ongoing period as ended (today or yesterday) */
     const handleEndOngoingPeriod = useCallback(async (log: PeriodLog) => {
         const now = Date.now();
-        const updated: PeriodLog = { ...log, endDate: formatLocalDateKey(), updatedAt: now };
+        // End date = last day with a daily flow entry, or today
+        const dailyDates = Object.keys(log.dailyFlow || {}).sort();
+        const endDate = dailyDates.length > 0 ? dailyDates[dailyDates.length - 1] : formatLocalDateKey();
+        const updated: PeriodLog = { ...log, endDate, updatedAt: now };
         try {
             const db = await getDB();
             await db.put('periods', updated);
@@ -212,6 +215,43 @@ const LunarTidesTab: React.FC<Props> = ({ addToast }) => {
             addToast('保存失败', 'error');
         }
     }, [addToast]);
+
+    /** Check in daily flow for a specific date on the ongoing period */
+    const handleDailyFlowCheckin = useCallback(async (log: PeriodLog, date: string, flow: FlowIntensity) => {
+        const now = Date.now();
+        const newDailyFlow = { ...(log.dailyFlow || {}), [date]: flow };
+        const updated: PeriodLog = {
+            ...log,
+            dailyFlow: newDailyFlow,
+            // Also update legacy flowIntensity to the latest entry for backward compat
+            flowIntensity: flow,
+            updatedAt: now,
+        };
+        try {
+            const db = await getDB();
+            await db.put('periods', updated);
+            setPeriods((prev) =>
+                prev.map((p) => (p.id === updated.id ? updated : p)),
+            );
+        } catch {
+            addToast('保存失败', 'error');
+        }
+    }, [addToast]);
+
+    /** Get the list of days from start to today for the ongoing period */
+    const ongoingDays = useMemo(() => {
+        if (!ongoingPeriod) return [];
+        const start = new Date(ongoingPeriod.startDate);
+        const today = new Date(formatLocalDateKey());
+        const days: string[] = [];
+        const cursor = new Date(start);
+        // Show up to 10 days max
+        while (cursor <= today && days.length < 10) {
+            days.push(cursor.toISOString().slice(0, 10));
+            cursor.setDate(cursor.getDate() + 1);
+        }
+        return days;
+    }, [ongoingPeriod]);
 
     /** Save new or edited period record */
     const handleSavePeriod = useCallback(async () => {
@@ -399,16 +439,16 @@ const LunarTidesTab: React.FC<Props> = ({ addToast }) => {
             {/* ── Period History + Add ── */}
             <div className="hs-section-title"><span><span className="hs-emoji">🩸</span> 经期记录</span></div>
 
-            {/* Ongoing period banner */}
+            {/* Ongoing period banner with daily flow check-in */}
             {ongoingPeriod && (
                 <div className="hs-track-card hs-animate-fade-in" style={{ margin: '0 20px 12px', border: '1px solid var(--hs-rose)', borderRadius: 14 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
                         <div>
                             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--hs-text)' }}>
                                 经期进行中 🩸
                             </div>
                             <div className="hs-track-subtitle">
-                                {ongoingPeriod.startDate} 开始 · {ongoingPeriod.flowIntensity ? FLOW_LABELS[ongoingPeriod.flowIntensity].label : ''}
+                                {ongoingPeriod.startDate} 开始 · 第 {ongoingDays.length} 天
                             </div>
                         </div>
                         <button
@@ -420,6 +460,46 @@ const LunarTidesTab: React.FC<Props> = ({ addToast }) => {
                             标记结束
                         </button>
                     </div>
+
+                    {/* Daily flow timeline */}
+                    <div style={{ fontSize: 12, color: 'var(--hs-text-muted)', marginBottom: 6 }}>每日流量打卡</div>
+                    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+                        {ongoingDays.map((day) => {
+                            const currentFlow = ongoingPeriod.dailyFlow?.[day];
+                            const dayLabel = `${parseInt(day.slice(8), 10)}日`;
+                            const isToday = day === todayDate;
+                            return (
+                                <div key={day} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 44 }}>
+                                    <div style={{ fontSize: 10, color: isToday ? 'var(--hs-primary-dark)' : 'var(--hs-text-muted)', fontWeight: isToday ? 600 : 400 }}>{isToday ? '今天' : dayLabel}</div>
+                                    <div style={{ display: 'flex', gap: 2 }}>
+                                        {(['light', 'medium', 'heavy'] as FlowIntensity[]).map((f) => (
+                                            <button
+                                                key={f}
+                                                type="button"
+                                                onClick={() => handleDailyFlowCheckin(ongoingPeriod, day, f)}
+                                                style={{
+                                                    width: 12, height: 12, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0,
+                                                    background: currentFlow === f
+                                                        ? (f === 'light' ? 'var(--hs-clay)' : f === 'medium' ? 'var(--hs-rose)' : '#c0392b')
+                                                        : 'var(--hs-bg)',
+                                                    boxShadow: currentFlow === f ? '0 0 4px rgba(0,0,0,0.2)' : 'inset 0 0 0 1px rgba(0,0,0,0.08)',
+                                                    opacity: currentFlow === f ? 1 : 0.5,
+                                                    transition: 'all 0.2s',
+                                                }}
+                                                aria-label={`${day} ${FLOW_LABELS[f].label}`}
+                                            />
+                                        ))}
+                                    </div>
+                                    {currentFlow && <div style={{ fontSize: 9, color: 'var(--hs-text-muted)' }}>{FLOW_LABELS[currentFlow].label}</div>}
+                                </div>
+                            );
+                        })}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--hs-text-muted)', marginTop: 6, display: 'flex', gap: 10, justifyContent: 'center' }}>
+                        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--hs-clay)', verticalAlign: 'middle' }} /> 少量</span>
+                        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--hs-rose)', verticalAlign: 'middle' }} /> 适中</span>
+                        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#c0392b', verticalAlign: 'middle' }} /> 量多</span>
+                    </div>
                 </div>
             )}
 
@@ -429,7 +509,13 @@ const LunarTidesTab: React.FC<Props> = ({ addToast }) => {
 
             {periods.length > 0 && (
                 <div className="hs-track-list" style={{ margin: '8px 20px 16px' }}>
-                    {[...periods].reverse().slice(0, 8).map((p) => (
+                    {[...periods].reverse().slice(0, 8).map((p) => {
+                        // Show daily flow dots summary if available
+                        const dailyEntries = p.dailyFlow ? Object.entries(p.dailyFlow).sort(([a], [b]) => a.localeCompare(b)) : [];
+                        const durationDays = p.endDate
+                            ? Math.max(1, Math.round((new Date(p.endDate).getTime() - new Date(p.startDate).getTime()) / 86400000) + 1)
+                            : null;
+                        return (
                         <div key={p.id} className="hs-track-list-item" style={p.isOutlier ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}>
                             <button
                                 type="button"
@@ -438,16 +524,27 @@ const LunarTidesTab: React.FC<Props> = ({ addToast }) => {
                             >
                                 <div className="hs-track-list-title">
                                     {p.startDate}{p.endDate ? ` → ${p.endDate}` : ' (进行中)'}
+                                    {durationDays ? <span style={{ fontSize: 11, color: 'var(--hs-text-muted)', marginLeft: 6 }}>{durationDays}天</span> : null}
                                 </div>
-                                <div className="hs-track-subtitle">
-                                    {p.flowIntensity ? FLOW_LABELS[p.flowIntensity].label : ''}
-                                    {p.isOutlier ? ' · 已标记为异常' : ''}
-                                    {!p.endDate && !p.isOutlier ? ' · 点击编辑' : ''}
+                                <div className="hs-track-subtitle" style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                                    {dailyEntries.length > 0 ? (
+                                        <>
+                                            {dailyEntries.map(([d, f]) => (
+                                                <span key={d} style={{
+                                                    display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                                                    background: f === 'light' ? 'var(--hs-clay)' : f === 'medium' ? 'var(--hs-rose)' : '#c0392b',
+                                                }} title={`${d}: ${FLOW_LABELS[f].label}`} />
+                                            ))}
+                                        </>
+                                    ) : (
+                                        <span>{p.flowIntensity ? FLOW_LABELS[p.flowIntensity].label : ''}</span>
+                                    )}
+                                    {p.isOutlier ? <span> · 已标记为异常</span> : null}
                                 </div>
                             </button>
                             <button type="button" className="hs-track-delete-btn" onClick={() => handleDeletePeriod(p.id)}>删除</button>
                         </div>
-                    ))}
+                    )})}
                 </div>
             )}
 
