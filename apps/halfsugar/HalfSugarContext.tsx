@@ -551,15 +551,24 @@ export const HalfSugarProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }, [addToast]);
 
     const handleSaveExercise = useCallback(async (exerciseType: string, durationMin: number) => {
-        const meta = MET_TABLE[exerciseType];
-        if (!meta || durationMin <= 0) { addToast('请选择运动类型并输入时长', 'error'); return false; }
+        const isCustom = exerciseType.startsWith('custom:');
+        const meta = isCustom ? null : MET_TABLE[exerciseType];
+        const customLabel = isCustom ? exerciseType.slice('custom:'.length).trim() : '';
+        const DEFAULT_CUSTOM_MET = 3.5; // moderate general activity
+
+        if (!isCustom && !meta) { addToast('请选择运动类型并输入时长', 'error'); return false; }
+        if (isCustom && !customLabel) { addToast('请输入运动名称', 'error'); return false; }
+        if (durationMin <= 0) { addToast('请输入运动时长', 'error'); return false; }
+
+        const metValue = meta?.met ?? DEFAULT_CUSTOM_MET;
+        const label = meta?.label ?? customLabel;
         const now = Date.now();
         try {
             const saved = await saveExercise({
                 id: buildTrackingId(`exercise-${todayDate}`),
-                date: todayDate, exerciseType, exerciseLabel: meta.label,
-                durationMinutes: Math.round(durationMin), metValue: meta.met,
-                caloriesBurned: estimateCaloriesBurned(meta.met, latestKnownWeightKg, durationMin),
+                date: todayDate, exerciseType, exerciseLabel: label,
+                durationMinutes: Math.round(durationMin), metValue,
+                caloriesBurned: estimateCaloriesBurned(metValue, latestKnownWeightKg, durationMin),
                 createdAt: now, updatedAt: now,
             });
             setTodayExercises((prev) => [saved, ...prev.filter((r) => r.id !== saved.id)].sort((a, b) => b.createdAt - a.createdAt));
