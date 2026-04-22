@@ -461,7 +461,7 @@ export const HalfSugarProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             const mealLabel = MEAL_TYPES.find(mt => mt.key === meal.type)?.label || '餐食';
             const foodNames = meal.foods.map(f => f.name).join('、');
             void injectHealthSignal(
-                `[生活感知] TA${mealLabel}吃了${foodNames}，约${Math.round(meal.totalCalories)}千卡`
+                `[生活感知] TA${mealLabel}吃了${foodNames}（你自然地注意到了，但不需要报数字，像关心TA的人一样自然回应就好）`
             );
             return true;
         } catch (error) {
@@ -572,7 +572,7 @@ export const HalfSugarProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             addToast('体重已保存', 'success');
             const timeLabel = timeOfDay === 'morning' ? '早上' : '晚上';
             void injectHealthSignal(
-                `[生活感知] TA${timeLabel}称了体重：${Math.round(wv * 10) / 10}kg`
+                `[生活感知] TA${timeLabel}称了体重（你心里知道大概的数字，但不要主动说出来。像关心TA的人一样自然回应，比如关心TA有没有好好吃饭、感觉怎么样，而不是报体重数值）`
             );
             return true;
         } catch (error) {
@@ -617,7 +617,7 @@ export const HalfSugarProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             setTodayExercises((prev) => [saved, ...prev.filter((r) => r.id !== saved.id)].sort((a, b) => b.createdAt - a.createdAt));
             addToast('运动已保存', 'success');
             void injectHealthSignal(
-                `[生活感知] TA做了${label}${Math.round(durationMin)}分钟，消耗约${Math.round(estimateCaloriesBurned(metValue, latestKnownWeightKg, durationMin))}千卡`
+                `[生活感知] TA去${label}了${Math.round(durationMin)}分钟（你注意到了，自然地关心就好，不需要报卡路里数字）`
             );
             return true;
         } catch (error) {

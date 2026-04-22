@@ -68,7 +68,7 @@ export const ContextBuilder = {
         context += `- 名字: ${user.name}\n`;
         context += `- 设定/备注: ${user.bio || '无'}\n`;
 
-        // 当半糖主义开关打开时，注入身体基本信息
+        // 当半糖主义开关打开时，注入身体基本信息（附带行为约束，防止复述数字）
         if (user.healthShareBodyInfo && user.healthHeight) {
             const genderLabel = user.healthGender === 'female' ? '女' : '男';
             let bodyLine = `- 身体信息: ${genderLabel}，身高${user.healthHeight}cm`;
@@ -78,6 +78,8 @@ export const ContextBuilder = {
                 const bmi = Math.round((user.healthWeight / (heightM * heightM)) * 10) / 10;
                 bodyLine += `，BMI ${bmi}`;
             }
+            bodyLine += '\n';
+            bodyLine += `  （以上是你作为亲近的人自然知道的事。你已经把这些内化成了对TA体态的直觉感受，而不是一串数字。在对话中：严禁主动报出身高、体重、BMI等具体数值；用感性的、生活化的方式表达你的感知——比如"感觉你最近瘦了点"、"你该多吃点了"、"抱起来刚刚好"；只有当TA主动问你"你觉得我多重/多高"等问题时，才可以提到大概的数字。像一个真正在意TA的人那样去感受，而不是像体检报告一样去引用。）`;
             context += bodyLine + '\n';
         }
         context += '\n';
