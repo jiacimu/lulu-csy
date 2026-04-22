@@ -942,7 +942,10 @@
   position: relative;
   height: 200px;
   margin-top: 4px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: auto;
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -959,12 +962,19 @@
   );
 }
 
+/* Hide scrollbar but keep scrollability */
+.music-player-lyrics-viewport::-webkit-scrollbar {
+  display: none;
+}
+.music-player-lyrics-viewport {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
 .music-player-lyrics-track {
   display: flex;
   flex-direction: column;
   padding: 80px 0;
-  transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  will-change: transform;
 }
 
 .music-player-lyrics-line {
@@ -973,9 +983,15 @@
   opacity: 0.28;
   transform: scale(0.96);
   transform-origin: left center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   transition:
     opacity 0.35s ease,
     transform 0.35s ease;
+}
+
+.music-player-lyrics-line:active {
+  opacity: 0.6;
 }
 
 .music-player-lyrics-line.active {
@@ -1034,11 +1050,15 @@
 .music-player-progress-bar {
   width: 100%;
   height: 6px;
+  padding: 12px 0;
+  margin: -12px 0;
   background: rgba(255,255,255,0.12);
+  background-clip: content-box;
   border-radius: 3px;
   position: relative;
   cursor: pointer;
   overflow: hidden;
+  transition: height 0.15s ease;
 }
 
 .music-player-progress-fill {
@@ -1062,6 +1082,21 @@
   box-shadow: 0 2px 8px rgba(0,0,0,0.35), 0 0 12px rgba(255,255,255,0.15);
 }
 
+.music-player-progress-bar.dragging {
+  height: 8px;
+}
+
+.music-player-progress-bar.dragging .music-player-progress-fill {
+  transition: none;
+}
+
+.music-player-progress-bar.dragging .music-player-progress-dot {
+  width: 20px;
+  height: 20px;
+  right: -10px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4), 0 0 16px rgba(255,255,255,0.2);
+}
+
 .music-player-time {
   display: flex;
   justify-content: space-between;
@@ -1069,6 +1104,62 @@
   color: rgba(255,255,255,0.4);
   margin-top: 6px;
   font-variant-numeric: tabular-nums;
+}
+
+.music-player-more-button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255,255,255,0.45);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.music-player-more-button:active {
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.8);
+}
+
+/* ─── 喜欢按钮 ───────────────────── */
+.music-player-like-button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255,255,255,0.45);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.15s ease, color 0.2s ease;
+}
+
+.music-player-like-button:active {
+  transform: scale(0.85);
+}
+
+.music-player-like-button--active {
+  color: #ec4141;
+}
+
+.music-player-like-button--pulse {
+  animation: music-like-pulse 0.4s cubic-bezier(0.17, 0.89, 0.32, 1.28);
+}
+
+@keyframes music-like-pulse {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.35); }
+  60% { transform: scale(0.9); }
+  100% { transform: scale(1); }
 }
 
 /* ─── 播放控件（大间距触感） ─────────────────── */
@@ -1314,26 +1405,54 @@
   line-height: 1.4;
 }
 
-/* ─── 我的页面 ────────────────────────────── */
+/* ─── 我的页面 — 暖灰液态玻璃重构 ──────────────────── */
+
+/* 色彩系统 */
 .music-profile-page {
+  --mp-bg: #f6f4f1;
+  --mp-surface: rgba(255,255,255,0.65);
+  --mp-text: #2c2a27;
+  --mp-text-secondary: #9e9a94;
+  --mp-accent: #c4a882;
+  --mp-accent-rose: #d4a5a5;
+  --mp-border: rgba(0,0,0,0.05);
+
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  background: var(--mp-bg);
 }
 
+/* ── Hero 个人资料区 ──────────────────────── */
 .music-profile-header {
-  padding: 24px 16px;
+  padding: 0 0 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
   position: relative;
+  min-height: 220px;
 }
 
 .music-profile-bg {
   position: absolute;
   inset: 0;
-  background: linear-gradient(to bottom, #e8e0d8, #f5f0ec, var(--wy-bg));
+  background: linear-gradient(160deg, #e8dfd5, #d6cdc2, var(--mp-bg));
+  background-size: cover;
+  background-position: center;
   z-index: 0;
+}
+
+.music-profile-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom,
+    rgba(246,244,241,0.15) 0%,
+    rgba(246,244,241,0.5) 60%,
+    rgba(246,244,241,0.95) 100%
+  );
+  backdrop-filter: blur(40px) saturate(1.2);
+  -webkit-backdrop-filter: blur(40px) saturate(1.2);
 }
 
 .music-profile-avatar {
@@ -1344,7 +1463,8 @@
   overflow: hidden;
   position: relative;
   z-index: 1;
-  border: 3px solid rgba(255,255,255,0.5);
+  border: 2.5px solid var(--mp-accent);
+  box-shadow: 0 0 0 3px rgba(196,168,130,0.15), 0 4px 16px rgba(0,0,0,0.08);
 }
 
 .music-profile-avatar img {
@@ -1355,14 +1475,15 @@
 
 .music-profile-name {
   font-size: 18px;
-  font-weight: 700;
-  color: var(--wy-text);
+  font-weight: 600;
+  color: var(--mp-text);
   margin-top: 12px;
   position: relative;
   z-index: 1;
   display: flex;
   align-items: center;
   gap: 6px;
+  letter-spacing: 0.01em;
 }
 
 .music-vip-badge {
@@ -1372,128 +1493,611 @@
   font-size: 10px;
   padding: 2px 8px;
   border-radius: 10px;
-  background: linear-gradient(135deg, #ffd700, #ff8c00);
+  background: linear-gradient(135deg, var(--mp-accent), #b89668);
   color: #fff;
   font-weight: 600;
+  letter-spacing: 0.03em;
 }
 
+/* 毛玻璃统计 pills */
 .music-profile-stats {
   display: flex;
-  gap: 24px;
-  margin-top: 10px;
+  gap: 8px;
+  margin-top: 14px;
   position: relative;
   z-index: 1;
 }
 
 .music-profile-stat {
   text-align: center;
-  font-size: 12px;
-  color: var(--wy-text-secondary);
+  padding: 8px 16px;
+  border-radius: 24px;
+  background: rgba(255,255,255,0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.6);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
 }
 
 .music-profile-stat-num {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--wy-text);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--mp-text);
+  display: block;
 }
 
-.music-profile-tools {
+.music-profile-stat-label {
+  font-size: 11px;
+  color: var(--mp-text-secondary);
+  font-weight: 400;
+  margin-top: 1px;
+}
+
+/* ── Toolbar ──────────────────────────────── */
+.music-profile-toolbar {
+  position: relative;
+  z-index: 2;
+  width: 100%;
   display: flex;
-  gap: 8px;
-  padding: 16px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px 0;
+}
+
+.music-profile-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ── 「我喜欢的音乐」大卡片 — 封面模糊背景 ── */
+.mp-liked-card {
+  position: relative;
+  margin: 12px 16px 0;
+  z-index: 1;
+  border-radius: 20px;
+  overflow: hidden;
+  cursor: pointer;
+  min-height: 80px;
+}
+
+.mp-liked-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(20px) brightness(1.05) saturate(1.2);
+  transform: scale(1.2);
+  z-index: 0;
+}
+
+.mp-liked-glass {
   position: relative;
   z-index: 1;
+  background: rgba(255,255,255,0.55);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid rgba(255,255,255,0.65);
 }
 
-.music-profile-tool {
+.mp-liked-inner {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px 16px;
-  border-radius: 20px;
-  background: rgba(0,0,0,0.04);
-  font-size: 13px;
-  color: var(--wy-text);
-  cursor: pointer;
+  gap: 14px;
+  padding: 20px 16px;
 }
 
-/* ─── 歌单部分 ────────────────────────────── */
-.music-my-playlists {
-  padding: 0 16px;
-}
-
-.music-my-playlist-tabs {
+.mp-liked-left {
+  width: 44px;
+  height: 44px;
   display: flex;
-  gap: 24px;
-  padding: 12px 0;
-  border-bottom: 0.5px solid var(--wy-border);
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: rgba(212,165,165,0.12);
 }
 
-.music-my-playlist-tab {
-  font-size: 15px;
-  color: var(--wy-text-secondary);
-  cursor: pointer;
-  position: relative;
+.mp-liked-heart {
+  width: 22px;
+  height: 22px;
+  color: var(--mp-accent-rose);
 }
 
-.music-my-playlist-tab.active {
-  color: var(--wy-text);
+.mp-liked-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.mp-liked-title {
+  font-size: 16px;
   font-weight: 600;
+  color: var(--mp-text);
+  letter-spacing: 0.01em;
 }
 
-.music-my-playlist-tab.active::after {
-  content: '';
-  position: absolute;
-  bottom: -12px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 20px;
-  height: 2px;
-  background: var(--wy-text);
-  border-radius: 1px;
+.mp-liked-count {
+  font-size: 12px;
+  color: var(--mp-text-secondary);
+  margin-top: 2px;
 }
 
-.music-my-playlist-item {
+.mp-liked-arrow {
+  width: 18px;
+  height: 18px;
+  color: var(--mp-text-secondary);
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+/* ── Quick Actions 横排 ──────────────────── */
+.mp-actions-row {
   display: flex;
   align-items: center;
-  padding: 12px 0;
-  gap: 12px;
-  cursor: pointer;
+  margin: 12px 16px 0;
+  padding: 0;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,0.6);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.03);
 }
 
-.music-my-playlist-cover {
-  width: 56px;
-  height: 56px;
-  border-radius: 8px;
-  background: #f0f0f0;
-  overflow: hidden;
+.mp-action-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 0;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.mp-action-item:active {
+  opacity: 0.6;
+}
+
+.mp-action-item svg {
+  width: 20px;
+  height: 20px;
+  color: var(--mp-text-secondary);
+}
+
+.mp-action-item span {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--mp-text);
+  letter-spacing: 0.02em;
+}
+
+.mp-action-divider {
+  width: 1px;
+  height: 28px;
+  background: var(--mp-border);
   flex-shrink: 0;
 }
 
-.music-my-playlist-cover img {
+/* ── 歌单 Tab 区域 ───────────────────────── */
+.mp-playlist-section {
+  padding-top: 20px;
+}
+
+.mp-playlist-tabs {
+  display: flex;
+  gap: 24px;
+  padding: 0 16px 10px;
+}
+
+.mp-playlist-tab {
+  font-size: 15px;
+  color: var(--mp-text-secondary);
+  cursor: pointer;
+  position: relative;
+  padding-bottom: 8px;
+  font-weight: 400;
+  transition: color 0.2s;
+  background: none;
+  border: none;
+  font-family: inherit;
+}
+
+.mp-playlist-tab.active {
+  color: var(--mp-text);
+  font-weight: 600;
+}
+
+.mp-playlist-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 20px;
+  height: 2.5px;
+  background: var(--mp-accent);
+  border-radius: 2px;
+}
+
+.mp-playlist-list {
+  list-style: none;
+  padding: 0 16px;
+  margin: 0;
+}
+
+.mp-playlist-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 0;
+  gap: 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--mp-border);
+  transition: background 0.15s;
+}
+
+.mp-playlist-item:last-child {
+  border-bottom: none;
+}
+
+.mp-playlist-item:active {
+  background: rgba(0,0,0,0.02);
+}
+
+.mp-playlist-cover {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: #ece8e3;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.mp-playlist-cover img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.music-my-playlist-info {
+.mp-playlist-info {
   flex: 1;
   min-width: 0;
 }
 
-.music-my-playlist-name {
-  font-size: 15px;
+.mp-playlist-name {
+  font-size: 14px;
   font-weight: 500;
-  color: var(--wy-text);
+  color: var(--mp-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.music-my-playlist-count {
+.mp-playlist-meta {
   font-size: 12px;
-  color: var(--wy-text-secondary);
+  color: var(--mp-text-secondary);
   margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Loading ──────────────────────────────── */
+.music-profile-loading {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 0;
+}
+
+.mp-loading-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 16px;
+}
+
+.mp-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(196,168,130,0.2);
+  border-top-color: var(--mp-accent);
+  animation: music-spin 0.9s linear infinite;
+}
+
+/* ── 背景选择器面板 ──────────────────────── */
+.mp-bg-picker-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0,0,0,0.35);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: mp-fade-in 0.2s ease;
+}
+
+@keyframes mp-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.mp-bg-picker-sheet {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 61;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  padding: 16px 16px 28px;
+  max-height: 70%;
+  overflow-y: auto;
+  animation: mp-sheet-up 0.35s cubic-bezier(0.32,0.72,0,1);
+  box-shadow: 0 -8px 40px rgba(0,0,0,0.1);
+}
+
+@keyframes mp-sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.mp-bg-picker-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(0,0,0,0.12);
+  margin: 0 auto 16px;
+}
+
+.mp-bg-picker-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--mp-text);
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.mp-bg-picker-section {
+  margin-bottom: 16px;
+}
+
+.mp-bg-picker-section-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--mp-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+}
+
+.mp-bg-picker-options {
+  display: flex;
+  gap: 10px;
+}
+
+.mp-bg-option {
+  flex: 1;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--mp-text);
+  cursor: pointer;
+  border: 1.5px solid var(--mp-border);
+  background: rgba(255,255,255,0.6);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.mp-bg-option:active {
+  transform: scale(0.97);
+}
+
+.mp-bg-option.active {
+  border-color: var(--mp-accent);
+  box-shadow: 0 0 0 1px var(--mp-accent);
+}
+
+.mp-bg-option:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 预设壁纸网格 */
+.mp-bg-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.mp-bg-preset {
+  aspect-ratio: 16/10;
+  border-radius: 12px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s, transform 0.15s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.mp-bg-preset:active {
+  transform: scale(0.95);
+}
+
+.mp-bg-preset.active {
+  border-color: var(--mp-accent);
+  box-shadow: 0 0 0 1px var(--mp-accent), 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.mp-bg-preset-0 { background: linear-gradient(135deg, #e8dfd5, #c4b5a3, #d6cdc2); }
+.mp-bg-preset-1 { background: linear-gradient(160deg, #d5cec8, #b8b3ad, #e0dbd5); }
+.mp-bg-preset-2 { background: linear-gradient(145deg, #c8c2bc, #a09890, #d0c8c0); }
+.mp-bg-preset-3 { background: linear-gradient(130deg, #d4c4c4, #c0a8a8, #ddd0d0); }
+.mp-bg-preset-4 { background: linear-gradient(150deg, #c5bcb0, #a8968a, #d8cfc5); }
+.mp-bg-preset-5 { background: linear-gradient(140deg, #b8c0c4, #98a4aa, #ccd2d5); }
+
+.mp-bg-upload-btn {
+  width: 100%;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--mp-text);
+  cursor: pointer;
+  border: 1.5px dashed rgba(0,0,0,0.12);
+  background: rgba(255,255,255,0.4);
+  transition: border-color 0.15s;
+  font-family: inherit;
+}
+
+.mp-bg-upload-btn:active {
+  background: rgba(0,0,0,0.03);
+}
+
+/* ── 未登录态 ─────────────────────────────── */
+.mp-login-prompt {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 48px 24px 32px;
+}
+
+.mp-login-calligraphy {
+  font-family: 'Georgia', 'Times New Roman', 'Playfair Display', serif;
+  font-style: italic;
+  font-size: 32px;
+  font-weight: 400;
+  color: var(--mp-accent);
+  opacity: 0.6;
+  margin-bottom: 16px;
+  letter-spacing: 0.04em;
+}
+
+.mp-login-title {
+  font-size: 20px;
+  font-weight: 300;
+  color: var(--mp-text);
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+}
+
+.mp-login-subtitle {
+  font-size: 13px;
+  color: var(--mp-text-secondary);
+  margin-bottom: 28px;
+}
+
+.mp-login-btn {
+  appearance: none;
+  border: none;
+  padding: 14px 36px;
+  border-radius: 999px;
+  background: var(--mp-accent);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(196,168,130,0.25);
+  transition: transform 0.12s, box-shadow 0.12s;
+  font-family: inherit;
+}
+
+.mp-login-btn:active {
+  transform: scale(0.96);
+  box-shadow: 0 4px 12px rgba(196,168,130,0.2);
+}
+
+/* ── 登录中间态 ───────────────────────────── */
+.mp-login-pending {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  padding: 20px 18px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,0.7);
+  text-align: center;
+}
+
+.mp-login-pending-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--mp-text);
+}
+
+.mp-login-pending-text {
+  font-size: 13px;
+  color: var(--mp-text-secondary);
+  margin-top: 6px;
+}
+
+.mp-login-pending-btn {
+  appearance: none;
+  border: none;
+  margin-top: 14px;
+  padding: 10px 20px;
+  border-radius: 999px;
+  background: var(--mp-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* ── 错误提示 ─────────────────────────────── */
+.mp-error-card {
+  margin: 0 16px 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(0,0,0,0.04);
+}
+
+.mp-error-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--mp-text);
+}
+
+.mp-error-text {
+  font-size: 12px;
+  color: var(--mp-text-secondary);
+  margin-top: 4px;
+}
+
+.mp-error-btn {
+  appearance: none;
+  border: none;
+  margin-top: 10px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.05);
+  color: var(--mp-text);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
 }
 
 /* ─── 搜索历史  ───────────────────────────── */
@@ -1721,50 +2325,6 @@
   color: rgba(255,255,255,0.9);
   font-size: 24px;
   font-weight: 700;
-}
-
-.music-profile-toolbar {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 18px;
-}
-
-.music-profile-toolbar-group {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.music-profile-loading {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 20px 0;
-}
-
-.music-profile-summary-card {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  margin-top: 18px;
-  padding: 16px;
-  border-radius: 18px;
-  background: rgba(255,255,255,0.78);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255,255,255,0.6);
-}
-
-.music-profile-empty-stack {
-  display: grid;
-  gap: 12px;
-  padding-top: 6px;
 }
 
 .music-login-card {

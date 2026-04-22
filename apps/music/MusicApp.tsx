@@ -23,6 +23,7 @@ import {
   type NeteaseUserAccount,
 } from '../../types/music';
 import {
+  addSongsToPlaylist,
   checkQrStatus,
   clearMusicCookie,
   getAlbumDetail,
@@ -33,14 +34,19 @@ import {
   getDjProgramDetail,
   getDjPrograms,
   getDjRadioDetail,
+  getPersonalizedPlaylists,
   getPlaylistDetail,
   getQrKey,
   getQrUrl,
+  getRecommendResource,
+  getRecommendSongs,
   getTopPlaylists,
   getUserAccount,
+  getUserPlaylists,
   isMusicLoggedIn,
   MUSIC_SEARCH_TAB_LABELS,
   MUSIC_SEARCH_TABS,
+  removeSongsFromPlaylist,
   searchMusicAll,
   searchMusicByType,
   setMusicCookie,
@@ -456,15 +462,19 @@ const PlayerLyricsPanel = ({
   currentTime,
   settings,
   onSettingsChange,
+  onSeekToTime,
 }: {
   songId: number;
   currentTime: number;
   settings: FloatingLyricsSettings;
   onSettingsChange: (patch: Partial<FloatingLyricsSettings>) => void;
+  onSeekToTime?: (seconds: number) => void;
 }) => {
-  const [trackOffset, setTrackOffset] = useState(0);
   const viewportRef = useRef<HTMLDivElement>(null);
   const lineRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const userScrollingRef = useRef(false);
+  const userScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAutoScrollIndexRef = useRef(-1);
 
   const {
     lines,
@@ -481,28 +491,48 @@ const PlayerLyricsPanel = ({
     lineRefs.current = lineRefs.current.slice(0, lines.length);
   }, [lines.length]);
 
-  useLayoutEffect(() => {
-    if (currentIndex < 0) {
-      setTrackOffset(0);
-      return;
+  // Detect user-initiated scroll via touch/wheel
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    function markUserScrolling(): void {
+      userScrollingRef.current = true;
+      if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
+      userScrollTimerRef.current = setTimeout(() => {
+        userScrollingRef.current = false;
+      }, 3000);
     }
 
-    const frameId = window.requestAnimationFrame(() => {
-      const viewport = viewportRef.current;
-      const activeLine = lineRefs.current[currentIndex];
+    viewport.addEventListener('touchstart', markUserScrolling, { passive: true });
+    viewport.addEventListener('wheel', markUserScrolling, { passive: true });
 
-      if (!viewport || !activeLine) {
-        setTrackOffset(0);
-        return;
-      }
+    return () => {
+      viewport.removeEventListener('touchstart', markUserScrolling);
+      viewport.removeEventListener('wheel', markUserScrolling);
+      if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
+    };
+  }, []);
 
-      const viewportCenter = viewport.clientHeight / 2;
-      const activeLineCenter = activeLine.offsetTop + activeLine.offsetHeight / 2;
-      setTrackOffset(viewportCenter - activeLineCenter);
+  // Auto-scroll to current lyric line (smooth)
+  useLayoutEffect(() => {
+    if (currentIndex < 0 || userScrollingRef.current) return;
+    if (currentIndex === lastAutoScrollIndexRef.current) return;
+    lastAutoScrollIndexRef.current = currentIndex;
+
+    const viewport = viewportRef.current;
+    const activeLine = lineRefs.current[currentIndex];
+    if (!viewport || !activeLine) return;
+
+    const viewportCenter = viewport.clientHeight / 2;
+    const activeLineCenter = activeLine.offsetTop + activeLine.offsetHeight / 2;
+    const targetScroll = activeLineCenter - viewportCenter;
+
+    viewport.scrollTo({
+      top: Math.max(0, targetScroll),
+      behavior: 'smooth',
     });
-
-    return () => window.cancelAnimationFrame(frameId);
-  }, [currentIndex, lines, settings.showTranslation]);
+  }, [currentIndex]);
 
   const style = {
     ...getLyricColorVars(settings.textColor),
@@ -548,10 +578,7 @@ const PlayerLyricsPanel = ({
         <div className="music-player-lyrics-empty">这首歌暂时没有可显示的歌词。</div>
       ) : (
         <div className="music-player-lyrics-viewport" ref={viewportRef}>
-          <div
-            className="music-player-lyrics-track"
-            style={{ transform: `translate3d(0, ${trackOffset}px, 0)` }}
-          >
+          <div className="music-player-lyrics-track">
             {lines.map((line, index) => (
               <div
                 key={`${line.time}-${index}`}
@@ -559,9 +586,17 @@ const PlayerLyricsPanel = ({
                   lineRefs.current[index] = node;
                 }}
                 className={`music-player-lyrics-line ${index === currentIndex ? 'active' : ''}`}
+                onClick={() => {
+                  if (onSeekToTime && line.time >= 0) {
+                    onSeekToTime(line.time);
+                    // Resume auto-scroll immediately after seeking
+                    userScrollingRef.current = false;
+                    if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
+                  }
+                }}
               >
                 <span className="music-player-lyrics-line-text">{line.text}</span>
-                {settings.showTranslation && index === currentIndex && line.translation ? (
+                {settings.showTranslation && line.translation ? (
                   <span className="music-player-lyrics-line-translation">{line.translation}</span>
                 ) : null}
               </div>
@@ -587,6 +622,9 @@ const DiscoverPage = ({
   showExitButton,
   onPlaylistSelect,
   onSongClick,
+  dailySongs,
+  dailySongsLoading,
+  isLoggedIn,
 }: {
   playlists: NeteasePlaylist[];
   playlistsLoading: boolean;
@@ -601,6 +639,9 @@ const DiscoverPage = ({
   showExitButton: boolean;
   onPlaylistSelect: (playlist: NeteasePlaylist) => void;
   onSongClick: (song: NeteaseSong, queue?: NeteaseSong[]) => void;
+  dailySongs: NeteaseSong[];
+  dailySongsLoading: boolean;
+  isLoggedIn: boolean;
 }) => (
   <div className="music-discover-page music-no-scrollbar">
     <div className="music-root-toolbar">
@@ -626,7 +667,7 @@ const DiscoverPage = ({
       </div>
     </div>
 
-    <SectionBlock title="推荐歌单" subtitle="来自真实热度榜单的歌单推荐">
+    <SectionBlock title={isLoggedIn ? '每日推荐' : '推荐歌单'} subtitle={isLoggedIn ? '根据你的口味每天更新' : '热门个性化推荐'}>
       {playlistsError ? (
         <div className="music-state-card">
           <div className="music-state-title">歌单加载失败</div>
@@ -660,6 +701,45 @@ const DiscoverPage = ({
         </div>
       ) : null}
     </SectionBlock>
+
+    {isLoggedIn && !dailySongsLoading && dailySongs.length > 0 ? (
+      <SectionBlock title="每日推荐歌曲" subtitle="每天为你推荐 30 首好歌">
+        <div style={{ padding: '0 16px' }}>
+          <ul className="music-song-list">
+            {dailySongs.slice(0, 10).map((song, index) => (
+              <li
+                key={song.id}
+                className={`music-song-item ${currentPlayable?.id === song.id ? 'music-song-item-active' : ''}`}
+                onClick={() => onSongClick(song, dailySongs)}
+              >
+                <div className="music-song-index">{index + 1}</div>
+                <CoverArt
+                  src={song.album?.picUrl}
+                  alt={song.name}
+                  seed={song.id}
+                  className="music-song-cover"
+                  note="♪"
+                />
+                <div className="music-song-info">
+                  <div className="music-song-name">{song.name}</div>
+                  <div className="music-song-artist">
+                    {song.artists?.map(a => a.name).join(' / ') || '未知'}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </SectionBlock>
+    ) : null}
+
+    {isLoggedIn && dailySongsLoading ? (
+      <SectionBlock title="每日推荐歌曲" subtitle="加载中">
+        <div className="music-loading-block">
+          <div className="music-inline-spinner" />
+        </div>
+      </SectionBlock>
+    ) : null}
 
     <SectionBlock
       title={previewPlaylist ? `${previewPlaylist.name} 速览` : '歌单速览'}
@@ -1276,61 +1356,261 @@ const ProgramDetailPage = ({
   );
 };
 
+/* ── Profile background IndexedDB helpers ── */
+const PROFILE_BG_DB_NAME = 'music_profile_bg_db';
+const PROFILE_BG_STORE = 'backgrounds';
+const PROFILE_BG_KEY = 'custom_bg';
+const PROFILE_BG_SETTING_KEY = 'music_profile_bg_setting';
+
+type ProfileBgSetting = { type: 'default' | 'netease' | 'preset' | 'custom'; presetIndex?: number };
+
+const PRESET_GRADIENTS = [
+  'linear-gradient(135deg, #e8dfd5, #c4b5a3, #d6cdc2)',
+  'linear-gradient(160deg, #d5cec8, #b8b3ad, #e0dbd5)',
+  'linear-gradient(145deg, #c8c2bc, #a09890, #d0c8c0)',
+  'linear-gradient(130deg, #d4c4c4, #c0a8a8, #ddd0d0)',
+  'linear-gradient(150deg, #c5bcb0, #a8968a, #d8cfc5)',
+  'linear-gradient(140deg, #b8c0c4, #98a4aa, #ccd2d5)',
+];
+
+function readBgSetting(): ProfileBgSetting {
+  try {
+    const raw = localStorage.getItem(PROFILE_BG_SETTING_KEY);
+    if (!raw) return { type: 'default' };
+    const parsed = JSON.parse(raw) as ProfileBgSetting;
+    if (parsed && typeof parsed.type === 'string') return parsed;
+  } catch { /* ignore */ }
+  return { type: 'default' };
+}
+
+function writeBgSetting(setting: ProfileBgSetting): void {
+  try { localStorage.setItem(PROFILE_BG_SETTING_KEY, JSON.stringify(setting)); } catch { /* ignore */ }
+}
+
+function openBgDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PROFILE_BG_DB_NAME, 1);
+    req.onupgradeneeded = () => { req.result.createObjectStore(PROFILE_BG_STORE); };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function saveCustomBg(blob: Blob): Promise<void> {
+  const db = await openBgDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PROFILE_BG_STORE, 'readwrite');
+    tx.objectStore(PROFILE_BG_STORE).put(blob, PROFILE_BG_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function loadCustomBg(): Promise<string | null> {
+  try {
+    const db = await openBgDb();
+    return new Promise((resolve) => {
+      const tx = db.transaction(PROFILE_BG_STORE, 'readonly');
+      const req = tx.objectStore(PROFILE_BG_STORE).get(PROFILE_BG_KEY);
+      req.onsuccess = () => {
+        const blob = req.result as Blob | undefined;
+        resolve(blob ? URL.createObjectURL(blob) : null);
+      };
+      req.onerror = () => resolve(null);
+    });
+  } catch { return null; }
+}
+
+function compressImage(file: File, maxWidth = 1200, quality = 0.85): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = img.width > maxWidth ? maxWidth / img.width : 1;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('Canvas not supported')); return; }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => { blob ? resolve(blob) : reject(new Error('Compress failed')); }, 'image/jpeg', quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load failed')); };
+    img.src = url;
+  });
+}
+
+const IconWallpaper = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg>;
+
+
+const ProfileBgPicker = ({
+  setting,
+  hasNeteaseBackground,
+  onSelect,
+  onUpload,
+  onClose,
+}: {
+  setting: ProfileBgSetting;
+  hasNeteaseBackground: boolean;
+  onSelect: (s: ProfileBgSetting) => void;
+  onUpload: (file: File) => void;
+  onClose: () => void;
+}) => {
+  const fileRef = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <div className="mp-bg-picker-backdrop" onClick={onClose} />
+      <div className="mp-bg-picker-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="mp-bg-picker-handle" />
+        <div className="mp-bg-picker-title">自定义背景</div>
+
+        <div className="mp-bg-picker-section">
+          <div className="mp-bg-picker-section-label">基本</div>
+          <div className="mp-bg-picker-options">
+            <button type="button" className={`mp-bg-option ${setting.type === 'default' ? 'active' : ''}`} onClick={() => onSelect({ type: 'default' })}>默认</button>
+            <button type="button" className={`mp-bg-option ${setting.type === 'netease' ? 'active' : ''}`} disabled={!hasNeteaseBackground} onClick={() => onSelect({ type: 'netease' })}>账号背景</button>
+          </div>
+        </div>
+
+        <div className="mp-bg-picker-section">
+          <div className="mp-bg-picker-section-label">预设壁纸</div>
+          <div className="mp-bg-presets">
+            {PRESET_GRADIENTS.map((_, i) => (
+              <div key={i} className={`mp-bg-preset mp-bg-preset-${i} ${setting.type === 'preset' && setting.presetIndex === i ? 'active' : ''}`} onClick={() => onSelect({ type: 'preset', presetIndex: i })} />
+            ))}
+          </div>
+        </div>
+
+        <div className="mp-bg-picker-section">
+          <div className="mp-bg-picker-section-label">自定义</div>
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); }} />
+          <button type="button" className={`mp-bg-upload-btn ${setting.type === 'custom' ? 'active' : ''}`} onClick={() => fileRef.current?.click()}>从相册选择</button>
+        </div>
+      </div>
+    </>
+  );
+};
+
 const ProfilePage = ({
   account,
   isLoading,
   error,
   isLoggedIn,
+  userPlaylists,
+  userPlaylistsLoading,
+  userPlaylistsError,
   onOpenLogin,
   onLogout,
   onCloseApp,
   onSearch,
   showExitButton,
+  onOpenPlaylist,
 }: {
   account: NeteaseUserAccount | null;
   isLoading: boolean;
   error: string | null;
   isLoggedIn: boolean;
+  userPlaylists: NeteasePlaylist[];
+  userPlaylistsLoading: boolean;
+  userPlaylistsError: string | null;
   onOpenLogin: () => void;
   onLogout: () => void;
   onCloseApp: () => void;
   onSearch: () => void;
   showExitButton: boolean;
+  onOpenPlaylist: (playlist: NeteasePlaylist) => void;
 }) => {
-  const backgroundStyle = account?.backgroundUrl ? {
-    backgroundImage: `linear-gradient(to bottom, rgba(22,22,24,0.15), rgba(250,250,250,1)), url(${account.backgroundUrl})`,
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-  } : undefined;
+  const [playlistTab, setPlaylistTab] = useState<'created' | 'collected'>('created');
+  const [bgSetting, setBgSetting] = useState<ProfileBgSetting>(readBgSetting);
+  const [customBgUrl, setCustomBgUrl] = useState<string | null>(null);
+  const [showBgPicker, setShowBgPicker] = useState(false);
+
+  // Load custom background from IndexedDB on mount
+  useEffect(() => {
+    if (bgSetting.type === 'custom') { void loadCustomBg().then(setCustomBgUrl); }
+  }, [bgSetting.type]);
+
+  const accountUserId = account?.userId ?? null;
+
+  const createdPlaylists = useMemo(() => {
+    if (accountUserId === null) return [];
+    return userPlaylists.filter((p) => p.creator?.userId === accountUserId);
+  }, [accountUserId, userPlaylists]);
+
+  const collectedPlaylists = useMemo(() => {
+    if (accountUserId === null) return [];
+    return userPlaylists.filter((p) => p.creator?.userId !== accountUserId);
+  }, [accountUserId, userPlaylists]);
+
+  // First created playlist is always "My Favorites" in NetEase
+  const likedPlaylist = createdPlaylists[0] || null;
+  const otherCreated = createdPlaylists.slice(1);
+  const visiblePlaylists = playlistTab === 'created' ? otherCreated : collectedPlaylists;
+
+  // Resolve background style
+  const bgStyle = useMemo<React.CSSProperties>(() => {
+    switch (bgSetting.type) {
+      case 'netease':
+        return account?.backgroundUrl
+          ? { backgroundImage: `url(${account.backgroundUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+          : {};
+      case 'preset':
+        return { background: PRESET_GRADIENTS[bgSetting.presetIndex ?? 0] };
+      case 'custom':
+        return customBgUrl ? { backgroundImage: `url(${customBgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {};
+      default:
+        return {};
+    }
+  }, [bgSetting, account?.backgroundUrl, customBgUrl]);
+
+  function handleBgSelect(setting: ProfileBgSetting): void {
+    setBgSetting(setting);
+    writeBgSetting(setting);
+    if (setting.type !== 'custom') setCustomBgUrl(null);
+    setShowBgPicker(false);
+  }
+
+  function handleBgUpload(file: File): void {
+    void (async () => {
+      try {
+        const compressed = await compressImage(file);
+        await saveCustomBg(compressed);
+        const url = URL.createObjectURL(compressed);
+        setCustomBgUrl(url);
+        const setting: ProfileBgSetting = { type: 'custom' };
+        setBgSetting(setting);
+        writeBgSetting(setting);
+        setShowBgPicker(false);
+      } catch { /* ignore */ }
+    })();
+  }
 
   return (
     <div className="music-profile-page music-no-scrollbar">
       <div className="music-profile-header">
-        <div className="music-profile-bg" style={backgroundStyle} />
+        <div className="music-profile-bg" style={bgStyle} />
+
+        {/* Toolbar */}
         <div className="music-profile-toolbar">
           <div className="music-profile-toolbar-group">
             {showExitButton ? (
-              <button
-                type="button"
-                className="music-icon-button"
-                aria-label="退出 Emo Cloud"
-                data-testid="music-app-close"
-                onClick={onCloseApp}
-              >
+              <button type="button" className="music-icon-button" aria-label="退出" data-testid="music-app-close" onClick={onCloseApp}>
                 <IconBack />
               </button>
             ) : null}
           </div>
           <div className="music-profile-toolbar-group">
+            <button type="button" className="music-icon-button" onClick={() => setShowBgPicker(true)} aria-label="自定义背景"><IconWallpaper /></button>
             <button type="button" className="music-icon-button" onClick={onSearch}><IconSearch /></button>
-            {isLoggedIn ? <button type="button" className="music-text-button music-text-button-danger" onClick={onLogout}>退出登录</button> : null}
+            {isLoggedIn ? <button type="button" className="music-text-button" style={{ color: '#9e9a94', fontSize: 12 }} onClick={onLogout}>退出</button> : null}
           </div>
         </div>
 
+        {/* Content */}
         {isLoading ? (
           <div className="music-profile-loading">
-            <div className="music-inline-spinner" />
-            <div className="music-state-text">正在同步 {MUSIC_APP_NAME} 账号...</div>
+            <div className="mp-spinner" />
           </div>
         ) : isLoggedIn && account ? (
           <>
@@ -1340,61 +1620,124 @@ const ProfilePage = ({
               {account.isVip ? <span className="music-vip-badge">{getVipLabel(account)}</span> : null}
             </div>
             <div className="music-profile-stats">
-              <div className="music-profile-stat"><span className="music-profile-stat-num">{account.follows}</span>关注</div>
-              <div className="music-profile-stat"><span className="music-profile-stat-num">{account.followeds}</span>粉丝</div>
-              <div className="music-profile-stat"><span className="music-profile-stat-num">{account.listenSongs}</span>累计听歌</div>
-            </div>
-            <div className="music-profile-tools">
-              <div className="music-profile-tool"><span>账号</span><strong>{account.userId}</strong></div>
-              <div className="music-profile-tool"><span>动态</span><strong>{account.eventCount}</strong></div>
-              <div className="music-profile-tool"><span>状态</span><strong>{account.isVip ? 'VIP' : '普通'}</strong></div>
-            </div>
-            <div className="music-profile-summary-card">
-              <div className="music-state-title">{MUSIC_APP_NAME} 已连接</div>
-              <div className="music-state-text">现在搜索、详情和播放都走真实接口了，单曲和声音会按实体类型走不同的播放链路。</div>
+              <div className="music-profile-stat">
+                <span className="music-profile-stat-num">{account.follows}</span>
+                <span className="music-profile-stat-label">关注</span>
+              </div>
+              <div className="music-profile-stat">
+                <span className="music-profile-stat-num">{account.followeds}</span>
+                <span className="music-profile-stat-label">粉丝</span>
+              </div>
+              <div className="music-profile-stat">
+                <span className="music-profile-stat-num">{account.listenSongs}</span>
+                <span className="music-profile-stat-label">听歌</span>
+              </div>
             </div>
           </>
         ) : isLoggedIn ? (
-          <div className="music-login-card">
-            <div className="music-login-card-title">{error ? '账号已授权，但资料还没同步成功' : '账号已授权，正在准备资料'}</div>
-            <div className="music-login-card-text">
-              {error
-                ? '这通常是登录态不完整或刚授权后的同步失败。重新扫码一次就能刷新完整 cookie。'
-                : '昵称、头像和 VIP 状态正在同步，通常几秒内就会刷新出来。'}
-            </div>
-            <button type="button" className="music-primary-button" onClick={onOpenLogin}>{error ? '重新扫码登录' : '重新打开二维码'}</button>
+          <div className="mp-login-pending">
+            <div className="mp-login-pending-title">{error ? '登录异常' : '登录中，请稍候'}</div>
+            {error ? <div className="mp-login-pending-text">同步异常，请重新扫码登录</div> : null}
+            <button type="button" className="mp-login-pending-btn" onClick={onOpenLogin}>{error ? '重新登录' : '打开二维码'}</button>
           </div>
         ) : (
-          <div className="music-login-card">
-            <div className="music-login-card-title">登录 {MUSIC_APP_NAME}</div>
-            <div className="music-login-card-text">扫码后可以读取真实昵称、头像和 VIP 状态，并为需要登录态的歌曲和播客拿到更稳定的播放链接。</div>
-            <button type="button" className="music-primary-button" onClick={onOpenLogin}>打开二维码登录</button>
+          <div className="mp-login-prompt">
+            <div className="mp-login-calligraphy">My Music</div>
+            <div className="mp-login-title">登录即可查看</div>
+            <div className="mp-login-subtitle">你的歌单和收藏</div>
+            <button type="button" className="mp-login-btn" onClick={onOpenLogin}>扫码登录</button>
           </div>
         )}
       </div>
 
-      {error ? (
-        <div className="music-state-card" style={{ margin: '0 16px 16px' }}>
-          <div className="music-state-title">账号同步失败</div>
-          <div className="music-state-text">{error}</div>
-          <button type="button" className="music-secondary-button" onClick={onOpenLogin}>重新登录</button>
+      {/* Error card */}
+      {error && isLoggedIn ? (
+        <div className="mp-error-card">
+          <div className="mp-error-title">登录异常</div>
+          <div className="mp-error-text">{error}</div>
+          <button type="button" className="mp-error-btn" onClick={onOpenLogin}>重新登录</button>
         </div>
       ) : null}
 
-      {!isLoggedIn && !isLoading ? (
-        <div className="music-profile-empty-stack">
-          <div className="music-state-card">
-            <div className="music-state-title">为什么需要登录？</div>
-            <div className="music-state-text">部分歌曲和声音的播放链接依赖登录 cookie。登录后，播放器会优先走你的账号权限拿真实音频地址。</div>
-          </div>
-          <div className="music-state-card">
-            <div className="music-state-title">登录后会有什么变化</div>
-            <div className="music-state-text">昵称、头像、VIP 状态和累计听歌数都会替换掉当前页面里的占位信息，播放成功率也会更高。</div>
-          </div>
-        </div>
+      {/* Logged-in content */}
+      {isLoggedIn && account ? (
+        <>
+          {/* 「我喜欢的音乐」card - with cover image blurred background */}
+          {likedPlaylist ? (
+            <div className="mp-liked-card" onClick={() => onOpenPlaylist(likedPlaylist)}>
+              {likedPlaylist.coverImgUrl ? (
+                <div className="mp-liked-bg" style={{ backgroundImage: `url(${likedPlaylist.coverImgUrl})` }} />
+              ) : null}
+              <div className="mp-liked-glass">
+                <div className="mp-liked-inner">
+                  <div className="mp-liked-left">
+                    <svg className="mp-liked-heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" /></svg>
+                  </div>
+                  <div className="mp-liked-info">
+                    <div className="mp-liked-title">{likedPlaylist.name}</div>
+                    <div className="mp-liked-count">{likedPlaylist.trackCount} 首</div>
+                  </div>
+                  <svg className="mp-liked-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M9 18l6-6-6-6" /></svg>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+
+
+          {/* Playlist tabs */}
+          {userPlaylistsLoading ? (
+            <div className="mp-loading-block">
+              <div className="mp-spinner" />
+            </div>
+          ) : (
+            <div className="mp-playlist-section">
+              <div className="mp-playlist-tabs">
+                <button type="button" className={`mp-playlist-tab ${playlistTab === 'created' ? 'active' : ''}`} onClick={() => setPlaylistTab('created')}>
+                  创建的歌单 ({otherCreated.length})
+                </button>
+                <button type="button" className={`mp-playlist-tab ${playlistTab === 'collected' ? 'active' : ''}`} onClick={() => setPlaylistTab('collected')}>
+                  收藏的歌单 ({collectedPlaylists.length})
+                </button>
+              </div>
+              <ul className="mp-playlist-list">
+                {visiblePlaylists.map((playlist) => (
+                  <li key={playlist.id} className="mp-playlist-item" onClick={() => onOpenPlaylist(playlist)}>
+                    <CoverArt src={playlist.coverImgUrl} alt={playlist.name} seed={playlist.id} className="mp-playlist-cover" note="♫" />
+                    <div className="mp-playlist-info">
+                      <div className="mp-playlist-name">{playlist.name}</div>
+                      <div className="mp-playlist-meta">{getPlaylistSubtitle(playlist)}</div>
+                    </div>
+                  </li>
+                ))}
+                {visiblePlaylists.length === 0 ? (
+                  <li style={{ padding: '24px 0', textAlign: 'center', fontSize: 13, color: '#9e9a94' }}>暂无歌单</li>
+                ) : null}
+              </ul>
+            </div>
+          )}
+
+          {userPlaylistsError ? (
+            <div className="mp-error-card">
+              <div className="mp-error-title">歌单加载失败</div>
+              <div className="mp-error-text">{userPlaylistsError}</div>
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       <div style={{ height: 112 }} />
+
+      {/* Background picker sheet */}
+      {showBgPicker ? (
+        <ProfileBgPicker
+          setting={bgSetting}
+          hasNeteaseBackground={Boolean(account?.backgroundUrl)}
+          onSelect={handleBgSelect}
+          onUpload={handleBgUpload}
+          onClose={() => setShowBgPicker(false)}
+        />
+      ) : null}
     </div>
   );
 };
@@ -1749,6 +2092,91 @@ const SkinPicker = ({
   );
 };
 
+const LIKED_SONGS_KEY = 'music_liked_songs';
+
+function isLikedSong(songId: number): boolean {
+  try {
+    const raw = localStorage.getItem(LIKED_SONGS_KEY);
+    if (!raw) return false;
+    const set: number[] = JSON.parse(raw);
+    return Array.isArray(set) && set.includes(songId);
+  } catch {
+    return false;
+  }
+}
+
+function toggleLikedSong(songId: number): boolean {
+  try {
+    const raw = localStorage.getItem(LIKED_SONGS_KEY);
+    const set: number[] = raw ? JSON.parse(raw) : [];
+    const idx = set.indexOf(songId);
+    if (idx >= 0) {
+      set.splice(idx, 1);
+      localStorage.setItem(LIKED_SONGS_KEY, JSON.stringify(set));
+      return false;
+    }
+    set.push(songId);
+    localStorage.setItem(LIKED_SONGS_KEY, JSON.stringify(set));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const LikeButton = ({ songId, likedPlaylistId }: { songId: number; likedPlaylistId: number | null }) => {
+  const [liked, setLiked] = useState(() => isLikedSong(songId));
+  const [animating, setAnimating] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  useEffect(() => {
+    setLiked(isLikedSong(songId));
+  }, [songId]);
+
+  return (
+    <button
+      type="button"
+      className={`music-player-like-button ${liked ? 'music-player-like-button--active' : ''} ${animating ? 'music-player-like-button--pulse' : ''}`}
+      aria-label={liked ? '取消喜欢' : '我喜欢'}
+      style={{ opacity: syncing ? 0.5 : 1 }}
+      disabled={syncing}
+      onClick={() => {
+        const next = toggleLikedSong(songId);
+        setLiked(next);
+        if (next) {
+          setAnimating(true);
+          setTimeout(() => setAnimating(false), 400);
+        }
+        // Sync to NetEase in background
+        if (likedPlaylistId && likedPlaylistId > 0) {
+          setSyncing(true);
+          console.log('[LikeButton] syncing:', next ? 'add' : 'del', 'playlistId:', likedPlaylistId, 'songId:', songId);
+          const apiCall = next
+            ? addSongsToPlaylist(likedPlaylistId, [songId])
+            : removeSongsFromPlaylist(likedPlaylistId, [songId]);
+          apiCall
+            .then(() => {
+              console.log('[LikeButton] sync success');
+            })
+            .catch((err) => {
+              console.warn('[LikeButton] sync failed, reverting:', err);
+              window.alert(`收藏同步失败: ${err instanceof Error ? err.message : String(err)}`);
+              // Revert optimistic update
+              const reverted = toggleLikedSong(songId);
+              setLiked(reverted);
+            })
+            .finally(() => setSyncing(false));
+        } else {
+          console.warn('[LikeButton] no likedPlaylistId, skip sync. id:', likedPlaylistId);
+        }
+      }}
+    >
+      <svg width="22" height="22" viewBox="0 0 24 24" fill={liked ? '#ec4141' : 'none'} stroke={liked ? '#ec4141' : 'currentColor'} strokeWidth="1.8">
+        <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+      </svg>
+    </button>
+  );
+};
+
 const FullPlayer = ({
   playable,
   isPlaying,
@@ -1756,12 +2184,14 @@ const FullPlayer = ({
   currentTime,
   duration,
   lyricSettings,
+  likedPlaylistId,
   onClose,
   onLyricSettingsChange,
   onTogglePlay,
   onPrev,
   onNext,
   onSeek,
+  onSeekToTime,
 }: {
   playable: MusicPlayable;
   isPlaying: boolean;
@@ -1769,14 +2199,18 @@ const FullPlayer = ({
   currentTime: number;
   duration: number;
   lyricSettings: FloatingLyricsSettings;
+  likedPlaylistId: number | null;
   onClose: () => void;
   onLyricSettingsChange: (patch: Partial<FloatingLyricsSettings>) => void;
   onTogglePlay: () => void;
   onPrev: () => void;
   onNext: () => void;
   onSeek: (pct: number) => void;
+  onSeekToTime: (seconds: number) => void;
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragPercent, setDragPercent] = useState(0);
   const cover = getPlayableCover(playable);
   const displayDuration = duration > 0 ? duration : playable.duration / 1000;
 
@@ -1828,6 +2262,44 @@ const FullPlayer = ({
   function handleSkinSelect(id: string): void {
     setActiveSkinId(id);
     try { localStorage.setItem(SKIN_STORAGE_KEY, id); } catch { /* ignore */ }
+  }
+
+  function clampProgressPercent(event: React.PointerEvent, bar: HTMLDivElement): number {
+    const rect = bar.getBoundingClientRect();
+    if (rect.width <= 0) return 0;
+    return Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
+  }
+
+  function handleProgressPointerDown(event: React.PointerEvent): void {
+    event.preventDefault();
+    const bar = progressBarRef.current;
+    if (!bar) return;
+
+    bar.setPointerCapture(event.pointerId);
+    setIsDragging(true);
+    setDragPercent(clampProgressPercent(event, bar));
+  }
+
+  function handleProgressPointerMove(event: React.PointerEvent): void {
+    if (!isDragging) return;
+    const bar = progressBarRef.current;
+    if (!bar) return;
+
+    setDragPercent(clampProgressPercent(event, bar));
+  }
+
+  function handleProgressPointerUp(event: React.PointerEvent): void {
+    if (!isDragging) return;
+    const bar = progressBarRef.current;
+    const nextPercent = bar ? clampProgressPercent(event, bar) : dragPercent;
+
+    if (bar?.hasPointerCapture(event.pointerId)) {
+      bar.releasePointerCapture(event.pointerId);
+    }
+
+    setDragPercent(nextPercent);
+    setIsDragging(false);
+    onSeek(nextPercent);
   }
 
   async function handleSkinUpload(file: File): Promise<void> {
@@ -1910,8 +2382,16 @@ const FullPlayer = ({
                 {getPlayableSubtitle(playable)}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 16, flexShrink: 0 }}>
-              <div style={{ color: 'rgba(255,255,255,0.45)', cursor: 'pointer' }}><IconMore /></div>
+            <div style={{ display: 'flex', gap: 12, flexShrink: 0, alignItems: 'center' }}>
+              <LikeButton songId={playable.id} likedPlaylistId={likedPlaylistId} />
+              <button
+                type="button"
+                className="music-player-more-button"
+                aria-label="更多"
+                onClick={() => window.alert('收藏到歌单功能即将上线')}
+              >
+                <IconMore />
+              </button>
             </div>
           </div>
         </div>
@@ -1922,26 +2402,30 @@ const FullPlayer = ({
             currentTime={currentTime}
             settings={lyricSettings}
             onSettingsChange={onLyricSettingsChange}
+            onSeekToTime={onSeekToTime}
           />
         ) : null}
 
         <div className="music-player-progress">
           <div
             ref={progressBarRef}
-            className="music-player-progress-bar"
-            onClick={(event) => {
-              const rect = progressBarRef.current?.getBoundingClientRect();
-              if (!rect) return;
-              const pct = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
-              onSeek(pct);
-            }}
+            className={`music-player-progress-bar ${isDragging ? 'dragging' : ''}`}
+            onPointerDown={handleProgressPointerDown}
+            onPointerMove={handleProgressPointerMove}
+            onPointerUp={handleProgressPointerUp}
+            onPointerCancel={handleProgressPointerUp}
+            style={{ touchAction: 'none' }}
           >
-            <div className="music-player-progress-fill" style={{ width: `${progress}%` }}>
+            <div className="music-player-progress-fill" style={{ width: `${isDragging ? dragPercent : progress}%` }}>
               <div className="music-player-progress-dot" />
             </div>
           </div>
           <div className="music-player-time">
-            <span>{formatSeconds(currentTime)}</span>
+            <span>
+              {isDragging
+                ? formatSeconds((dragPercent / 100) * displayDuration)
+                : formatSeconds(currentTime)}
+            </span>
             <span>{formatSeconds(displayDuration)}</span>
           </div>
         </div>
@@ -2008,8 +2492,8 @@ const MiniPlayer = ({
 };
 
 export default function MusicApp() {
-  const { closeApp, registerBackHandler } = useApp();
-  const { currentSong, isPlaying, currentTime, duration, progress, playSong, togglePlay, playNext, playPrev, seek } = useAudioPlayer();
+  const { closeApp, registerBackHandler, appParams } = useApp();
+  const { currentSong, isPlaying, currentTime, duration, progress, playSong, togglePlay, playNext, playPrev, seek, seekToTime } = useAudioPlayer();
 
   const [rootPage, setRootPage] = useState<RootPage>('discover');
   const [lastPrimaryPage, setLastPrimaryPage] = useState<PrimaryPage>('discover');
@@ -2035,10 +2519,15 @@ export default function MusicApp() {
   const [accountLoading, setAccountLoading] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountReloadKey, setAccountReloadKey] = useState(0);
+  const [userPlaylists, setUserPlaylists] = useState<NeteasePlaylist[]>([]);
+  const [userPlaylistsLoading, setUserPlaylistsLoading] = useState(false);
+  const [userPlaylistsError, setUserPlaylistsError] = useState<string | null>(null);
 
   const [playlists, setPlaylists] = useState<NeteasePlaylist[]>([]);
   const [playlistsLoading, setPlaylistsLoading] = useState(true);
   const [playlistsError, setPlaylistsError] = useState<string | null>(null);
+  const [dailySongs, setDailySongs] = useState<NeteaseSong[]>([]);
+  const [dailySongsLoading, setDailySongsLoading] = useState(false);
   const [playlistPreview, setPlaylistPreview] = useState<PlaylistPreviewState>({
     playlist: null,
     tracks: [],
@@ -2439,31 +2928,79 @@ export default function MusicApp() {
     }
   }
 
+  // ── 推荐歌单：登录用每日推荐，未登录用个性化推荐，都失败回退到热门 ──
   useEffect(() => {
     let active = true;
 
-    const loadPlaylists = async () => {
+    const loadRecommendations = async () => {
       setPlaylistsLoading(true);
       setPlaylistsError(null);
 
       try {
-        const nextPlaylists = await getTopPlaylists('全部', 6);
+        let nextPlaylists: NeteasePlaylist[];
+
+        if (isLoggedIn) {
+          // 优先用每日推荐
+          try {
+            nextPlaylists = await getRecommendResource();
+          } catch {
+            // 降级到个性化推荐
+            nextPlaylists = await getPersonalizedPlaylists(6);
+          }
+        } else {
+          // 未登录：个性化推荐（不需要 cookie）
+          try {
+            nextPlaylists = await getPersonalizedPlaylists(6);
+          } catch {
+            // 最终降级到热门
+            nextPlaylists = await getTopPlaylists('全部', 6);
+          }
+        }
+
         if (!active) return;
-        setPlaylists(nextPlaylists);
+        setPlaylists(nextPlaylists.slice(0, 6));
       } catch (error) {
         if (!active) return;
         setPlaylists([]);
         setPlaylistsError(error instanceof Error ? error.message : '推荐歌单加载失败');
       } finally {
-        if (active) {
-          setPlaylistsLoading(false);
-        }
+        if (active) setPlaylistsLoading(false);
       }
     };
 
-    void loadPlaylists();
+    void loadRecommendations();
     return () => { active = false; };
-  }, []);
+  }, [isLoggedIn]);
+
+  // ── 每日推荐歌曲（仅登录时加载） ──
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setDailySongs([]);
+      return;
+    }
+
+    let active = true;
+    setDailySongsLoading(true);
+
+    getRecommendSongs()
+      .then((songs) => {
+        if (active) setDailySongs(songs);
+      })
+      .catch(() => {
+        if (active) setDailySongs([]);
+      })
+      .finally(() => {
+        if (active) setDailySongsLoading(false);
+      });
+
+    return () => { active = false; };
+  }, [isLoggedIn]);
+
+  useEffect(() => {
+    if (appParams?.autoShowPlayer) {
+      setShowFullPlayer(true);
+    }
+  }, [appParams]);
 
   useEffect(() => {
     if (playlists.length === 0 || playlistPreview.playlist) return;
@@ -2504,6 +3041,37 @@ export default function MusicApp() {
     void loadAccount();
     return () => { active = false; };
   }, [accountReloadKey, isLoggedIn, rootPage]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !account) {
+      setUserPlaylists([]);
+      setUserPlaylistsLoading(false);
+      setUserPlaylistsError(null);
+      return;
+    }
+
+    let active = true;
+    setUserPlaylistsLoading(true);
+    setUserPlaylistsError(null);
+
+    getUserPlaylists(account.userId)
+      .then((playlists) => {
+        if (!active) return;
+        setUserPlaylists(playlists);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setUserPlaylists([]);
+        setUserPlaylistsError(error instanceof Error ? error.message : '歌单加载失败');
+      })
+      .finally(() => {
+        if (active) {
+          setUserPlaylistsLoading(false);
+        }
+      });
+
+    return () => { active = false; };
+  }, [account, isLoggedIn]);
 
   useEffect(() => {
     if (rootPage !== 'search') return;
@@ -2575,6 +3143,9 @@ export default function MusicApp() {
           showExitButton={showRootExitButton}
           onPlaylistSelect={(playlist) => { void loadPlaylistPreview(playlist); }}
           onSongClick={handleSongClick}
+          dailySongs={dailySongs}
+          dailySongsLoading={dailySongsLoading}
+          isLoggedIn={isLoggedIn}
         />
       ) : null}
 
@@ -2613,6 +3184,9 @@ export default function MusicApp() {
           isLoading={accountLoading}
           error={accountError}
           isLoggedIn={isLoggedIn}
+          userPlaylists={userPlaylists}
+          userPlaylistsLoading={userPlaylistsLoading}
+          userPlaylistsError={userPlaylistsError}
           onOpenLogin={() => setShowQrLogin(true)}
           onLogout={() => {
             clearMusicCookie();
@@ -2624,6 +3198,7 @@ export default function MusicApp() {
           onCloseApp={closeApp}
           onSearch={openSearch}
           showExitButton={showRootExitButton}
+          onOpenPlaylist={openPlaylistDetail}
         />
       ) : null}
 
@@ -2716,12 +3291,14 @@ export default function MusicApp() {
           currentTime={currentTime}
           duration={duration}
           lyricSettings={lyricSettings}
+          likedPlaylistId={(() => { const uid = account?.userId; if (!uid) return null; const first = userPlaylists.find(p => p.creator?.userId === uid); return first?.id ?? null; })()}
           onClose={() => setShowFullPlayer(false)}
           onLyricSettingsChange={handleLyricSettingsChange}
           onTogglePlay={togglePlay}
           onPrev={() => { void playPrev(); }}
           onNext={() => { void playNext(); }}
           onSeek={seek}
+          onSeekToTime={seekToTime}
         />
       ) : null}
 

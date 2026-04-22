@@ -328,6 +328,17 @@ function seekInternal(percent: number): void {
     syncStateFromAudio();
 }
 
+function seekToTimeInternal(seconds: number): void {
+    const audio = getAudio();
+    if (!audio) return;
+
+    const safeDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
+    if (safeDuration <= 0) return;
+
+    audio.currentTime = Math.max(0, Math.min(seconds, safeDuration));
+    syncStateFromAudio();
+}
+
 async function playNextInternal(): Promise<void> {
     const playlistLength = currentState.playlist.length;
     if (playlistLength === 0) return;
@@ -404,6 +415,7 @@ export function useAudioPlayer() {
         resume: resumeInternal,
         togglePlay: togglePlayInternal,
         seek: seekInternal,
+        seekToTime: seekToTimeInternal,
         playNext: playNextInternal,
         playPrev: playPrevInternal,
         setVolume: setVolumeInternal,

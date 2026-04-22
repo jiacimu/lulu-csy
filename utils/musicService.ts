@@ -901,6 +901,47 @@ export async function getTopPlaylists(cat = '全部', limit = 30): Promise<Netea
         .filter((playlist): playlist is NeteasePlaylist => Boolean(playlist));
 }
 
+/**
+ * 个性化推荐歌单（不需要登录也能用，登录后更精准）
+ */
+export async function getPersonalizedPlaylists(limit = 6): Promise<NeteasePlaylist[]> {
+    const data = await musicPost<{ result?: unknown }>('/api/music/personalized', {
+        limit,
+        cookie: getMusicCookie(),
+    });
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}个性化推荐暂时不可用`);
+    return asArray(data.result)
+        .map(normalizePlaylist)
+        .filter((item): item is NeteasePlaylist => Boolean(item));
+}
+
+/**
+ * 每日推荐歌单（需要登录）
+ */
+export async function getRecommendResource(): Promise<NeteasePlaylist[]> {
+    const cookie = getMusicCookie();
+    if (!cookie) throw new Error('需要登录才能使用每日推荐');
+    const data = await musicPost<{ recommend?: unknown }>('/api/music/recommend/resource', { cookie });
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}每日推荐暂时不可用`);
+    return asArray(data.recommend)
+        .map(normalizePlaylist)
+        .filter((item): item is NeteasePlaylist => Boolean(item));
+}
+
+/**
+ * 每日推荐歌曲（需要登录，每天 30 首）
+ */
+export async function getRecommendSongs(): Promise<NeteaseSong[]> {
+    const cookie = getMusicCookie();
+    if (!cookie) throw new Error('需要登录才能使用每日推荐歌曲');
+    const data = await musicPost<{ data?: { dailySongs?: unknown } }>('/api/music/recommend/songs', { cookie });
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}每日推荐歌曲暂时不可用`);
+    const dailySongs = (data.data as Record<string, unknown>)?.dailySongs;
+    return asArray(dailySongs)
+        .map(normalizeSong)
+        .filter((item): item is NeteaseSong => Boolean(item));
+}
+
 export async function getQrKey(): Promise<string> {
     const data = await musicPost<{ unikey?: unknown; data?: unknown }>('/api/music/login/qr/key', {});
     const dataRecord = asRecord(data.data);
@@ -936,4 +977,43 @@ export async function getUserAccount(cookie = getMusicCookie()): Promise<Netease
     const data = await musicPost<JsonRecord>('/api/music/user/account', { cookie: trimmedCookie });
     assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}账号信息暂时不可用`);
     return normalizeUserAccount(data);
+}
+
+export async function getUserPlaylists(uid: number, limit = 50, offset = 0): Promise<NeteasePlaylist[]> {
+    const data = await musicPost<{ playlist?: unknown }>('/api/music/user/playlist', {
+        uid,
+        limit,
+        offset,
+        cookie: getMusicCookie(),
+    });
+    assertMusicApiSuccess(data, `${MUSIC_SERVICE_NAME}用户歌单暂时不可用`);
+    return asArray(data.playlist)
+        .map(normalizePlaylist)
+        .filter((item): item is NeteasePlaylist => Boolean(item));
+}
+
+export async function addSongsToPlaylist(playlistId: number, songIds: number[]): Promise<void> {
+    const cookie = getMusicCookie();
+    if (!cookie) throw new Error('请先登录');
+    if (songIds.length === 0) return;
+    const data = await musicPost<JsonRecord>('/api/music/playlist/tracks', {
+        op: 'add',
+        pid: playlistId,
+        tracks: songIds.join(','),
+        cookie,
+    });
+    assertMusicApiSuccess(data, '收藏失败');
+}
+
+export async function removeSongsFromPlaylist(playlistId: number, songIds: number[]): Promise<void> {
+    const cookie = getMusicCookie();
+    if (!cookie) throw new Error('请先登录');
+    if (songIds.length === 0) return;
+    const data = await musicPost<JsonRecord>('/api/music/playlist/tracks', {
+        op: 'del',
+        pid: playlistId,
+        tracks: songIds.join(','),
+        cookie,
+    });
+    assertMusicApiSuccess(data, '取消收藏失败');
 }

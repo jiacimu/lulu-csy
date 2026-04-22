@@ -23,6 +23,7 @@
     "@capacitor/local-notifications": "^6.0.0",
     "@capacitor/share": "^6.0.0",
     "@capacitor/status-bar": "^6.0.0",
+    "@developer-hub/liquid-glass": "^1.2.3",
     "@huggingface/transformers": "^3.8.1",
     "@phosphor-icons/react": "^2.1.10",
     "@ricky0123/vad-web": "^0.0.30",
