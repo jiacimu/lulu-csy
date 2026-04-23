@@ -632,7 +632,7 @@ ${fieldListStr}
     };
 
     return (
-        <div className="relative flex h-full w-full flex-col overflow-hidden bg-[#0a0a14] text-white">
+        <div className="relative flex h-full w-full flex-col overflow-y-auto bg-[#0a0a14] text-white">
             <div className="pointer-events-none absolute inset-0">
                 <div className="absolute -top-24 right-[-56px] h-64 w-64 rounded-full bg-sky-500/[0.08] blur-[90px]" />
                 <div className="absolute bottom-[-90px] left-[-70px] h-72 w-72 rounded-full bg-emerald-500/[0.05] blur-[110px]" />
@@ -754,7 +754,7 @@ ${fieldListStr}
                 </div>
             </div>
 
-            <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-3 px-4 pb-4 sm:gap-4 lg:flex-row">
+            <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-3 px-4 pb-20 sm:gap-4 sm:pb-4 lg:flex-row">
                 <div className="lg:order-2 lg:w-[400px] lg:shrink-0">
                     <div className="rounded-[32px] border border-white/[0.06] bg-white/[0.03] p-4 backdrop-blur-sm">
                         <div className="flex items-center justify-between gap-3">
@@ -816,11 +816,22 @@ ${fieldListStr}
                         ))}
                     </div>
 
-                    <div className="min-h-0 flex-1 overflow-y-auto pr-1 pb-3 sm:pb-4">
+                    <div className="min-h-0 flex-1 pr-1 pb-3 sm:pb-4">
                         {activeTab === 'prompt' ? renderPromptTab() : renderHtmlTab()}
                     </div>
                 </div>
             </div>
+
+            {/* Floating save button – always accessible on mobile */}
+            <button
+                onClick={handleSave}
+                className="fixed bottom-5 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-white/15 shadow-lg shadow-black/40 backdrop-blur-xl transition-all active:scale-90 sm:hidden"
+                aria-label="保存"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-5 w-5 text-white/90">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                </svg>
+            </button>
         </div>
     );
 };
