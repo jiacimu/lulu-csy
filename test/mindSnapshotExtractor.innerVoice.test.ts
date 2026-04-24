@@ -105,4 +105,28 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
         expect(result!.innerVoice.length).toBe(120);
         expect(result!.innerVoice).toBe(overlongInnerVoice.slice(0, 120));
     });
+
+    it('replaces two-digit custom status template captures as full placeholders', async () => {
+        const values = Array.from({ length: 11 }, (_, index) => `G${index + 1}`);
+        const statusBlock = `<status>\n${values.map((value, index) => `F${index + 1}: ${value}`).join('\n')}\n</status>`;
+
+        mockFetchContent(statusBlock);
+
+        const result = await MindSnapshotExtractor.generateCustomCard(
+            baseCharacter,
+            '我会提前看材料。',
+            currentMsgs as any,
+            apiConfig,
+            {
+                id: 'tpl-custom',
+                name: 'custom',
+                systemPrompt: '输出 status 字段。',
+                extractRegex: `<status>\\s*${values.map((_, index) => `F${index + 1}:\\s*(.*?)`).join('\\s*')}\\s*<\\/status>`,
+                htmlTemplate: '<div>$1|$9|$10|$11|$12</div>',
+                renderMode: 'html',
+            },
+        );
+
+        expect(result?.meta?.html).toBe('<div>G1|G9|G10|G11|$12</div>');
+    });
 });

@@ -113,6 +113,27 @@ function sanitizeClassicInnerVoice(value: string | null | undefined): string | n
     return normalized.slice(0, CLASSIC_INNER_VOICE_MAX_LENGTH);
 }
 
+function substituteStatusTemplateVariables(
+    htmlTemplate: string,
+    matchResult: RegExpMatchArray | null,
+    extracted: string,
+): string {
+    if (matchResult && matchResult.length > 1) {
+        return htmlTemplate.replace(/\$(\d+)/g, (token, indexText: string) => {
+            const index = Number(indexText);
+            if (!Number.isInteger(index) || index <= 0 || index >= matchResult.length) {
+                return token;
+            }
+
+            return matchResult[index] || '';
+        });
+    }
+
+    return htmlTemplate.replace(/\$(\d+)/g, (token, indexText: string) => (
+        indexText === '1' ? extracted : token
+    ));
+}
+
 function unescapeInnerVoiceFallback(value: string): string {
     return value
         .replace(/\\n/g, '\n')
@@ -1258,18 +1279,7 @@ ${aiReply.slice(0, 500)}
             // HTML 模式：如果有 htmlTemplate 则做变量替换
             let finalHtml = extracted;
             if (template.htmlTemplate?.trim()) {
-                finalHtml = template.htmlTemplate;
-                if (matchResult && matchResult.length > 1) {
-                    // 把 $1, $2 等捕获组替换进模板里
-                    for (let i = 1; i < matchResult.length; i++) {
-                        const val = matchResult[i] || '';
-                        // 替换所有 $1, $2 ... 注意要转义 $ 号
-                        finalHtml = finalHtml.replace(new RegExp(`\\$${i}`, 'g'), val);
-                    }
-                } else {
-                    // 如果正则没写捕获组，或者没写正则，所有的 $1 都换成整个提取出来的文本
-                    finalHtml = finalHtml.replace(/\$1/g, extracted);
-                }
+                finalHtml = substituteStatusTemplateVariables(template.htmlTemplate, matchResult, extracted);
             } else {
                 // 没有提供模板，说明 AI 直接输出的就是 HTML 代码
                 finalHtml = extractHtmlFromResponse(extracted) || extracted;
