@@ -15,9 +15,11 @@ import type {
 } from '../../types/music';
 import type { MemoryRecord } from '../../types';
 import { DB } from '../../utils/db';
+import { exportMemoryRecordMp3 } from '../../utils/memoryRecordExport';
 import { resetPlaybackLyricsRuntimeForTests } from '../../utils/playbackLyricsRuntime';
 import { LYRIC_SETTINGS_KEY } from '../../components/os/floatingLyricsSettings';
 import { useApp } from '../../context/AppContext';
+import { useOS } from '../../context/OSContext';
 import { useAudioPlayer } from '../../hooks/useAudioPlayer';
 import {
     getAlbumDetail,
@@ -43,11 +45,20 @@ vi.mock('../../context/AppContext', () => ({
     useApp: vi.fn(),
 }));
 
+vi.mock('../../context/OSContext', () => ({
+    useOS: vi.fn(),
+}));
+
 vi.mock('../../hooks/useAudioPlayer', () => ({
     useAudioPlayer: vi.fn(),
 }));
 
+vi.mock('../../utils/memoryRecordExport', () => ({
+    exportMemoryRecordMp3: vi.fn(),
+}));
+
 vi.mock('../../utils/musicService', () => ({
+    addSongsToPlaylist: vi.fn(),
     checkQrStatus: vi.fn(),
     clearMusicCookie: vi.fn(),
     getAlbumDetail: vi.fn(),
@@ -62,8 +73,11 @@ vi.mock('../../utils/musicService', () => ({
     getPlaylistDetail: vi.fn(),
     getQrKey: vi.fn(),
     getQrUrl: vi.fn(),
+    getRecommendResource: vi.fn(),
+    getRecommendSongs: vi.fn(),
     getTopPlaylists: vi.fn(),
     getUserAccount: vi.fn(),
+    getUserPlaylists: vi.fn(),
     isMusicLoggedIn: vi.fn(),
     MUSIC_SEARCH_TAB_LABELS: {
         song: '单曲',
@@ -77,11 +91,14 @@ vi.mock('../../utils/musicService', () => ({
     MUSIC_SEARCH_TABS: ['all', 'song', 'playlist', 'album', 'artist', 'radio', 'program'],
     searchMusicAll: vi.fn(),
     searchMusicByType: vi.fn(),
+    removeSongsFromPlaylist: vi.fn(),
     setMusicCookie: vi.fn(),
 }));
 
 const mockedUseApp = vi.mocked(useApp);
+const mockedUseOS = vi.mocked(useOS);
 const mockedUseAudioPlayer = vi.mocked(useAudioPlayer);
+const mockedExportMemoryRecordMp3 = vi.mocked(exportMemoryRecordMp3);
 const mockedGetAlbumDetail = vi.mocked(getAlbumDetail);
 const mockedGetArtistAlbums = vi.mocked(getArtistAlbums);
 const mockedGetArtistDesc = vi.mocked(getArtistDesc);
@@ -122,6 +139,19 @@ const sampleProgram: NeteaseDjProgram = {
     radioId: 99,
     radioName: '深夜播客',
     coverUrl: 'radio-cover.jpg',
+};
+
+const sampleMemoryPlayable: MemoryRecordPlayable = {
+    kind: 'memoryRecord',
+    id: 850000002,
+    recordId: 'mrec-export',
+    name: '梦里回声',
+    artistName: 'Sully',
+    albumName: '回忆唱片匣',
+    duration: 120000,
+    lyrics: '[Verse]\n梦在转动',
+    audioId: 'mrec-export:master',
+    requiresMasterAudio: true,
 };
 
 function buildPlayerState(currentSong: MusicPlayable | null) {
@@ -173,7 +203,12 @@ describe('MusicApp', () => {
         );
 
         mockedUseApp.mockReturnValue(buildAppContext());
+        mockedUseOS.mockReturnValue({ addToast: vi.fn() } as any);
         mockedUseAudioPlayer.mockReturnValue(buildPlayerState(null) as any);
+        mockedExportMemoryRecordMp3.mockResolvedValue({
+            fileName: '梦里回声 - Sully.mp3',
+            method: 'download',
+        });
         mockedGetAlbumDetail.mockResolvedValue(null as any);
         mockedGetArtistAlbums.mockResolvedValue([]);
         mockedGetArtistDesc.mockResolvedValue('');
@@ -297,6 +332,42 @@ describe('MusicApp', () => {
         fireEvent.click(screen.getByTestId('music-mini-player'));
 
         expect(screen.queryByTestId('music-player-lyrics-panel')).toBeNull();
+    });
+
+    it('shows MP3 export for memory records and reports success', async () => {
+        const addToast = vi.fn();
+        mockedUseOS.mockReturnValue({ addToast } as any);
+        mockedUseAudioPlayer.mockReturnValue(buildPlayerState(sampleMemoryPlayable) as any);
+
+        render(<MusicApp />);
+
+        await waitFor(() => {
+            expect(mockedGetTopPlaylists).toHaveBeenCalled();
+        });
+
+        fireEvent.click(screen.getByTestId('music-mini-player'));
+        fireEvent.click(screen.getByLabelText('导出 MP3'));
+
+        await waitFor(() => {
+            expect(mockedExportMemoryRecordMp3).toHaveBeenCalledWith(expect.objectContaining({
+                recordId: sampleMemoryPlayable.recordId,
+            }));
+        });
+        expect(addToast).toHaveBeenCalledWith('MP3 已导出', 'success');
+    });
+
+    it('does not show MP3 export for Netease songs', async () => {
+        mockedUseAudioPlayer.mockReturnValue(buildPlayerState(sampleSong) as any);
+
+        render(<MusicApp />);
+
+        await waitFor(() => {
+            expect(mockedGetTopPlaylists).toHaveBeenCalled();
+        });
+
+        fireEvent.click(screen.getByTestId('music-mini-player'));
+
+        expect(screen.queryByLabelText('导出 MP3')).toBeNull();
     });
 
     it('syncs lyric color changes from the player panel to floating lyrics', async () => {

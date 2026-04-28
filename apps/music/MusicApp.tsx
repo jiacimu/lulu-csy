@@ -4,6 +4,7 @@
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { useOS } from '../../context/OSContext';
 import { useAudioPlayer } from '../../hooks/useAudioPlayer';
 import { useLyrics } from '../../hooks/useLyrics';
 import { useDominantColor } from '../../hooks/useDominantColor';
@@ -54,6 +55,7 @@ import {
   setMusicCookie,
 } from '../../utils/musicService';
 import { DB } from '../../utils/db';
+import { exportMemoryRecordMp3 } from '../../utils/memoryRecordExport';
 import { hasPlayableMemoryRecordAudio, memoryRecordToPlayable } from '../../utils/memoryRecordPlayable';
 import { findCurrentLyricIndex } from '../../utils/parseLrc';
 import type { MemoryRecordLyricTiming } from '../../types/memoryRecord';
@@ -124,6 +126,7 @@ const IconPrev = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="cur
 const IconNext = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm10-12v12h2V6z" /></svg>;
 const IconHeart = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" /></svg>;
 const IconMore = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>;
+const IconDownload = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M5 21h14" /></svg>;
 const IconPlaylist = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>;
 const IconMiniPlay = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>;
 const IconMiniPause = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" /></svg>;
@@ -2435,6 +2438,7 @@ const FullPlayer = ({
   onSeek,
   onSeekToTime,
   onAddToPlaylist,
+  onExportMemoryRecord,
   onSaveMemoryRecordLyricTiming,
 }: {
   playable: MusicPlayable;
@@ -2452,11 +2456,13 @@ const FullPlayer = ({
   onSeek: (pct: number) => void;
   onSeekToTime: (seconds: number) => void;
   onAddToPlaylist?: (songId: number) => void;
+  onExportMemoryRecord?: (playable: MemoryRecordPlayable) => Promise<void> | void;
   onSaveMemoryRecordLyricTiming?: (recordId: string, timing: MemoryRecordLyricTiming | undefined) => Promise<void> | void;
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragPercent, setDragPercent] = useState(0);
+  const [isExportingMp3, setIsExportingMp3] = useState(false);
   const cover = getPlayableCover(playable);
   const displayDuration = duration > 0 ? duration : playable.duration / 1000;
 
@@ -2559,6 +2565,17 @@ const FullPlayer = ({
     }
   }
 
+  async function handleExportMp3(): Promise<void> {
+    if (!isMemoryRecordPlayable(playable) || !onExportMemoryRecord || isExportingMp3) return;
+
+    setIsExportingMp3(true);
+    try {
+      await onExportMemoryRecord(playable);
+    } finally {
+      setIsExportingMp3(false);
+    }
+  }
+
   return (
     <div className="music-player-page">
       {/* Layer 0: 皮肤壁纸 / 封面模糊 */}
@@ -2631,6 +2648,18 @@ const FullPlayer = ({
             <div style={{ display: 'flex', gap: 12, flexShrink: 0, alignItems: 'center' }}>
               {isSongPlayable(playable) ? (
                 <LikeButton songId={playable.id} likedPlaylistId={likedPlaylistId} />
+              ) : null}
+              {isMemoryRecordPlayable(playable) ? (
+                <button
+                  type="button"
+                  className="music-player-export-button"
+                  aria-label="导出 MP3"
+                  title="导出 MP3"
+                  disabled={isExportingMp3}
+                  onClick={() => { void handleExportMp3(); }}
+                >
+                  {isExportingMp3 ? <span className="music-export-spinner" /> : <IconDownload />}
+                </button>
               ) : null}
               <button
                 type="button"
@@ -2811,6 +2840,7 @@ const AddToPlaylistModal = ({
 
 export default function MusicApp() {
   const { closeApp, registerBackHandler, appParams } = useApp();
+  const { addToast } = useOS();
   const { currentSong, isPlaying, currentTime, duration, progress, playSong, togglePlay, playNext, playPrev, seek, seekToTime } = useAudioPlayer();
 
   const [rootPage, setRootPage] = useState<RootPage>('discover');
@@ -3019,6 +3049,16 @@ export default function MusicApp() {
 
   function handleMemoryRecordClick(record: MemoryRecordPlayable, queue?: MemoryRecordPlayable[]): void {
     handlePlayableClick(record, queue);
+  }
+
+  async function handleExportMemoryRecordMp3(record: MemoryRecordPlayable): Promise<void> {
+    try {
+      await exportMemoryRecordMp3(record);
+      addToast('MP3 已导出', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'MP3 导出失败';
+      addToast(message, 'error');
+    }
   }
 
   async function saveMemoryRecordLyricTiming(recordId: string, timing: MemoryRecordLyricTiming | undefined): Promise<void> {
@@ -3672,6 +3712,7 @@ export default function MusicApp() {
           onSeek={seek}
           onSeekToTime={seekToTime}
           onAddToPlaylist={setAddToPlaylistSongId}
+          onExportMemoryRecord={handleExportMemoryRecordMp3}
           onSaveMemoryRecordLyricTiming={saveMemoryRecordLyricTiming}
         />
       ) : null}
