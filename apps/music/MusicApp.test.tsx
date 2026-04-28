@@ -408,6 +408,53 @@ describe('MusicApp', () => {
         ).toBe('#7c3aed');
     });
 
+    it('renders local memory record lyrics in floating lyrics without fetching Netease lyrics', async () => {
+        const playable: MemoryRecordPlayable = {
+            ...sampleMemoryPlayable,
+            lyrics: '[Verse]\n梦在转动\n你在身后',
+        };
+
+        mockedUseApp.mockReturnValue(buildAppContext(AppID.Launcher));
+        mockedUseAudioPlayer.mockReturnValue({
+            ...buildPlayerState(playable),
+            currentTime: 1,
+        } as any);
+
+        render(<FloatingLyrics />);
+
+        await waitFor(() => {
+            expect(screen.getByTestId('floating-lyrics')).toBeTruthy();
+        });
+
+        expect(screen.getByText('梦在转动')).toBeTruthy();
+        expect(mockedGetLyric).not.toHaveBeenCalled();
+    });
+
+    it('does not render floating lyrics for programs or memory records without local lyrics', async () => {
+        mockedUseApp.mockReturnValue(buildAppContext(AppID.Launcher));
+        mockedUseAudioPlayer.mockReturnValue(buildPlayerState(sampleProgram) as any);
+
+        const { rerender } = render(<FloatingLyrics />);
+
+        expect(screen.queryByTestId('floating-lyrics')).toBeNull();
+        expect(mockedGetLyric).not.toHaveBeenCalled();
+
+        mockedUseAudioPlayer.mockReturnValue(
+            buildPlayerState({
+                ...sampleMemoryPlayable,
+                lyrics: '',
+                monologueText: undefined,
+            }) as any,
+        );
+
+        rerender(<FloatingLyrics />);
+
+        await waitFor(() => {
+            expect(screen.queryByTestId('floating-lyrics')).toBeNull();
+        });
+        expect(mockedGetLyric).not.toHaveBeenCalled();
+    });
+
     it('saves manual lyric timing for memory records', async () => {
         const record: MemoryRecord = {
             id: 'mrec-timing',

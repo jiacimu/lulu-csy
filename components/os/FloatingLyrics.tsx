@@ -9,6 +9,9 @@ import { useAudioPlayer } from '../../hooks/useAudioPlayer';
 import { useLyrics } from '../../hooks/useLyrics';
 import { AppID } from '../../types';
 import { useApp } from '../../context/AppContext';
+import { isMemoryRecordPlayable,isSongPlayable,type MemoryRecordPlayable } from '../../types/music';
+import { DB } from '../../utils/db';
+import { memoryRecordToPlayable } from '../../utils/memoryRecordPlayable';
 import {
     getLyricColorVars,
     type FloatingLyricsSettings,
@@ -26,15 +29,57 @@ const FloatingLyrics: React.FC = () => {
     );
     const [toolbarExpanded, setToolbarExpanded] = useState(false);
     const [trackOffset, setTrackOffset] = useState(0);
+    const [storedMemoryRecord, setStoredMemoryRecord] =
+        useState<MemoryRecordPlayable | null>(null);
     const viewportRef = useRef<HTMLDivElement>(null);
     const lineRefs = useRef<Array<HTMLDivElement | null>>([]);
     const toolbarHideTimerRef = useRef<number | null>(null);
 
+    const currentMemoryRecord = isMemoryRecordPlayable(currentSong)
+        ? currentSong
+        : null;
+    const effectiveMemoryRecord =
+        currentMemoryRecord
+            && storedMemoryRecord?.recordId === currentMemoryRecord.recordId
+            ? storedMemoryRecord
+            : currentMemoryRecord;
+    const lyricSongId = currentSong && isSongPlayable(currentSong)
+        ? currentSong.id
+        : undefined;
+    const lyricsEnabled = settings.enabled && activeApp !== AppID.Music;
+
     const { lines, currentIndex } = useLyrics({
-        songId: currentSong?.id,
+        songId: effectiveMemoryRecord ? undefined : lyricSongId,
         currentTime,
-        enabled: settings.enabled && activeApp !== AppID.Music,
+        enabled: lyricsEnabled,
+        localLyrics: effectiveMemoryRecord?.lyrics,
+        localMonologueText: effectiveMemoryRecord?.monologueText,
+        localLyricsOffsetMs: effectiveMemoryRecord?.lyricsOffsetMs,
+        localLyricTiming: effectiveMemoryRecord?.lyricTiming,
     });
+
+    useEffect(() => {
+        if (!currentMemoryRecord) {
+            setStoredMemoryRecord(null);
+            return;
+        }
+
+        let active = true;
+
+        DB.getMemoryRecordById(currentMemoryRecord.recordId)
+            .then((record) => {
+                if (!active) return;
+                setStoredMemoryRecord(record ? memoryRecordToPlayable(record) : null);
+            })
+            .catch((error: unknown) => {
+                console.warn('[FloatingLyrics] Failed to load memory record lyrics:', error);
+                if (active) setStoredMemoryRecord(null);
+            });
+
+        return () => {
+            active = false;
+        };
+    }, [currentMemoryRecord?.recordId]);
 
     useEffect(() => {
         const handleStorage = () => {

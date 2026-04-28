@@ -64,6 +64,7 @@ export interface BubbleStyle {
     backgroundImageOpacity?: number;
     borderRadius: number;
     opacity: number;
+    hideTail?: boolean;
 
     // Gradient (takes priority over backgroundColor when present)
     gradient?: { from: string; to: string; direction: number };

@@ -1,4 +1,6 @@
-import type { LyricLine } from '../types/music';
+import type { LyricLine,MusicPlayable } from '../types/music';
+import { isMemoryRecordPlayable,isSongPlayable } from '../types/music';
+import { buildLocalLyrics } from './localLyrics';
 import { getLyric } from './musicService';
 import { findCurrentLyricIndex,mergeLrcTranslation,parseLrc } from './parseLrc';
 
@@ -172,6 +174,30 @@ export async function getPlaybackLyricSnapshot(
     if (resource.error || resource.lines.length === 0) return null;
 
     return buildPlaybackLyricSnapshot(songId, currentTime, resource.lines);
+}
+
+export async function getPlayableLyricSnapshot(
+    playable: MusicPlayable | null | undefined,
+    currentTime: number,
+): Promise<PlaybackLyricSnapshot | null> {
+    if (!playable) return null;
+
+    if (isSongPlayable(playable)) {
+        return getPlaybackLyricSnapshot(playable.id, currentTime);
+    }
+
+    if (!isMemoryRecordPlayable(playable)) return null;
+
+    const local = buildLocalLyrics({
+        lyrics: playable.lyrics,
+        monologueText: playable.monologueText,
+        lyricsOffsetMs: playable.lyricsOffsetMs,
+        lyricTiming: playable.lyricTiming,
+    });
+
+    if (local.lines.length === 0) return null;
+
+    return buildPlaybackLyricSnapshot(playable.id, currentTime, local.lines);
 }
 
 export function resetPlaybackLyricsRuntimeForTests(): void {

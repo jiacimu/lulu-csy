@@ -59,9 +59,9 @@ const apiConfig: APIConfig = {
     model: 'song-model',
 };
 
-function openAiResponse(content: string): Response {
+function openAiResponse(content: string, finishReason = 'stop'): Response {
     return new Response(JSON.stringify({
-        choices: [{ message: { content } }],
+        choices: [{ message: { content }, finish_reason: finishReason }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 
@@ -217,16 +217,20 @@ describe('memory record draft fallback', () => {
         const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
         expect(firstBody.messages[1].content).toContain('【用户写歌需求】');
         expect(firstBody.messages[1].content).toContain('歌曲主题：雨夜重逢');
+        expect(firstBody.max_tokens).toBe(16000);
+        const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+        expect(secondBody.max_tokens).toBe(16000);
     });
 
     it('keeps the initial draft when lyric self-check returns invalid JSON', async () => {
+        const completeLyrics = '[Intro]\n旧门牌还亮着\n风停在楼下\n\n[Verse 1]\n你把钥匙放回口袋\n我假装没有看见\n\n[Chorus]\n别急着说再见\n让夜色慢一点\n\n[Outro]\n门牌轻轻亮着\n像还在等那天';
         const fetchMock = vi.fn()
             .mockResolvedValueOnce(openAiResponse(JSON.stringify({
                 title: '旧门牌',
                 albumName: '回忆唱片匣',
                 artistName: 'Sully',
                 monologueText: '',
-                lyrics: '[Verse]\n旧门牌还亮着',
+                lyrics: completeLyrics,
                 musicPrompt: 'lo-fi mandopop',
                 coverGradient: 'linear-gradient(135deg, #f7d6e0, #2d3142)',
             })))
@@ -250,8 +254,60 @@ describe('memory record draft fallback', () => {
         expect(fetchMock).toHaveBeenCalledTimes(2);
         expect(draft.title).toBe('旧门牌');
         expect(draft.musicPrompt).toBe('lo-fi mandopop');
+        expect(draft.lyrics).toBe(completeLyrics);
         expect(draft.error).toContain('歌词自检/润色 JSON 解析失败');
         expect(mocks.generateWithFallback).not.toHaveBeenCalled();
+    });
+
+    it('does not replace a complete draft with truncated polished lyrics', async () => {
+        const completeLyrics = '[Intro]\n雨声停在门口\n鞋尖等了一会\n\n[Verse 1]\n你把伞慢慢收好\n我装作还在找钥匙\n\n[Chorus]\n靠近一点点\n别把晚风都说穿\n\n[Outro]\n门还留着缝\n名字轻轻亮着';
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(openAiResponse(JSON.stringify({
+                title: '雨停以后',
+                albumName: '回忆唱片匣',
+                artistName: 'Sully',
+                monologueText: '',
+                lyrics: completeLyrics,
+                musicPrompt: 'soft mandopop, 76 bpm',
+                coverGradient: 'linear-gradient(135deg, #f7d6e0, #2d3142)',
+            })))
+            .mockResolvedValueOnce(openAiResponse('{"title":"半截","style_prompt":"lo-fi drums","lyrics":"[Intro]\\n嗯\\n\\n[Verse 1]\\n菜单划掉\\n带亮的选项\\n\\n[Pre Chorus]\\n没关系'));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const draft = await createMemoryRecordDraft({
+            char,
+            userProfile,
+            mode: 'relationship_theme',
+            memories: [],
+            apiConfig,
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(draft.title).toBe('雨停以后');
+        expect(draft.lyrics).toBe(completeLyrics);
+        expect(draft.lyrics).not.toContain('菜单划掉');
+        expect(draft.error).toContain('歌词自检/润色 JSON 解析失败');
+    });
+
+    it('falls back instead of saving a draft when the provider reports a token cutoff', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(openAiResponse(
+            '{"title":"半截","albumName":"回忆唱片匣","artistName":"Sully","monologueText":"","lyrics":"[Intro]\\n嗯\\n\\n[Verse 1]\\n菜单划掉',
+            'length',
+        ));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const draft = await createMemoryRecordDraft({
+            char,
+            userProfile,
+            mode: 'relationship_theme',
+            memories: [],
+            apiConfig,
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(draft.lyrics).toContain('[Final Chorus]');
+        expect(draft.lyrics).not.toContain('菜单划掉');
+        expect(draft.error).toContain('max_tokens');
     });
 
     it('revises lyrics from the current editable version and instruction', async () => {
@@ -278,6 +334,7 @@ describe('memory record draft fallback', () => {
         const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
         expect(body.messages[1].content).toContain('副歌更暧昧一点');
         expect(body.messages[1].content).toContain('warm pop');
+        expect(body.max_tokens).toBe(16000);
     });
 
     it('skips TTS and mastering for non-monologue modes', async () => {

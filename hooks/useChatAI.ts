@@ -22,12 +22,12 @@ import { handleDiaryRead } from './handlers/handleDiaryRead';
 import { handleFeishuDiary } from './handlers/handleFeishuDiary';
 import { handleFeishuDiaryRead } from './handlers/handleFeishuDiaryRead';
 import { handleXhsActions } from './handlers/handleXhsActions';
-import { isSongPlayable, type SongCardMetadata } from '../types/music';
+import type { SongCardMetadata } from '../types/music';
 import { searchSongs } from '../utils/musicService';
 import { getCurrentPlayback } from './useAudioPlayer';
 import {
     getPlaybackLyricKey,
-    getPlaybackLyricSnapshot,
+    getPlayableLyricSnapshot,
     shouldInjectPlaybackLyricSnapshot,
 } from '../utils/playbackLyricsRuntime';
 import { shouldInjectPlaybackContextFromState } from '../utils/playbackContextRuntime';
@@ -140,17 +140,10 @@ export const useChatAI = ({
                     const playback = getCurrentPlayback();
                     if (!shouldInjectPlaybackContextFromState(playback)) return null;
 
-                    if (!isSongPlayable(playback.currentSong)) {
-                        return {
-                            playback,
-                            lyricSnapshot: null,
-                        };
-                    }
-
                     return {
                         playback,
-                        lyricSnapshot: await getPlaybackLyricSnapshot(
-                            playback.currentSong.id,
+                        lyricSnapshot: await getPlayableLyricSnapshot(
+                            playback.currentSong,
                             playback.currentTime,
                         ),
                     };

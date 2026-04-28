@@ -102,6 +102,8 @@ const REQUIRED_LYRIC_SECTIONS = [
 ];
 
 const DEFAULT_MUSIC_PROMPT = 'intimate cinematic pop ballad, warm vocal, soft piano, light drums, bittersweet and private';
+const MEMORY_RECORD_LLM_MAX_TOKENS = 16000;
+const INCOMPLETE_LYRICS_WARNING = '歌词返回不完整（可能是 max_tokens 截断），已改用本地兜底草稿';
 
 export const MEMORY_RECORD_MODE_COPY: Record<MemoryRecordMode, { label: string; detail: string }> = {
     blind_box: {
@@ -201,6 +203,41 @@ export function shouldGenerateMemoryRecordMonologue(mode: MemoryRecordMode): boo
 function clampText(value: string, maxLength: number): string {
     const trimmed = value.trim();
     return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength - 1)}…` : trimmed;
+}
+
+function normalizeLyricSectionName(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '');
+}
+
+function getLyricSectionNames(lyrics: string): Set<string> {
+    const sections = [...lyrics.matchAll(/^\s*\[([^\]\r\n]+)\]\s*$/gm)]
+        .map(match => normalizeLyricSectionName(match[1] || ''))
+        .filter(Boolean);
+    return new Set(sections);
+}
+
+function isLikelyCompleteLyrics(lyrics: string): boolean {
+    const sungLines = lyrics
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line && !/^\[[^\]]+\]$/.test(line));
+    const sections = getLyricSectionNames(lyrics);
+    const hasChorus = sections.has('chorus') || sections.has('副歌');
+    const hasEnding = sections.has('outro') || sections.has('finalchorus') || sections.has('尾奏') || sections.has('结尾');
+    return sungLines.length >= 8 && sections.size >= 4 && hasChorus && hasEnding;
+}
+
+function getChoiceFinishReason(data: any): string {
+    const choice = data?.choices?.[0];
+    const reason = choice?.finish_reason
+        ?? choice?.finishReason
+        ?? choice?.finish_details?.type
+        ?? choice?.finishDetails?.type;
+    return typeof reason === 'string' ? reason : '';
+}
+
+function isLengthFinishReason(reason: string): boolean {
+    return /length|max[_-]?(tokens|completion|output)/i.test(reason);
 }
 
 function hashText(value: string): number {
@@ -403,6 +440,14 @@ function buildPrompt(
    歌词是唱出来的，不是念作文。要有口语的节奏感：
    "算了吧 反正" / "就这样 也挺好" / "你说的 我记着呢"
 
+6. 韵脚的呼吸
+   中文歌词的魅力有一半来自韵脚。不押韵的歌词念起来会"散"，唱起来会"飘"。
+   - 副歌必须严格押韵，同一段至少 3 行结尾落在同一个韵上
+   - 主歌至少做到隔行押韵，AABB 或 ABAB 都可以
+   - 可以整首歌一韵到底，也可以 Verse 和 Chorus 各用一种韵——但不能每段各押各的毫无规律
+   - 舒服的中文开口韵：ang / ao / ou / ai / an / en / i / u——优先使用
+   - 严禁为了凑韵生造词语、强行倒装、塞与上下文无关的句子——宁可换韵也不能牺牲自然感
+
 【输出规范】
 1. 只输出 JSON，不要 Markdown 代码框。
 2. 不要在成品里揭晓具体使用了哪些记忆或种子信息。
@@ -525,7 +570,7 @@ function validateLyricJsonPayload(value: any): LyricJsonPayload | null {
     const stylePrompt = typeof styleRaw === 'string' ? styleRaw.trim() : '';
     const lyrics = typeof lyricsRaw === 'string' ? lyricsRaw.trim() : '';
 
-    if (!title || !stylePrompt || !lyrics) return null;
+    if (!title || !stylePrompt || !lyrics || !isLikelyCompleteLyrics(lyrics)) return null;
     return { title, stylePrompt, lyrics };
 }
 
@@ -650,11 +695,16 @@ async function callMemoryRecordLlm(
             model: apiConfig.model,
             messages,
             temperature: options?.temperature ?? 0.82,
-            max_tokens: options?.maxTokens ?? 4500,
+            max_tokens: options?.maxTokens ?? MEMORY_RECORD_LLM_MAX_TOKENS,
             stream: false,
         }),
         signal: safeTimeoutSignal(options?.timeoutMs ?? 150000),
     });
+
+    const finishReason = getChoiceFinishReason(data);
+    if (isLengthFinishReason(finishReason)) {
+        throw new Error(`LLM 输出达到 max_tokens 上限（finish_reason: ${finishReason}），歌词可能未完整返回`);
+    }
 
     return extractContent(data);
 }
@@ -688,8 +738,12 @@ function buildLyricAuditSystemPrompt(): string {
 - Verse 铺画面和关系（短句，低语感）；Pre Chorus 蓄力（句式可突然加速变密）；Chorus 主题爆发/hook（句子最短最有力）；Verse 2 推进关系/矛盾（不要重复 Verse 1）；Bridge 出现转折（句式节奏必须和前后段落明显不同——这是整首歌节奏的"奇袭"）；Outro 收束并留白。
 - 整首歌必须有至少一处节奏"断裂"——句式突然变短或突然拉长，打破惯性。如果读完从头到尾一个速度一个句式，就是不合格的"平"，必须重新调整。
 
-六、押韵检查
-- 副歌尽量自然押韵，同一段至少 3 行结尾音接近。但切忌为了押韵写出生硬、不自然的凑字句。
+六、押韵检查（重要）
+- 副歌必须严格押韵，同一段至少 3 行结尾落在同一个韵上
+- 主歌至少做到隔行押韵（AABB 或 ABAB）
+- 整首歌需要有一个清晰的押韵策略——要么一韵到底，要么 Verse 和 Chorus 各用一种韵——不能每段散乱各押各的
+- 如果找不到明显的韵脚结构，说明押韵不合格，必须重新整理
+- 严禁为凑韵生造词语、强行倒装、或塞与上下文无关的句子
 
 七、title 检查
 - 歌名应简短、有记忆点，最好来自歌词中的关键核心意象。如果原标题平庸、太长、像小说标题，请予优化。
@@ -765,7 +819,7 @@ async function polishDraftPayload(options: CreateMemoryRecordDraftOptions, paylo
                 }),
             },
         ],
-        { temperature: 0.72, maxTokens: 5000, timeoutMs: 150000 },
+        { temperature: 0.72, maxTokens: MEMORY_RECORD_LLM_MAX_TOKENS, timeoutMs: 150000 },
     );
 
     const parsed = extractJsonTyped(raw, validateLyricJsonPayload);
@@ -795,7 +849,7 @@ export async function reviseMemoryRecordLyrics(options: ReviseMemoryRecordLyrics
                 }),
             },
         ],
-        { temperature: 0.78, maxTokens: 5000, timeoutMs: 150000 },
+        { temperature: 0.78, maxTokens: MEMORY_RECORD_LLM_MAX_TOKENS, timeoutMs: 150000 },
     );
 
     const parsed = extractJsonTyped(raw, validateLyricJsonPayload);
@@ -830,7 +884,7 @@ export async function createMemoryRecordDraft(options: CreateMemoryRecordDraftOp
                     { role: 'system', content: prompt.system },
                     { role: 'user', content: prompt.user },
                 ],
-                { temperature: 0.92, maxTokens: 4500, timeoutMs: 150000 },
+                { temperature: 0.92, maxTokens: MEMORY_RECORD_LLM_MAX_TOKENS, timeoutMs: 150000 },
             );
             const parsed = extractJsonTyped(rawDraft, (value) => validateDraftPayload(value, options));
             payload = parsed || buildFallbackDraft(options, allSeeds);
@@ -845,6 +899,10 @@ export async function createMemoryRecordDraft(options: CreateMemoryRecordDraftOp
             } catch (polishError) {
                 const message = polishError instanceof Error ? polishError.message : String(polishError);
                 error = appendDraftWarning(error, message);
+            }
+            if (!isLikelyCompleteLyrics(payload.lyrics)) {
+                error = appendDraftWarning(error, INCOMPLETE_LYRICS_WARNING);
+                payload = buildFallbackDraft(options, allSeeds);
             }
         } catch (err) {
             console.error('[MemoryRecord] Draft API error or timeout:', err);

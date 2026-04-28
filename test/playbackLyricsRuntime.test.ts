@@ -5,12 +5,19 @@ vi.mock('../utils/musicService', () => ({
 }));
 
 import { getLyric } from '../utils/musicService';
+import { computeLocalLyricsSourceHash } from '../utils/localLyrics';
+import type {
+    MemoryRecordPlayable,
+    NeteaseDjProgram,
+    NeteaseSong,
+} from '../types/music';
 import {
     buildPlaybackLyricSnapshot,
     getDistinctLyricTranslation,
     getPlaybackLyricKey,
     getPlaybackLyricSnapshot,
     getPlaybackLyricsResource,
+    getPlayableLyricSnapshot,
     resetPlaybackLyricsRuntimeForTests,
     shouldInjectPlaybackLyricSnapshot,
 } from '../utils/playbackLyricsRuntime';
@@ -116,6 +123,86 @@ describe('playbackLyricsRuntime', () => {
         const snapshot = await getPlaybackLyricSnapshot(7, 2);
 
         expect(snapshot).toBeNull();
+    });
+
+    it('builds playable snapshots from memory record local lyrics with offset and saved timing', async () => {
+        const playable: MemoryRecordPlayable = {
+            kind: 'memoryRecord',
+            id: 850000123,
+            recordId: 'mrec-lyrics',
+            name: '梦里回声',
+            artistName: 'Sully',
+            albumName: '回忆唱片匣',
+            duration: 120000,
+            lyrics: '[Verse]\n第一句\n第二句',
+            monologueText: '先听这一段。',
+            lyricsOffsetMs: 10000,
+            lyricTiming: {
+                sourceHash: computeLocalLyricsSourceHash([
+                    '先听这一段。',
+                    '第一句',
+                    '第二句',
+                ]),
+                lineTimesMs: [0, 12000, 18000],
+                updatedAt: 1000,
+            },
+        };
+
+        const snapshot = await getPlayableLyricSnapshot(playable, 12.8);
+
+        expect(mockedGetLyric).not.toHaveBeenCalled();
+        expect(snapshot?.songId).toBe(playable.id);
+        expect(snapshot?.currentIndex).toBe(1);
+        expect(snapshot?.currentText).toBe('第一句');
+        expect(snapshot?.lineStartTime).toBe(12);
+        expect(snapshot?.nextLineTime).toBe(18);
+    });
+
+    it('delegates playable snapshots for Netease songs to the lyric service', async () => {
+        const song: NeteaseSong = {
+            kind: 'song',
+            id: 99,
+            name: '晴天',
+            artists: [{ id: 1, name: '周杰伦' }],
+            album: {
+                kind: 'album',
+                id: 7,
+                name: '叶惠美',
+            },
+            duration: 269000,
+        };
+
+        mockedGetLyric.mockResolvedValue({
+            lrc: { lyric: '[00:01.00]故事的小黄花' },
+        });
+
+        const snapshot = await getPlayableLyricSnapshot(song, 1.5);
+
+        expect(mockedGetLyric).toHaveBeenCalledWith(song.id);
+        expect(snapshot?.currentText).toBe('故事的小黄花');
+    });
+
+    it('returns null for program playables and memory records without local lyrics', async () => {
+        const program: NeteaseDjProgram = {
+            kind: 'program',
+            id: 3001,
+            name: '深夜播客',
+            duration: 1800000,
+        };
+        const emptyMemory: MemoryRecordPlayable = {
+            kind: 'memoryRecord',
+            id: 850000456,
+            recordId: 'mrec-empty',
+            name: '空白唱片',
+            artistName: 'Sully',
+            albumName: '回忆唱片匣',
+            duration: 120000,
+            lyrics: '',
+        };
+
+        await expect(getPlayableLyricSnapshot(program, 20)).resolves.toBeNull();
+        await expect(getPlayableLyricSnapshot(emptyMemory, 20)).resolves.toBeNull();
+        expect(mockedGetLyric).not.toHaveBeenCalled();
     });
 
     it('drops translation lines that duplicate the original lyric', () => {

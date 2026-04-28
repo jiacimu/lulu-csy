@@ -2,7 +2,7 @@
 
 
 
-import React,{ useState,useRef,useEffect } from 'react';
+import React,{ useState,useRef,useEffect,useMemo } from 'react';
 import { useOS } from '../context/OSContext';
 import { ChatTheme,BubbleStyle,Message } from '../types';
 import { processImage } from '../utils/file';
@@ -19,6 +19,7 @@ const DEFAULT_STYLE: BubbleStyle = {
     decorationY: -10,
     decorationScale: 1,
     decorationRotate: 0,
+    hideTail: false,
     avatarDecorationX: 50,
     avatarDecorationY: 50,
     avatarDecorationScale: 1,
@@ -140,6 +141,49 @@ const extractPaddingFromCss = (css: string) => {
     return match ? parseInt(match[1]) : 12; // Default 12px (py-3)
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+const normalizeBubbleStyle = (value: unknown, fallback: BubbleStyle): BubbleStyle => {
+    if (!isRecord(value)) throw new Error('invalid');
+    const source = value as Partial<BubbleStyle>;
+    return {
+        ...fallback,
+        ...source,
+        textColor: typeof source.textColor === 'string' ? source.textColor : fallback.textColor,
+        backgroundColor: typeof source.backgroundColor === 'string' ? source.backgroundColor : fallback.backgroundColor,
+        borderRadius: typeof source.borderRadius === 'number' ? source.borderRadius : fallback.borderRadius,
+        opacity: typeof source.opacity === 'number' ? source.opacity : fallback.opacity,
+        backgroundImageOpacity: typeof source.backgroundImageOpacity === 'number' ? source.backgroundImageOpacity : fallback.backgroundImageOpacity,
+        hideTail: typeof source.hideTail === 'boolean' ? source.hideTail : fallback.hideTail,
+    };
+};
+
+const parseImportedTheme = (rawText: string, currentId: string): ChatTheme => {
+    const parsed: unknown = JSON.parse(rawText);
+    if (!isRecord(parsed)) throw new Error('invalid');
+
+    const name = typeof parsed.name === 'string' ? parsed.name.trim() : '';
+    const type = parsed.type;
+    if (!name || (type !== 'custom' && type !== 'preset')) throw new Error('invalid');
+
+    return {
+        ...(parsed as unknown as ChatTheme),
+        id: currentId,
+        name,
+        type: 'custom',
+        user: normalizeBubbleStyle(parsed.user, DEFAULT_THEME.user),
+        ai: normalizeBubbleStyle(parsed.ai, DEFAULT_THEME.ai),
+        customCss: typeof parsed.customCss === 'string' ? parsed.customCss : '',
+    };
+};
+
+const safeThemeFileName = (name: string) => {
+    const base = (name.trim() || 'bubble-theme').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60);
+    return `${base}.json`;
+};
+
 // --- Collapsible Section chevron SVG ---
 const ChevronIcon: React.FC<{ open: boolean }> = ({ open }) => (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
@@ -186,10 +230,12 @@ const MOCK_TRANSFER_AI: Message = {
 };
 
 const ThemeMaker: React.FC = () => {
-    const { closeApp, addCustomTheme, addToast, characters, activeCharacterId, customThemes } = useOS();
+    const { closeApp, addCustomTheme, addToast, characters, activeCharacterId, customThemes, updateCharacter } = useOS();
     const [editingTheme, setEditingTheme] = useState<ChatTheme>({ ...DEFAULT_THEME, id: `theme-${Date.now()}` });
     const [activeTab, setActiveTab] = useState<'user' | 'ai' | 'css'>('user');
     const [toolSection, setToolSection] = useState<'base' | 'sticker' | 'avatar'>('base');
+    const [sharePanel, setSharePanel] = useState<'none' | 'export' | 'import'>('none');
+    const [importText, setImportText] = useState('');
 
     // Local state for sliders
     const [paddingVal, setPaddingVal] = useState(12);
@@ -200,8 +246,11 @@ const ThemeMaker: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const decorationInputRef = useRef<HTMLInputElement>(null);
     const avatarDecoInputRef = useRef<HTMLInputElement>(null);
+    const exportTextareaRef = useRef<HTMLTextAreaElement>(null);
+    const importFileInputRef = useRef<HTMLInputElement>(null);
 
     const activeStyle = editingTheme[activeTab === 'css' ? 'user' : activeTab];
+    const themeJson = useMemo(() => JSON.stringify(editingTheme, null, 2), [editingTheme]);
 
     // Edit mode: load existing theme from sessionStorage if set by Chat.tsx
     useEffect(() => {
@@ -270,11 +319,25 @@ const ThemeMaker: React.FC = () => {
         }
     };
 
-    const saveTheme = () => {
+    const saveTheme = async () => {
         if (!editingTheme.name.trim()) return;
         const char = characters.find(c => c.id === activeCharacterId);
-        const currentBaseId = char?.bubbleStyle || 'default';
-        addCustomTheme({ ...editingTheme, baseThemeId: currentBaseId });
+        const currentCustomTheme = customThemes.find(t => t.id === char?.bubbleStyle);
+        const inheritedBaseId = currentCustomTheme?.baseThemeId || char?.bubbleStyle || 'default';
+        const baseThemeId = inheritedBaseId === editingTheme.id ? (editingTheme.baseThemeId || 'default') : inheritedBaseId;
+        const themeToSave: ChatTheme = {
+            ...editingTheme,
+            name: editingTheme.name.trim(),
+            type: 'custom',
+            baseThemeId,
+        };
+        await addCustomTheme(themeToSave);
+        if (char) {
+            updateCharacter(char.id, { bubbleStyle: themeToSave.id });
+            addToast('已保存并应用到当前角色', 'success');
+        } else {
+            addToast('已保存到主题库', 'success');
+        }
         closeApp();
     };
 
@@ -288,29 +351,84 @@ const ThemeMaker: React.FC = () => {
         addToast('已重置为默认样式', 'success');
     };
 
-    const exportTheme = async () => {
+    const copyThemeJson = async () => {
+        const selectTextarea = (textarea: HTMLTextAreaElement) => {
+            textarea.focus();
+            textarea.select();
+            textarea.setSelectionRange(0, textarea.value.length);
+        };
+
+        const copyWithSelection = () => {
+            const textarea = exportTextareaRef.current ?? document.createElement('textarea');
+            const shouldRemove = !exportTextareaRef.current;
+            if (shouldRemove) {
+                textarea.value = themeJson;
+                textarea.setAttribute('readonly', '');
+                textarea.style.position = 'fixed';
+                textarea.style.top = '0';
+                textarea.style.left = '0';
+                textarea.style.width = '1px';
+                textarea.style.height = '1px';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+            }
+
+            selectTextarea(textarea);
+            const copied = document.execCommand('copy');
+            if (shouldRemove) textarea.remove();
+            return copied;
+        };
+
         try {
-            const json = JSON.stringify(editingTheme, null, 2);
-            await navigator.clipboard.writeText(json);
+            if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+            await navigator.clipboard.writeText(themeJson);
             addToast('主题 JSON 已复制到剪贴板', 'success');
         } catch {
-            addToast('复制失败，请手动复制', 'error');
+            if (copyWithSelection()) {
+                addToast('主题 JSON 已复制到剪贴板', 'success');
+            } else if (exportTextareaRef.current) {
+                selectTextarea(exportTextareaRef.current);
+                addToast('已选中 JSON，请按 Ctrl+C 复制', 'success');
+            } else {
+                addToast('复制失败，请手动复制面板中的 JSON', 'error');
+            }
         }
     };
 
-    const importTheme = async () => {
+    const downloadThemeJson = () => {
+        const blob = new Blob([themeJson], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = safeThemeFileName(editingTheme.name);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        addToast('主题 JSON 已下载', 'success');
+    };
+
+    const applyImportedTheme = (text: string) => {
         try {
-            const text = await navigator.clipboard.readText();
-            const parsed = JSON.parse(text) as ChatTheme;
-            if (!parsed.user || !parsed.ai) throw new Error('invalid');
-            setEditingTheme(prev => ({
-                ...parsed,
-                id: prev.id, // keep current ID
-            }));
-            if (parsed.customCss) setPaddingVal(extractPaddingFromCss(parsed.customCss));
-            addToast(`已导入: ${parsed.name || 'unnamed'}`, 'success');
+            const parsed = parseImportedTheme(text, editingTheme.id);
+            setEditingTheme(parsed);
+            setPaddingVal(parsed.customCss ? extractPaddingFromCss(parsed.customCss) : 12);
+            setImportText(text);
+            setSharePanel('none');
+            addToast(`已导入: ${parsed.name}`, 'success');
         } catch {
-            addToast('剩贴板内容无法解析为主题', 'error');
+            addToast('主题 JSON 无法解析', 'error');
+        }
+    };
+
+    const importThemeFile = async (file: File) => {
+        try {
+            const text = await file.text();
+            applyImportedTheme(text);
+        } catch {
+            addToast('主题文件读取失败', 'error');
+        } finally {
+            if (importFileInputRef.current) importFileInputRef.current.value = '';
         }
     };
 
@@ -370,12 +488,13 @@ const ThemeMaker: React.FC = () => {
     const renderTextPreview = (role: 'user' | 'ai', text: string) => {
         const style = role === 'user' ? editingTheme.user : editingTheme.ai;
         const isUser = role === 'user';
+        const showTail = !style.hideTail;
         const containerStyle: React.CSSProperties = {
             backgroundColor: style.backgroundColor,
             borderRadius: `${style.borderRadius}px`,
             opacity: style.opacity,
-            borderBottomLeftRadius: isUser ? `${style.borderRadius}px` : '4px',
-            borderBottomRightRadius: isUser ? '4px' : `${style.borderRadius}px`,
+            borderBottomLeftRadius: isUser || !showTail ? `${style.borderRadius}px` : '4px',
+            borderBottomRightRadius: isUser && showTail ? '4px' : `${style.borderRadius}px`,
             borderTopLeftRadius: `${style.borderRadius}px`,
             borderTopRightRadius: `${style.borderRadius}px`,
             border: style.borderWidth && style.borderWidth > 0 ? `${style.borderWidth}px solid ${style.borderColor || 'transparent'}` : undefined,
@@ -385,6 +504,19 @@ const ThemeMaker: React.FC = () => {
 
         return renderPreviewRow(role, (
             <>
+                {showTail && (
+                    <svg
+                        className={`sully-bubble-tail absolute top-[12px] w-[6px] h-[10px] pointer-events-none ${isUser ? '-right-[5.5px]' : '-left-[5.5px]'}`}
+                        version="1.1"
+                        xmlns="http://www.w3.org/2000/svg"
+                    >
+                        {isUser ? (
+                            <polygon points="0,0 6,5 0,10" style={{ fill: style.gradient?.from || style.backgroundColor || '#95ec69' }} />
+                        ) : (
+                            <polygon points="6,0 0,5 6,10" style={{ fill: style.gradient?.from || style.backgroundColor || '#ffffff' }} />
+                        )}
+                    </svg>
+                )}
                 {style.decoration && (
                     <img
                         src={style.decoration}
@@ -467,15 +599,15 @@ const ThemeMaker: React.FC = () => {
                         className="flex-1 min-w-0 bg-slate-100/80 border border-slate-200/60 rounded-lg px-2.5 py-1 text-sm text-center focus:border-primary/50 transition-all outline-none placeholder:text-slate-300"
                         placeholder="主题名称"
                     />
-                    <button onClick={saveTheme} className="shrink-0 px-4 py-1.5 bg-primary text-white rounded-full text-xs font-bold shadow-lg shadow-primary/30 active:scale-95 transition-all">
+                    <button onClick={() => void saveTheme()} className="shrink-0 px-4 py-1.5 bg-primary text-white rounded-full text-xs font-bold shadow-lg shadow-primary/30 active:scale-95 transition-all">
                         保存
                     </button>
                 </div>
                 {/* Utility row: Reset + Import/Export */}
                 <div className="px-4 pb-3 flex gap-2 items-center">
                     <button onClick={resetTheme} className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200 active:scale-95 transition-all">↺ 重置</button>
-                    <button onClick={exportTheme} className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200 active:scale-95 transition-all">↑ 导出</button>
-                    <button onClick={importTheme} className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200 active:scale-95 transition-all">↓ 导入</button>
+                    <button onClick={() => setSharePanel('export')} className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200 active:scale-95 transition-all">↑ 导出</button>
+                    <button onClick={() => { setImportText(''); setSharePanel('import'); }} className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200 active:scale-95 transition-all">↓ 导入</button>
                 </div>
             </div>
 
@@ -526,6 +658,7 @@ const ThemeMaker: React.FC = () => {
                                         opacity: sourceStyle.opacity,
                                         borderWidth: sourceStyle.borderWidth,
                                         borderColor: sourceStyle.borderColor,
+                                        hideTail: sourceStyle.hideTail,
                                         boxShadow: sourceStyle.boxShadow,
                                         fontSize: sourceStyle.fontSize,
                                         textShadow: sourceStyle.textShadow,
@@ -559,7 +692,7 @@ const ThemeMaker: React.FC = () => {
                         <div className="space-y-6 animate-fade-in h-full flex flex-col">
                             <div className="text-[10px] text-slate-400 bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed">
                                 <span className="font-bold block mb-1 text-slate-500">CSS 增强模式</span>
-                                可使用CSS类名 <code className="bg-slate-200 px-1 rounded">.sully-bubble-user</code> 和 <code className="bg-slate-200 px-1 rounded">.sully-bubble-ai</code> 来统一定制气泡样式。
+                                可使用CSS类名 <code className="bg-slate-200 px-1 rounded">.sully-bubble-user</code>、<code className="bg-slate-200 px-1 rounded">.sully-bubble-ai</code> 和 <code className="bg-slate-200 px-1 rounded">.sully-bubble-tail</code> 来统一定制气泡样式。
                                 <br />支持使用 <code className="text-red-400">!important</code> 覆盖可视化编辑器的设置。
                             </div>
 
@@ -684,6 +817,25 @@ const ThemeMaker: React.FC = () => {
                                 <div>
                                     <div className="flex justify-between mb-2"><label className="text-[10px] font-bold text-slate-400 uppercase">圆角大小</label><span className="text-[10px] text-slate-500 font-mono">{activeStyle.borderRadius}px</span></div>
                                     <input type="range" min="0" max="30" value={activeStyle.borderRadius} onChange={(e) => updateStyle('borderRadius', parseInt(e.target.value))} className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-primary" />
+                                </div>
+
+                                {/* Bubble Tail */}
+                                <div className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-100 rounded-xl p-3">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase block">气泡尾巴</label>
+                                        <span className="text-[10px] text-slate-400">{activeStyle.hideTail ? '隐藏' : '显示'}</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        role="switch"
+                                        aria-checked={!activeStyle.hideTail}
+                                        onClick={() => updateStyle('hideTail', !activeStyle.hideTail)}
+                                        className={`relative w-12 h-6 rounded-full transition-colors active:scale-95 ${activeStyle.hideTail ? 'bg-slate-300' : 'bg-primary'}`}
+                                    >
+                                        <span
+                                            className={`absolute left-0 top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${activeStyle.hideTail ? 'translate-x-1' : 'translate-x-7'}`}
+                                        />
+                                    </button>
                                 </div>
 
                                 {/* Border Width & Color */}
@@ -831,6 +983,93 @@ const ThemeMaker: React.FC = () => {
 
                 </div>
             </div>
+
+            {sharePanel !== 'none' && (
+                <div
+                    className="absolute inset-0 z-50 flex items-end bg-slate-900/35 backdrop-blur-sm animate-fade-in"
+                    onClick={() => setSharePanel('none')}
+                >
+                    <div
+                        className="w-full bg-white rounded-t-[2rem] shadow-2xl border border-white/60 px-5 pt-5 pb-7 space-y-4"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h2 className="text-base font-bold text-slate-800">{sharePanel === 'export' ? '导出主题' : '导入主题'}</h2>
+                                <p className="text-[11px] text-slate-400 mt-0.5">{editingTheme.name || '未命名主题'}</p>
+                            </div>
+                            <button
+                                onClick={() => setSharePanel('none')}
+                                className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center active:scale-95 transition-transform"
+                                aria-label="关闭"
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        {sharePanel === 'export' ? (
+                            <>
+                                <textarea
+                                    ref={exportTextareaRef}
+                                    value={themeJson}
+                                    readOnly
+                                    data-allow-text-selection="true"
+                                    className="w-full h-56 bg-slate-900 text-slate-100 font-mono text-[11px] leading-relaxed rounded-2xl p-4 resize-none outline-none"
+                                />
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        onClick={() => void copyThemeJson()}
+                                        className="py-3 rounded-2xl bg-slate-100 text-slate-600 text-xs font-bold active:scale-[0.98] transition-transform"
+                                    >
+                                        复制 JSON
+                                    </button>
+                                    <button
+                                        onClick={downloadThemeJson}
+                                        className="py-3 rounded-2xl bg-primary text-white text-xs font-bold shadow-lg shadow-primary/20 active:scale-[0.98] transition-transform"
+                                    >
+                                        下载 JSON
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <textarea
+                                    value={importText}
+                                    onChange={(e) => setImportText(e.target.value)}
+                                    data-allow-text-selection="true"
+                                    placeholder="粘贴主题 JSON"
+                                    className="w-full h-48 bg-slate-50 border border-slate-200 text-slate-700 font-mono text-[11px] leading-relaxed rounded-2xl p-4 resize-none outline-none focus:border-primary/40"
+                                />
+                                <input
+                                    type="file"
+                                    ref={importFileInputRef}
+                                    accept="application/json,.json"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) void importThemeFile(file);
+                                    }}
+                                />
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        onClick={() => importFileInputRef.current?.click()}
+                                        className="py-3 rounded-2xl bg-slate-100 text-slate-600 text-xs font-bold active:scale-[0.98] transition-transform"
+                                    >
+                                        选择文件
+                                    </button>
+                                    <button
+                                        onClick={() => applyImportedTheme(importText)}
+                                        disabled={!importText.trim()}
+                                        className="py-3 rounded-2xl bg-primary text-white text-xs font-bold shadow-lg shadow-primary/20 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:shadow-none"
+                                    >
+                                        应用导入
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

@@ -46,6 +46,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
     thinking,
 }) => {
     const radius = styleConfig.borderRadius ?? 6;
+    const showTail = !styleConfig.hideTail;
     const bubbleRef = useRef<HTMLDivElement>(null);
     const [thinkingExpanded, setThinkingExpanded] = useState(false);
 
@@ -63,9 +64,9 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
             el.style.setProperty('background', styleConfig.backgroundColor, 'important');
         }
 
-        // Fine-grained border-radius: tail-side bottom corner → 4px, rest → radius
+        // Fine-grained border-radius: tail-side bottom corner → 4px only when the tail is visible.
         const mainR = `${radius}px`;
-        const tailR = '4px';
+        const tailR = showTail ? '4px' : mainR;
         el.style.setProperty('border-top-left-radius', mainR, 'important');
         el.style.setProperty('border-top-right-radius', mainR, 'important');
         el.style.setProperty('border-bottom-left-radius', isUser ? mainR : tailR, 'important');
@@ -101,7 +102,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
         } else {
             el.style.removeProperty('font-size');
         }
-    }, [styleConfig.backgroundColor, styleConfig.gradient, styleConfig.textColor, radius, styleConfig.opacity, isUser, styleConfig.borderWidth, styleConfig.borderColor, styleConfig.boxShadow, styleConfig.fontSize]);
+    }, [styleConfig.backgroundColor, styleConfig.gradient, styleConfig.textColor, radius, styleConfig.opacity, isUser, showTail, styleConfig.borderWidth, styleConfig.borderColor, styleConfig.boxShadow, styleConfig.fontSize]);
 
     return (
         /* Outer Wrapper — relative container; SVG tail & decoration sticker live here
@@ -109,16 +110,18 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
         <div className="relative animate-fade-in active:scale-[0.98] transition-transform">
 
             {/* Layer 0: SVG Tail — outside inner shell, won't be clipped */}
-            <svg
-                className={`sully-bubble-tail absolute top-[12px] w-[6px] h-[10px] pointer-events-none ${isUser ? '-right-[5.5px]' : '-left-[5.5px]'}`}
-                version="1.1" xmlns="http://www.w3.org/2000/svg"
-            >
-                {isUser ? (
-                    <polygon points="0,0 6,5 0,10" style={{ fill: styleConfig.gradient?.from || styleConfig.backgroundColor || 'var(--bubble-user-bg, #95ec69)' }} />
-                ) : (
-                    <polygon points="6,0 0,5 6,10" style={{ fill: styleConfig.gradient?.from || styleConfig.backgroundColor || 'var(--bubble-ai-bg, white)' }} />
-                )}
-            </svg>
+            {showTail && (
+                <svg
+                    className={`sully-bubble-tail absolute top-[12px] w-[6px] h-[10px] pointer-events-none ${isUser ? '-right-[5.5px]' : '-left-[5.5px]'}`}
+                    version="1.1" xmlns="http://www.w3.org/2000/svg"
+                >
+                    {isUser ? (
+                        <polygon points="0,0 6,5 0,10" style={{ fill: styleConfig.gradient?.from || styleConfig.backgroundColor || 'var(--bubble-user-bg, #95ec69)' }} />
+                    ) : (
+                        <polygon points="6,0 0,5 6,10" style={{ fill: styleConfig.gradient?.from || styleConfig.backgroundColor || 'var(--bubble-ai-bg, white)' }} />
+                    )}
+                </svg>
+            )}
 
             {/* Layer 2: Decoration Sticker — outside inner shell, can overflow bubble edges */}
             {styleConfig.decoration && (
