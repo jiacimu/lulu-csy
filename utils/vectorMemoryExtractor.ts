@@ -30,10 +30,27 @@ import {
 // Tail buffer: exclude the N most recent messages from auto-extraction
 // to prevent extracting memories from messages the user might roll/regenerate.
 const TAIL_BUFFER = 20;
+export const VECTOR_EXTRACTION_MEMORY_CONTEXT_LIMIT = 200;
+
+type ExtractionMemoryHeader = {
+    id: string;
+    title: string;
+    content?: string;
+    importance: number;
+    createdAt?: number;
+    deprecated?: boolean;
+};
 
 interface BatchExtractOptions {
     checkpoint?: VectorMemoryBatchCheckpoint | null;
     onCheckpoint?: (checkpoint: VectorMemoryBatchCheckpoint) => void;
+}
+
+export function selectExtractionMemoryHeaders<T extends ExtractionMemoryHeader>(headers: T[]): T[] {
+    return [...headers]
+        .filter(h => !h.deprecated)
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        .slice(0, VECTOR_EXTRACTION_MEMORY_CONTEXT_LIMIT);
 }
 
 export const VectorMemoryExtractor = {
@@ -169,11 +186,7 @@ export const VectorMemoryExtractor = {
             for (let i = 0; i < newMsgs.length; i += WINDOW_SIZE - OVERLAP) {
                 const windowMsgs = newMsgs.slice(i, i + WINDOW_SIZE);
                 const allHeaders = await DB.getVectorMemoryHeaders(charId);
-                // Cap to newest 50 to prevent prompt bloat at scale
-                const existingHeaders = allHeaders
-                    .filter(h => !h.deprecated) // Exclude deprecated (LLM shouldn't try to update invalidated memories)
-                    .sort((a, b) => b.createdAt - a.createdAt)
-                    .slice(0, 50);
+                const existingHeaders = selectExtractionMemoryHeaders(allHeaders);
                 const formattedMsgs = formatMessages(windowMsgs, charSnapshot.name);
                 const prompt = buildExtractionPrompt(charSnapshot.name, existingHeaders, formattedMsgs);
                 const results = await callLLM(prompt, apiConfig);
@@ -361,7 +374,7 @@ export const VectorMemoryExtractor = {
 
             // Refresh headers each window so LLM sees previously created memories
             const allHeaders = await DB.getVectorMemoryHeaders(charId);
-            const existingHeaders = allHeaders.filter(h => !h.deprecated);
+            const existingHeaders = selectExtractionMemoryHeaders(allHeaders);
             const formattedMsgs = formatMessages(window.messages, charName);
             const prompt = buildExtractionPrompt(charName, existingHeaders, formattedMsgs);
 
@@ -530,10 +543,7 @@ export const VectorMemoryExtractor = {
             for (let i = 0; i < virtualMsgs.length; i += WINDOW - OVERLAP) {
                 const windowMsgs = virtualMsgs.slice(i, i + WINDOW);
                 const allHeaders = await DB.getVectorMemoryHeaders(charId);
-                const existingHeaders = allHeaders
-                    .filter(h => !h.deprecated)
-                    .sort((a, b) => b.createdAt - a.createdAt)
-                    .slice(0, 50);
+                const existingHeaders = selectExtractionMemoryHeaders(allHeaders);
 
                 const formattedMsgs = formatMessages(
                     windowMsgs.map(m => ({ ...m, content: m.content })), // 通话内容不截断
