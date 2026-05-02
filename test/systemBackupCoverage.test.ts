@@ -267,24 +267,89 @@ describe('system backup coverage', () => {
         localStorage.setItem('csyos_user_id', 'csy-user-original');
         localStorage.setItem('csyos_client_id', 'csy-client-original');
         localStorage.setItem('os_sub_api_config', '{"model":"flash"}');
+        await DB.saveAsset('csyos_user_id', 'existing-user-asset');
 
         const data = await readBackupData(await exportSystemData('full', makeStateSnapshot(), noopProgress));
         expect(data.extraLocalStorageConfig?.csyos_user_id).toBeUndefined();
         expect(data.extraLocalStorageConfig?.csyos_client_id).toBeUndefined();
 
-        await importWithoutReload(JSON.stringify({
+        const pollutedIdentityBackup = {
             timestamp: Date.now(),
             version: 3,
+            csyos_user_id: 'csy-user-from-top-level',
+            csyosClientId: 'csy-client-from-top-level',
+            assets: [
+                { id: 'csyos_user_id', data: 'asset-user-from-backup' },
+                { id: 'safe_asset', data: 'safe-value' },
+            ],
+            customIcons: {
+                csyos_client_id: 'icon-client-from-backup',
+                Calendar: 'calendar-icon',
+            },
+            appearancePresets: [
+                { id: 'csyos_client_id', name: 'bad preset' },
+                { id: 'preset-safe', name: 'safe preset' },
+            ],
             extraLocalStorageConfig: {
                 csyos_user_id: 'csy-user-from-backup',
                 csyos_client_id: 'csy-client-from-backup',
                 os_sub_api_config: '{"model":"restored"}',
             },
-        }));
+        };
+
+        await importWithoutReload(JSON.stringify(pollutedIdentityBackup));
 
         expect(localStorage.getItem('csyos_user_id')).toBe('csy-user-original');
         expect(localStorage.getItem('csyos_client_id')).toBe('csy-client-original');
         expect(localStorage.getItem('os_sub_api_config')).toBe('{"model":"restored"}');
+        expect(await DB.getAsset('csyos_user_id')).toBe('existing-user-asset');
+        expect(await DB.getAsset('safe_asset')).toBe('safe-value');
+        expect(await DB.getAsset('icon_csyos_client_id')).toBeNull();
+        expect(await DB.getAsset('icon_Calendar')).toBe('calendar-icon');
+        expect(await DB.getAsset('appearance_preset_csyos_client_id')).toBeNull();
+        expect(await DB.getAsset('appearance_preset_preset-safe')).toContain('safe preset');
+
+        const zip = new JSZip();
+        zip.file('data.json', JSON.stringify({
+            ...pollutedIdentityBackup,
+            extraLocalStorageConfig: {
+                csyos_user_id: 'csy-user-from-zip',
+                csyos_client_id: 'csy-client-from-zip',
+                os_sub_api_config: '{"model":"zip-restored"}',
+            },
+        }));
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+
+        await importWithoutReload(new File([zipBlob], 'polluted-device-id.zip', { type: 'application/zip' }));
+
+        expect(localStorage.getItem('csyos_user_id')).toBe('csy-user-original');
+        expect(localStorage.getItem('csyos_client_id')).toBe('csy-client-original');
+        expect(localStorage.getItem('os_sub_api_config')).toBe('{"model":"zip-restored"}');
+    });
+
+    it('restores the original device identity even when import fails', async () => {
+        localStorage.setItem('csyos_user_id', 'csy-user-original');
+        localStorage.setItem('csyos_client_id', 'csy-client-original');
+
+        const importSpy = vi.spyOn(DB, 'importFullData').mockImplementation(async () => {
+            localStorage.setItem('csyos_user_id', 'csy-user-during-import');
+            localStorage.setItem('csyos_client_id', 'csy-client-during-import');
+            throw new Error('import failed');
+        });
+
+        await expect(importWithoutReload(JSON.stringify({
+            timestamp: Date.now(),
+            version: 3,
+            extraLocalStorageConfig: {
+                csyos_user_id: 'csy-user-from-backup',
+                csyos_client_id: 'csy-client-from-backup',
+            },
+        }))).rejects.toThrow('import failed');
+
+        expect(localStorage.getItem('csyos_user_id')).toBe('csy-user-original');
+        expect(localStorage.getItem('csyos_client_id')).toBe('csy-client-original');
+
+        importSpy.mockRestore();
     });
 
     it('roundtrips music profile background and custom player skins', async () => {

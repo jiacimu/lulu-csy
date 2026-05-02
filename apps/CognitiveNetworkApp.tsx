@@ -787,7 +787,7 @@ const CognitiveNetworkApp: React.FC = () => {
             haptic.light();
             return;
         }
-        setUserId(nextId);
+        setUserId(nextId, { source: 'manual' });
         setSyncUserId(nextId);
         setBindInput('');
         setSyncCodeVisible(false);

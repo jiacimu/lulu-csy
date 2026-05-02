@@ -796,6 +796,91 @@ export const SYSTEM_BACKUP_EXCLUDED_LOCAL_STORAGE_PREFIXES = [
     'vector_memory_batch_checkpoint:',
 ];
 
+const SYSTEM_BACKUP_DEVICE_IDENTITY_KEYS = [
+    'csyos_user_id',
+    'csyos_client_id',
+    'csyosUserId',
+    'csyosClientId',
+];
+
+const SYSTEM_BACKUP_DEVICE_IDENTITY_STORAGE_KEYS = [
+    'csyos_user_id',
+    'csyos_client_id',
+] as const;
+
+type DeviceIdentitySnapshot = Record<typeof SYSTEM_BACKUP_DEVICE_IDENTITY_STORAGE_KEYS[number], string | null>;
+
+const SYSTEM_BACKUP_DEVICE_IDENTITY_KEY_FINGERPRINTS = new Set(
+    SYSTEM_BACKUP_DEVICE_IDENTITY_KEYS.map(key => key.replace(/[-_\s]/g, '').toLowerCase())
+);
+
+const DROP_IMPORTED_DEVICE_IDENTITY_VALUE = Symbol('dropImportedDeviceIdentityValue');
+
+function isDeviceIdentityImportKey(key: unknown): boolean {
+    return typeof key === 'string'
+        && SYSTEM_BACKUP_DEVICE_IDENTITY_KEY_FINGERPRINTS.has(key.replace(/[-_\s]/g, '').toLowerCase());
+}
+
+function stripImportedDeviceIdentityValue(value: unknown): unknown | typeof DROP_IMPORTED_DEVICE_IDENTITY_VALUE {
+    if (Array.isArray(value)) {
+        const cleaned: unknown[] = [];
+        for (const item of value) {
+            const next = stripImportedDeviceIdentityValue(item);
+            if (next !== DROP_IMPORTED_DEVICE_IDENTITY_VALUE) cleaned.push(next);
+        }
+        return cleaned;
+    }
+
+    if (value !== null && typeof value === 'object') {
+        const source = value as Record<string, unknown>;
+        if (isDeviceIdentityImportKey(source.id) || isDeviceIdentityImportKey(source.key) || isDeviceIdentityImportKey(source.name)) {
+            return DROP_IMPORTED_DEVICE_IDENTITY_VALUE;
+        }
+
+        const cleaned: Record<string, unknown> = {};
+        for (const [key, child] of Object.entries(source)) {
+            if (isDeviceIdentityImportKey(key)) continue;
+            const next = stripImportedDeviceIdentityValue(child);
+            if (next !== DROP_IMPORTED_DEVICE_IDENTITY_VALUE) cleaned[key] = next;
+        }
+        return cleaned;
+    }
+
+    return value;
+}
+
+function stripImportedDeviceIdentity(data: FullBackupData): FullBackupData {
+    const cleaned = stripImportedDeviceIdentityValue(data);
+    return cleaned && typeof cleaned === 'object' ? cleaned as FullBackupData : data;
+}
+
+function captureDeviceIdentitySnapshot(): DeviceIdentitySnapshot {
+    const snapshot = {} as DeviceIdentitySnapshot;
+    for (const key of SYSTEM_BACKUP_DEVICE_IDENTITY_STORAGE_KEYS) {
+        try {
+            snapshot[key] = localStorage.getItem(key);
+        } catch {
+            snapshot[key] = null;
+        }
+    }
+    return snapshot;
+}
+
+function restoreDeviceIdentitySnapshot(snapshot: DeviceIdentitySnapshot): void {
+    for (const key of SYSTEM_BACKUP_DEVICE_IDENTITY_STORAGE_KEYS) {
+        try {
+            const value = snapshot[key];
+            if (value === null) {
+                localStorage.removeItem(key);
+            } else {
+                localStorage.setItem(key, value);
+            }
+        } catch {
+            // Import must not fail while restoring the local-only device identity guard.
+        }
+    }
+}
+
 function getStoresToProcess(mode: SystemBackupMode, options: SystemBackupOptions = {}): string[] {
     let stores: string[];
     if (mode === 'full') stores = [...ALL_STORES];
@@ -1114,6 +1199,8 @@ export async function importSystemData(
     onProgress: (message: string, progress: number) => void,
     callbacks: ImportCallbacks
 ): Promise<void> {
+    const deviceIdentitySnapshot = captureDeviceIdentitySnapshot();
+    try {
     onProgress('正在解析备份文件...', 0);
     let data: FullBackupData;
     let zip: JSZipLike | null = null;
@@ -1144,6 +1231,8 @@ export async function importSystemData(
     if (zip) {
         data = await restoreAssetsFromZip(data, zip);
     }
+
+    data = stripImportedDeviceIdentity(data);
 
     if (Array.isArray(data.vectorMemories) && data.vectorMemories.length > 0) {
         // A system backup may come from another frontend/backend environment.
@@ -1249,4 +1338,7 @@ export async function importSystemData(
 
     callbacks.addToast('恢复成功，系统即将重启...', 'success');
     setTimeout(() => window.location.reload(), 1500);
+    } finally {
+        restoreDeviceIdentitySnapshot(deviceIdentitySnapshot);
+    }
 }

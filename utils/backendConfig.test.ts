@@ -10,6 +10,7 @@ import {
   getBackendResolutionDebug,
   getBackendToken,
   getBackendUrl,
+  setUserId,
 } from './backendConfig';
 
 describe('backendConfig', () => {
@@ -70,5 +71,16 @@ describe('backendConfig', () => {
         const params = new URLSearchParams(buildBackendAuthQuery());
         expect(params.get('_clientId')).toBe(clientId);
         expect(params.get('userId')).toBe('csy-user-a');
+    });
+
+    it('only changes the sync code through the explicit manual path', () => {
+        localStorage.setItem('csyos_user_id', 'csy-user-original');
+
+        const unsafeSetUserId = setUserId as unknown as (id: string, options?: { source?: string }) => void;
+        unsafeSetUserId('csy-user-from-import');
+        expect(localStorage.getItem('csyos_user_id')).toBe('csy-user-original');
+
+        setUserId('csy-user-manual', { source: 'manual' });
+        expect(localStorage.getItem('csyos_user_id')).toBe('csy-user-manual');
     });
 });

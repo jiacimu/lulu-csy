@@ -27,6 +27,10 @@ export const HEALTH_CACHE_KEY = 'csyos_backend_alive';
 const USER_ID_KEY = 'csyos_user_id';
 export const CLIENT_ID_KEY = 'csyos_client_id';
 
+export type SetUserIdOptions = {
+    source: 'manual';
+};
+
 type EnvMap = Record<string, string | undefined>;
 type BackendQueryValue = string | number | boolean | null | undefined;
 export type BackendConfigSource = 'local_override' | 'build_env' | 'default_fallback' | 'missing';
@@ -283,7 +287,12 @@ export function getClientId(): string {
     return id;
 }
 
-export function setUserId(id: string): void {
+export function setUserId(id: string, options: SetUserIdOptions): void {
+    if (options?.source !== 'manual') {
+        console.warn('[Identity] Ignored non-manual Sync Code update.');
+        return;
+    }
+
     const trimmed = id.trim();
     if (trimmed) {
         safeLocalStorageSet(USER_ID_KEY, trimmed);
