@@ -58,11 +58,21 @@ export interface CardAppearance {
     images?: EmbeddedImage[];
 }
 
+export type StatusWorkshopInteractionMode = 'none' | 'expand' | 'flip' | 'pages' | 'state';
+
+export interface StatusWorkshopReviewFlags {
+    system?: boolean;
+    protocol?: boolean;
+    html?: boolean;
+    css?: boolean;
+    js?: boolean;
+}
+
 /** 用户自定义模板 */
 export interface CustomStatusTemplate {
     id: string;
     name: string;                   // 模板名称（如 "赛博日记"）
-    systemPrompt: string;           // 用户自定义的 system prompt（告诉副模型输出什么格式）
+    systemPrompt: string;           // 用户自定义的状态文本规则（告诉副模型输出什么格式）
     extractRegex: string;           // 用户自定义的提取正则（从 AI 输出中提取渲染内容）
     htmlTemplate?: string;          // 旧版完整 HTML 模板（支持 $1, $2 等正则捕获组替换）
     htmlBody?: string;              // 新版分层模板：body 内 HTML 骨架
@@ -70,6 +80,9 @@ export interface CustomStatusTemplate {
     jsTemplate?: string;            // 新版分层模板：可选 classic inline JS（不含 <script> 标签）
     templateVersion?: number;       // 模板结构版本。2=分层模板；缺省=旧版完整 HTML
     allowScripts?: boolean;         // 是否允许该模板在沙箱 iframe 内执行内联脚本，默认关闭
+    interactionMode?: StatusWorkshopInteractionMode; // 互动需求类型，none=无互动
+    interactionIdea?: string;        // 互动需求补充说明，供 HTML/CSS/JS 共同读取
+    reviewFlags?: StatusWorkshopReviewFlags; // 上游改动后下游需复核的提示标记
     renderMode: 'html' | 'text';    // 渲染方式：html=iframe沙箱，text=纯文本卡片
     fields?: TemplateField[];       // 可视化编辑器字段定义
     cardStyle?: CardAppearance;     // 卡片外观参数
