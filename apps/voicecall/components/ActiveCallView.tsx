@@ -95,6 +95,8 @@ interface ActiveCallViewProps {
     // ─── 通话质量反馈 ───
     /** STT 返回空结果，提示用户“没听清” */
     sttEmptyHint?: boolean;
+    /** 当前设备禁用语音输入，使用文字输入兜底 */
+    voiceInputDisabled?: boolean;
 }
 
 const ActiveCallView: React.FC<ActiveCallViewProps> = ({
@@ -121,6 +123,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
     onVolumeChange,
     // ─── 通话质量反馈 ───
     sttEmptyHint = false,
+    voiceInputDisabled = false,
 }) => {
     // 接通闪光效果
     const [showFlash, setShowFlash] = useState(true);
@@ -191,6 +194,15 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
 
     // 静音 ↔ 取消静音时联动文字输入框
     useEffect(() => {
+        if (voiceInputDisabled) {
+            if (!isTextInputVisible) {
+                textInputAutoOpenedByMuteRef.current = false;
+                setIsTextInputVisible(true);
+                setTimeout(() => inputRef.current?.focus(), 200);
+            }
+            return;
+        }
+
         if (isMuted) {
             if (!isTextInputVisible) {
                 textInputAutoOpenedByMuteRef.current = true;
@@ -205,9 +217,15 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                 setIsTextInputVisible(false);
             }
         }
-    }, [isMuted]);
+    }, [isMuted, isTextInputVisible, voiceInputDisabled]);
 
     const toggleTextInput = useCallback(() => {
+        if (voiceInputDisabled) {
+            setIsTextInputVisible(true);
+            setTimeout(() => inputRef.current?.focus(), 100);
+            return;
+        }
+
         setIsTextInputVisible(prev => {
             const next = !prev;
             if (next) {
@@ -216,7 +234,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
             }
             return next;
         });
-    }, []);
+    }, [voiceInputDisabled]);
 
     const handleSend = useCallback(() => {
         const trimmed = inputValue.trim();
@@ -255,6 +273,9 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                     </span>
                     {ttsDegraded && (
                         <span className="text-[10px] text-amber-300/60 tracking-wider">· 文字模式</span>
+                    )}
+                    {voiceInputDisabled && !ttsDegraded && (
+                        <span className="text-[10px] text-amber-300/60 tracking-wider">· 文字输入</span>
                     )}
                 </div>
             </div>
@@ -305,7 +326,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                         {/* 引擎状态 — 微小指示 */}
                         {!isConnecting && (
                             <div className="flex items-center justify-center gap-2 mb-1">
-                                {isUserSpeaking && (
+                                {!voiceInputDisabled && isUserSpeaking && (
                                     <span className="vc-mic-pulse text-[10px] px-2 py-0.5 rounded-full bg-red-500/15 border border-red-400/20 text-red-300/70 tracking-wider">
                                         ● 录音中
                                     </span>
@@ -314,7 +335,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                         )}
 
                         {/* STT 空结果提示 */}
-                        {sttEmptyHint && !displayedTranscript && !visibleAiResponse && (
+                        {!voiceInputDisabled && sttEmptyHint && !displayedTranscript && !visibleAiResponse && (
                             <p className="vc-quality-hint vc-animate-fade">没有听清，再说一次？</p>
                         )}
 
@@ -358,7 +379,9 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                                 <span /><span /><span />
                             </div>
                         ) : !isConnecting && (
-                            <p className="vc-subtitle vc-subtitle--hint">{isMuted ? '麦克风已关闭，请打字…' : '说话或打字…'}</p>
+                            <p className="vc-subtitle vc-subtitle--hint">
+                                {voiceInputDisabled ? '请打字继续…' : (isMuted ? '麦克风已关闭，请打字…' : '说话或打字…')}
+                            </p>
                         )}
 
                         {/* AI 回复 — 悬浮字幕 */}
@@ -422,6 +445,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                     onToggleTextInput={isConnecting ? () => {} : toggleTextInput}
                     volume={volume}
                     onVolumeChange={onVolumeChange}
+                    voiceInputDisabled={voiceInputDisabled}
                 />
             </div>
         </div>

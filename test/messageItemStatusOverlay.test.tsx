@@ -35,28 +35,30 @@ const baseMessage = {
     metadata: {},
 } as any;
 
+function messageItemProps(extraProps: Record<string, unknown> = {}) {
+    return {
+        msg: baseMessage,
+        isFirstInGroup: true,
+        isLastInGroup: true,
+        activeTheme: baseTheme,
+        charAvatar: '/char.png',
+        charName: 'Marcus',
+        userAvatar: '/user.png',
+        onLongPress: vi.fn(),
+        selectionMode: false,
+        isSelected: false,
+        onToggleSelect: vi.fn(),
+        onTransferAction: vi.fn(),
+        onPlayVoice: vi.fn(),
+        onStopVoice: vi.fn(),
+        onRetryVoice: vi.fn(),
+        onToggleVoiceText: vi.fn(),
+        ...extraProps,
+    };
+}
+
 function renderMessageItem(extraProps: Record<string, unknown> = {}) {
-    return render(
-        <MessageItem
-            msg={baseMessage}
-            isFirstInGroup
-            isLastInGroup
-            activeTheme={baseTheme}
-            charAvatar="/char.png"
-            charName="Marcus"
-            userAvatar="/user.png"
-            onLongPress={vi.fn()}
-            selectionMode={false}
-            isSelected={false}
-            onToggleSelect={vi.fn()}
-            onTransferAction={vi.fn()}
-            onPlayVoice={vi.fn()}
-            onStopVoice={vi.fn()}
-            onRetryVoice={vi.fn()}
-            onToggleVoiceText={vi.fn()}
-            {...extraProps}
-        />,
-    );
+    return render(<MessageItem {...messageItemProps(extraProps)} />);
 }
 
 afterEach(() => {
@@ -77,6 +79,10 @@ describe('MessageItem status overlay', () => {
 
         fireEvent.click(screen.getByAltText('avatar').parentElement!);
         expect(screen.getByTestId('status-card-overlay-shell')).toBeInTheDocument();
+        expect(screen.getByTestId('inner-voice-backdrop')).toHaveAttribute(
+            'style',
+            'background-color: transparent;',
+        );
 
         vi.advanceTimersByTime(9000);
         expect(screen.getByTestId('status-card-overlay-shell')).toBeInTheDocument();
@@ -100,6 +106,23 @@ describe('MessageItem status overlay', () => {
 
         fireEvent.click(screen.getByTestId('inner-voice-backdrop'));
         expect(screen.queryByTestId('inner-voice-overlay-shell')).not.toBeInTheDocument();
+    });
+
+    it('closes custom status card overlays from the fixed close button', async () => {
+        renderMessageItem({
+            statusCardData: {
+                cardType: 'custom_text',
+                body: 'Custom voice note',
+                style: {},
+            } satisfies StatusCardData,
+        });
+
+        fireEvent.click(screen.getByAltText('avatar').parentElement!);
+        expect(await screen.findByTestId('status-card-overlay-shell')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByTestId('inner-voice-close-button'));
+        expect(screen.queryByTestId('status-card-overlay-shell')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('inner-voice-backdrop')).not.toBeInTheDocument();
     });
 
     it('uses separate animation shells for status cards and classic inner voice cards', async () => {
@@ -161,5 +184,41 @@ describe('MessageItem status overlay', () => {
         expect(screen.getByTestId('classic-inner-voice-toggle')).toHaveTextContent('收起全文');
         expect(screen.getByTestId('classic-inner-voice-scroll-area').style.maxHeight).toBe('calc(100vh - 120px)');
         expect(screen.getByTestId('classic-inner-voice-text')).toHaveTextContent('今天风很大');
+    });
+
+    it('rerenders the quote block when reply target data changes for the same message', () => {
+        const view = renderMessageItem({
+            msg: { ...baseMessage, replyTo: undefined },
+        });
+
+        expect(screen.queryByText('"第一次引用"')).not.toBeInTheDocument();
+
+        view.rerender(
+            <MessageItem
+                {...messageItemProps({
+                    msg: {
+                        ...baseMessage,
+                        replyTo: { id: 7, name: 'Sully', content: '第一次引用' },
+                    },
+                })}
+            />,
+        );
+
+        expect(screen.getByText('Sully')).toBeInTheDocument();
+        expect(screen.getByText('"第一次引用"')).toBeInTheDocument();
+
+        view.rerender(
+            <MessageItem
+                {...messageItemProps({
+                    msg: {
+                        ...baseMessage,
+                        replyTo: { id: 8, name: 'Sully', content: '第二次引用' },
+                    },
+                })}
+            />,
+        );
+
+        expect(screen.queryByText('"第一次引用"')).not.toBeInTheDocument();
+        expect(screen.getByText('"第二次引用"')).toBeInTheDocument();
     });
 });

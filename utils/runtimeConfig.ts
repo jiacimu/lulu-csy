@@ -174,6 +174,7 @@ function normalizeApiConfig(
         apiKey: normalizeString(value?.apiKey),
         model: normalizeString(value?.model) || defaults.model,
         useGeminiJailbreak: value?.useGeminiJailbreak === true,
+        useDeepSeekMode: value?.useDeepSeekMode === true,
         disablePrefill: value?.disablePrefill === true,
     };
 }

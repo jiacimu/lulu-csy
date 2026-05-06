@@ -49,6 +49,22 @@ describe('voice call persistence', () => {
         ]);
     });
 
+    it('persists low-memory call history as text only without audio entries', () => {
+        const history = [
+            { role: 'user', content: VOICE_CALL_OPENING_PROMPT },
+            { role: 'assistant', content: '第一句' },
+            { role: 'user', content: '第二句' },
+            { role: 'assistant', content: '第三句' },
+        ];
+
+        expect(buildPersistedCallConversation(history)).toEqual([
+            { role: 'assistant', content: '第一句' },
+            { role: 'user', content: '第二句' },
+            { role: 'assistant', content: '第三句' },
+        ]);
+        expect(buildPersistedCallAudioEntries(42, history)).toEqual([]);
+    });
+
     it('supports legacy lookup keys for cards saved before the prompt offset fix', () => {
         expect(buildVoiceCallAudioLookupKeys(42, 0)).toEqual([
             'call_42_0',

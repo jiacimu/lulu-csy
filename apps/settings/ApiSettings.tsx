@@ -12,6 +12,7 @@ const ApiSettings: React.FC = () => {
     const [localUrl, setLocalUrl] = useState(apiConfig.baseUrl);
     const [localModel, setLocalModel] = useState(apiConfig.model);
     const [localDisablePrefill, setLocalDisablePrefill] = useState(apiConfig.disablePrefill || false);
+    const [localDeepSeekMode, setLocalDeepSeekMode] = useState(apiConfig.useDeepSeekMode || false);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [isTestingConnection, setIsTestingConnection] = useState(false);
     const [testConnectionStatus, setTestConnectionStatus] = useState<'idle' | 'success' | 'error' | 'testing'>('idle');
@@ -25,6 +26,7 @@ const ApiSettings: React.FC = () => {
         setLocalKey(apiConfig.apiKey);
         setLocalModel(apiConfig.model);
         setLocalDisablePrefill(apiConfig.disablePrefill || false);
+        setLocalDeepSeekMode(apiConfig.useDeepSeekMode || false);
     }, [apiConfig]);
 
     const loadPreset = (preset: typeof apiPresets[0]) => {
@@ -32,19 +34,20 @@ const ApiSettings: React.FC = () => {
         setLocalKey(preset.config.apiKey);
         setLocalModel(preset.config.model);
         setLocalDisablePrefill(preset.config.disablePrefill || false);
+        setLocalDeepSeekMode(preset.config.useDeepSeekMode || false);
         addToast(`已加载配置: ${preset.name}`, 'info');
     };
 
     const handleSavePreset = () => {
         if (!newPresetName.trim()) { addToast('请输入预设名称', 'error'); return; }
-        addApiPreset(newPresetName, { baseUrl: localUrl, apiKey: localKey, model: localModel, disablePrefill: localDisablePrefill });
+        addApiPreset(newPresetName, { baseUrl: localUrl, apiKey: localKey, model: localModel, disablePrefill: localDisablePrefill, useDeepSeekMode: localDeepSeekMode });
         setNewPresetName('');
         setShowPresetModal(false);
         addToast('预设已保存', 'success');
     };
 
     const handleSaveApi = () => {
-        updateApiConfig({ apiKey: localKey, baseUrl: localUrl, model: localModel, disablePrefill: localDisablePrefill });
+        updateApiConfig({ apiKey: localKey, baseUrl: localUrl, model: localModel, disablePrefill: localDisablePrefill, useDeepSeekMode: localDeepSeekMode });
         setStatusMsg('配置已保存');
         setTimeout(() => setStatusMsg(''), 2000);
         setTestConnectionStatus('idle');
@@ -146,6 +149,14 @@ const ApiSettings: React.FC = () => {
                         <label htmlFor="disablePrefill" className="text-xs font-semibold text-slate-600 flex-1 cursor-pointer">
                             关闭助手预填充 (Disable Prefill)
                             <span className="block text-[10px] font-normal text-slate-400 mt-0.5">如果中转站报错 400 且频繁吞字数扣费，请务必勾选此项。官方接口无需勾选。</span>
+                        </label>
+                    </div>
+
+                    <div className="group flex items-center gap-3 bg-white/50 border border-slate-200/60 rounded-xl px-4 py-3">
+                        <input type="checkbox" id="deepSeekMode" checked={localDeepSeekMode} onChange={(e) => setLocalDeepSeekMode(e.target.checked)} className="w-4 h-4 text-blue-600 bg-slate-100 border-slate-300 rounded focus:ring-blue-500" />
+                        <label htmlFor="deepSeekMode" className="text-xs font-semibold text-slate-600 flex-1 cursor-pointer">
+                            🐋 DeepSeek 特化模式
+                            <span className="block text-[10px] font-normal text-slate-400 mt-0.5">为 DeepSeek V4 Pro 量身定制的角色扮演预设。启用后将替换破限层、角色规则、语言风格和思维链为 DeepSeek 优化版本。</span>
                         </label>
                     </div>
 

@@ -35,6 +35,61 @@ function isToolWrapperJunk(value: string): boolean {
     return /^[\s`[\]【】]+$/.test(value);
 }
 
+function stripOuterCodeFence(value: string): string {
+    const trimmed = value.trim();
+    const fenceMatch = trimmed.match(/^```(?:json|JSON|text|markdown|md)?[ \t]*\r?\n?([\s\S]*?)\r?\n?```$/);
+    return fenceMatch ? fenceMatch[1].trim() : value;
+}
+
+function getJsonTextCandidate(value: unknown): string | null {
+    if (typeof value === 'string') return value;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+    const record = value as Record<string, unknown>;
+    for (const key of ['content', 'text', 'reply', 'response', 'answer']) {
+        if (typeof record[key] === 'string') return record[key] as string;
+    }
+
+    const message = record.message;
+    if (typeof message === 'string') return message;
+    if (message && typeof message === 'object' && !Array.isArray(message)) {
+        const messageRecord = message as Record<string, unknown>;
+        if (typeof messageRecord.content === 'string') return messageRecord.content;
+    }
+
+    return null;
+}
+
+function normalizeChatTextEnvelope(text: string): string {
+    let result = stripOuterCodeFence(text);
+
+    for (let i = 0; i < 2; i++) {
+        const trimmed = stripOuterCodeFence(result).trim();
+        const looksJsonWrapped =
+            (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+            (trimmed.startsWith('{') && trimmed.endsWith('}'));
+        if (!looksJsonWrapped) break;
+
+        try {
+            const candidate = getJsonTextCandidate(JSON.parse(trimmed));
+            if (candidate === null) break;
+            result = stripOuterCodeFence(candidate);
+        } catch {
+            break;
+        }
+    }
+
+    return result
+        .replace(/\\r\\n|\\n|\\r/g, '\n')
+        .replace(/\\t/g, '\t');
+}
+
+function stripLeakedChatLinePrefixes(text: string): string {
+    return text
+        .replace(/^[ \t]*[\[【(（][ \t]*(?:\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2}日?)?[ \t]*)?(?:[上下]午[ \t]*)?\d{1,2}[：:]\d{2}(?:[ \t]*(?:AM|PM))?[ \t]*[\]】)）][ \t]*(?:[\w\u4e00-\u9fa5·•._ -]{1,40}[：:][ \t]*)?/gim, '')
+        .replace(/^[ \t]*(?:\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2}日?)?[ T\t]+(?:[上下]午[ \t]*)?\d{1,2}[：:]\d{2}(?:[ \t]*(?:AM|PM))?[ \t]+(?:[\w\u4e00-\u9fa5·•._ -]{1,40}[：:][ \t]*)?|(?:[上下]午[ \t]*)?\d{1,2}[：:]\d{2}(?:[ \t]*(?:AM|PM))?[ \t]+[\w\u4e00-\u9fa5·•._ -]{1,40}[：:][ \t]*)/gim, '');
+}
+
 function normalizeSongShareTags(text: string): string {
     let result = text.replace(
         /(?:\[\[|\[|【)\s*(?:分享(?:歌曲|音乐)|(?:share[-_]?)?song)\s*[:：]\s*([\s\S]*?)\s*(?:\]\]|]|】)/gi,
@@ -207,14 +262,14 @@ export const ChatParser = {
      * Called after every API completion (initial + re-calls from search/diary/xhs).
      */
     cleanAiSecondPass: (text: string): string => {
-        let result = text
+        let result = stripLeakedChatLinePrefixes(normalizeChatTextEnvelope(text))
             .replace(/\[\d{4}[-/年]\d{1,2}[-/月]\d{1,2}.*?\]/g, '')
-            .replace(/^[\w\u4e00-\u9fa5]+:\s*/, '')
+            .replace(/^[\w\u4e00-\u9fa5·•._ -]{1,40}\s*[:：]\s*/, '')
             .replace(/[【\[](?:(?:你|User|用户|System|我)\s*)?发送了?表情包?[:：]\s*(.*?)[】\]]/g, '[[SEND_EMOJI: $1]]');
         result = normalizeSongShareTags(result);
         // Strip any CoT protocol residual that leaked through (e.g. from Gemini native thinking)
         result = stripCoTResidual(result);
-        return result;
+        return stripLeakedChatLinePrefixes(result);
     },
 
     /**
@@ -223,7 +278,7 @@ export const ChatParser = {
      * Safe to call multiple times (idempotent). Preserves %%BILINGUAL%% markers.
      */
     sanitize: (text: string): string => {
-        return text
+        return stripLeakedChatLinePrefixes(normalizeChatTextEnvelope(text))
             // Strip leaked timestamps from chat history context:
             // [2026-02-11 13:52] format (bracketed, from history entries)
             .replace(/\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\]\s*/g, '')

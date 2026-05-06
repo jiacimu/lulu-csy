@@ -13,8 +13,11 @@ import type { CognitiveCharStats } from '../utils/cognitiveNetworkCharacterStats
 import { MEMORY_RECORD_MODE_COPY,produceMemoryRecordAudio,shouldGenerateMemoryRecordMonologue,generateLyrics,checkLyricSingability,optimizeLyrics,generateStylePrompt,createRecordId,COVER_GRADIENTS,type MemoryRecordMemoryHeader,type SingabilityCheckResult,type StylePromptResult } from '../utils/memoryRecordService';
 import { getMemoryRecordCoverImage } from '../utils/memoryRecordCovers';
 import { hasPlayableMemoryRecordAudio,memoryRecordToPlayable } from '../utils/memoryRecordPlayable';
+import { shareMemoryRecordPoster } from '../utils/memoryRecordShare';
 import type { CharacterProfile,MemoryRecord,MemoryRecordMode,MemoryRecordSongRequest } from '../types';
+import type { MemoryRecordPlayable } from '../types/music';
 import { MEMORY_RECORD_STATUS_LABELS } from '../types';
+import MemoryRecordShareModal from '../components/music/MemoryRecordShareModal';
 
 /* Recovered comment */
 
@@ -245,6 +248,8 @@ const CognitiveNetworkApp: React.FC = () => {
     const [recordMemoryOptionsLoading, setRecordMemoryOptionsLoading] = useState(false);
     const [recordMemoryOptionsError, setRecordMemoryOptionsError] = useState('');
     const [memoryRecords, setMemoryRecords] = useState<MemoryRecord[]>([]);
+    const [shareModalPlayable, setShareModalPlayable] = useState<MemoryRecordPlayable | null>(null);
+    const [isSharingMemoryRecord, setIsSharingMemoryRecord] = useState(false);
     const [recordGenerating, setRecordGenerating] = useState(false);
     const [recordStatusText, setRecordStatusText] = useState('');
     const [recordFlowStatus, setRecordFlowStatus] = useState<MemoryRecordFlowStatus>('idle');
@@ -1645,6 +1650,29 @@ const CognitiveNetworkApp: React.FC = () => {
         }
     }, [addToast]);
 
+    const openMemoryRecordShare = useCallback((record: MemoryRecord) => {
+        if (!hasPlayableMemoryRecordAudio(record)) {
+            addToast('这首歌还没有可分享的音频', 'info');
+            return;
+        }
+
+        setShareModalPlayable(memoryRecordToPlayable(record));
+        haptic.light();
+    }, [addToast]);
+
+    const handleShareMemoryRecordPoster = useCallback(async (playable: MemoryRecordPlayable) => {
+        setIsSharingMemoryRecord(true);
+        try {
+            const result = await shareMemoryRecordPoster(playable);
+            setShareModalPlayable(null);
+            addToast(result.method === 'download' ? '分享海报已下载' : '已打开系统分享', 'success');
+        } catch (e: any) {
+            addToast(e?.message || '分享失败', 'error');
+        } finally {
+            setIsSharingMemoryRecord(false);
+        }
+    }, [addToast]);
+
     const copyMemoryRecordError = useCallback((record: MemoryRecord) => {
         const errorText = [
             `曲目: ${record.title}`,
@@ -2617,6 +2645,14 @@ const CognitiveNetworkApp: React.FC = () => {
                                                                 >
                                                                     播放
                                                                 </button>
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={!playable}
+                                                                    onClick={() => openMemoryRecordShare(record)}
+                                                                    className="rounded-full border border-[#8bb8f1]/30 px-3 py-1.5 text-[10px] font-semibold text-[#cfe0ff] disabled:opacity-32"
+                                                                >
+                                                                    分享
+                                                                </button>
                                                                 {canPreviewMonologue ? (
                                                                     <button
                                                                         type="button"
@@ -3223,6 +3259,17 @@ const CognitiveNetworkApp: React.FC = () => {
                     onCancel={() => setShowConfirm(null)}
                 />
             )}
+
+            <MemoryRecordShareModal
+                playable={shareModalPlayable}
+                isSharing={isSharingMemoryRecord}
+                onClose={() => setShareModalPlayable(null)}
+                onShare={() => {
+                    if (shareModalPlayable) {
+                        void handleShareMemoryRecordPoster(shareModalPlayable);
+                    }
+                }}
+            />
         </div>
     );
 };

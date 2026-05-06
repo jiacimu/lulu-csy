@@ -57,10 +57,13 @@ describe('character TTS voice binding', () => {
     it('keeps the character voice id when preparing voice-call PCM config', () => {
         const config = withCharacterTtsVoice(buildTtsConfig('global-voice'), buildChar('character-voice'));
         const voiceCallConfig = buildVoiceCallTtsConfig(config);
+        const lowMemoryVoiceCallConfig = buildVoiceCallTtsConfig(config, undefined, 16000);
 
         expect(voiceCallConfig.voiceSetting.voice_id).toBe('character-voice');
         expect(voiceCallConfig.audioSetting.format).toBe('pcm');
         expect(voiceCallConfig.audioSetting.audio_sample_rate).toBe(24000);
+        expect(lowMemoryVoiceCallConfig.audioSetting.format).toBe('pcm');
+        expect(lowMemoryVoiceCallConfig.audioSetting.audio_sample_rate).toBe(16000);
     });
 
     it('temporarily overrides voice-call language boost for foreign mode only', () => {

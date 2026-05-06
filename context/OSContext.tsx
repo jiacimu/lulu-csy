@@ -1,12 +1,22 @@
 
 import React,{ createContext,useContext,useEffect,useState,useRef,useCallback,useMemo } from 'react';
-import { AppID,OSTheme,CharacterProfile,ChatTheme,UserProfile,SystemLog } from '../types';
+import { AppID,OSTheme,CharacterProfile,ChatTheme,UserProfile,SystemLog,AppearancePreset } from '../types';
 import { DB } from '../utils/db';
 import { onSystemLog } from '../utils/systemInterceptor';
 import { exportSystemData,importSystemData,ExportStateSnapshot,ImportCallbacks,SystemBackupMode,SystemBackupOptions } from '../utils/systemBackup';
 import { setHapticsEnabled as setHapticsEnabledGlobal } from '../utils/haptics';
 import { preloadImages } from '../utils/preloadResources';
 import { useAutoBackup } from '../hooks/useAutoBackup';
+import {
+    APPEARANCE_PRESET_ASSET_PREFIX,
+    createAppearancePreset,
+    exportAppearancePresetBlob,
+    importAppearancePresetFromFile,
+    parseStoredAppearancePresets,
+    replaceAppearancePresetAssets,
+    sanitizeAppearanceTheme,
+    stripAppearanceThemeForLocalStorage,
+} from '../utils/appearancePresets';
 
 // Sub-contexts
 import { NotificationProvider,useNotification,NotificationContextType } from './NotificationContext';
@@ -39,6 +49,15 @@ interface OSContextType extends AppContextType, NotificationContextType, Charact
     customThemes: ChatTheme[];
     addCustomTheme: (theme: ChatTheme) => void;
     removeCustomTheme: (id: string) => void;
+
+    // Appearance Presets
+    appearancePresets: AppearancePreset[];
+    saveAppearancePreset: (name: string) => Promise<void>;
+    applyAppearancePreset: (id: string) => Promise<void>;
+    deleteAppearancePreset: (id: string) => Promise<void>;
+    renameAppearancePreset: (id: string, name: string) => Promise<void>;
+    exportAppearancePreset: (id: string) => Promise<Blob>;
+    importAppearancePreset: (file: File) => Promise<void>;
 
     // Icons
     customIcons: Record<string, string>;
@@ -286,6 +305,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     const [isSettingsLoaded, setIsSettingsLoaded] = useState(false);
     const [customThemes, setCustomThemes] = useState<ChatTheme[]>([]);
     const [customIcons, setCustomIcons] = useState<Record<string, string>>({});
+    const [appearancePresets, setAppearancePresets] = useState<AppearancePreset[]>([]);
 
     // LOGS
     const [systemLogs, setSystemLogs] = useState<SystemLog[]>([]);
@@ -381,6 +401,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
                 const assetMap: Record<string, string> = {};
                 if (Array.isArray(assets)) {
                     assets.forEach(a => assetMap[a.id] = a.data);
+                    setAppearancePresets(parseStoredAppearancePresets(assets));
 
                     if (assetMap['wallpaper']) {
                         loadedTheme.wallpaper = assetMap['wallpaper'];
@@ -425,8 +446,9 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
                 console.error("Failed to load assets from DB", e);
             }
 
-            setTheme(loadedTheme);
-            applyCustomFont(loadedTheme.customFont);
+            const cleanTheme = sanitizeAppearanceTheme(loadedTheme);
+            setTheme(cleanTheme);
+            applyCustomFont(cleanTheme.customFont);
         };
 
         const initData = async () => {
@@ -644,29 +666,25 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
     const updateTheme = async (updates: Partial<OSTheme>) => {
         const { wallpaper, launcherWidgetImage, launcherWidgets, desktopDecorations, customFont } = updates;
-        const newTheme = { ...theme, ...updates };
+        const newTheme = sanitizeAppearanceTheme({ ...theme, ...updates });
         setTheme(newTheme);
 
         if (wallpaper !== undefined) {
-            if (wallpaper && wallpaper.startsWith('data:')) {
-                await DB.saveAsset('wallpaper', wallpaper);
+            if (newTheme.wallpaper && newTheme.wallpaper.startsWith('data:')) {
+                await DB.saveAsset('wallpaper', newTheme.wallpaper);
             } else {
                 await DB.deleteAsset('wallpaper');
             }
         }
 
         if (launcherWidgetImage !== undefined) {
-            if (launcherWidgetImage && launcherWidgetImage.startsWith('data:')) {
-                await DB.saveAsset('launcherWidgetImage', launcherWidgetImage);
-            } else {
-                await DB.deleteAsset('launcherWidgetImage');
-            }
+            await DB.deleteAsset('launcherWidgetImage');
         }
 
         if (launcherWidgets !== undefined) {
             const slots = ['tl', 'tr', 'wide', 'bl', 'br'];
             for (const slot of slots) {
-                const val = launcherWidgets[slot];
+                const val = newTheme.launcherWidgets?.[slot];
                 if (val && val.startsWith('data:')) {
                     await DB.saveAsset(`widget_${slot}`, val);
                 } else if (!val) {
@@ -682,7 +700,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
                 await DB.deleteAsset(key);
             }
             if (desktopDecorations) {
-                for (const deco of desktopDecorations) {
+                for (const deco of newTheme.desktopDecorations || []) {
                     if (deco.content && deco.content.startsWith('data:') && deco.type === 'image') {
                         await DB.saveAsset(`deco_${deco.id}`, deco.content);
                     }
@@ -691,39 +709,19 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
         }
 
         if (customFont !== undefined) {
-            if (customFont && customFont.startsWith('data:')) {
-                await DB.saveAsset('custom_font_data', customFont);
-                applyCustomFont(customFont);
-            } else if (customFont && (customFont.startsWith('http') || customFont.startsWith('https'))) {
+            if (newTheme.customFont && newTheme.customFont.startsWith('data:')) {
+                await DB.saveAsset('custom_font_data', newTheme.customFont);
+                applyCustomFont(newTheme.customFont);
+            } else if (newTheme.customFont && (newTheme.customFont.startsWith('http') || newTheme.customFont.startsWith('https'))) {
                 await DB.deleteAsset('custom_font_data');
-                applyCustomFont(customFont);
+                applyCustomFont(newTheme.customFont);
             } else {
                 await DB.deleteAsset('custom_font_data');
                 applyCustomFont(undefined);
             }
         }
 
-        const lsTheme = { ...newTheme };
-        if (lsTheme.wallpaper && lsTheme.wallpaper.startsWith('data:')) lsTheme.wallpaper = '';
-        if (lsTheme.launcherWidgetImage && lsTheme.launcherWidgetImage.startsWith('data:')) lsTheme.launcherWidgetImage = '';
-        if (lsTheme.launcherWidgets) {
-            const cleanWidgets: Record<string, string> = {};
-            for (const [k, v] of Object.entries(lsTheme.launcherWidgets)) {
-                cleanWidgets[k] = (v && v.startsWith('data:')) ? '' : v;
-            }
-            lsTheme.launcherWidgets = cleanWidgets;
-        }
-
-        if (lsTheme.desktopDecorations) {
-            lsTheme.desktopDecorations = lsTheme.desktopDecorations.map(d => ({
-                ...d,
-                content: (d.content && d.content.startsWith('data:') && d.type === 'image') ? '' : d.content
-            }));
-        }
-
-        if (lsTheme.customFont && lsTheme.customFont.startsWith('data:')) lsTheme.customFont = '';
-
-        localStorage.setItem('os_theme', JSON.stringify(lsTheme));
+        localStorage.setItem('os_theme', JSON.stringify(stripAppearanceThemeForLocalStorage(newTheme)));
     };
     // TTS 配置更新 — 深层 merge 嵌套对象（voiceSetting / audioSetting / voiceModify / preprocessConfig）
             // voiceModify 可选，只在有值时 merge
@@ -742,6 +740,59 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     }, []);
     const removeCustomTheme = async (id: string) => { setCustomThemes(prev => prev.filter(t => t.id !== id)); await DB.deleteTheme(id); };
     const setCustomIcon = async (appId: string, iconUrl: string | undefined) => { setCustomIcons(prev => { const next = { ...prev }; if (iconUrl) next[appId] = iconUrl; else delete next[appId]; return next; }); if (iconUrl) { await DB.saveAsset(`icon_${appId}`, iconUrl); } else { await DB.deleteAsset(`icon_${appId}`); } };
+
+    // --- Appearance Presets ---
+    const saveAppearancePreset = async (name: string) => {
+        const presetName = name.trim() || `预设 ${new Date().toLocaleDateString('zh-CN')}`;
+        const preset = createAppearancePreset(presetName, theme, customIcons);
+        setAppearancePresets(prev => [preset, ...prev]);
+        await DB.saveAsset(`${APPEARANCE_PRESET_ASSET_PREFIX}${preset.id}`, JSON.stringify(preset));
+        addToast(`外观预设「${presetName}」已保存`, 'success');
+    };
+
+    const applyAppearancePreset = async (id: string) => {
+        const preset = appearancePresets.find(item => item.id === id);
+        if (!preset) throw new Error('预设不存在');
+
+        const nextTheme = sanitizeAppearanceTheme(preset.theme);
+        await replaceAppearancePresetAssets(DB, { ...preset, theme: nextTheme });
+        setTheme(nextTheme);
+        setCustomIcons(preset.customIcons ? { ...preset.customIcons } : {});
+        applyCustomFont(nextTheme.customFont);
+        localStorage.setItem('os_theme', JSON.stringify(stripAppearanceThemeForLocalStorage(nextTheme)));
+        addToast(`已应用预设「${preset.name}」`, 'success');
+    };
+
+    const deleteAppearancePreset = async (id: string) => {
+        setAppearancePresets(prev => prev.filter(item => item.id !== id));
+        await DB.deleteAsset(`${APPEARANCE_PRESET_ASSET_PREFIX}${id}`);
+        addToast('预设已删除', 'info');
+    };
+
+    const renameAppearancePreset = async (id: string, name: string) => {
+        const presetName = name.trim();
+        if (!presetName) return;
+        const preset = appearancePresets.find(item => item.id === id);
+        if (!preset) throw new Error('预设不存在');
+        const updated = { ...preset, name: presetName };
+        setAppearancePresets(prev => prev.map(item => item.id === id ? updated : item));
+        await DB.saveAsset(`${APPEARANCE_PRESET_ASSET_PREFIX}${id}`, JSON.stringify(updated));
+        addToast('预设已重命名', 'success');
+    };
+
+    const exportAppearancePreset = async (id: string): Promise<Blob> => {
+        const preset = appearancePresets.find(item => item.id === id);
+        if (!preset) throw new Error('预设不存在');
+        return exportAppearancePresetBlob(preset);
+    };
+
+    const importAppearancePreset = async (file: File): Promise<void> => {
+        const preset = await importAppearancePresetFromFile(file);
+        setAppearancePresets(prev => [preset, ...prev]);
+        await DB.saveAsset(`${APPEARANCE_PRESET_ASSET_PREFIX}${preset.id}`, JSON.stringify(preset));
+        addToast(`已导入预设「${preset.name}」`, 'success');
+    };
+
     // --- System Export/Import ---
     const exportSystem = async (mode: SystemBackupMode, options?: SystemBackupOptions): Promise<Blob> => {
         try {
@@ -800,6 +851,13 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
         customThemes,
         addCustomTheme,
         removeCustomTheme,
+        appearancePresets,
+        saveAppearancePreset,
+        applyAppearancePreset,
+        deleteAppearancePreset,
+        renameAppearancePreset,
+        exportAppearancePreset,
+        importAppearancePreset,
         customIcons,
         setCustomIcon,
         exportSystem,

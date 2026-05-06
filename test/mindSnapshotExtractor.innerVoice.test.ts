@@ -127,7 +127,7 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
             },
         );
 
-        expect(result?.meta?.html).toBe('<div>G1|G9|G10|G11|$12</div>');
+        expect(result?.meta?.html).toBe('<div>G1|G9|G10|G11|</div>');
         expect(result?.meta?.allowScripts).not.toBe(true);
     });
 
@@ -181,5 +181,63 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
         expect(result?.meta?.html).toContain('.status-card { color: #fff; }');
         expect(result?.meta?.html).toContain('classList.add("ready")');
         expect(result?.meta?.allowScripts).toBe(true);
+    });
+
+    it('generates custom status cards from named placeholders without extractRegex', async () => {
+        mockFetchContent('<status>\n心情: 安静\n弹幕:\n  - 第一条\n  - 第二条\n</status>');
+
+        const result = await MindSnapshotExtractor.generateCustomCard(
+            baseCharacter,
+            '我会提前看材料。',
+            currentMsgs as any,
+            apiConfig,
+            {
+                id: 'tpl-named',
+                name: 'named template',
+                systemPrompt: '输出 status 字段。',
+                extractRegex: '',
+                fields: [
+                    { id: 'field_1', name: '心情', description: '当前心情', required: true },
+                    { id: 'field_2', name: '弹幕', description: '直播弹幕', required: true, type: 'list' },
+                ],
+                htmlBody: '<section class="status-card"><strong>{{心情}}</strong><ul>{{#弹幕}}<li>{{.}}</li>{{/弹幕}}</ul></section>',
+                cssTemplate: '.status-card { color: #fff; }',
+                jsTemplate: 'document.body.dataset.count = String(window.__statusData["弹幕"].length);',
+                templateVersion: 2,
+                allowScripts: true,
+                renderMode: 'html',
+            },
+        );
+
+        expect(result?.meta?.html).toContain('<strong>安静</strong>');
+        expect(result?.meta?.html).toContain('<li>第一条</li><li>第二条</li>');
+        expect(result?.meta?.html).toContain('window.__statusData');
+        expect(result?.meta?.allowScripts).toBe(true);
+    });
+
+    it('uses parsed named fields even when a legacy extractRegex is present', async () => {
+        mockFetchContent('<status>\n心情: 安静\nMood: quiet\n</status>');
+
+        const result = await MindSnapshotExtractor.generateCustomCard(
+            baseCharacter,
+            '我会提前看材料。',
+            currentMsgs as any,
+            apiConfig,
+            {
+                id: 'tpl-mixed',
+                name: 'mixed template',
+                systemPrompt: '输出 status 字段。',
+                extractRegex: '<status>[\\s\\S]*?Mood:\\s*(.*?)\\s*<\\/status>',
+                fields: [
+                    { id: 'field_1', name: '心情', description: '当前心情', required: true },
+                ],
+                htmlBody: '<section class="status-card"><strong>{{心情}}</strong><span>$1</span></section>',
+                templateVersion: 2,
+                renderMode: 'html',
+            },
+        );
+
+        expect(result?.meta?.html).toContain('<strong>安静</strong><span>quiet</span>');
+        expect(result?.meta?.html).not.toContain('{{心情}}');
     });
 });

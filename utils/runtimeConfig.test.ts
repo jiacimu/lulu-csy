@@ -47,6 +47,7 @@ describe('runtimeConfig', () => {
             baseUrl: 'https://llm.example.com',
             model: 'gpt-structured',
             useGeminiJailbreak: false,
+            useDeepSeekMode: false,
             disablePrefill: false,
         });
     });

@@ -62,6 +62,7 @@ interface ChatModalsProps {
     onSetHistoryStart: (id: number | undefined) => void;
     onEnterSelectionMode: () => void;
     onReplyMessage: () => void;
+    onCloseMessageOptions: () => void;
     onEditMessageStart: () => void;
     onConfirmEditMessage: () => void;
     onDeleteMessage: () => void;
@@ -124,7 +125,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     onTransfer, onImportEmoji, onSaveSettings,
     onBgUpload, onRemoveBg, onClearHistory,
     onArchive, onCreatePrompt, onEditPrompt, onSavePrompt, onDeletePrompt,
-    onSetHistoryStart, onEnterSelectionMode, onReplyMessage, onEditMessageStart, onConfirmEditMessage, onDeleteMessage, onCopyMessage, onDeleteEmoji, onDeleteCategory,
+    onSetHistoryStart, onEnterSelectionMode, onReplyMessage, onCloseMessageOptions, onEditMessageStart, onConfirmEditMessage, onDeleteMessage, onCopyMessage, onDeleteEmoji, onDeleteCategory,
     allCharacters = [], onSaveCategoryVisibility,
     translationEnabled, onToggleTranslation, translateSourceLang, translateTargetLang, onSetTranslateSourceLang, onSetTranslateLang,
     xhsEnabled, onToggleXhs,
@@ -599,7 +600,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                 </div>
             </Modal>
 
-            <Modal isOpen={modalType === 'message-options'} title="消息操作" onClose={() => setModalType('none')}>
+            <Modal isOpen={modalType === 'message-options'} title="消息操作" onClose={onCloseMessageOptions}>
                 <div className="space-y-3">
                     <button onClick={onEnterSelectionMode} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
                         多选 / 批量删除

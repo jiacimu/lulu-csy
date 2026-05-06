@@ -19,6 +19,8 @@ interface ChatInputAreaProps {
     onSend: () => void;
     onDeleteSelected: () => void;
     onForwardSelected?: () => void;
+    onSoulReflection?: () => void;
+    charName?: string;
     selectedCount: number;
     emojis: Emoji[];
     allVisibleEmojis?: Emoji[];
@@ -55,7 +57,7 @@ interface ChatInputAreaProps {
 
 const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     input, setInput, isTyping, selectionMode,
-    showPanel, setShowPanel, onSend, onDeleteSelected, onForwardSelected, selectedCount,
+    showPanel, setShowPanel, onSend, onDeleteSelected, onForwardSelected, onSoulReflection, charName, selectedCount,
     emojis, allVisibleEmojis = [], characters, activeCharacterId, onCharSelect,
     customThemes, onUpdateTheme, onRemoveTheme, activeThemeId,
     onPanelAction, onImageSelect, isSummarizing,
@@ -248,9 +250,21 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                 转发 ({selectedCount})
                             </button>
                         )}
+                        {onSoulReflection && (
+                            <button
+                                onClick={onSoulReflection}
+                                disabled={selectedCount === 0}
+                                title={charName ? `让${charName}回回神` : '回神'}
+                                aria-label={charName ? `让${charName}回回神` : '回神'}
+                                className={`flex-1 py-3 font-bold rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2 ${selectedCount === 0 ? 'bg-slate-200 text-slate-400' : 'bg-neutral-900 text-neutral-400 border border-neutral-700 shadow-sm'}`}
+                            >
+                                <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4"><line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><line x1="6" y1="12" x2="18" y2="12" stroke="currentColor" strokeWidth="1" strokeLinecap="round" opacity="0.3" /></svg>
+                                回神
+                            </button>
+                        )}
                         <button
                             onClick={onDeleteSelected}
-                            className={`${onForwardSelected ? 'flex-1' : 'w-full'} py-3 bg-red-500 text-white font-bold rounded-xl shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2`}
+                            className={`${onForwardSelected || onSoulReflection ? 'flex-1' : 'w-full'} py-3 bg-red-500 text-white font-bold rounded-xl shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2`}
                         >
                             <Trash className="w-5 h-5" weight="bold" />
                             删除 ({selectedCount})

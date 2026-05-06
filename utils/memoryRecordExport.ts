@@ -8,16 +8,25 @@ import { buildLocalLyrics } from './localLyrics';
 import { getMemoryRecordCoverImage } from './memoryRecordCovers';
 
 export type MemoryRecordMp3ExportMethod = 'native-share' | 'web-share' | 'download';
+export type MemoryRecordFileShareMethod = MemoryRecordMp3ExportMethod;
 
 export interface MemoryRecordMp3ExportResult {
     fileName: string;
-    method: MemoryRecordMp3ExportMethod;
+    method: MemoryRecordFileShareMethod;
     lyricsFileName?: string;
 }
 
-interface MemoryRecordExportFile {
+export interface MemoryRecordExportFile {
     blob: Blob;
     fileName: string;
+}
+
+export interface MemoryRecordExportPackage {
+    audioEntry: MemoryRecordAudio;
+    fileName: string;
+    files: MemoryRecordExportFile[];
+    lyricsFileName?: string;
+    record: MemoryRecord;
 }
 
 interface ResolvedMemoryRecordExportAudio {
@@ -537,7 +546,7 @@ async function buildTaggedMemoryRecordMp3(
     return new Blob([uint8ArrayToArrayBuffer(taggedBytes)], { type: 'audio/mpeg' });
 }
 
-export async function exportMemoryRecordMp3(playable: MemoryRecordPlayable): Promise<MemoryRecordMp3ExportResult> {
+export async function buildMemoryRecordExportPackage(playable: MemoryRecordPlayable): Promise<MemoryRecordExportPackage> {
     const { audioEntry, record } = await resolveExportAudio(playable);
     const mp3Blob = ensureMp3Blob(audioEntry.blob);
     const taggedMp3Blob = await buildTaggedMemoryRecordMp3(mp3Blob, playable, record, audioEntry);
@@ -549,16 +558,40 @@ export async function exportMemoryRecordMp3(playable: MemoryRecordPlayable): Pro
     ];
     const lyricsFileName = lrcFile?.fileName;
 
-    if (await tryNativeShare(files, fileName)) {
-        return { fileName, method: 'native-share', ...(lyricsFileName ? { lyricsFileName } : {}) };
+    return {
+        audioEntry,
+        fileName,
+        files,
+        record,
+        ...(lyricsFileName ? { lyricsFileName } : {}),
+    };
+}
+
+export async function shareMemoryRecordFiles(
+    files: MemoryRecordExportFile[],
+    title: string,
+): Promise<MemoryRecordFileShareMethod> {
+    if (await tryNativeShare(files, title)) {
+        return 'native-share';
     }
 
-    if (await tryWebShare(files, fileName)) {
-        return { fileName, method: 'web-share', ...(lyricsFileName ? { lyricsFileName } : {}) };
+    if (await tryWebShare(files, title)) {
+        return 'web-share';
     }
 
     for (const file of files) {
         triggerBrowserDownload(file.blob, file.fileName);
     }
-    return { fileName, method: 'download', ...(lyricsFileName ? { lyricsFileName } : {}) };
+    return 'download';
+}
+
+export async function exportMemoryRecordMp3(playable: MemoryRecordPlayable): Promise<MemoryRecordMp3ExportResult> {
+    const exportPackage = await buildMemoryRecordExportPackage(playable);
+    const method = await shareMemoryRecordFiles(exportPackage.files, exportPackage.fileName);
+
+    return {
+        fileName: exportPackage.fileName,
+        method,
+        ...(exportPackage.lyricsFileName ? { lyricsFileName: exportPackage.lyricsFileName } : {}),
+    };
 }

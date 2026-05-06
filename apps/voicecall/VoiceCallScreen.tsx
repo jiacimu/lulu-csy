@@ -143,6 +143,8 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
         aiResponse,
         ttsDegraded,
         transcriptSource,
+        lowMemoryMode,
+        voiceInputMode,
         // ─── 通话质量反馈 ───
         sttEmptyHint,
         // ─── 外语模式 (Foreign Language) ───
@@ -206,6 +208,9 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
 
             // ── 持久化通话记录 ──
             const history = lastCallHistory.current;
+            const persistedHistory = lowMemoryMode
+                ? history.map(({ role, content }) => ({ role, content }))
+                : history;
 
             if (history.length > 0) {
                 const mode = selectedMode || 'daily';
@@ -213,8 +218,8 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                 const modeText = MODE_LABELS[mode] || mode;
 
                 // 过滤掉系统自动发送的开场白提示词，避免出现在通话记录卡片中
-                const filteredHistory = filterPersistedCallHistory(history);
-                const persistedConversation = buildPersistedCallConversation(history);
+                const filteredHistory = filterPersistedCallHistory(persistedHistory);
+                const persistedConversation = buildPersistedCallConversation(persistedHistory);
 
                 // 拼接给模型读 + 卡片展示的文本版
                 const lines = filteredHistory.map(h =>
@@ -239,10 +244,12 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                         // 剥离 audioBlob，防止撑爆主存
                         conversation: persistedConversation,
                         hasCallAudio: persistedConversation.some(h => h.hasAudio === true),
+                        lowMemoryMode,
+                        voiceInputMode,
                     },
                 }).then(async (savedMsgId) => {
                     // ── 将音频 Blob 存入专用的 STORE_VOICE_AUDIO ──
-                    const audioEntries = buildPersistedCallAudioEntries(savedMsgId, history);
+                    const audioEntries = lowMemoryMode ? [] : buildPersistedCallAudioEntries(savedMsgId, persistedHistory);
                     for (const [i, entry] of audioEntries.entries()) {
                         try {
                             await saveVoiceAudio(entry.key, entry.blob);
@@ -257,7 +264,7 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                     if (char.vectorMemoryEnabled && embeddingApiKey) {
                         const callExtractConfig = getSecondaryApiConfig() || apiConfig;
                         VectorMemoryExtractor.extractFromCallHistory(
-                            char.id, char.name, history, Date.now(), callExtractConfig, embeddingApiKey,
+                            char.id, char.name, persistedHistory, Date.now(), callExtractConfig, embeddingApiKey,
                         ).then(count => {
                             if (count > 0) console.log(`[VoiceCall] Extracted ${count} memories from call`);
                         }).catch(err => console.error('[VoiceCall] Call memory extraction failed:', err));
@@ -544,6 +551,7 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                         volume={volume}
                         onVolumeChange={setVolume}
                         sttEmptyHint={sttEmptyHint}
+                        voiceInputDisabled={voiceInputMode === 'text-only'}
                     />
                 )}
 

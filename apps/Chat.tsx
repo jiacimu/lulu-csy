@@ -79,6 +79,12 @@ const Chat: React.FC = () => {
     const [selectionMode, setSelectionMode] = useState(false);
     const [selectedMsgIds, setSelectedMsgIds] = useState<Set<number>>(new Set());
 
+    // --- Soul Reflection State ---
+    const [showSoulReflectionPanel, setShowSoulReflectionPanel] = useState(false);
+    const [soulReflectionFeedback, setSoulReflectionFeedback] = useState('');
+    const [isSoulReflecting, setIsSoulReflecting] = useState(false);
+    const [soulReflectionResult, setSoulReflectionResult] = useState<{ reflection: string; anchors: string; mirrorSnippets: string[] } | null>(null);
+
     // --- Translation State (per-character toggle, global language settings) ---
     const [translationEnabled, setTranslationEnabled] = useState(() => {
         try { return JSON.parse(localStorage.getItem(`chat_translate_enabled_${activeCharacterId}`) || 'false'); } catch { return false; }
@@ -564,6 +570,73 @@ const Chat: React.FC = () => {
         }
     };
 
+    const handleSoulReflection = async () => {
+        if (!char || !apiConfig.apiKey || selectedMsgIds.size === 0) return;
+        if (!soulReflectionFeedback.trim()) {
+            addToast('请先写点什么', 'info');
+            return;
+        }
+
+        const selectedIds = new Set(selectedMsgIds);
+        const selectedMessages = messages.filter(m => selectedIds.has(m.id));
+        if (selectedMessages.length === 0) return;
+
+        setIsSoulReflecting(true);
+
+        try {
+            const { generateSoulReflection } = await import('../utils/soulReflection');
+
+            const result = await generateSoulReflection({
+                selectedMessages,
+                userFeedback: soulReflectionFeedback,
+                char,
+                userProfile,
+                recentContext: messages.slice(-20),
+            }, apiConfig);
+
+            const mirrorSnippetsList = selectedMessages
+                .filter(m => m.role === 'assistant')
+                .slice(0, 5)
+                .map(m => m.content.substring(0, 30));
+
+            const mirrorSnippets = mirrorSnippetsList.join('||');
+
+            const modelContent = result.anchors
+                ? `${result.reflection}\n\n${result.anchors}`
+                : result.reflection;
+
+            await DB.saveMessage({
+                charId: char.id,
+                role: 'assistant',
+                type: 'soul_reflection',
+                content: modelContent,
+                metadata: {
+                    source: 'soul_reflection',
+                    displayReflection: result.reflection,
+                    mirrorSnippets,
+                    anchors: result.anchors,
+                    selectedMsgIds: Array.from(selectedIds),
+                    userFeedback: soulReflectionFeedback,
+                    hiddenFromUser: true,
+                },
+            });
+
+            // Show result panel instead of inserting into chat flow
+            setSoulReflectionResult({
+                reflection: result.reflection,
+                anchors: result.anchors,
+                mirrorSnippets: mirrorSnippetsList,
+            });
+            setSoulReflectionFeedback('');
+            setSelectionMode(false);
+            setSelectedMsgIds(new Set());
+        } catch (err: any) {
+            addToast(err.message || '回神失败', 'error');
+        } finally {
+            setIsSoulReflecting(false);
+        }
+    };
+
     // --- Modal Handlers ---
 
     const handleAddCategory = async () => {
@@ -865,6 +938,7 @@ const Chat: React.FC = () => {
             }
         });
         setModalType('none');
+        setSelectedMessage(null);
     };
 
     const handleCopyMessage = () => {
@@ -1305,6 +1379,8 @@ const Chat: React.FC = () => {
         );
     }
 
+    const activeCharName = char.name || '';
+
     return (
         <div
             className={`sully-chat-container flex flex-col h-full bg-[#f1f5f9] overflow-hidden relative font-sans transition-[background-image] duration-500 theme-${activeTheme.baseThemeId || activeTheme.id}`}
@@ -1344,6 +1420,7 @@ const Chat: React.FC = () => {
                 onClearHistory={handleClearHistory} onArchive={handleFullArchive}
                 onCreatePrompt={createNewPrompt} onEditPrompt={editSelectedPrompt} onSavePrompt={handleSavePrompt} onDeletePrompt={handleDeletePrompt}
                 onSetHistoryStart={handleSetHistoryStart} onEnterSelectionMode={handleEnterSelectionMode}
+                onCloseMessageOptions={() => { setModalType('none'); setSelectedMessage(null); }}
                 onReplyMessage={handleReplyMessage} onEditMessageStart={() => { if (selectedMessage) { setEditContent(selectedMessage.content); setModalType('edit-message'); } }}
                 onConfirmEditMessage={confirmEditMessage} onDeleteMessage={handleDeleteMessage} onCopyMessage={handleCopyMessage} onDeleteEmoji={handleDeleteEmoji} onDeleteCategory={handleDeleteCategory}
                 allCharacters={characters} onSaveCategoryVisibility={handleSaveCategoryVisibility}
@@ -1477,7 +1554,7 @@ const Chat: React.FC = () => {
                             isLastInGroup={nextRole !== m.role}
                             activeTheme={activeTheme}
                             charAvatar={char.avatar}
-                            charName={char.name}
+                            charName={activeCharName}
                             userAvatar={userProfile.avatar}
                             onLongPress={handleMessageLongPress}
                             selectionMode={selectionMode}
@@ -1555,6 +1632,8 @@ const Chat: React.FC = () => {
                     onSend={handleSendCallback}
                     onDeleteSelected={handleBatchDelete}
                     onForwardSelected={handleForwardSelected}
+                    onSoulReflection={() => setShowSoulReflectionPanel(true)}
+                    charName={activeCharName}
                     selectedCount={selectedMsgIds.size}
                     emojis={filteredEmojis}
                     allVisibleEmojis={allVisibleEmojis}
@@ -1581,6 +1660,142 @@ const Chat: React.FC = () => {
                     isSpeaking={voiceRecorder.isSpeaking}
                 />
             </div>
+
+            {/* ═══ Soul Reflection — Immersive Black Panel ═══ */}
+            {showSoulReflectionPanel && (
+                <div className="fixed inset-0 z-[100] bg-black flex flex-col font-sans overflow-hidden animate-fade-in">
+                    {/* Close button */}
+                    {!isSoulReflecting && (
+                        <button
+                            onClick={() => { setShowSoulReflectionPanel(false); setSoulReflectionResult(null); }}
+                            className="absolute top-6 right-6 z-20 w-10 h-10 flex items-center justify-center rounded-full border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-90"
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5"><path d="M6.75 6.75l10.5 10.5M17.25 6.75l-10.5 10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                        </button>
+                    )}
+
+                    {soulReflectionResult ? (
+                        /* ═══ Result View ═══ */
+                        <div className="flex-1 flex flex-col items-center overflow-hidden">
+                            {/* Header */}
+                            <div className="pt-20 flex flex-col items-center shrink-0">
+                                <div className="w-8 h-[1px] bg-neutral-800 mb-8" />
+                                <div className="w-[1px] h-8 bg-gradient-to-b from-transparent via-neutral-500 to-transparent mb-4" />
+                                <p className="text-[11px] font-light text-neutral-600 tracking-[0.3em] uppercase">回神</p>
+                            </div>
+
+                            {/* Content */}
+                            <div className="flex-1 min-h-0 w-full max-w-lg px-8 py-8 overflow-y-auto no-scrollbar">
+                                {/* Mirror snippets */}
+                                {soulReflectionResult.mirrorSnippets.length > 0 && (
+                                    <div className="mb-8">
+                                        <div className="w-5 h-[1px] bg-neutral-700 mb-4" />
+                                        <div className="space-y-2 pl-4 border-l border-neutral-800">
+                                            {soulReflectionResult.mirrorSnippets.map((s, i) => (
+                                                <p key={i} className="text-[12px] text-neutral-600 italic leading-relaxed font-light">
+                                                    "{s}{s.length >= 28 ? '...' : '"'}
+                                                </p>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Divider */}
+                                {soulReflectionResult.mirrorSnippets.length > 0 && (
+                                    <div className="flex items-center gap-4 mb-8">
+                                        <div className="flex-1 h-[1px] bg-neutral-800" />
+                                        <div className="w-1 h-1 rounded-full bg-neutral-700" />
+                                        <div className="flex-1 h-[1px] bg-neutral-800" />
+                                    </div>
+                                )}
+
+                                {/* Reflection text */}
+                                <div className="text-[15px] text-neutral-300 leading-[2.0] tracking-wide font-light whitespace-pre-wrap">
+                                    {soulReflectionResult.reflection}
+                                </div>
+
+                                {/* Anchors */}
+                                {soulReflectionResult.anchors && (
+                                    <div className="mt-10">
+                                        <div className="flex items-center gap-3 mb-4">
+                                            <div className="w-3 h-[1px] bg-neutral-600" />
+                                            <span className="text-[10px] text-neutral-600 tracking-[0.2em] uppercase font-medium">Anchors</span>
+                                            <div className="flex-1 h-[1px] bg-neutral-800" />
+                                        </div>
+                                        <div className="text-[13px] text-neutral-500 leading-[1.9] whitespace-pre-wrap font-light">
+                                            {soulReflectionResult.anchors}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Bottom close hint */}
+                            <div className="shrink-0 pb-10 pt-4 flex flex-col items-center gap-3">
+                                <div className="w-[1px] h-6 bg-gradient-to-b from-neutral-700 to-transparent" />
+                                <button
+                                    onClick={() => { setShowSoulReflectionPanel(false); setSoulReflectionResult(null); }}
+                                    className="text-[11px] text-neutral-600 tracking-[0.15em] font-light hover:text-neutral-400 transition-colors active:scale-95"
+                                >
+                                    关闭
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        /* ═══ Input View ═══ */
+                        <div className="flex-1 flex flex-col items-center justify-center px-8">
+                            {isSoulReflecting ? (
+                                /* Loading state */
+                                <div className="flex flex-col items-center">
+                                    <div className="w-12 h-[1px] bg-neutral-800 mb-12" />
+                                    <div className="w-[1px] h-12 bg-gradient-to-b from-transparent via-white to-transparent animate-pulse mb-6" />
+                                    <p className="text-sm font-light text-neutral-500 italic tracking-widest">正在回神...</p>
+                                </div>
+                            ) : (
+                                /* Input form */
+                                <div className="w-full max-w-sm flex flex-col items-center">
+                                    {/* Title area */}
+                                    <div className="mb-10 flex flex-col items-center">
+                                        <div className="w-8 h-[1px] bg-neutral-800 mb-8" />
+                                        <div className="w-[1px] h-8 bg-gradient-to-b from-transparent via-neutral-500 to-transparent mb-4" />
+                                        <p className="text-[11px] font-light text-neutral-600 tracking-[0.3em] uppercase">回神</p>
+                                    </div>
+
+                                    {/* Selected count */}
+                                    <p className="text-[11px] text-neutral-600 mb-6 tracking-wide">
+                                        已选中 {selectedMsgIds.size} 条消息
+                                    </p>
+
+                                    {/* Feedback input */}
+                                    <textarea
+                                        value={soulReflectionFeedback}
+                                        onChange={e => setSoulReflectionFeedback(e.target.value)}
+                                        placeholder={activeCharName ? `和${activeCharName}说...` : '写下你的感受...'}
+                                        className="w-full h-32 bg-transparent border border-neutral-800 rounded-none px-4 py-3 text-[14px] text-neutral-300 placeholder-neutral-700 resize-none focus:outline-none focus:border-neutral-600 transition-colors font-light tracking-wide leading-relaxed"
+                                        autoFocus
+                                    />
+
+                                    {/* Submit button */}
+                                    <button
+                                        onClick={handleSoulReflection}
+                                        disabled={!soulReflectionFeedback.trim()}
+                                        className="w-full mt-6 py-3.5 border border-neutral-700 text-neutral-400 font-light text-[13px] tracking-[0.15em] transition-all active:scale-[0.97] disabled:opacity-20 disabled:scale-100 hover:border-neutral-500 hover:text-neutral-300"
+                                    >
+                                        回神
+                                    </button>
+
+                                    {/* Cancel */}
+                                    <button
+                                        onClick={() => setShowSoulReflectionPanel(false)}
+                                        className="mt-4 text-[11px] text-neutral-700 tracking-[0.1em] hover:text-neutral-500 transition-colors"
+                                    >
+                                        取消
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Forward Modal */}
             <Modal isOpen={showForwardModal} title="转发聊天记录" onClose={() => setShowForwardModal(false)}>

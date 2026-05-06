@@ -7,6 +7,7 @@ type ComposeOptions = {
     extracted?: string;
     previewValues?: readonly string[];
     includeScripts?: boolean;
+    parsedData?: Record<string, string | string[]>;
 };
 
 export type SplitStatusTemplateResult = {
@@ -79,7 +80,7 @@ export function substituteStatusTemplateVariables(
             }
 
             if (index >= matchResult.length) {
-                return token;
+                return '';
             }
 
             return matchResult[index] || '';
@@ -89,6 +90,50 @@ export function substituteStatusTemplateVariables(
     return source.replace(/\$(\d+)/g, (_token, indexText: string) => (
         indexText === '1' ? extracted : ''
     ));
+}
+
+export function substituteNamedPlaceholders(
+    source: string,
+    data: Record<string, string | string[]>,
+): string {
+    const values = data || {};
+
+    const withLists = source.replace(/{{#\s*([^}]+?)\s*}}([\s\S]*?){{\/\s*([^}]+?)\s*}}/g, (token, openKey: string, inner: string, closeKey: string) => {
+        const key = openKey.trim();
+        if (key !== closeKey.trim()) return token;
+
+        const list = values[key];
+        if (!Array.isArray(list)) return '';
+
+        return list.map((item, index) => inner
+            .replace(/{{\s*\.\s*}}/g, item)
+            .replace(/{{\s*@index\s*}}/g, String(index)))
+            .join('');
+    });
+
+    return withLists.replace(/{{\s*([^#/][^}]*)\s*}}/g, (token, rawKey: string) => {
+        const key = rawKey.trim();
+        if (key === '.' || key === '@index') return token;
+        const value = values[key];
+        if (Array.isArray(value)) return value.join('、');
+        return typeof value === 'string' ? value : '';
+    });
+}
+
+function substituteTemplatePlaceholders(source: string, options: ComposeOptions): string {
+    let substituted = options.parsedData
+        ? substituteNamedPlaceholders(source, options.parsedData)
+        : source;
+
+    if (options.previewValues) {
+        return substituteWithValues(substituted, options.previewValues, options.extracted);
+    }
+
+    if (options.matchResult || !options.parsedData) {
+        return substituteStatusTemplateVariables(substituted, options.matchResult || null, options.extracted || '');
+    }
+
+    return substituted.replace(/\$(\d+)/g, '');
 }
 
 export function hasLayeredStatusTemplate(template: CustomStatusTemplate | null | undefined): boolean {
@@ -107,9 +152,7 @@ export function composeCustomStatusTemplateHtml(
         const legacyHtml = normalizeBlock(template.htmlTemplate);
         if (!legacyHtml) return '';
 
-        return options.previewValues
-            ? substituteWithValues(legacyHtml, options.previewValues, options.extracted)
-            : substituteStatusTemplateVariables(legacyHtml, options.matchResult || null, options.extracted || '');
+        return substituteTemplatePlaceholders(legacyHtml, options);
     }
 
     const htmlBody = normalizeBlock(template.htmlBody);
@@ -119,15 +162,13 @@ export function composeCustomStatusTemplateHtml(
     const jsTemplate = stripScriptWrapper(normalizeBlock(template.jsTemplate));
     const shouldIncludeScripts = options.includeScripts ?? template.allowScripts === true;
 
-    const substitutedBody = options.previewValues
-        ? substituteWithValues(htmlBody, options.previewValues, options.extracted)
-        : substituteStatusTemplateVariables(htmlBody, options.matchResult || null, options.extracted || '');
-    const substitutedCss = options.previewValues
-        ? substituteWithValues(cssTemplate, options.previewValues, options.extracted)
-        : substituteStatusTemplateVariables(cssTemplate, options.matchResult || null, options.extracted || '');
-    const substitutedJs = options.previewValues
-        ? substituteWithValues(jsTemplate, options.previewValues, options.extracted)
-        : substituteStatusTemplateVariables(jsTemplate, options.matchResult || null, options.extracted || '');
+    const substitutedBody = substituteTemplatePlaceholders(htmlBody, options);
+    const substitutedCss = substituteTemplatePlaceholders(cssTemplate, options);
+    const substitutedJs = substituteTemplatePlaceholders(jsTemplate, options);
+
+    const dataScriptBlock = shouldIncludeScripts && options.parsedData
+        ? `\n<script>window.__statusData = JSON.parse(decodeURIComponent("${encodeURIComponent(JSON.stringify(options.parsedData))}"));</script>`
+        : '';
 
     const scriptBlock = shouldIncludeScripts && substitutedJs
         ? `\n<script>\n${substitutedJs}\n</script>`
@@ -145,7 +186,7 @@ ${substitutedCss}
 <body>
 <main class="status-card-frame">
 ${substitutedBody}
-</main>${scriptBlock}
+</main>${dataScriptBlock}${scriptBlock}
 </body>
 </html>`;
 }

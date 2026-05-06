@@ -17,6 +17,7 @@ import { StatusCardData,CustomStatusTemplate,SKELETON_REGISTRY } from '../types/
 import { DB } from './db';
 import { RealtimeContextManager } from './realtimeContext';
 import { composeCustomStatusTemplateHtml } from './statusTemplateComposer';
+import { parseStatusBlock } from './statusBlockParser';
 import {
   RawSenseOutput,
   SenseDelta,
@@ -1224,9 +1225,15 @@ ${aiReply.slice(0, 500)}
         const content = await callSecondaryLLM(apiConfig, system, user, controller.signal, 2000, 0.8);
         if (!content) return null;
 
-        // ── 用用户的正则提取内容 ──
+        // ── 用用户的正则或新版结构化解析器提取内容 ──
         let extracted: string | null = null;
         let matchResult: RegExpMatchArray | null = null;
+        let parsedData: Record<string, string | string[]> | undefined;
+        const parsedStatus = parseStatusBlock(content, template.fields);
+        if (parsedStatus) {
+            parsedData = parsedStatus.fields;
+        }
+
         if (template.extractRegex?.trim()) {
             try {
                 const regex = new RegExp(template.extractRegex, 's');
@@ -1237,10 +1244,14 @@ ${aiReply.slice(0, 500)}
                 console.warn('🎨 [CustomCard] Invalid regex:', template.extractRegex, e);
                 onError?.(`自定义正则无效: ${template.extractRegex}`);
             }
+        } else if (parsedStatus) {
+            extracted = parsedStatus.raw;
+        } else {
+            onError?.('自定义卡片没有找到 <status> 状态块');
         }
 
-        // 如果没有正则或正则没匹配到，直接用完整输出
-        if (!extracted) {
+        // 旧正则模板匹配失败时保留原有兜底；新版结构化模板要求存在 <status>。
+        if (!extracted && template.extractRegex?.trim()) {
             // Strip think tags
             extracted = content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/g, '').trim();
             extracted = extracted.replace(/<think(?:ing)?>[\s\S]*$/g, '').trim();
@@ -1260,6 +1271,7 @@ ${aiReply.slice(0, 500)}
             const composedHtml = composeCustomStatusTemplateHtml(template, {
                 matchResult,
                 extracted,
+                parsedData,
                 includeScripts: template.allowScripts === true,
             });
             const finalHtml = composedHtml || extractHtmlFromResponse(extracted) || extracted;

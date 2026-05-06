@@ -2,11 +2,13 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem } from '@capacitor/filesystem';
 import type { MemoryRecord } from '../types';
 import type { MemoryRecordPlayable } from '../types/music';
 import { DB } from './db';
 import { computeLocalLyricsSourceHash } from './localLyrics';
-import { exportMemoryRecordMp3 } from './memoryRecordExport';
+import { exportMemoryRecordMp3, shareMemoryRecordFiles } from './memoryRecordExport';
 
 let createObjectURLMock: ReturnType<typeof vi.fn>;
 
@@ -312,5 +314,42 @@ describe('memoryRecordExport', () => {
         expect(frames.has('TIT2')).toBe(true);
         expect(frames.has('USLT')).toBe(true);
         expect(frames.has('APIC')).toBe(false);
+    });
+
+    it('uses Web Share when browser file sharing is available', async () => {
+        const webShare = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'share', { value: webShare, configurable: true });
+        Object.defineProperty(navigator, 'canShare', { value: vi.fn(() => true), configurable: true });
+
+        const method = await shareMemoryRecordFiles([
+            { blob: new Blob(['png'], { type: 'image/png' }), fileName: 'card.png' },
+        ], '分享卡片');
+
+        expect(method).toBe('web-share');
+        expect(webShare).toHaveBeenCalledWith(expect.objectContaining({
+            files: [expect.any(File)],
+            title: '分享卡片',
+        }));
+        expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
+    });
+
+    it('falls back to download when native share fails and Web Share is unsupported', async () => {
+        vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+        Object.defineProperty(Filesystem, 'writeFile', {
+            configurable: true,
+            value: vi.fn().mockResolvedValue(undefined),
+        });
+        Object.defineProperty(Filesystem, 'getUri', {
+            configurable: true,
+            value: vi.fn().mockResolvedValue({ uri: 'cache://song.mp3' }),
+        });
+
+        const method = await shareMemoryRecordFiles([
+            { blob: new Blob(['png'], { type: 'image/png' }), fileName: 'card.png' },
+            { blob: new Blob(['mp3'], { type: 'audio/mpeg' }), fileName: 'song.mp3' },
+        ], '分享卡片');
+
+        expect(method).toBe('download');
+        expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(2);
     });
 });

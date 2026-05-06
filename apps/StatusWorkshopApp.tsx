@@ -14,11 +14,13 @@ import {
     hasLayeredStatusTemplate,
     splitStatusTemplateHtml,
 } from '../utils/statusTemplateComposer';
+import { buildStatusSampleV2, parseStatusBlock } from '../utils/statusBlockParser';
 import { AUTOFILL_SUPPRESSION_REACT_PROPS } from '../utils/autofillSuppression';
 
-type TabId = 'system' | 'protocol' | 'interaction' | 'html' | 'css' | 'js';
-type GenerationStep = 'system' | 'protocol' | 'html' | 'css' | 'js';
-type GenerationMode = 'iterate' | 'replace';
+type TabId = 'fields' | 'visual' | 'interaction' | 'advanced';
+type VisualTabId = 'html' | 'css';
+type GenerationStep = 'fields' | 'prompt' | 'html' | 'css' | 'js';
+type GenerationMode = 'generate' | 'polish';
 type PreviewMode = 'visual' | 'extract';
 type ReviewFlag = keyof StatusWorkshopReviewFlags;
 
@@ -26,6 +28,7 @@ export type GeneratorField = {
     id: string;
     name: string;
     desc: string;
+    type?: 'text' | 'list';
 };
 
 type DebouncedPreviewUpdate = ((html: string, allowScripts?: boolean) => void) & {
@@ -33,20 +36,22 @@ type DebouncedPreviewUpdate = ((html: string, allowScripts?: boolean) => void) &
 };
 
 export type StatusTemplateExtractionValidation = {
-    status: 'missing_regex' | 'invalid_regex' | 'no_match' | 'missing_groups' | 'ok';
+    status: 'missing_regex' | 'invalid_regex' | 'no_match' | 'missing_groups' | 'missing_fields' | 'ok';
     severity: 'neutral' | 'error' | 'warning' | 'success';
     sampleStatusText: string;
     placeholders: number[];
     missingPlaceholders: number[];
+    missingFields?: string[];
     captureCount: number;
     messages: string[];
     matchResult: RegExpMatchArray | null;
+    parsedData?: Record<string, string | string[]>;
 };
 
 const DEFAULT_GENERATOR_FIELDS: GeneratorField[] = [
-    { id: 'default-time', name: '时间', desc: '当前时间 HH:MM' },
-    { id: 'default-location', name: '地点', desc: '角色所在位置' },
-    { id: 'default-action', name: '动作', desc: '角色正在做什么' },
+    { id: 'default-time', name: '时间', desc: '当前时间 HH:MM', type: 'text' },
+    { id: 'default-location', name: '地点', desc: '角色所在位置', type: 'text' },
+    { id: 'default-action', name: '动作', desc: '角色正在做什么', type: 'text' },
 ];
 
 const WORKSHOP_TEXT_ENTRY_PROPS = {
@@ -63,30 +68,29 @@ const STATUS_WORKSHOP_EXPORT_VERSION = 1;
 
 let generatorFieldIdCounter = 0;
 
-function createGeneratorField(name = '', desc = ''): GeneratorField {
+function createGeneratorField(name = '', desc = '', type: 'text' | 'list' = 'text'): GeneratorField {
     generatorFieldIdCounter += 1;
     return {
         id: `generated-field-${Date.now()}-${generatorFieldIdCounter}`,
         name,
         desc,
+        type,
     };
 }
 
 const GENERATION_LABELS: Record<GenerationStep, string> = {
-    system: '生成状态写法',
-    protocol: '生成字段协议',
+    prompt: '生成写法',
+    fields: '生成字段',
     html: '生成 HTML 骨架',
-    css: '生成 / 优化 CSS',
+    css: '生成 CSS',
     js: '生成互动 JS',
 };
 
 const TABS: Array<{ id: TabId; label: string }> = [
-    { id: 'protocol', label: '1 字段协议' },
-    { id: 'system', label: '2 TA 的状态写法' },
-    { id: 'interaction', label: '3 互动需求' },
-    { id: 'html', label: '4 HTML 骨架' },
-    { id: 'css', label: '5 CSS 美化' },
-    { id: 'js', label: '6 互动 JS' },
+    { id: 'fields', label: '1 定义字段' },
+    { id: 'visual', label: '2 视觉设计' },
+    { id: 'interaction', label: '3 互动' },
+    { id: 'advanced', label: '4 AI 写法' },
 ];
 
 const INTERACTION_OPTIONS: Array<{
@@ -122,6 +126,7 @@ function createEmptyTemplate(index: number): CustomStatusTemplate {
             name: field.name,
             description: field.desc,
             required: true,
+            type: field.type || 'text',
         })),
     };
 }
@@ -141,6 +146,7 @@ function getValidGeneratorFields(fields: GeneratorField[]): GeneratorField[] {
             id: field.id,
             name: field.name.trim(),
             desc: field.desc.trim(),
+            type: field.type === 'list' ? 'list' as const : 'text' as const,
         }))
         .filter(field => field.name);
 }
@@ -151,6 +157,7 @@ function toTemplateFields(fields: GeneratorField[]): TemplateField[] {
         name: field.name,
         description: field.desc,
         required: true,
+        type: field.type === 'list' ? 'list' : 'text',
     }));
 }
 
@@ -163,6 +170,7 @@ function templateFieldsToGeneratorFields(fields: TemplateField[] | undefined): G
         id: field.id || `field_${index + 1}`,
         name: field.name || '',
         desc: field.description || '',
+        type: field.type === 'list' ? 'list' : 'text',
     }));
 }
 
@@ -176,7 +184,11 @@ function formatFieldList(fields: GeneratorField[] | TemplateField[]): string {
         .map((field, index) => {
             const name = 'name' in field ? field.name : '';
             const description = 'desc' in field ? field.desc : field.description;
-            return `- ${name}: ${description || `字段 ${index + 1} 的状态值`}（占位符 $${index + 1}）`;
+            const type = field.type === 'list' ? 'list' : 'text';
+            const placeholder = type === 'list'
+                ? `{{#${name}}}<li>{{.}}</li>{{/${name}}}`
+                : `{{${name}}}`;
+            return `- ${name}: ${description || `字段 ${index + 1} 的状态值`}（类型：${type === 'list' ? '列表' : '文本'}；占位符：${placeholder}）`;
         })
         .join('\n');
 }
@@ -187,21 +199,24 @@ function getFieldName(field: GeneratorField | TemplateField, index: number): str
 
 export function buildStatusContract(fields: GeneratorField[] | TemplateField[]): string {
     const lines = fields.length
-        ? fields.map((field, index) => `${getFieldName(field, index)}: 值`)
+        ? fields.flatMap((field, index) => {
+            const name = getFieldName(field, index);
+            if (field.type === 'list') {
+                return [`${name}:`, '  - 列表项1', '  - 列表项2', '  - 列表项3'];
+            }
+            return [`${name}: 值`];
+        })
         : ['字段1: 值'];
 
     return ['<status>', ...lines, '</status>'].join('\n');
 }
 
 export function buildStatusSample(fields: GeneratorField[] | TemplateField[]): string {
-    const lines = fields.length
-        ? fields.map((field, index) => {
-            const name = getFieldName(field, index);
-            return `${name}: ${name}示例值`;
-        })
-        : ['字段1: 字段1示例值'];
-
-    return ['<status>', ...lines, '</status>'].join('\n');
+    return buildStatusSampleV2(fields.map((field, index) => ({
+        name: getFieldName(field, index),
+        type: field.type === 'list' ? 'list' : 'text',
+        description: 'desc' in field ? field.desc : field.description,
+    })));
 }
 
 export function extractTemplatePlaceholders(source: string): number[] {
@@ -214,6 +229,10 @@ export function extractTemplatePlaceholders(source: string): number[] {
     }
 
     return Array.from(placeholders).sort((a, b) => a - b);
+}
+
+export function shouldClearLegacyExtractRegexForHtml(htmlBody: string): boolean {
+    return /{{\s*(?:#|\/)?\s*[^}]+?\s*}}/.test(htmlBody || '');
 }
 
 function getTemplatePlaceholderSource(template: CustomStatusTemplate): string {
@@ -236,15 +255,52 @@ export function validateStatusTemplateExtraction(
     const regexSource = (template.extractRegex || '').trim();
 
     if (!regexSource) {
+        const parsed = parseStatusBlock(sampleStatusText, template.fields);
+        const templateFields = template.fields || [];
+        const missingFields = templateFields
+            .map(field => field.name)
+            .filter(name => !parsed?.fields || !(name in parsed.fields));
+
+        if (!parsed) {
+            return {
+                status: 'no_match',
+                severity: 'error',
+                sampleStatusText,
+                placeholders,
+                missingPlaceholders: [],
+                missingFields: templateFields.map(field => field.name),
+                captureCount: 0,
+                messages: ['没有找到 <status>...</status> 状态块，新解析器无法提取字段。'],
+                matchResult: null,
+            };
+        }
+
+        if (missingFields.length > 0) {
+            return {
+                status: 'missing_fields',
+                severity: 'warning',
+                sampleStatusText,
+                placeholders,
+                missingPlaceholders: [],
+                missingFields,
+                captureCount: 0,
+                messages: [`新解析器能读取状态块，但缺少字段：${missingFields.join('、')}。`],
+                matchResult: null,
+                parsedData: parsed.fields,
+            };
+        }
+
         return {
-            status: 'missing_regex',
-            severity: 'neutral',
+            status: 'ok',
+            severity: 'success',
             sampleStatusText,
             placeholders,
-            missingPlaceholders: placeholders,
+            missingPlaceholders: [],
+            missingFields: [],
             captureCount: 0,
-            messages: ['生成或填写提取正则后，这里会用样例状态记录检查 $1、$2 是否真的抓得到。'],
+            messages: ['新解析器能读取样例状态记录，并覆盖所有字段。'],
             matchResult: null,
+            parsedData: parsed.fields,
         };
     }
 
@@ -258,6 +314,7 @@ export function validateStatusTemplateExtraction(
             sampleStatusText,
             placeholders,
             missingPlaceholders: placeholders,
+            missingFields: [],
             captureCount: 0,
             messages: [`正则无效：${error?.message || '无法解析这个表达式'}`],
             matchResult: null,
@@ -271,6 +328,7 @@ export function validateStatusTemplateExtraction(
             sampleStatusText,
             placeholders,
             missingPlaceholders: placeholders,
+            missingFields: [],
             captureCount: 0,
             messages: ['提取正则没有匹配样例状态记录，状态写法和提取正则不一致。'],
             matchResult: null,
@@ -287,6 +345,7 @@ export function validateStatusTemplateExtraction(
             sampleStatusText,
             placeholders,
             missingPlaceholders,
+            missingFields: [],
             captureCount,
             messages: [
                 `正则只捕获 ${captureCount} 个值，但模板用了 ${missingPlaceholders.map(index => `$${index}`).join('、')}。这些位置在正式聊天里会留空。`,
@@ -301,6 +360,7 @@ export function validateStatusTemplateExtraction(
         sampleStatusText,
         placeholders,
         missingPlaceholders: [],
+        missingFields: [],
         captureCount,
         messages: placeholders.length > 0
             ? [`正则能匹配样例状态记录，并提供 ${captureCount} 个捕获值。`]
@@ -403,6 +463,7 @@ function normalizeGeneratedFields(fields: any, fallback: GeneratorField[]): Temp
             name: String(field?.name || '').trim(),
             description: String(field?.description || field?.desc || '').trim(),
             required: field?.required !== false,
+            type: field?.type === 'list' ? 'list' as const : 'text' as const,
         }))
         .filter((field: TemplateField) => field.name);
 
@@ -421,7 +482,7 @@ function normalizeImportedFields(fields: unknown): TemplateField[] {
     if (!Array.isArray(fields)) return toTemplateFields(DEFAULT_GENERATOR_FIELDS);
 
     const normalized = fields
-        .map((field, index) => {
+        .map((field, index): TemplateField | null => {
             if (!isPlainRecord(field)) return null;
             const name = safeString(field.name).trim();
             if (!name) return null;
@@ -431,6 +492,7 @@ function normalizeImportedFields(fields: unknown): TemplateField[] {
                 name,
                 description: safeString(field.description || field.desc).trim(),
                 required: field.required !== false,
+                type: field.type === 'list' ? 'list' as const : 'text' as const,
             };
         })
         .filter((field): field is TemplateField => Boolean(field));
@@ -528,7 +590,7 @@ export function buildSystemPromptPrompt(
 字段协议：
 ${formatFieldList(fields)}
 
-精确状态记录格式（必须逐字照抄字段名、顺序和英文冒号）：
+精确状态记录格式（必须逐字照抄字段名；文本字段用一行，列表字段用缩进的 - item）：
 ${statusContract}
 
 ${currentBlock}
@@ -538,7 +600,8 @@ ${currentBlock}
 写法要求：
 - 正常回应照常写，不要因为状态记录破坏 TA 的语气
 - 每次回应末尾追加唯一的 <status>...</status> 块，并严格使用上面的精确状态记录格式
-- 字段标签必须逐字照抄，字段顺序不能变化，分隔符必须使用英文半角冒号 :
+- 字段标签必须逐字照抄，字段顺序不能变化，分隔符可以使用英文半角冒号 :，不要混入 markdown 表格
+- text 字段输出“字段名: 值”，list 字段输出“字段名:”后换行 3-10 条“  - 列表项”
 - 必须逐一覆盖字段协议中的每个字段，说明该字段应该从哪里取材、写多短、写到什么具体程度
 - 字段值必须贴近刚才的回应和当前对话，优先使用最新动作、地点、身体状态、情绪变化和关系动态
 - 字段值要短、具体、可渲染，避免“正常”“很好”“无变化”“未知”这类空泛占位
@@ -553,10 +616,17 @@ ${currentBlock}
 }`;
 }
 
-export function buildProtocolPrompt(userIdea: string, fields: GeneratorField[]): string {
+export function buildFieldsPrompt(
+    userIdea: string,
+    fields: GeneratorField[],
+    currentFields: TemplateField[] = [],
+): string {
     const statusContract = buildStatusContract(fields);
+    const currentBlock = currentFields.length
+        ? `\n\n当前字段定义（在此基础上优化，不要无故改名）：\n${formatFieldList(currentFields)}`
+        : '';
 
-    return `你是状态栏字段协议与正则设计师。
+    return `你是状态栏字段定义设计师。
 
 用户想做的状态栏：
 「${userIdea}」
@@ -567,23 +637,29 @@ ${formatFieldList(fields)}
 状态记录契约：
 ${statusContract}
 
-请只设计字段协议和 extractRegex 正则。不要写状态文本规则，不要写视觉，不要写 HTML、CSS、JS。
+${currentBlock}
+
+请只设计字段定义。不要写状态文本规则，不要写 extractRegex，不要写视觉，不要写 HTML、CSS、JS。
 
 要求：
 - TA 必须在每次回应末尾输出唯一的 <status>...</status>
-- 每个字段独占一行，字段名、字段顺序和英文半角冒号必须严格遵守上面的状态记录契约
-- 字段格式必须是：字段名: 值
-- extractRegex 必须捕获每个字段值
-- 使用 [\\s\\S]*? 或 \\s* 兼容换行和空白
+- text 字段用于短标量值，list 字段用于弹幕、物品、待办、消息等变长项目
+- 字段名要短、稳定、可直接作为 {{字段名}} 占位符
+- 字段数量以用户意图为准，不要为了凑数制造重复字段
+- 每个字段说明要告诉 AI 信息来源、长度、风格和兜底写法
 - 只输出 JSON，不要 markdown
 
 输出：
 {
-  "extractRegex": "用于提取 <status> 块和字段值的正则",
   "fields": [
-    { "name": "字段名", "description": "字段说明", "placeholder": "$1" }
-  ]
+    { "name": "字段名", "description": "字段说明", "type": "text" }
+  ],
+  "qualityNotes": "一句话说明字段为什么适合这个状态栏"
 }`;
+}
+
+export function buildProtocolPrompt(userIdea: string, fields: GeneratorField[]): string {
+    return buildFieldsPrompt(userIdea, fields);
 }
 
 export function buildHtmlPrompt(
@@ -593,17 +669,21 @@ export function buildHtmlPrompt(
     currentHtmlBody = '',
 ): string {
     const interactionRequirement = describeInteractionRequirement(interaction.mode, interaction.idea);
+    const statusContract = buildStatusContract(fields);
     const currentBlock = currentHtmlBody.trim()
-        ? `\n\n当前 HTML 骨架（请在这个基础上修改，保留可用结构、占位符和 class 命名，不要推倒重写）：\n${currentHtmlBody.trim()}`
+        ? `\n\n当前 HTML 骨架（在此基础上改进，保留可用结构、命名占位符和 class 命名，不要推倒重写）：\n${currentHtmlBody.trim()}`
         : '';
 
     return `你是状态栏 HTML 结构工程师。
 
-用户想做的状态栏：
+用户的视觉想法：
 「${userIdea}」
 
 字段协议：
 ${formatFieldList(fields)}
+
+状态记录格式：
+${statusContract}
 
 互动需求：
 ${interactionRequirement}
@@ -616,8 +696,10 @@ ${currentBlock}
 - 只生成 body 内部结构，不要输出完整 html/head/body
 - 不要写 <style>
 - 不要写 <script>
-- 必须使用 $1、$2、$3... 作为字段值占位符
-- 不要改变字段顺序
+- text 字段必须使用 {{字段名}} 命名占位符
+- list 字段必须使用 {{#字段名}}...{{/字段名}} 块，块内部用 {{.}} 输出当前项，可用 {{@index}} 输出 0-based 索引
+- 不要使用 $1、$2 旧占位符
+- 不要改名、删除或新增字段
 - class 名必须语义清楚且稳定，方便 CSS 精修
 - 结构要体现信息层级：标题/主状态/字段组/辅助信息
 - 如果互动需求不是“无互动”，必须预留 button、data-action、data-state、aria-expanded 或可切换 class 等 JS 钩子
@@ -634,19 +716,30 @@ ${currentBlock}
 
 export function buildCssPrompt(
     userIdea: string,
+    fields: TemplateField[],
     htmlBody: string,
     interaction: { mode: StatusWorkshopInteractionMode; idea: string },
+    currentCss = '',
 ): string {
+    const currentBlock = currentCss.trim()
+        ? `\n\n当前 CSS（在此基础上改进，不要推倒重写）：\n${currentCss.trim()}`
+        : '';
+
     return `你是资深 UI 视觉设计师，不是特效生成器。
 
-用户想做的状态栏：
+用户的视觉想法：
 「${userIdea}」
+
+字段协议：
+${formatFieldList(fields)}
 
 已有 HTML 结构：
 ${htmlBody}
 
 互动需求：
 ${describeInteractionRequirement(interaction.mode, interaction.idea)}
+
+${currentBlock}
 
 你的任务：只写 CSS，把这个状态栏做得精致、清晰、耐看。
 
@@ -677,6 +770,7 @@ CSS 要求：
 - 文本必须不会溢出容器
 - 适配窄屏，避免横向滚动
 - 如果互动需求不是“无互动”，必须提供对应 .is-expanded、.is-flipped、.is-active、[data-state] 等状态样式
+- 保留 HTML 中的 {{字段名}} 和列表块占位符，不要写旧 $1/$2 说明
 - 只输出 JSON，不要 markdown
 
 输出：
@@ -696,48 +790,29 @@ export function buildCssPolishPrompt(
     htmlBody: string,
     cssTemplate: string,
     interaction: { mode: StatusWorkshopInteractionMode; idea: string },
+    fields: TemplateField[] = [],
 ): string {
-    return `你是 CSS 审美质检和修复专家。
-
-用户想做的状态栏：
-「${userIdea}」
-
-HTML 结构：
-${htmlBody}
-
-当前 CSS：
-${cssTemplate}
-
-互动需求：
-${describeInteractionRequirement(interaction.mode, interaction.idea)}
-
-请只优化 CSS。目标是去掉明显模板感，让视觉更稳、更干净、更耐看。必须基于当前 CSS 继续精修，保留已有有效视觉特征、选择器和互动状态，不要退回首版，不要随意重写成另一种风格。
-
-重点：
-- 统一间距、字号、行高和圆角
-- 减弱过重阴影、描边、模糊和高饱和装饰
-- 提高文字对比度和字段值识别度
-- 保留用户明确要求的方向，但不要额外套风格
-- 如果互动需求不是“无互动”，保留并完善 .is-expanded、.is-flipped、.is-active、[data-state] 等状态样式
-- 不要修改 HTML，不要新增字段，不要改占位符
-- 只输出 JSON，不要 markdown
-
-输出：
-{
-  "cssTemplate": "优化后的完整 CSS",
-  "designIntent": "一句话说明优化结果"
-}`;
+    return buildCssPrompt(userIdea, fields, htmlBody, interaction, cssTemplate);
 }
 
 export function buildJsPrompt(
     interaction: { mode: StatusWorkshopInteractionMode; idea: string },
+    fields: TemplateField[],
     htmlBody: string,
     cssTemplate: string,
+    currentJs = '',
 ): string {
+    const currentBlock = currentJs.trim()
+        ? `\n\n当前 JS（在此基础上改进，保留可用绑定，不要推倒重写）：\n${currentJs.trim()}`
+        : '';
+
     return `你是状态栏轻互动工程师。
 
 互动需求：
 ${describeInteractionRequirement(interaction.mode, interaction.idea)}
+
+字段协议：
+${formatFieldList(fields)}
 
 已有 HTML：
 ${htmlBody}
@@ -745,12 +820,15 @@ ${htmlBody}
 已有 CSS：
 ${cssTemplate}
 
+${currentBlock}
+
 请生成少量内联 classic JavaScript。如果互动需求是“无互动”，返回空字符串。
 
 要求：
 - 只生成 JS 代码，不要 <script> 标签
 - 只能使用 document.querySelector / querySelectorAll / addEventListener
 - 只能绑定已有 HTML 结构和已有 class/data-* 钩子
+- 可以通过 window.__statusData 读取完整结构化数据，包括列表字段
 - 只能做点击展开、翻页、切换、翻卡、局部状态变化
 - 不要请求网络
 - 不要使用 fetch、XMLHttpRequest、WebSocket、localStorage
@@ -779,7 +857,7 @@ export const StatusWorkshopGeneratorFieldList: React.FC<StatusWorkshopGeneratorF
                 key={field.id}
                 className="rounded-2xl border border-white/[0.04] bg-white/[0.02] p-2.5 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0"
             >
-                <div className="grid grid-cols-[minmax(0,1fr),40px] gap-2 sm:grid-cols-[108px,minmax(0,1fr),40px]">
+                <div className="grid grid-cols-[minmax(0,1fr),92px,40px] gap-2 sm:grid-cols-[108px,96px,minmax(0,1fr),40px]">
                     <input
                         type="text"
                         value={field.name}
@@ -790,10 +868,21 @@ export const StatusWorkshopGeneratorFieldList: React.FC<StatusWorkshopGeneratorF
                         className="min-w-0 rounded-xl border border-white/[0.05] bg-white/[0.03] px-3 py-2.5 text-[12px] text-white/75 outline-none transition-colors placeholder:text-white/20 focus:border-white/15"
                         {...WORKSHOP_TEXT_INPUT_PROPS}
                     />
+                    <select
+                        value={field.type === 'list' ? 'list' : 'text'}
+                        onChange={e => setFields(prev => prev.map((item, itemIndex) => (
+                            itemIndex === index ? { ...item, type: e.target.value === 'list' ? 'list' : 'text' } : item
+                        )))}
+                        aria-label={`${field.name || `字段${index + 1}`}类型`}
+                        className="min-w-0 rounded-xl border border-white/[0.05] bg-white/[0.03] px-2.5 py-2.5 text-[12px] text-white/70 outline-none transition-colors focus:border-white/15"
+                    >
+                        <option value="text">文本</option>
+                        <option value="list">列表</option>
+                    </select>
                     <button
                         onClick={() => setFields(prev => prev.filter((_, itemIndex) => itemIndex !== index))}
                         disabled={fields.length === 1}
-                        className={`flex h-10 w-10 items-center justify-center rounded-xl border text-[12px] transition-all sm:order-3 ${
+                        className={`flex h-10 w-10 items-center justify-center rounded-xl border text-[12px] transition-all sm:order-4 ${
                             fields.length === 1
                                 ? 'cursor-not-allowed border-white/[0.04] bg-white/[0.03] text-white/15'
                                 : 'border-white/[0.05] bg-white/[0.05] text-white/40 hover:bg-white/[0.08]'
@@ -808,7 +897,7 @@ export const StatusWorkshopGeneratorFieldList: React.FC<StatusWorkshopGeneratorF
                             itemIndex === index ? { ...item, desc: e.target.value } : item
                         )))}
                         placeholder="字段说明"
-                        className="col-span-2 rounded-xl border border-white/[0.05] bg-white/[0.03] px-3 py-2.5 text-[12px] text-white/75 outline-none transition-colors placeholder:text-white/20 focus:border-white/15 sm:order-2 sm:col-span-1"
+                        className="col-span-3 rounded-xl border border-white/[0.05] bg-white/[0.03] px-3 py-2.5 text-[12px] text-white/75 outline-none transition-colors placeholder:text-white/20 focus:border-white/15 sm:order-3 sm:col-span-1"
                         {...WORKSHOP_TEXT_INPUT_PROPS}
                     />
                 </div>
@@ -826,13 +915,15 @@ const StatusWorkshopApp: React.FC = () => {
         [characters, activeCharacterId],
     );
 
-    const [activeTab, setActiveTab] = useState<TabId>('protocol');
+    const [activeTab, setActiveTab] = useState<TabId>('fields');
+    const [activeVisualTab, setActiveVisualTab] = useState<VisualTabId>('html');
     const [templates, setTemplates] = useState<CustomStatusTemplate[]>(() => activeChar?.customStatusTemplates || []);
     const [activeTemplateId, setActiveTemplateId] = useState(
         () => activeChar?.activeCustomTemplateId || activeChar?.customStatusTemplates?.[0]?.id || '',
     );
     const [genDescription, setGenDescription] = useState('');
     const [cssIdea, setCssIdea] = useState('');
+    const [promptIdea, setPromptIdea] = useState('');
     const [genFields, setGenFields] = useState<GeneratorField[]>(DEFAULT_GENERATOR_FIELDS);
     const [generatingStep, setGeneratingStep] = useState<GenerationStep | null>(null);
     const [previewHeight, setPreviewHeight] = useState(240);
@@ -884,9 +975,10 @@ const StatusWorkshopApp: React.FC = () => {
     }, [activeTemplateId]);
 
     const updateGeneratorFields = useCallback<React.Dispatch<React.SetStateAction<GeneratorField[]>>>((updater) => {
-        setGenFields(updater);
-        updateActiveTemplate({}, ['system', 'html', 'css', 'js']);
-    }, [updateActiveTemplate]);
+        const nextFields = typeof updater === 'function' ? updater(genFields) : updater;
+        setGenFields(nextFields);
+        updateActiveTemplate({ fields: toTemplateFields(nextFields) }, ['fields', 'protocol', 'system', 'html', 'css', 'js']);
+    }, [genFields, updateActiveTemplate]);
 
     const handleSelectTemplate = useCallback((templateId: string) => {
         const nextTemplate = templates.find(template => template.id === templateId);
@@ -899,7 +991,7 @@ const StatusWorkshopApp: React.FC = () => {
         setTemplates(prev => [...prev, nextTemplate]);
         setActiveTemplateId(nextTemplate.id);
         setGenFields(templateFieldsToGeneratorFields(nextTemplate.fields));
-        setActiveTab('protocol');
+        setActiveTab('fields');
     }, [templates.length]);
 
     const handleCopyTemplate = useCallback(() => {
@@ -917,7 +1009,7 @@ const StatusWorkshopApp: React.FC = () => {
         setTemplates(prev => [...prev, copiedTemplate]);
         setActiveTemplateId(copiedTemplate.id);
         setGenFields(templateFieldsToGeneratorFields(copiedTemplate.fields));
-        setActiveTab('protocol');
+        setActiveTab('fields');
     }, [activeTemplate, addToast]);
 
     const handleDeleteTemplate = useCallback((templateId: string) => {
@@ -987,7 +1079,7 @@ const StatusWorkshopApp: React.FC = () => {
             setTemplates(prev => [...prev, ...importedTemplates]);
             setActiveTemplateId(importedTemplates[0].id);
             setGenFields(templateFieldsToGeneratorFields(importedTemplates[0].fields));
-            setActiveTab('protocol');
+            setActiveTab('fields');
             addToast(`已导入 ${importedTemplates.length} 个方案`, 'success');
         } catch (error: any) {
             addToast(`导入失败: ${error?.message || '文件格式不正确'}`, 'error');
@@ -1000,7 +1092,7 @@ const StatusWorkshopApp: React.FC = () => {
             return;
         }
 
-        setActiveTab('protocol');
+        setActiveTab('fields');
 
         window.setTimeout(() => {
             if (!activeTemplate.name.trim()) {
@@ -1032,31 +1124,45 @@ const StatusWorkshopApp: React.FC = () => {
         const previewValues = previewFields.length > 0
             ? previewFields.map((field, index) => `[${field.name || `字段${index + 1}`}]`)
             : ['[字段1]', '[字段2]', '[字段3]'];
+        const sampleStatusText = buildStatusSample(previewFields);
+        const sampleParsedData = !template.extractRegex?.trim()
+            ? parseStatusBlock(sampleStatusText, previewFields)?.fields
+            : undefined;
 
         if (mode === 'extract') {
-            const sampleStatusText = buildStatusSample(previewFields);
             const validation = validateStatusTemplateExtraction(template, sampleStatusText);
-
-            if (validation.status === 'missing_regex') {
-                return buildPreviewMessageHtml('提取预览待校验', validation.messages[0], sampleStatusText);
-            }
 
             if (validation.status === 'invalid_regex' || validation.status === 'no_match') {
                 return buildPreviewMessageHtml('提取预览未通过', validation.messages[0], sampleStatusText);
             }
 
-            const extracted = validation.matchResult?.[1] || validation.matchResult?.[0] || '';
-            const composedHtml = composeCustomStatusTemplateHtml(template, {
-                matchResult: validation.matchResult,
-                extracted,
-                includeScripts: template.allowScripts === true,
-            });
+            const rows = previewFields.map((field, index) => {
+                const parsedValue = validation.parsedData?.[field.name];
+                const regexValue = validation.matchResult?.[index + 1];
+                const value = Array.isArray(parsedValue)
+                    ? parsedValue.join('\n')
+                    : parsedValue ?? regexValue ?? '';
+                const ok = value ? '✅' : '❌';
+                const type = field.type === 'list' ? '列表' : '文本';
+                return `<tr><td>${escapeHtml(field.name)}</td><td>${type}</td><td><pre>${escapeHtml(value || '未解析')}</pre></td><td>${ok}</td></tr>`;
+            }).join('');
 
-            return composedHtml || buildPreviewMessageHtml('提取预览无内容', 'HTML 骨架还是空的。', sampleStatusText);
+            return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+body{margin:0;background:transparent;color:rgba(255,255,255,.82);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC",sans-serif}
+.status-card-frame{width:330px;max-width:calc(100vw - 24px)}
+.panel{border:1px solid rgba(255,255,255,.08);background:rgba(13,13,26,.92);border-radius:20px;padding:16px;box-sizing:border-box}
+.title{font-size:13px;font-weight:700;color:rgba(236,253,245,.86)}
+.msg{margin-top:6px;font-size:11px;line-height:1.7;color:rgba(255,255,255,.52)}
+table{width:100%;margin-top:12px;border-collapse:collapse;font-size:11px}
+td,th{border-top:1px solid rgba(255,255,255,.07);padding:8px 6px;text-align:left;vertical-align:top}
+th{color:rgba(255,255,255,.46);font-weight:600}
+pre{margin:0;white-space:pre-wrap;font:500 10px/1.5 "SF Mono","Fira Code",monospace;color:rgba(186,230,253,.86)}
+</style></head><body><main class="status-card-frame"><div class="panel"><div class="title">${validation.severity === 'success' ? '结构化提取通过' : '结构化提取需处理'}</div><div class="msg">${escapeHtml(validation.messages.join(' '))}</div><table><thead><tr><th>字段名</th><th>类型</th><th>解析到的值</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></main></body></html>`;
         }
 
         const composedHtml = composeCustomStatusTemplateHtml(template, {
             previewValues,
+            parsedData: sampleParsedData,
             includeScripts: template.allowScripts === true,
         });
 
@@ -1170,20 +1276,14 @@ const StatusWorkshopApp: React.FC = () => {
         return { targetTemplate, targetTemplateId };
     }, [activeTemplate, activeTemplateId, templates.length]);
 
-    const handleGenerateStep = useCallback(async (step: GenerationStep, mode: GenerationMode = 'iterate') => {
-        const userIdea = genDescription.trim();
-        const visualIdea = cssIdea.trim()
-            ? `${userIdea}\n\nCSS 视觉想法：${cssIdea.trim()}`
-            : userIdea;
+    const handleGenerateStep = useCallback(async (step: GenerationStep, mode: GenerationMode = 'generate') => {
+        const fieldIdea = genDescription.trim();
+        const visualIdea = cssIdea.trim() || fieldIdea;
+        const writingIdea = promptIdea.trim() || fieldIdea;
         const validFields = getValidGeneratorFields(genFields);
 
-        if ((step === 'system' || step === 'protocol' || step === 'html') && userIdea.length < 4) {
+        if ((step === 'fields' || step === 'html' || step === 'prompt') && fieldIdea.length < 4) {
             addToast('先把想要的状态栏说清楚一点，再生成', 'error');
-            return;
-        }
-
-        if (step === 'protocol' && validFields.length === 0) {
-            addToast('请至少填写一个字段', 'error');
             return;
         }
 
@@ -1193,54 +1293,42 @@ const StatusWorkshopApp: React.FC = () => {
         const templateFields = getTemplateFieldList(targetTemplate, validFields);
         const interaction = getTemplateInteraction(targetTemplate);
 
-        if (step === 'system' && (!targetTemplate.extractRegex?.trim() || templateFields.length === 0)) {
-            addToast('先完成字段协议，再生成 TA 的状态写法', 'error');
-            setActiveTab('protocol');
-            return;
-        }
-
-        if (step === 'html' && (!targetTemplate.extractRegex?.trim() || templateFields.length === 0)) {
-            addToast('先完成字段协议和提取正则，再生成 HTML 骨架', 'error');
-            setActiveTab('protocol');
+        if (step !== 'fields' && templateFields.length === 0) {
+            addToast('先定义至少一个字段', 'error');
+            setActiveTab('fields');
             return;
         }
 
         if ((step === 'css' || step === 'js') && !targetTemplate.htmlBody?.trim()) {
             addToast('先生成或填写 HTML 骨架', 'error');
-            setActiveTab('html');
+            setActiveTab('visual');
+            setActiveVisualTab('html');
             return;
         }
 
         if (step === 'js' && interaction.mode === 'none') {
-            addToast('当前互动需求是“无互动”，JS 可以保持为空', 'info');
+            addToast('当前互动是“无互动”，JS 可以保持为空', 'info');
             setActiveTab('interaction');
             return;
         }
 
-        if (step === 'html' && mode === 'replace' && targetTemplate.htmlBody?.trim()) {
-            const confirmed = window.confirm('重新生成会覆盖当前 HTML 骨架，CSS 和 JS 会保留但标记为需复核。确定继续吗？');
-            if (!confirmed) return;
-        }
-
-        if (step === 'css' && mode === 'replace' && targetTemplate.cssTemplate?.trim()) {
-            const confirmed = window.confirm('重新生成会覆盖当前 CSS。确定继续吗？');
-            if (!confirmed) return;
-        }
-
-        if (step === 'system' && mode === 'replace' && targetTemplate.systemPrompt?.trim()) {
-            const confirmed = window.confirm('重新生成会覆盖当前状态写法，HTML/CSS/JS 会保留但标记为需复核。确定继续吗？');
-            if (!confirmed) return;
-        }
-
-        if (step === 'protocol' && mode === 'replace' && targetTemplate.extractRegex?.trim()) {
-            const confirmed = window.confirm('重新生成会覆盖当前字段协议和提取正则，并标记状态写法、HTML/CSS/JS 需复核。确定继续吗？');
-            if (!confirmed) return;
-        }
-
         if (step === 'js' && !targetTemplate.cssTemplate?.trim()) {
             addToast('先生成或填写 CSS，再生成互动 JS', 'error');
-            setActiveTab('css');
+            setActiveTab('visual');
+            setActiveVisualTab('css');
             return;
+        }
+
+        const contentExists = (
+            (step === 'prompt' && targetTemplate.systemPrompt?.trim())
+            || (step === 'html' && targetTemplate.htmlBody?.trim())
+            || (step === 'css' && targetTemplate.cssTemplate?.trim())
+            || (step === 'js' && targetTemplate.jsTemplate?.trim())
+        );
+
+        if (mode === 'generate' && contentExists) {
+            const confirmed = window.confirm('生成会覆盖当前内容；如果想基于现有内容改，请点“优化”。确定继续吗？');
+            if (!confirmed) return;
         }
 
         setGeneratingStep(step);
@@ -1249,40 +1337,51 @@ const StatusWorkshopApp: React.FC = () => {
             let prompt = '';
             let temperature = 0.6;
 
-            if (step === 'system') {
+            if (step === 'fields') {
+                prompt = buildFieldsPrompt(
+                    fieldIdea,
+                    validFields.length ? validFields : DEFAULT_GENERATOR_FIELDS,
+                    mode === 'polish' ? templateFields : [],
+                );
+                temperature = 0.35;
+            } else if (step === 'prompt') {
                 prompt = buildSystemPromptPrompt(
-                    userIdea,
+                    writingIdea,
                     templateFields,
-                    mode === 'replace' ? '' : targetTemplate.systemPrompt || '',
+                    mode === 'polish' ? targetTemplate.systemPrompt || '' : '',
                 );
                 temperature = 0.45;
-            } else if (step === 'protocol') {
-                prompt = buildProtocolPrompt(userIdea, validFields);
-                temperature = 0.35;
             } else if (step === 'html') {
                 prompt = buildHtmlPrompt(
-                    userIdea,
+                    visualIdea,
                     templateFields,
                     interaction,
-                    mode === 'replace' ? '' : targetTemplate.htmlBody || '',
+                    mode === 'polish' ? targetTemplate.htmlBody || '' : '',
                 );
                 temperature = 0.55;
             } else if (step === 'css') {
-                if (targetTemplate.cssTemplate?.trim() && mode !== 'replace') {
-                    prompt = buildCssPolishPrompt(visualIdea, targetTemplate.htmlBody || '', targetTemplate.cssTemplate || '', interaction);
-                    temperature = 0.45;
-                } else {
-                    prompt = buildCssPrompt(visualIdea, targetTemplate.htmlBody || '', interaction);
-                    temperature = 0.72;
-                }
+                prompt = buildCssPrompt(
+                    visualIdea,
+                    templateFields,
+                    targetTemplate.htmlBody || '',
+                    interaction,
+                    mode === 'polish' ? targetTemplate.cssTemplate || '' : '',
+                );
+                temperature = mode === 'polish' ? 0.45 : 0.72;
             } else {
-                prompt = buildJsPrompt(interaction, targetTemplate.htmlBody || '', targetTemplate.cssTemplate || '');
+                prompt = buildJsPrompt(
+                    interaction,
+                    templateFields,
+                    targetTemplate.htmlBody || '',
+                    targetTemplate.cssTemplate || '',
+                    mode === 'polish' ? targetTemplate.jsTemplate || '' : '',
+                );
                 temperature = 0.4;
             }
 
             const result = await callSecondaryJson(prompt, temperature);
-            const generatedProtocolFields = step === 'protocol'
-                ? normalizeGeneratedFields(result.fields, validFields)
+            const generatedFields = step === 'fields'
+                ? normalizeGeneratedFields(result.fields, validFields.length ? validFields : DEFAULT_GENERATOR_FIELDS)
                 : null;
 
             setTemplates(prev => {
@@ -1293,32 +1392,33 @@ const StatusWorkshopApp: React.FC = () => {
                 return base.map(template => {
                     if (template.id !== targetTemplateId) return template;
 
-                    if (step === 'system') {
-                        const downstreamFlags: ReviewFlag[] = interaction.mode === 'none' ? ['html', 'css'] : ['html', 'css', 'js'];
+                    if (step === 'fields') {
+                        const downstreamFlags: ReviewFlag[] = interaction.mode === 'none' ? ['system', 'html', 'css'] : ['system', 'html', 'css', 'js'];
                         return markReviewFlags(clearReviewFlags({
+                            ...template,
+                            extractRegex: '',
+                            fields: generatedFields || template.fields,
+                            templateVersion: LAYERED_STATUS_TEMPLATE_VERSION,
+                            renderMode: 'html',
+                        }, ['fields', 'protocol']), downstreamFlags);
+                    }
+
+                    if (step === 'prompt') {
+                        return clearReviewFlags({
                             ...template,
                             systemPrompt: result.systemPrompt || template.systemPrompt,
                             templateVersion: LAYERED_STATUS_TEMPLATE_VERSION,
                             renderMode: 'html',
-                        }, ['system']), downstreamFlags);
-                    }
-
-                    if (step === 'protocol') {
-                        const downstreamFlags: ReviewFlag[] = interaction.mode === 'none' ? ['system', 'html', 'css'] : ['system', 'html', 'css', 'js'];
-                        return markReviewFlags(clearReviewFlags({
-                            ...template,
-                            extractRegex: result.extractRegex || template.extractRegex,
-                            fields: generatedProtocolFields || template.fields,
-                            templateVersion: LAYERED_STATUS_TEMPLATE_VERSION,
-                            renderMode: 'html',
-                        }, ['protocol']), downstreamFlags);
+                        }, ['advanced', 'system']);
                     }
 
                     if (step === 'html') {
                         const downstreamFlags: ReviewFlag[] = interaction.mode === 'none' ? ['css'] : ['css', 'js'];
+                        const nextHtmlBody = result.htmlBody || template.htmlBody;
                         return markReviewFlags(clearReviewFlags({
                             ...template,
-                            htmlBody: result.htmlBody || template.htmlBody,
+                            extractRegex: shouldClearLegacyExtractRegexForHtml(result.htmlBody || '') ? '' : template.extractRegex,
+                            htmlBody: nextHtmlBody,
                             templateVersion: LAYERED_STATUS_TEMPLATE_VERSION,
                             renderMode: 'html',
                         }, ['html']), downstreamFlags);
@@ -1343,19 +1443,20 @@ const StatusWorkshopApp: React.FC = () => {
                 });
             });
 
-            if (generatedProtocolFields) {
-                setGenFields(generatedProtocolFields.map((field, index) => ({
+            if (generatedFields) {
+                setGenFields(generatedFields.map((field, index) => ({
                     id: `generated-field-${index + 1}`,
                     name: field.name,
                     desc: field.description,
+                    type: field.type === 'list' ? 'list' : 'text',
                 })));
             }
 
-            if (step === 'protocol') setActiveTab('system');
-            if (step === 'system') setActiveTab('interaction');
-            if (step === 'html') setActiveTab('css');
-            if (step === 'css') setActiveTab(interaction.mode === 'none' ? 'css' : 'js');
-            if (step === 'js') setActiveTab('js');
+            if (step === 'fields') setActiveTab('visual');
+            if (step === 'html') setActiveVisualTab('css');
+            if (step === 'css') setActiveTab(interaction.mode === 'none' ? 'advanced' : 'interaction');
+            if (step === 'prompt') setActiveTab('advanced');
+            if (step === 'js') setActiveTab('interaction');
 
             addToast(`${GENERATION_LABELS[step]}完成`, 'success');
         } catch (e: any) {
@@ -1363,7 +1464,7 @@ const StatusWorkshopApp: React.FC = () => {
         } finally {
             setGeneratingStep(null);
         }
-    }, [addToast, callSecondaryJson, cssIdea, genDescription, genFields, resolveTargetTemplate]);
+    }, [addToast, callSecondaryJson, cssIdea, genDescription, genFields, promptIdea, resolveTargetTemplate]);
 
     const handleSplitLegacyTemplate = useCallback(() => {
         if (!activeTemplate?.htmlTemplate?.trim()) {
@@ -1385,7 +1486,8 @@ const StatusWorkshopApp: React.FC = () => {
             templateVersion: LAYERED_STATUS_TEMPLATE_VERSION,
             renderMode: 'html',
         });
-        setActiveTab('html');
+        setActiveTab('visual');
+        setActiveVisualTab('html');
         addToast('已拆成 HTML / CSS / JS，可继续微调', 'success');
     }, [activeTemplate, addToast, updateActiveTemplate]);
 
@@ -1484,30 +1586,38 @@ const StatusWorkshopApp: React.FC = () => {
 
     const renderSystemStep = () => {
         if (!activeTemplate) {
-            return renderEmptyState('先新建一个方案，再写 TA 的状态写法。');
+            return renderEmptyState('先新建一个方案，再微调 AI 的输出写法。');
         }
 
-        const hasProtocol = Boolean(activeTemplate.extractRegex?.trim() && getTemplateFieldList(activeTemplate, genFields).length > 0);
+        const hasProtocol = getTemplateFieldList(activeTemplate, genFields).length > 0;
         const downstreamFlags: ReviewFlag[] = normalizeInteractionMode(activeTemplate.interactionMode) === 'none'
             ? ['html', 'css']
             : ['html', 'css', 'js'];
 
         return (
             <div className="space-y-4 animate-fade-in">
-                {renderReviewNotice('system', '字段协议刚刚改过，当前状态写法会保留，但建议检查每个字段的写法规则是否仍然匹配。')}
+                {renderReviewNotice('system', '字段定义刚刚改过，当前写法会保留，但建议检查每个字段的输出规则是否仍然匹配。')}
                 <div className="rounded-[28px] border border-white/[0.06] bg-white/[0.04] p-5 backdrop-blur-sm">
                     <div className="mb-3">
-                        <div className="text-[13px] font-semibold text-white/80">TA 的状态写法</div>
-                        <p className="mt-1 text-[11px] leading-5 text-white/30">字段已经定好后，这里写每个字段要怎么表达：短、具体、贴近刚才回应，不写空泛占位。</p>
+                        <div className="text-[13px] font-semibold text-white/80">AI 写法</div>
+                        <p className="mt-1 text-[11px] leading-5 text-white/30">自动生成的规则一般够用，这里可以微调 AI 的输出风格。</p>
                     </div>
+                    <label className="mb-2 block text-[11px] font-semibold tracking-wide text-white/45">写法想法</label>
+                    <textarea
+                        value={promptIdea}
+                        onChange={e => setPromptIdea(e.target.value)}
+                        placeholder="弹幕要接地气不要文艺腔"
+                        className="mb-4 h-24 w-full resize-none rounded-2xl border border-white/[0.05] bg-white/[0.03] px-4 py-3 text-[12px] leading-6 text-white/80 outline-none transition-colors placeholder:text-white/20 focus:border-white/15"
+                        {...WORKSHOP_TEXT_ENTRY_PROPS}
+                    />
                     <div className="mb-3 flex flex-wrap gap-2">
-                        {renderStepButton('system', {
-                            label: activeTemplate.systemPrompt?.trim() ? '基于当前写法改进' : '生成状态写法',
+                        {renderStepButton('prompt', {
+                            label: '✨ 生成写法',
                             disabled: !hasProtocol,
                         })}
-                        {activeTemplate.systemPrompt?.trim() && renderStepButton('system', {
-                            label: '重新生成 / 覆盖',
-                            mode: 'replace',
+                        {activeTemplate.systemPrompt?.trim() && renderStepButton('prompt', {
+                            label: '🔄 优化写法',
+                            mode: 'polish',
                             disabled: !hasProtocol,
                         })}
                     </div>
@@ -1555,23 +1665,24 @@ const StatusWorkshopApp: React.FC = () => {
 
     const renderProtocolStep = () => {
         if (!activeTemplate) {
-            return renderEmptyState('先创建一个方案，再定义字段协议。');
+            return renderEmptyState('先创建一个方案，再定义字段。');
         }
+        const isLegacyRegexTemplate = Boolean(activeTemplate.extractRegex?.trim());
 
         return (
             <div className="space-y-4 animate-fade-in">
-                {renderReviewNotice('protocol', '当前字段协议需复核，建议检查字段顺序、占位符和提取正则是否一致。')}
+                {renderReviewNotice('protocol', '当前字段定义需复核，建议检查字段名、类型和模板占位符是否一致。')}
                 {renderExtractionNotice(activeExtractionValidation)}
                 <div className="rounded-[28px] border border-white/[0.06] bg-white/[0.04] p-5 backdrop-blur-sm">
                     <div className="mb-3">
-                        <div className="text-[13px] font-semibold text-white/80">字段协议</div>
-                        <p className="mt-1 text-[11px] leading-5 text-white/30">这里决定 TA 要留下哪些状态字段，以及正则如何把它们抓成 $1、$2、$3。</p>
+                        <div className="text-[13px] font-semibold text-white/80">定义字段</div>
+                        <p className="mt-1 text-[11px] leading-5 text-white/30">这里决定 TA 要留下哪些状态字段；文本用 {'{{字段名}}'}，列表用 {'{{#字段名}}...{{/字段名}}'}。</p>
                     </div>
-                    <label className="mb-2 block text-[11px] font-semibold tracking-wide text-white/45">状态栏想法</label>
+                    <label className="mb-2 block text-[11px] font-semibold tracking-wide text-white/45">字段想法</label>
                     <textarea
                         value={genDescription}
                         onChange={e => setGenDescription(e.target.value)}
-                        placeholder="说清楚你想做什么：像什么物件、展示哪些信息、整体情绪、哪些元素不要。描述太空泛就不会替你套模板。"
+                        placeholder="做一个角色直播间的状态栏"
                         className="mb-4 h-28 w-full resize-none rounded-2xl border border-white/[0.05] bg-white/[0.03] px-4 py-3 text-[12px] leading-6 text-white/80 outline-none transition-colors placeholder:text-white/20 focus:border-white/15"
                         {...WORKSHOP_TEXT_ENTRY_PROPS}
                     />
@@ -1586,27 +1697,30 @@ const StatusWorkshopApp: React.FC = () => {
                     </div>
                     <StatusWorkshopGeneratorFieldList fields={genFields} setFields={updateGeneratorFields} />
                     <div className="mt-4 flex flex-wrap gap-2">
-                        {renderStepButton('protocol', {
-                            label: activeTemplate.extractRegex?.trim() ? '基于当前字段协议更新' : '生成字段协议',
+                        {renderStepButton('fields', {
+                            label: '✨ 生成字段',
                         })}
-                        {activeTemplate.extractRegex?.trim() && renderStepButton('protocol', {
-                            label: '重新生成 / 覆盖',
-                            mode: 'replace',
+                        {renderStepButton('fields', {
+                            label: '🔄 优化字段',
+                            mode: 'polish',
                         })}
                     </div>
                 </div>
 
-                <div className="rounded-[28px] border border-white/[0.06] bg-white/[0.04] p-5 backdrop-blur-sm">
-                    <label className="mb-3 block text-[11px] font-semibold tracking-wide text-white/45">提取正则</label>
-                    <textarea
-                        value={activeTemplate.extractRegex}
-                        onChange={e => updateActiveTemplate({ extractRegex: e.target.value }, ['system', 'html', 'css', 'js'])}
-                        placeholder="<status>\\s*时间:\\s*(.*?)\\s*地点:\\s*(.*?)\\s*动作:\\s*(.*?)\\s*<\\/status>"
-                        className="h-24 w-full resize-none rounded-2xl border border-white/[0.05] bg-[#0d0d1a] px-4 py-4 font-mono text-[12px] leading-6 text-emerald-300/60 outline-none transition-colors placeholder:text-white/15 focus:border-white/15 sm:h-28"
-                        {...WORKSHOP_TEXT_ENTRY_PROPS}
-                    />
-                    <p className="mt-3 text-[11px] leading-6 text-white/28">正则匹配成功后，第 1 个捕获组就是 $1，第 2 个捕获组就是 $2，会按顺序填进 HTML 骨架。</p>
-                </div>
+                {isLegacyRegexTemplate && (
+                    <details className="rounded-[28px] border border-amber-300/10 bg-amber-300/[0.05] p-5 text-white/60 backdrop-blur-sm">
+                        <summary className="cursor-pointer text-[12px] font-semibold text-amber-100/78">旧版正则模式兼容设置</summary>
+                        <p className="mt-3 text-[11px] leading-6 text-amber-100/54">此方案使用旧版正则模式，会继续按 $1、$2 捕获组渲染；新建方案默认不需要这里。</p>
+                        <label className="mb-3 mt-4 block text-[11px] font-semibold tracking-wide text-white/45">提取正则</label>
+                        <textarea
+                            value={activeTemplate.extractRegex}
+                            onChange={e => updateActiveTemplate({ extractRegex: e.target.value }, ['system', 'html', 'css', 'js'])}
+                            placeholder="<status>\\s*时间:\\s*(.*?)\\s*地点:\\s*(.*?)\\s*动作:\\s*(.*?)\\s*<\\/status>"
+                            className="h-24 w-full resize-none rounded-2xl border border-white/[0.05] bg-[#0d0d1a] px-4 py-4 font-mono text-[12px] leading-6 text-emerald-300/60 outline-none transition-colors placeholder:text-white/15 focus:border-white/15 sm:h-28"
+                            {...WORKSHOP_TEXT_ENTRY_PROPS}
+                        />
+                    </details>
+                )}
             </div>
         );
     };
@@ -1652,13 +1766,17 @@ const StatusWorkshopApp: React.FC = () => {
                     <div className="mt-4 flex flex-wrap gap-2">
                         <button
                             type="button"
-                            onClick={() => setActiveTab('html')}
+                            onClick={() => {
+                                setActiveTab('visual');
+                                setActiveVisualTab('html');
+                            }}
                             className="rounded-2xl bg-white/[0.10] px-4 py-2.5 text-[12px] font-semibold text-white/82 transition-all hover:bg-white/[0.14] active:scale-[0.98]"
                         >
-                            下一步：HTML 骨架
+                            返回视觉设计
                         </button>
                     </div>
                 </div>
+                {renderJsTab()}
             </div>
         );
     };
@@ -1675,15 +1793,15 @@ const StatusWorkshopApp: React.FC = () => {
                     <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                         <div>
                             <div className="text-[11px] font-semibold tracking-wide text-white/45">HTML 骨架</div>
-                            <div className="mt-1 text-[10px] leading-4 text-white/25">$1, $2, $3 会按正则捕获组顺序替换；互动结构要在这里预留。</div>
+                            <div className="mt-1 text-[10px] leading-4 text-white/25">使用 {'{{字段名}}'}；列表用 {'{{#列表字段}}...{{/列表字段}}'}，互动结构要在这里预留。</div>
                         </div>
                         <div className="flex flex-wrap gap-2">
                             {renderStepButton('html', {
-                                label: activeTemplate.htmlBody?.trim() ? '基于当前骨架修改' : '生成 HTML 骨架',
+                                label: '✨ 生成 HTML',
                             })}
                             {activeTemplate.htmlBody?.trim() && renderStepButton('html', {
-                                label: '重新生成 / 覆盖',
-                                mode: 'replace',
+                                label: '🔄 优化 HTML',
+                                mode: 'polish',
                             })}
                         </div>
                     </div>
@@ -1694,7 +1812,7 @@ const StatusWorkshopApp: React.FC = () => {
                             templateVersion: LAYERED_STATUS_TEMPLATE_VERSION,
                             reviewFlags: { ...activeTemplate.reviewFlags, html: false },
                         }, normalizeInteractionMode(activeTemplate.interactionMode) === 'none' ? ['css'] : ['css', 'js'])}
-                        placeholder="<section class=&quot;status-card&quot;>...</section>"
+                        placeholder="<section class=&quot;status-card&quot;>{{字段名}}</section>"
                         className="h-[42svh] min-h-[280px] w-full resize-none rounded-2xl border border-white/[0.05] bg-[#0d0d1a] px-4 py-4 font-mono text-[12px] leading-6 text-emerald-300/60 outline-none transition-colors placeholder:text-white/15 focus:border-white/15 sm:h-[440px] sm:min-h-0"
                         {...WORKSHOP_TEXT_ENTRY_PROPS}
                     />
@@ -1729,26 +1847,18 @@ const StatusWorkshopApp: React.FC = () => {
                     <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                         <div>
                             <div className="text-[11px] font-semibold tracking-wide text-white/45">CSS 美化</div>
-                            <p className="mt-1 text-[10px] leading-4 text-white/25">默认基于当前 CSS 精修；需要从头抽卡时再点覆盖。</p>
+                            <p className="mt-1 text-[10px] leading-4 text-white/25">生成会重做 CSS；优化会基于当前 CSS 精修。</p>
                         </div>
                         <div className="flex flex-wrap gap-2">
                             {renderStepButton('css', {
-                                label: activeTemplate.cssTemplate?.trim() ? '基于当前 CSS 优化' : '生成 CSS',
+                                label: '✨ 生成 CSS',
                             })}
                             {activeTemplate.cssTemplate?.trim() && renderStepButton('css', {
-                                label: '重新生成 / 覆盖',
-                                mode: 'replace',
+                                label: '🔄 优化 CSS',
+                                mode: 'polish',
                             })}
                         </div>
                     </div>
-                    <label className="mb-2 block text-[11px] font-semibold tracking-wide text-white/45">CSS 视觉想法</label>
-                    <textarea
-                        value={cssIdea}
-                        onChange={e => setCssIdea(e.target.value)}
-                        placeholder={'视觉方向（可选）：比如更像杂志内页、极简主义、字段值更醒目。这里会影响「生成 CSS」和「优化 CSS 审美」。'}
-                        className="mb-4 h-24 w-full resize-none rounded-2xl border border-white/[0.05] bg-white/[0.03] px-4 py-3 text-[12px] leading-6 text-white/80 outline-none transition-colors placeholder:text-white/20 focus:border-white/15"
-                        {...WORKSHOP_TEXT_ENTRY_PROPS}
-                    />
                     <textarea
                         value={activeTemplate.cssTemplate || ''}
                         onChange={e => updateActiveTemplate({
@@ -1765,6 +1875,47 @@ const StatusWorkshopApp: React.FC = () => {
                 <div className="rounded-[24px] border border-white/[0.05] bg-white/[0.03] px-4 py-3 text-[11px] leading-6 text-white/32">
                     CSS 质量闸门：稳间距、清晰文字、克制阴影。不要光球、blob、廉价渐变和卡片套卡片。
                 </div>
+            </div>
+        );
+    };
+
+    const renderVisualStep = () => {
+        if (!activeTemplate) {
+            return renderEmptyState('先创建一个方案，再开始视觉设计。');
+        }
+
+        return (
+            <div className="space-y-4 animate-fade-in">
+                <div className="rounded-[28px] border border-white/[0.06] bg-white/[0.04] p-5 backdrop-blur-sm">
+                    <label className="mb-2 block text-[11px] font-semibold tracking-wide text-white/45">视觉想法</label>
+                    <textarea
+                        value={cssIdea}
+                        onChange={e => setCssIdea(e.target.value)}
+                        placeholder="暗色主题，手机直播界面风格"
+                        className="h-24 w-full resize-none rounded-2xl border border-white/[0.05] bg-white/[0.03] px-4 py-3 text-[12px] leading-6 text-white/80 outline-none transition-colors placeholder:text-white/20 focus:border-white/15"
+                        {...WORKSHOP_TEXT_ENTRY_PROPS}
+                    />
+                    <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl border border-white/[0.05] bg-white/[0.03] p-1">
+                        {([
+                            { id: 'html' as const, label: 'HTML 骨架' },
+                            { id: 'css' as const, label: 'CSS 美化' },
+                        ]).map(option => (
+                            <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => setActiveVisualTab(option.id)}
+                                className={`min-h-[38px] rounded-xl px-3 py-2 text-[12px] font-semibold transition-all ${
+                                    activeVisualTab === option.id
+                                        ? 'bg-white/10 text-white/78'
+                                        : 'text-white/34 hover:bg-white/[0.05]'
+                                }`}
+                            >
+                                {option.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                {activeVisualTab === 'html' ? renderHtmlTab() : renderCssTab()}
             </div>
         );
     };
@@ -1803,12 +1954,19 @@ const StatusWorkshopApp: React.FC = () => {
                     <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                         <div>
                             <div className="text-[11px] font-semibold tracking-wide text-white/45">JS 互动代码</div>
-                            <p className="mt-1 text-[10px] leading-4 text-white/25">JS 只绑定 HTML 已有结构，不负责补 HTML。</p>
+                            <p className="mt-1 text-[10px] leading-4 text-white/25">JS 只绑定 HTML 已有结构，也可以读取 window.__statusData。</p>
                         </div>
-                        {renderStepButton('js', {
-                            label: '生成互动 JS',
-                            disabled: normalizeInteractionMode(activeTemplate.interactionMode) === 'none',
-                        })}
+                        <div className="flex flex-wrap gap-2">
+                            {renderStepButton('js', {
+                                label: '✨ 生成 JS',
+                                disabled: normalizeInteractionMode(activeTemplate.interactionMode) === 'none',
+                            })}
+                            {activeTemplate.jsTemplate?.trim() && renderStepButton('js', {
+                                label: '🔄 优化 JS',
+                                mode: 'polish',
+                                disabled: normalizeInteractionMode(activeTemplate.interactionMode) === 'none',
+                            })}
+                        </div>
                     </div>
                     <textarea
                         value={activeTemplate.jsTemplate || ''}
@@ -1832,23 +1990,24 @@ const StatusWorkshopApp: React.FC = () => {
 
     const getStepStatusLabel = (step: TabId) => {
         if (!activeTemplate) return '待开始';
-        if (step !== 'interaction' && activeTemplate.reviewFlags?.[step]) {
-            if (step === 'system' && !activeTemplate.systemPrompt?.trim()) return '待完成';
-            if (step === 'protocol' && !activeTemplate.extractRegex?.trim()) return '待完成';
-            if (step === 'js' && normalizeInteractionMode(activeTemplate.interactionMode) === 'none') return '可选';
-            return '需复核';
+        if (step === 'fields') {
+            if (activeTemplate.reviewFlags?.fields || activeTemplate.reviewFlags?.protocol) return '需复核';
+            return getTemplateFieldList(activeTemplate, genFields).length > 0 ? '已完成' : '待完成';
         }
-
-        if (step === 'system') return activeTemplate.systemPrompt?.trim() ? '已完成' : '待完成';
-        if (step === 'protocol') return activeTemplate.extractRegex?.trim() ? '已完成' : '待完成';
+        if (step === 'visual') {
+            if (activeTemplate.reviewFlags?.html || activeTemplate.reviewFlags?.css) return '需复核';
+            if (activeTemplate.htmlBody?.trim() && activeTemplate.cssTemplate?.trim()) return '已完成';
+            if (activeTemplate.htmlBody?.trim()) return '缺 CSS';
+            return '待完成';
+        }
         if (step === 'interaction') {
+            if (activeTemplate.reviewFlags?.js) return '需复核';
             const mode = normalizeInteractionMode(activeTemplate.interactionMode);
-            return mode === 'none' ? '无互动' : '已选择';
+            if (mode === 'none') return '无互动';
+            return activeTemplate.jsTemplate?.trim() ? '已完成' : '待 JS';
         }
-        if (step === 'html') return activeTemplate.htmlBody?.trim() ? '已完成' : '待完成';
-        if (step === 'css') return activeTemplate.cssTemplate?.trim() ? '已完成' : '待完成';
-        if (normalizeInteractionMode(activeTemplate.interactionMode) === 'none') return '可选';
-        return activeTemplate.jsTemplate?.trim() ? '已完成' : '待完成';
+        if (activeTemplate.reviewFlags?.advanced || activeTemplate.reviewFlags?.system) return '需复核';
+        return activeTemplate.systemPrompt?.trim() ? '已完成' : '待完成';
     };
 
     return (
@@ -2103,12 +2262,10 @@ const StatusWorkshopApp: React.FC = () => {
                     </div>
 
                     <div className="min-h-0 flex-1 pb-3 sm:pb-4 lg:pr-1">
-                        {activeTab === 'system' && renderSystemStep()}
-                        {activeTab === 'protocol' && renderProtocolStep()}
+                        {activeTab === 'fields' && renderProtocolStep()}
+                        {activeTab === 'visual' && renderVisualStep()}
                         {activeTab === 'interaction' && renderInteractionStep()}
-                        {activeTab === 'html' && renderHtmlTab()}
-                        {activeTab === 'css' && renderCssTab()}
-                        {activeTab === 'js' && renderJsTab()}
+                        {activeTab === 'advanced' && renderSystemStep()}
                     </div>
                 </div>
             </div>

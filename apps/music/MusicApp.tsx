@@ -56,6 +56,7 @@ import {
 } from '../../utils/musicService';
 import { DB } from '../../utils/db';
 import { exportMemoryRecordMp3 } from '../../utils/memoryRecordExport';
+import { shareMemoryRecordPoster } from '../../utils/memoryRecordShare';
 import { hasPlayableMemoryRecordAudio, memoryRecordToPlayable } from '../../utils/memoryRecordPlayable';
 import { findCurrentLyricIndex } from '../../utils/parseLrc';
 import type { MemoryRecordLyricTiming } from '../../types/memoryRecord';
@@ -65,6 +66,7 @@ import {
   type FloatingLyricsSettings,
   updateFloatingLyricsSettings,
 } from '../../components/os/floatingLyricsSettings';
+import MemoryRecordShareModal from '../../components/music/MemoryRecordShareModal';
 import './music.css';
 
 const SEARCH_HISTORY_KEY = 'music_recent_keywords';
@@ -127,6 +129,7 @@ const IconNext = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="cur
 const IconHeart = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" /></svg>;
 const IconMore = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>;
 const IconDownload = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M5 21h14" /></svg>;
+const IconShare = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="M8.6 10.6l6.8-4.2" /><path d="M8.6 13.4l6.8 4.2" /></svg>;
 const IconPlaylist = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>;
 const IconMiniPlay = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>;
 const IconMiniPause = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" /></svg>;
@@ -2439,6 +2442,7 @@ const FullPlayer = ({
   onSeekToTime,
   onAddToPlaylist,
   onExportMemoryRecord,
+  onOpenShareMemoryRecord,
   onSaveMemoryRecordLyricTiming,
 }: {
   playable: MusicPlayable;
@@ -2457,6 +2461,7 @@ const FullPlayer = ({
   onSeekToTime: (seconds: number) => void;
   onAddToPlaylist?: (songId: number) => void;
   onExportMemoryRecord?: (playable: MemoryRecordPlayable) => Promise<void> | void;
+  onOpenShareMemoryRecord?: (playable: MemoryRecordPlayable) => void;
   onSaveMemoryRecordLyricTiming?: (recordId: string, timing: MemoryRecordLyricTiming | undefined) => Promise<void> | void;
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
@@ -2650,16 +2655,27 @@ const FullPlayer = ({
                 <LikeButton songId={playable.id} likedPlaylistId={likedPlaylistId} />
               ) : null}
               {isMemoryRecordPlayable(playable) ? (
-                <button
-                  type="button"
-                  className="music-player-export-button"
-                  aria-label="导出 MP3"
-                  title="导出 MP3"
-                  disabled={isExportingMp3}
-                  onClick={() => { void handleExportMp3(); }}
-                >
-                  {isExportingMp3 ? <span className="music-export-spinner" /> : <IconDownload />}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="music-player-share-button"
+                    aria-label="分享歌曲"
+                    title="分享歌曲"
+                    onClick={() => onOpenShareMemoryRecord?.(playable)}
+                  >
+                    <IconShare />
+                  </button>
+                  <button
+                    type="button"
+                    className="music-player-export-button"
+                    aria-label="导出 MP3"
+                    title="导出 MP3"
+                    disabled={isExportingMp3}
+                    onClick={() => { void handleExportMp3(); }}
+                  >
+                    {isExportingMp3 ? <span className="music-export-spinner" /> : <IconDownload />}
+                  </button>
+                </>
               ) : null}
               <button
                 type="button"
@@ -2849,6 +2865,8 @@ export default function MusicApp() {
   const [showFullPlayer, setShowFullPlayer] = useState(false);
   const [showQrLogin, setShowQrLogin] = useState(false);
   const [addToPlaylistSongId, setAddToPlaylistSongId] = useState<number | null>(null);
+  const [shareModalPlayable, setShareModalPlayable] = useState<MemoryRecordPlayable | null>(null);
+  const [isSharingMemoryRecord, setIsSharingMemoryRecord] = useState(false);
 
   // 预加载皮肤
   useEffect(() => {
@@ -3058,6 +3076,20 @@ export default function MusicApp() {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'MP3 导出失败';
       addToast(message, 'error');
+    }
+  }
+
+  async function handleShareMemoryRecordPoster(record: MemoryRecordPlayable): Promise<void> {
+    setIsSharingMemoryRecord(true);
+    try {
+      const result = await shareMemoryRecordPoster(record);
+      setShareModalPlayable(null);
+      addToast(result.method === 'download' ? '分享海报已下载' : '已打开系统分享', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '分享失败';
+      addToast(message, 'error');
+    } finally {
+      setIsSharingMemoryRecord(false);
     }
   }
 
@@ -3713,6 +3745,7 @@ export default function MusicApp() {
           onSeekToTime={seekToTime}
           onAddToPlaylist={setAddToPlaylistSongId}
           onExportMemoryRecord={handleExportMemoryRecordMp3}
+          onOpenShareMemoryRecord={setShareModalPlayable}
           onSaveMemoryRecordLyricTiming={saveMemoryRecordLyricTiming}
         />
       ) : null}
@@ -3735,6 +3768,17 @@ export default function MusicApp() {
         songId={addToPlaylistSongId}
         playlists={userPlaylists.filter((p) => account && p.creator?.userId === account.userId)}
         onClose={() => setAddToPlaylistSongId(null)}
+      />
+
+      <MemoryRecordShareModal
+        playable={shareModalPlayable}
+        isSharing={isSharingMemoryRecord}
+        onClose={() => setShareModalPlayable(null)}
+        onShare={() => {
+          if (shareModalPlayable) {
+            void handleShareMemoryRecordPoster(shareModalPlayable);
+          }
+        }}
       />
     </div>
   );

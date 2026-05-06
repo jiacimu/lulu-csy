@@ -1,5 +1,5 @@
 
-import { OSTheme,APIConfig,ApiPreset } from './core';
+import { OSTheme,APIConfig,ApiPreset,AppearancePreset } from './core';
 import { RealtimeConfig } from './realtime';
 import { CharacterProfile,GroupProfile,Worldbook } from './character';
 import { ChatTheme,Message,Emoji,EmojiCategory,VectorMemory } from './chat';
@@ -52,7 +52,7 @@ export interface FullBackupData {
     sttConfig?: SttConfig;            // 语音识别配置
     memoryPalaceConfig?: any;         // Upstream SullyOS Memory Palace config
     customIcons?: Record<string, string>;
-    appearancePresets?: any[];
+    appearancePresets?: AppearancePreset[];
     characters?: CharacterProfile[];
     groups?: GroupProfile[];
     messages?: Message[];

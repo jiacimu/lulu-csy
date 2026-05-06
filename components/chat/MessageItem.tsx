@@ -21,6 +21,7 @@ import VoiceCallSummaryCard from './cards/VoiceCallSummaryCard';
 import ForwardCard from './cards/ForwardCard';
 import WeChatMomentsCard from './cards/WeChatMomentsCard';
 import SongShareCardBubble from './cards/SongShareCardBubble';
+// SoulReflectionCard removed — soul_reflection messages are now hiddenFromUser and shown via immersive panel in Chat.tsx
 import ChatBubble from './ChatBubble';
 import InteractionPill from './InteractionPill';
 import VoiceBubble from './VoiceBubble';
@@ -385,6 +386,8 @@ const MessageItem = React.memo(({
         );
     }
 
+    // Soul Reflection — no longer rendered in chat flow (hiddenFromUser: true, shown via immersive panel)
+
     const commonLayout = (content: React.ReactNode) => (
         <>
             {timestampSeparator}
@@ -404,12 +407,39 @@ const MessageItem = React.memo(({
                             data-testid="inner-voice-backdrop"
                             className="fixed inset-0 z-[9999] overflow-y-auto px-4 py-6 transition-opacity duration-300 animate-fade-in sm:px-6 sm:py-10"
                             style={{
-                                backgroundColor: 'rgba(0,0,0,0.65)',
-                                backdropFilter: 'blur(12px)',
-                                WebkitBackdropFilter: 'blur(12px)',
+                                backgroundColor: 'transparent',
                             }}
                             onClick={() => setShowInnerVoice(false)}
                         >
+                            <button
+                                type="button"
+                                data-testid="inner-voice-close-button"
+                                aria-label="关闭心声卡片"
+                                title="关闭心声卡片"
+                                className="fixed z-[10000] flex h-11 w-11 items-center justify-center rounded-full border border-white/35 bg-slate-950/45 text-white shadow-[0_10px_30px_rgba(15,23,42,0.24)] backdrop-blur-md transition-all duration-200 hover:bg-slate-950/60 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/35"
+                                style={{
+                                    top: 'max(18px, env(safe-area-inset-top))',
+                                    right: 'max(18px, env(safe-area-inset-right))',
+                                }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowInnerVoice(false);
+                                }}
+                            >
+                                <svg
+                                    aria-hidden="true"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    className="h-5 w-5"
+                                >
+                                    <path
+                                        d="M6.75 6.75l10.5 10.5M17.25 6.75l-10.5 10.5"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                    />
+                                </svg>
+                            </button>
                             <div className="flex min-h-full flex-col items-center">
                                 <div
                                     data-testid={statusCardData ? 'status-card-overlay-shell' : 'inner-voice-overlay-shell'}
@@ -777,6 +807,9 @@ const MessageItem = React.memo(({
         prev.msg.metadata?.hasAudio === next.msg.metadata?.hasAudio &&
         prev.msg.metadata?.duration === next.msg.metadata?.duration &&
         prev.msg.metadata?.sourceText === next.msg.metadata?.sourceText &&
+        prev.msg.replyTo?.id === next.msg.replyTo?.id &&
+        prev.msg.replyTo?.name === next.msg.replyTo?.name &&
+        prev.msg.replyTo?.content === next.msg.replyTo?.content &&
         prev.isFirstInGroup === next.isFirstInGroup &&
         prev.isLastInGroup === next.isLastInGroup &&
         prev.activeTheme === next.activeTheme &&

@@ -16,6 +16,7 @@ import type {
 import type { MemoryRecord } from '../../types';
 import { DB } from '../../utils/db';
 import { exportMemoryRecordMp3 } from '../../utils/memoryRecordExport';
+import { shareMemoryRecordPoster } from '../../utils/memoryRecordShare';
 import { resetPlaybackLyricsRuntimeForTests } from '../../utils/playbackLyricsRuntime';
 import { LYRIC_SETTINGS_KEY } from '../../components/os/floatingLyricsSettings';
 import { useApp } from '../../context/AppContext';
@@ -55,6 +56,20 @@ vi.mock('../../hooks/useAudioPlayer', () => ({
 
 vi.mock('../../utils/memoryRecordExport', () => ({
     exportMemoryRecordMp3: vi.fn(),
+}));
+
+vi.mock('../../utils/memoryRecordShare', () => ({
+    buildMemoryRecordSharePreview: vi.fn((playable) => ({
+        albumName: playable.albumName,
+        artistName: playable.artistName,
+        coverGradient: playable.coverGradient,
+        coverImageUrl: playable.coverImageUrl,
+        durationMs: playable.duration,
+        lyricLines: ['梦在转动', '你在身后'],
+        title: playable.name,
+    })),
+    formatMemoryRecordShareDuration: vi.fn(() => '3:12'),
+    shareMemoryRecordPoster: vi.fn(),
 }));
 
 vi.mock('../../utils/musicService', () => ({
@@ -99,6 +114,7 @@ const mockedUseApp = vi.mocked(useApp);
 const mockedUseOS = vi.mocked(useOS);
 const mockedUseAudioPlayer = vi.mocked(useAudioPlayer);
 const mockedExportMemoryRecordMp3 = vi.mocked(exportMemoryRecordMp3);
+const mockedShareMemoryRecordPoster = vi.mocked(shareMemoryRecordPoster);
 const mockedGetAlbumDetail = vi.mocked(getAlbumDetail);
 const mockedGetArtistAlbums = vi.mocked(getArtistAlbums);
 const mockedGetArtistDesc = vi.mocked(getArtistDesc);
@@ -208,6 +224,11 @@ describe('MusicApp', () => {
         mockedUseAudioPlayer.mockReturnValue(buildPlayerState(null) as any);
         mockedExportMemoryRecordMp3.mockResolvedValue({
             fileName: '梦里回声 - Sully.mp3',
+            method: 'download',
+        });
+        mockedShareMemoryRecordPoster.mockResolvedValue({
+            cardFileName: '梦里回声 - Sully.png',
+            fileNames: ['梦里回声 - Sully.png'],
             method: 'download',
         });
         mockedGetAlbumDetail.mockResolvedValue(null as any);
@@ -355,6 +376,36 @@ describe('MusicApp', () => {
             }));
         });
         expect(addToast).toHaveBeenCalledWith('MP3 已导出', 'success');
+    });
+
+    it('shows memory record share preview and shares poster', async () => {
+        const addToast = vi.fn();
+        mockedUseOS.mockReturnValue({ addToast } as any);
+        mockedUseAudioPlayer.mockReturnValue(buildPlayerState(sampleMemoryPlayable) as any);
+        mockedShareMemoryRecordPoster.mockResolvedValue({
+            cardFileName: '星河回信.png',
+            fileNames: ['星河回信.png'],
+            method: 'download',
+        });
+
+        render(<MusicApp />);
+
+        await waitFor(() => {
+            expect(mockedGetTopPlaylists).toHaveBeenCalled();
+        });
+
+        fireEvent.click(screen.getByTestId('music-mini-player'));
+        fireEvent.click(screen.getByLabelText('分享歌曲'));
+
+        expect(screen.getByRole('dialog', { name: '分享一起写歌作品' })).toBeTruthy();
+        fireEvent.click(screen.getByRole('button', { name: '分享海报' }));
+
+        await waitFor(() => {
+            expect(mockedShareMemoryRecordPoster).toHaveBeenCalledWith(expect.objectContaining({
+                recordId: sampleMemoryPlayable.recordId,
+            }));
+        });
+        expect(addToast).toHaveBeenCalledWith('分享海报已下载', 'success');
     });
 
     it('does not show MP3 export for Netease songs', async () => {

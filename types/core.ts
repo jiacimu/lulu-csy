@@ -78,6 +78,14 @@ export interface OSTheme {
     hideStatusBar?: boolean;
 }
 
+export interface AppearancePreset {
+    id: string;
+    name: string;
+    createdAt: number;
+    theme: OSTheme;
+    customIcons?: Record<string, string>;
+}
+
 export interface TranslationConfig {
     enabled: boolean;
     sourceLang: string; // e.g. '日本語' - the language messages are displayed in (选)
@@ -95,6 +103,7 @@ export interface APIConfig {
     apiKey: string;
     model: string;
     useGeminiJailbreak?: boolean;
+    useDeepSeekMode?: boolean;
     disablePrefill?: boolean;
 }
 

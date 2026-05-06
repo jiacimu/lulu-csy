@@ -12,6 +12,7 @@ import { MindSnapshotExtractor } from '../utils/mindSnapshotExtractor';
 import { loadCharacterGoals, formatGoalListStr } from '../utils/goalService';
 import { EventExtractor } from '../utils/eventExtractor';
 import { extractThinking } from '../utils/thinkingExtractor';
+import { isDeepSeekMode } from '../utils/deepseekPrompts';
 import { getEmbeddingConfig,getSecondaryApiConfig } from '../utils/runtimeConfig';
 import { BackendAgentManager } from '../utils/autonomousAgent';
 import type { HandlerContext } from './handlers/types';
@@ -348,11 +349,18 @@ mode 可选值：
                 trailingInstructions += `\n\n[Reminder: 每句话必须用 <翻译><原文>...</原文><译文>...</译文></翻译> 标签包裹。一句一个标签。绝对不能省略。]`;
             }
 
-            // 3.0a Prefill injection — force CoT <thinking> start
+            // 3.0a Prefill injection — force CoT start
+            // DeepSeek uses <think>, Gemini/Claude uses <thinking>
             // Controlled via settings to support buggy proxies that block prefill (and eat tokens)
             const usePrefill = !apiConfig.disablePrefill;
+            const isDeepSeek = isDeepSeekMode(apiConfig);
+            const thinkTag = isDeepSeek ? 'think' : 'thinking';
             if (usePrefill) {
-                trailingInstructions += `\n\n[思考链格式锁定]\n请严格遵循以下输出流程：\n1. 先在 <thinking>...</thinking> 中完成全部思考\n2. 思考完毕后，必须输出 </thinking> 闭合标签\n3. 闭合标签后，立即输出角色的正文回复（不要遗漏！）\n4. 正文中不得包含任何 <thinking> 标签或思考过程\n\n格式：\n<thinking>\n（你的思考过程）\n</thinking>\n（角色正文回复）\n\n严禁只输出思考而遗漏正文。思考链闭合后必须紧跟正文内容。\n\n━━━━━━━━━━━━━━━\n<!--\nif 首段不是<thinking>标签 then\n    立即回滚本轮并重写，直至首段为<thinking>…</thinking>\nend if\n-->\n━━━━━━━━━━━━━━━`;
+                if (isDeepSeek) {
+                    trailingInstructions += `\n\n[思考链格式锁定]\n请严格遵循以下输出流程：\n1. 先在 <think>...</think> 中完成全部思考\n2. 思考完毕后，必须输出 </think> 闭合标签\n3. 闭合标签后，立即输出角色的正文回复（不要遗漏！）\n4. 正文中不得包含任何 <think> 标签或思考过程\n\n格式：\n<think>\n（你的思考过程）\n</think>\n（角色正文回复）\n\n严禁只输出思考而遗漏正文。思考链闭合后必须紧跟正文内容。`;
+                } else {
+                    trailingInstructions += `\n\n[思考链格式锁定]\n请严格遵循以下输出流程：\n1. 先在 <thinking>...</thinking> 中完成全部思考\n2. 思考完毕后，必须输出 </thinking> 闭合标签\n3. 闭合标签后，立即输出角色的正文回复（不要遗漏！）\n4. 正文中不得包含任何 <thinking> 标签或思考过程\n\n格式：\n<thinking>\n（你的思考过程）\n</thinking>\n（角色正文回复）\n\n严禁只输出思考而遗漏正文。思考链闭合后必须紧跟正文内容。\n\n━━━━━━━━━━━━━━━\n<!--\nif 首段不是<thinking>标签 then\n    立即回滚本轮并重写，直至首段为<thinking>…</thinking>\nend if\n-->\n━━━━━━━━━━━━━━━`;
+                }
             }
 
             if (trailingInstructions) {
@@ -364,8 +372,8 @@ mode 可选值：
             }
 
             if (usePrefill) {
-                fullMessages.push({ role: 'assistant', content: '<thinking>' });
-                console.log('🧩 [Prefill] Injected <thinking> prefill assistant message');
+                fullMessages.push({ role: 'assistant', content: `<${thinkTag}>` });
+                console.log(`🧩 [Prefill] Injected <${thinkTag}> prefill assistant message`);
             }
 
             // Claude API 兼容：确保最后一条 assistant 消息无尾部空白
@@ -413,12 +421,12 @@ mode 可选值：
                 ''
             );
 
-            // 4.0a Prefill reconstruction — restore the <thinking> opening tag
+            // 4.0a Prefill reconstruction — restore the opening tag
             // ONLY if we used prefill AND the model didn't use the native reasoning channel.
             // (If nativeThinking exists, the text content is pure message, no need to pollute it)
             if (usePrefill && !nativeThinking && !aiContent.includes('<thinking>') && !aiContent.includes('<think>')) {
-                aiContent = '<thinking>\n' + aiContent;
-                console.log('🧩 [Prefill] Reconstructed <thinking> tag onto response (Fallback mode)');
+                aiContent = `<${thinkTag}>\n` + aiContent;
+                console.log(`🧩 [Prefill] Reconstructed <${thinkTag}> tag onto response (Fallback mode)`);
             }
 
             console.log(`🧠 [ThinkingDebug] useGeminiJailbreak=${apiConfig.useGeminiJailbreak} | raw length=${aiContent.length} | nativeThinking length=${nativeThinking.length} | has <thinking>=${aiContent.includes('<thinking>')} | has <think>=${aiContent.includes('<think>')}`);
@@ -441,17 +449,19 @@ mode 可选值：
                 try {
                     // Remove the prefill assistant message and thinking chain lock for retry
                     const retryMessages = fullMessages.filter(m => 
-                        !(m.role === 'assistant' && typeof m.content === 'string' && m.content.startsWith('<thinking>'))
+                        !(m.role === 'assistant' && typeof m.content === 'string' && (m.content.startsWith('<thinking>') || m.content.startsWith('<think>')))
                     );
                     
                     // The thinking chain lock was injected into the last user message, we need to remove it
                     const rLastUserIdx = retryMessages.map(m => m.role).lastIndexOf('user');
                     if (rLastUserIdx >= 0 && typeof retryMessages[rLastUserIdx].content === 'string') {
                         retryMessages[rLastUserIdx].content = retryMessages[rLastUserIdx].content.replace(/\[思考链格式锁定\][\s\S]*?━━━━━━━━━━━━━━━/, '');
+                        // Also clean DeepSeek-style chain lock (no separator block)
+                        retryMessages[rLastUserIdx].content = retryMessages[rLastUserIdx].content.replace(/\[思考链格式锁定\][\s\S]*?思考链闭合后必须紧跟正文内容。/, '');
                         // Add a direct instruction instead
-                        retryMessages[rLastUserIdx].content += '\n\n[系统: 请直接输出角色的回复正文，不需要 <thinking> 标签。]';
+                        retryMessages[rLastUserIdx].content += `\n\n[系统: 请直接输出角色的回复正文，不需要 <${thinkTag}> 标签。]`;
                     } else {
-                        retryMessages.push({ role: 'user', content: '[系统: 请直接输出角色的回复正文，不需要 <thinking> 标签。]' });
+                        retryMessages.push({ role: 'user', content: `[系统: 请直接输出角色的回复正文，不需要 <${thinkTag}> 标签。]` });
                     }
                     
                     const retryBody = { model: apiConfig.model, messages: retryMessages, temperature: 0.85, stream: false };

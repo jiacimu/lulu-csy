@@ -7,6 +7,7 @@ import { useOS } from '../context/OSContext';
 import type { CustomStatusTemplate } from '../types/statusCard';
 import StatusWorkshopApp,{
     buildCssPolishPrompt,
+    buildFieldsPrompt,
     buildHtmlPrompt,
     buildJsPrompt,
     buildProtocolPrompt,
@@ -16,6 +17,7 @@ import StatusWorkshopApp,{
     buildSystemPromptPrompt,
     extractTemplatePlaceholders,
     parseStatusWorkshopImportPayload,
+    shouldClearLegacyExtractRegexForHtml,
     StatusWorkshopGeneratorFieldList,
     validateStatusTemplateExtraction,
 } from './StatusWorkshopApp';
@@ -57,20 +59,22 @@ describe('StatusWorkshopGeneratorFieldList', () => {
 });
 
 describe('StatusWorkshop prompt helpers', () => {
-    const fields = [{ id: 'field-1', name: '时间', desc: '当前时间' }];
-    const templateFields = [{ id: 'field_1', name: '时间', description: '当前时间', required: true }];
+    const fields = [{ id: 'field-1', name: '时间', desc: '当前时间', type: 'text' as const }];
+    const templateFields = [{ id: 'field_1', name: '时间', description: '当前时间', required: true, type: 'text' as const }];
     const interaction = { mode: 'flip' as const, idea: '点击卡片翻到背面看隐藏心声' };
 
-    it('keeps field protocol separate from status writing rules', () => {
-        const protocolPrompt = buildProtocolPrompt('做一个心情状态栏', fields);
+    it('keeps field definitions separate from status writing rules', () => {
+        const fieldsPrompt = buildFieldsPrompt('做一个心情状态栏', fields);
         const statusWritingPrompt = buildSystemPromptPrompt('做一个心情状态栏', templateFields);
         const contract = buildStatusContract(fields);
 
-        expect(protocolPrompt).toContain('"extractRegex"');
-        expect(protocolPrompt).toContain('"fields"');
-        expect(protocolPrompt).toContain('不要写状态文本规则');
-        expect(protocolPrompt).toContain(contract);
-        expect(protocolPrompt).not.toContain('"systemPrompt"');
+        expect(fieldsPrompt).toContain('"fields"');
+        expect(fieldsPrompt).toContain('"type": "text"');
+        expect(fieldsPrompt).toContain('不要写状态文本规则');
+        expect(fieldsPrompt).toContain('不要写 extractRegex');
+        expect(fieldsPrompt).toContain(contract);
+        expect(fieldsPrompt).not.toContain('"systemPrompt"');
+        expect(fieldsPrompt).not.toContain('"extractRegex"');
 
         expect(statusWritingPrompt).toContain('"systemPrompt"');
         expect(statusWritingPrompt).toContain('字段协议');
@@ -85,24 +89,49 @@ describe('StatusWorkshop prompt helpers', () => {
     it('does not rely on status writing rules when building field protocol prompts', () => {
         const protocolPrompt = buildProtocolPrompt('做一个心情状态栏', fields);
 
-        expect(protocolPrompt).toContain('"extractRegex"');
         expect(protocolPrompt).toContain('"fields"');
+        expect(protocolPrompt).toContain('不要写 extractRegex');
         expect(protocolPrompt).not.toContain('当前状态文本规则');
         expect(protocolPrompt).not.toContain('"systemPrompt"');
     });
 
     it('threads interaction requirements through HTML, CSS, and JS prompts', () => {
-        const htmlPrompt = buildHtmlPrompt('做一个翻卡状态栏', templateFields, interaction, '<section class="card">$1</section>');
-        const cssPrompt = buildCssPolishPrompt('做一个翻卡状态栏', '<section data-action="flip">$1</section>', '.card { color: red; }', interaction);
-        const jsPrompt = buildJsPrompt(interaction, '<button data-action="flip">flip</button>', '.is-flipped { transform: rotateY(180deg); }');
+        const htmlPrompt = buildHtmlPrompt('做一个翻卡状态栏', templateFields, interaction, '<section class="card">{{时间}}</section>');
+        const cssPrompt = buildCssPolishPrompt('做一个翻卡状态栏', '<section data-action="flip">{{时间}}</section>', '.card { color: red; }', interaction, templateFields);
+        const jsPrompt = buildJsPrompt(interaction, templateFields, '<button data-action="flip">flip</button>', '.is-flipped { transform: rotateY(180deg); }');
 
         expect(htmlPrompt).toContain('当前 HTML 骨架');
+        expect(htmlPrompt).toContain('{{时间}}');
         expect(htmlPrompt).toContain('data-action');
         expect(cssPrompt).toContain('当前 CSS');
-        expect(cssPrompt).toContain('保留已有有效视觉特征');
+        expect(cssPrompt).toContain('在此基础上改进');
         expect(cssPrompt).toContain('.is-flipped');
         expect(jsPrompt).toContain('只能绑定已有 HTML 结构');
+        expect(jsPrompt).toContain('window.__statusData');
         expect(jsPrompt).toContain('不要重写整段 HTML');
+    });
+
+    it('clears stale legacy regex when generated HTML uses named placeholders', () => {
+        expect(shouldClearLegacyExtractRegexForHtml('<section>{{心情}}</section>')).toBe(true);
+        expect(shouldClearLegacyExtractRegexForHtml('<ul>{{#弹幕}}<li>{{.}}</li>{{/弹幕}}</ul>')).toBe(true);
+        expect(shouldClearLegacyExtractRegexForHtml('<section>$1</section>')).toBe(false);
+    });
+
+    it('validates new parser templates without extractRegex', () => {
+        const fieldsWithList = [
+            { id: 'field_1', name: '时间', description: '当前时间', required: true, type: 'text' as const },
+            { id: 'field_2', name: '弹幕', description: '直播弹幕', required: true, type: 'list' as const },
+        ];
+        const template = createTemplate({
+            fields: fieldsWithList,
+            extractRegex: '',
+            htmlBody: '<section>{{时间}}<ul>{{#弹幕}}<li>{{.}}</li>{{/弹幕}}</ul></section>',
+        });
+        const validation = validateStatusTemplateExtraction(template, buildStatusSample(fieldsWithList));
+
+        expect(validation.status).toBe('ok');
+        expect(validation.parsedData?.时间).toBe('时间示例值');
+        expect(validation.parsedData?.弹幕).toEqual(['弹幕示例1', '弹幕示例2', '弹幕示例3']);
     });
 
     it('validates template placeholders against real regex capture groups', () => {
@@ -221,109 +250,100 @@ describe('StatusWorkshopApp workflow', () => {
         vi.restoreAllMocks();
     });
 
-    it('starts from field protocol and allows it before status writing rules', () => {
+    it('starts from field definitions and allows generation before AI writing rules', () => {
         renderWorkshop(createTemplate());
 
-        expect(screen.getByText('1 字段协议')).toBeInTheDocument();
+        expect(screen.getByText('1 定义字段')).toBeInTheDocument();
         expect(screen.getByText('导入方案')).toBeInTheDocument();
         expect(screen.getByText('导出当前')).toBeInTheDocument();
         expect(screen.getByText('导出全部')).toBeInTheDocument();
-        const generateButton = screen.getByText('生成字段协议').closest('button');
+        const generateButton = screen.getByText('✨ 生成字段').closest('button');
 
         expect(generateButton).not.toBeDisabled();
         expect(screen.queryByText(/先完成.*状态写法/)).not.toBeInTheDocument();
     });
 
-    it('does not show tool-like status writing copy to users', () => {
+    it('does not show tool-like status writing copy to users in advanced writing step', () => {
         renderWorkshop(createTemplate({ extractRegex: 'old regex' }));
 
-        fireEvent.click(screen.getByText('2 TA 的状态写法'));
+        fireEvent.click(screen.getByText('4 AI 写法'));
 
-        expect(screen.getByText('状态文本规则')).toBeInTheDocument();
-        expect(screen.getByPlaceholderText(/告诉TA/)).toBeInTheDocument();
+        expect(screen.getByText('AI 写法')).toBeInTheDocument();
+        expect(screen.getByPlaceholderText(/弹幕要接地气/)).toBeInTheDocument();
         expect(screen.queryByText(/System Prompt|角色 AI|char AI/)).not.toBeInTheDocument();
         expect(screen.queryByPlaceholderText(/System Prompt|角色 AI|char AI|告诉角色/)).not.toBeInTheDocument();
     });
 
-    it('blocks HTML generation until field protocol is complete', () => {
-        const { addToast } = renderWorkshop(createTemplate());
+    it('uses the new 4-tab structure and visual subtabs', () => {
+        renderWorkshop(createTemplate());
 
-        fireEvent.change(screen.getByPlaceholderText(/说清楚你想做什么/), {
-            target: { value: '做一个能显示时间的状态栏' },
-        });
-        fireEvent.click(screen.getByText('4 HTML 骨架'));
-        fireEvent.click(screen.getByText('生成 HTML 骨架'));
+        expect(screen.getByText('1 定义字段')).toBeInTheDocument();
+        expect(screen.getByText('2 视觉设计')).toBeInTheDocument();
+        expect(screen.getByText('3 互动')).toBeInTheDocument();
+        expect(screen.getByText('4 AI 写法')).toBeInTheDocument();
 
-        expect(addToast).toHaveBeenCalledWith('先完成字段协议和提取正则，再生成 HTML 骨架', 'error');
+        fireEvent.click(screen.getByText('2 视觉设计'));
+
+        expect(screen.getAllByText('HTML 骨架').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('CSS 美化').length).toBeGreaterThan(0);
+        expect(screen.getByText('✨ 生成 HTML')).toBeInTheDocument();
     });
 
-    it('marks status writing and render steps for review after protocol changes without clearing content', () => {
+    it('does not show extractRegex for new templates', () => {
+        renderWorkshop(createTemplate());
+
+        expect(screen.queryByText('提取正则')).not.toBeInTheDocument();
+        expect(screen.queryByText(/旧版正则模式/)).not.toBeInTheDocument();
+    });
+
+    it('shows legacy extractRegex inside a compatibility panel', () => {
         renderWorkshop(createTemplate({
-            systemPrompt: '每个字段都要短而具体。',
             extractRegex: 'old regex',
-            htmlBody: '<section class="status-card">$1</section>',
-            cssTemplate: '.status-card { color: red; }',
-            jsTemplate: 'document.querySelector(".status-card")?.classList.toggle("is-active");',
-            interactionMode: 'flip',
         }));
 
-        fireEvent.change(screen.getByDisplayValue('old regex'), {
-            target: { value: 'new regex' },
-        });
-
-        expect(screen.getAllByText('需复核').length).toBeGreaterThanOrEqual(4);
-        fireEvent.click(screen.getByText('2 TA 的状态写法'));
-        expect(screen.getByDisplayValue('每个字段都要短而具体。')).toBeInTheDocument();
-        expect(screen.getByText(/字段协议刚刚改过/)).toBeInTheDocument();
+        expect(screen.getByText('旧版正则模式兼容设置')).toBeInTheDocument();
+        expect(screen.getByDisplayValue('old regex')).toBeInTheDocument();
     });
 
-    it('shows extraction diagnostics when regex capture groups do not cover placeholders', () => {
-        renderWorkshop(createTemplate({
-            fields: [
-                { id: 'field_1', name: '时间', description: '当前时间', required: true },
-                { id: 'field_2', name: '心情', description: '当前心情', required: true },
-            ],
-            extractRegex: '<status>[\\s\\S]*?时间:\\s*(.*?)\\s*<\\/status>',
-            htmlBody: '<section class="status-card">$1 $2</section>',
-        }));
-
-        expect(screen.getByText('提取校验需处理')).toBeInTheDocument();
-        expect(screen.getByText(/模板用了 \$2/)).toBeInTheDocument();
-        expect(screen.getByText('提取预览')).toBeInTheDocument();
-    });
-
-    it('marks downstream steps for review after interaction changes without clearing content', () => {
+    it('marks visual and JS for review after interaction changes without clearing content', () => {
         renderWorkshop(createTemplate({
             systemPrompt: '每次回复末尾输出状态。',
-            extractRegex: '<status>[\\s\\S]*?时间:\\s*(.*?)<\\/status>',
-            htmlBody: '<section class="status-card">$1</section>',
+            htmlBody: '<section class="status-card">{{时间}}</section>',
             cssTemplate: '.status-card { color: red; }',
             jsTemplate: 'document.querySelector(".status-card")?.classList.toggle("is-active");',
             interactionMode: 'none',
         }));
 
-        fireEvent.click(screen.getByText('3 互动需求'));
+        fireEvent.click(screen.getByText('3 互动'));
         fireEvent.click(screen.getByText('翻卡'));
 
-        expect(screen.getAllByText('需复核').length).toBeGreaterThanOrEqual(3);
-        fireEvent.click(screen.getByText('4 HTML 骨架'));
-        expect(screen.getByDisplayValue('<section class="status-card">$1</section>')).toBeInTheDocument();
+        expect(screen.getAllByText('需复核').length).toBeGreaterThanOrEqual(2);
+        fireEvent.click(screen.getByText('2 视觉设计'));
+        expect(screen.getByDisplayValue('<section class="status-card">{{时间}}</section>')).toBeInTheDocument();
     });
 
-    it('requires confirmation before replacing existing HTML', () => {
+    it('requires confirmation before generating over existing HTML', () => {
         const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
         renderWorkshop(createTemplate({
             systemPrompt: '每次回复末尾输出状态。',
-            extractRegex: '<status>[\\s\\S]*?时间:\\s*(.*?)<\\/status>',
-            htmlBody: '<section class="status-card">$1</section>',
+            htmlBody: '<section class="status-card">{{时间}}</section>',
         }));
 
-        fireEvent.change(screen.getByPlaceholderText(/说清楚你想做什么/), {
+        fireEvent.change(screen.getByPlaceholderText(/做一个角色直播间/), {
             target: { value: '做一个能显示时间的状态栏' },
         });
-        fireEvent.click(screen.getByText('4 HTML 骨架'));
-        fireEvent.click(screen.getByText('重新生成 / 覆盖'));
+        fireEvent.click(screen.getByText('2 视觉设计'));
+        fireEvent.click(screen.getByText('✨ 生成 HTML'));
 
         expect(confirmSpy).toHaveBeenCalled();
+    });
+
+    it('renders a field type selector', () => {
+        renderWorkshop(createTemplate());
+
+        const selectors = screen.getAllByRole('combobox') as HTMLSelectElement[];
+        expect(selectors[0].value).toBe('text');
+        fireEvent.change(selectors[0], { target: { value: 'list' } });
+        expect(selectors[0].value).toBe('list');
     });
 });

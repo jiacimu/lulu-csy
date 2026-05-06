@@ -34,6 +34,7 @@ export interface TemplateField {
     name: string;          // 字段显示名（如 "时间"、"地点"）
     description: string;   // 给 AI 的提示（如 "当前时间，格式 HH:MM"）
     required: boolean;
+    type?: 'text' | 'list';
 }
 
 /** 嵌入图片定义 */
@@ -61,6 +62,8 @@ export interface CardAppearance {
 export type StatusWorkshopInteractionMode = 'none' | 'expand' | 'flip' | 'pages' | 'state';
 
 export interface StatusWorkshopReviewFlags {
+    fields?: boolean;
+    advanced?: boolean;
     system?: boolean;
     protocol?: boolean;
     html?: boolean;

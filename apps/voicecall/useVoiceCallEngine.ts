@@ -41,6 +41,11 @@ import {
     buildVoiceCallRecentContextTranscript,
     type VoiceCallRecentContextMessage,
 } from './voiceCallRecentContext';
+import {
+    getVoiceCallRuntimeProfile,
+    VOICE_CALL_DEFAULT_SAMPLE_RATE,
+    type VoiceCallInputMode,
+} from './voiceCallRuntime';
 
 // ─── 类型 ──────────────────────────────────────────────────────────────
 
@@ -108,6 +113,10 @@ export interface UseVoiceCallEngineReturn {
     ttsDegraded: boolean;
     /** 当前 transcript 来源 */
     transcriptSource: VoiceCallTranscriptSource;
+    /** 是否处于 iOS/Safari 省内存档位 */
+    lowMemoryMode: boolean;
+    /** 当前输入模式；省内存或 VAD 初始化失败时为 text-only */
+    voiceInputMode: VoiceCallInputMode;
     // ─── 通话质量反馈 ───
     /** STT 返回空结果，提示用户"没听清" */
     sttEmptyHint: boolean;
@@ -122,9 +131,6 @@ export interface UseVoiceCallEngineReturn {
 }
 
 // ─── 通话专用 TTS 采样率 ─────────────────────────────────────────────
-
-const VOICE_CALL_SAMPLE_RATE = 24000;
-const RECENT_CHAT_CONTEXT_LIMIT = 50;
 
 // ─── Float32Array → WAV Blob ──────────────────────────────────────────
 
@@ -198,7 +204,11 @@ function resolveVoiceCallLanguageBoost(foreignLang?: VoiceCallForeignLangConfig)
     return sourceLang ? VOICE_CALL_TTS_LANGUAGE_BOOST_MAP[sourceLang] : undefined;
 }
 
-export function buildVoiceCallTtsConfig(base: TtsConfig, foreignLang?: VoiceCallForeignLangConfig): TtsConfig {
+export function buildVoiceCallTtsConfig(
+    base: TtsConfig,
+    foreignLang?: VoiceCallForeignLangConfig,
+    sampleRate: number = VOICE_CALL_DEFAULT_SAMPLE_RATE,
+): TtsConfig {
     const languageBoost = resolveVoiceCallLanguageBoost(foreignLang);
     return {
         ...base,
@@ -206,7 +216,7 @@ export function buildVoiceCallTtsConfig(base: TtsConfig, foreignLang?: VoiceCall
         audioSetting: {
             ...base.audioSetting,
             format: 'pcm' as const,
-            audio_sample_rate: VOICE_CALL_SAMPLE_RATE,
+            audio_sample_rate: sampleRate,
         },
     };
 }
@@ -273,12 +283,15 @@ function buildVoiceCallRetrievalMessages(
 // ─── Hook ──────────────────────────────────────────────────────────────
 
 export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoiceCallEngineReturn {
+    const runtimeProfileRef = useRef(getVoiceCallRuntimeProfile());
+    const runtimeProfile = runtimeProfileRef.current;
     const [engineState, setEngineState] = useState<EngineState>('idle');
     const [isUserSpeaking, setIsUserSpeaking] = useState(false);
     const [transcript, setTranscript] = useState('');
     const [aiResponse, setAiResponse] = useState('');
     const [ttsDegraded, setTtsDegraded] = useState(false);
     const [transcriptSource, setTranscriptSource] = useState<VoiceCallTranscriptSource>('voice');
+    const [voiceInputMode, setVoiceInputMode] = useState<VoiceCallInputMode>(runtimeProfile.voiceInputMode);
     // ─── 外语模式 (Foreign Language) ───
     const [aiTranslation, setAiTranslation] = useState('');
     const [subtitleHistory, setSubtitleHistory] = useState<VoiceCallSubtitleEntry[]>([]);
@@ -446,9 +459,12 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                 if (gen === generationRef.current && engineActiveRef.current) {
                     console.log('[Engine] AI finished speaking, back to listening');
                     // ── 打包本轮 PCM → WAV Blob 存入缓存（以 gen 作为精确 key）──
-                    if (turnAudioChunksRef.current.length > 0) {
+                    if (runtimeProfileRef.current.persistAssistantAudio && turnAudioChunksRef.current.length > 0) {
                         try {
-                            const wavBlob = pcmChunksToWavBlob(turnAudioChunksRef.current, VOICE_CALL_SAMPLE_RATE);
+                            const wavBlob = pcmChunksToWavBlob(
+                                turnAudioChunksRef.current,
+                                runtimeProfileRef.current.ttsSampleRate,
+                            );
                             turnAudioBlobsRef.current.set(gen, wavBlob);
                             console.log(`[Engine] Turn audio cached (gen=${gen}): ${(wavBlob.size / 1024).toFixed(1)}KB`);
                         } catch (e) {
@@ -462,7 +478,11 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                 }
             };
 
-            const vcTtsConfig = buildVoiceCallTtsConfig(opts.ttsConfig, opts.foreignLang);
+            const vcTtsConfig = buildVoiceCallTtsConfig(
+                opts.ttsConfig,
+                opts.foreignLang,
+                runtimeProfileRef.current.ttsSampleRate,
+            );
 
             let ttsReady = false;
             let ttsConnectFailed = false;
@@ -542,7 +562,9 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                 if (chunk.audio.length > 0) {
                     playerRef.current?.enqueue(chunk.audio);
                     // ── 收集原始 PCM 用于通话录音缓存 ──
-                    turnAudioChunksRef.current.push(new Uint8Array(chunk.audio));
+                    if (runtimeProfileRef.current.persistAssistantAudio) {
+                        turnAudioChunksRef.current.push(new Uint8Array(chunk.audio));
+                    }
                 }
                 if (chunk.isFinal) {
                     isFinalCount++;
@@ -926,11 +948,19 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         subtitleIdRef.current = 0;
         setSubtitleHistory([]);
         setAiTranslation('');
+        setVoiceInputMode(runtimeProfileRef.current.voiceInputMode);
+        turnAudioChunksRef.current = [];
+        turnAudioBlobsRef.current = new Map();
+        pendingAudioSegmentsRef.current = [];
+        lastCallHistoryRef.current = [];
+        recentContextMessagesRef.current = [];
 
         try {
-            const recentContextPromise = DB.getRecentMessagesByCharId(opts.char.id, RECENT_CHAT_CONTEXT_LIMIT)
+            const runtime = runtimeProfileRef.current;
+            const recentContextLimit = runtime.recentContextLimit;
+            const recentContextPromise = DB.getRecentMessagesByCharId(opts.char.id, recentContextLimit)
                 .then((messages) => buildVoiceCallRecentContextMessages(messages, {
-                    limit: RECENT_CHAT_CONTEXT_LIMIT,
+                    limit: recentContextLimit,
                     hideBeforeMessageId: opts.char.hideBeforeMessageId,
                 }))
                 .catch((error) => {
@@ -938,18 +968,33 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                     return [] as VoiceCallRecentContextMessage[];
                 });
 
-            // 1. 获取麦克风
-            const [stream, recentContextMessages] = await Promise.all([
-                navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        sampleRate: 16000,
-                    },
-                }),
-                recentContextPromise,
-            ]);
-            streamRef.current = stream;
+            // 1. 获取麦克风；iOS/Safari 省内存档位直接跳过 VAD/ONNX/WASM
+            let stream: MediaStream | null = null;
+            let nextVoiceInputMode = runtime.voiceInputMode;
+            if (runtime.voiceInputMode === 'voice') {
+                try {
+                    if (!navigator.mediaDevices?.getUserMedia) {
+                        throw new Error('当前浏览器不支持麦克风输入');
+                    }
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            sampleRate: 16000,
+                        },
+                    });
+                    streamRef.current = stream;
+                } catch (error) {
+                    console.warn('[Engine] Microphone unavailable, falling back to text input:', error);
+                    nextVoiceInputMode = 'text-only';
+                    setVoiceInputMode('text-only');
+                }
+            } else {
+                console.log('[Engine] Low-memory runtime: skipping microphone and VAD initialization');
+                setVoiceInputMode('text-only');
+            }
+
+            const recentContextMessages = await recentContextPromise;
             recentContextMessagesRef.current = recentContextMessages;
             const recentChatContext = buildVoiceCallRecentContextTranscript(
                 recentContextMessages,
@@ -983,7 +1028,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
 
             // 3. 初始化 PCM 音频播放器（采样率与通话 TTS 配置一致）
             playerRef.current = new VoiceCallAudioPlayer({
-                sampleRate: VOICE_CALL_SAMPLE_RATE,
+                sampleRate: runtime.ttsSampleRate,
             });
             playerRef.current.init();
 
@@ -998,79 +1043,94 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             //    这里不预创建，避免闲置超时
 
             // 5. 初始化 VAD
-            const { MicVAD } = await import('@ricky0123/vad-web');
-            const vad = await MicVAD.new({
-                getStream: async () => stream,
-                pauseStream: async () => { /* no-op */ },
-                resumeStream: async () => stream,
-                onnxWASMBasePath: '/vad/onnx/',
-                baseAssetPath: '/vad/',
-                positiveSpeechThreshold: 0.6,
-                negativeSpeechThreshold: 0.3,
-                redemptionMs: 300,
-                startOnLoad: false,
-                onSpeechStart: () => {
-                    // 静音时忽略 VAD 检测 — 不设录音状态、不触发 barge-in
-                    if (optionsRef.current.isMuted) return;
-                    // 闸门期间忽略 VAD（响铃时环境噪音不应打断缓冲的开场白）
-                    if (gatedRef.current) return;
-                    console.log('[Engine] VAD: speech start');
-                    setIsUserSpeaking(true);
-                    // 打断检查
-                    if (engineStateRef.current === 'speaking') {
-                        handleBargeIn();
+            if (stream && nextVoiceInputMode === 'voice') {
+                try {
+                    const { MicVAD } = await import('@ricky0123/vad-web');
+                    const vad = await MicVAD.new({
+                        getStream: async () => stream,
+                        pauseStream: async () => { /* no-op */ },
+                        resumeStream: async () => stream,
+                        onnxWASMBasePath: '/vad/onnx/',
+                        baseAssetPath: '/vad/',
+                        positiveSpeechThreshold: 0.6,
+                        negativeSpeechThreshold: 0.3,
+                        redemptionMs: 300,
+                        startOnLoad: false,
+                        onSpeechStart: () => {
+                            // 静音时忽略 VAD 检测 — 不设录音状态、不触发 barge-in
+                            if (optionsRef.current.isMuted) return;
+                            // 闸门期间忽略 VAD（响铃时环境噪音不应打断缓冲的开场白）
+                            if (gatedRef.current) return;
+                            console.log('[Engine] VAD: speech start');
+                            setIsUserSpeaking(true);
+                            // 打断检查
+                            if (engineStateRef.current === 'speaking') {
+                                handleBargeIn();
+                            }
+                        },
+                        onSpeechEnd: (audio: Float32Array) => {
+                            // 静音时忽略 VAD 结束 — 丢弃音频，不走 STT
+                            if (optionsRef.current.isMuted) return;
+                            // 闸门期间忽略 VAD
+                            if (gatedRef.current) return;
+                            console.log('[Engine] VAD: speech end');
+                            setIsUserSpeaking(false);
+
+                            // ── 拼接模式：push 片段 + 重置去抖定时器 ──
+                            if (!engineActiveRef.current) return;
+                            if (Date.now() < ignoreUntilRef.current) return;
+
+                            // 过短片段过滤
+                            if (audio.length < 16000 * 0.3) {
+                                console.log('[Engine] Voice segment too short, ignoring');
+                                return;
+                            }
+
+                            pendingAudioSegmentsRef.current.push(audio);
+                            console.log(`[Engine] Buffered segment ${pendingAudioSegmentsRef.current.length} (${(audio.length / 16000).toFixed(1)}s)`);
+
+                            // 重置去抖定时器
+                            if (sttDebounceTimerRef.current) {
+                                clearTimeout(sttDebounceTimerRef.current);
+                            }
+                            sttDebounceTimerRef.current = setTimeout(() => {
+                                sttDebounceTimerRef.current = null;
+                                const segments = pendingAudioSegmentsRef.current;
+                                pendingAudioSegmentsRef.current = [];
+
+                                if (segments.length === 0) return;
+
+                                // 拼接所有音频段
+                                let totalLen = 0;
+                                for (const seg of segments) totalLen += seg.length;
+                                const concatenated = new Float32Array(totalLen);
+                                let offset = 0;
+                                for (const seg of segments) {
+                                    concatenated.set(seg, offset);
+                                    offset += seg.length;
+                                }
+
+                                console.log(`[Engine] Concat ${segments.length} segment(s) → ${(totalLen / 16000).toFixed(1)}s total`);
+                                processConcatenatedAudio(concatenated, 16000);
+                            }, STT_DEBOUNCE_MS);
+                        },
+                    });
+
+                    vadRef.current = vad;
+                    vad.start();
+                    setVoiceInputMode('voice');
+                } catch (error) {
+                    console.warn('[Engine] VAD unavailable, falling back to text input:', error);
+                    try { stream.getTracks().forEach(t => t.stop()); } catch { }
+                    if (streamRef.current === stream) {
+                        streamRef.current = null;
                     }
-                },
-                onSpeechEnd: (audio: Float32Array) => {
-                    // 静音时忽略 VAD 结束 — 丢弃音频，不走 STT
-                    if (optionsRef.current.isMuted) return;
-                    // 闸门期间忽略 VAD
-                    if (gatedRef.current) return;
-                    console.log('[Engine] VAD: speech end');
                     setIsUserSpeaking(false);
-
-                    // ── 拼接模式：push 片段 + 重置去抖定时器 ──
-                    if (!engineActiveRef.current) return;
-                    if (Date.now() < ignoreUntilRef.current) return;
-
-                    // 过短片段过滤
-                    if (audio.length < 16000 * 0.3) {
-                        console.log('[Engine] Voice segment too short, ignoring');
-                        return;
-                    }
-
-                    pendingAudioSegmentsRef.current.push(audio);
-                    console.log(`[Engine] Buffered segment ${pendingAudioSegmentsRef.current.length} (${(audio.length / 16000).toFixed(1)}s)`);
-
-                    // 重置去抖定时器
-                    if (sttDebounceTimerRef.current) {
-                        clearTimeout(sttDebounceTimerRef.current);
-                    }
-                    sttDebounceTimerRef.current = setTimeout(() => {
-                        sttDebounceTimerRef.current = null;
-                        const segments = pendingAudioSegmentsRef.current;
-                        pendingAudioSegmentsRef.current = [];
-
-                        if (segments.length === 0) return;
-
-                        // 拼接所有音频段
-                        let totalLen = 0;
-                        for (const seg of segments) totalLen += seg.length;
-                        const concatenated = new Float32Array(totalLen);
-                        let offset = 0;
-                        for (const seg of segments) {
-                            concatenated.set(seg, offset);
-                            offset += seg.length;
-                        }
-
-                        console.log(`[Engine] Concat ${segments.length} segment(s) → ${(totalLen / 16000).toFixed(1)}s total`);
-                        processConcatenatedAudio(concatenated, 16000);
-                    }, STT_DEBOUNCE_MS);
-                },
-            });
-
-            vadRef.current = vad;
-            vad.start();
+                    setVoiceInputMode('text-only');
+                }
+            } else {
+                setVoiceInputMode('text-only');
+            }
 
             setEngineState('listening');
             engineStateRef.current = 'listening';
@@ -1116,6 +1176,16 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         } catch (err: any) {
             console.error('[Engine] Failed to start:', err);
             engineActiveRef.current = false;
+            try { vadRef.current?.destroy?.(); } catch { }
+            vadRef.current = null;
+            playerRef.current?.destroy();
+            playerRef.current = null;
+            ttsWsRef.current?.close();
+            ttsWsRef.current = null;
+            llmRef.current?.abort();
+            llmRef.current = null;
+            streamRef.current?.getTracks().forEach(t => t.stop());
+            streamRef.current = null;
             opts.onError?.(err.message || '语音引擎启动失败');
             setEngineState('idle');
             engineStateRef.current = 'idle';
@@ -1135,9 +1205,12 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         generationRef.current++;
 
         // ── 打包最后一轮未完成的 PCM（如果用户在 AI 说话中途挂断）──
-        if (turnAudioChunksRef.current.length > 0) {
+        if (runtimeProfileRef.current.persistAssistantAudio && turnAudioChunksRef.current.length > 0) {
             try {
-                const wavBlob = pcmChunksToWavBlob(turnAudioChunksRef.current, VOICE_CALL_SAMPLE_RATE);
+                const wavBlob = pcmChunksToWavBlob(
+                    turnAudioChunksRef.current,
+                    runtimeProfileRef.current.ttsSampleRate,
+                );
                 turnAudioBlobsRef.current.set(lastGen, wavBlob);
                 console.log(`[Engine] Final turn audio cached (gen=${lastGen}): ${(wavBlob.size / 1024).toFixed(1)}KB`);
             } catch (e) {
@@ -1198,6 +1271,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         setEngineState('idle');
         engineStateRef.current = 'idle';
         setIsUserSpeaking(false);
+        setVoiceInputMode(runtimeProfileRef.current.voiceInputMode);
         console.log('[Engine] Voice call engine stopped');
     }, []);
 
@@ -1212,6 +1286,11 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                 ttsWsRef.current?.close();
                 llmRef.current?.abort();
                 streamRef.current?.getTracks().forEach(t => t.stop());
+                vadRef.current = null;
+                playerRef.current = null;
+                ttsWsRef.current = null;
+                llmRef.current = null;
+                streamRef.current = null;
             }
         };
     }, []);
@@ -1243,6 +1322,8 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         aiResponse,
         ttsDegraded,
         transcriptSource,
+        lowMemoryMode: runtimeProfile.lowMemoryMode,
+        voiceInputMode,
         // ─── 通话质量反馈 ───
         sttEmptyHint,
         // ─── 外语模式 (Foreign Language) ───

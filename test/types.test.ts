@@ -84,4 +84,21 @@ describe('ChatParser', () => {
             },
         });
     });
+
+    it('normalises JSON-wrapped replies and escaped newlines before saving', () => {
+        const { ChatParser } = chatParserModule;
+
+        expect(ChatParser.sanitize('"早安\\n想你了"')).toBe('早安\n想你了');
+        expect(ChatParser.sanitize('{"content":"[2026-02-11 13:52] Sully: 早\\n安"}')).toBe('早\n安');
+        expect(ChatParser.sanitize('```json\n{"message":{"content":"[13:52] Sully: 看到啦\\n马上来"}}\n```')).toBe('看到啦\n马上来');
+        expect(ChatParser.sanitize('2026/02/11 13:52 Sully：第一句\\n[下午1:53] Sully: 第二句')).toBe('第一句\n第二句');
+        expect(ChatParser.sanitize('12:30 我会到')).toBe('12:30 我会到');
+    });
+
+    it('keeps chat control markers while normalising escaped formatting', () => {
+        const { ChatParser } = chatParserModule;
+
+        expect(ChatParser.sanitize('原文\\n%%BILINGUAL%%\\nTranslation')).toBe('原文\n%%BILINGUAL%%\nTranslation');
+        expect(ChatParser.cleanAiSecondPass('[[SEND_EMOJI: 揉脸]]\\n[[SHARE_SONG: 晴天 | 周杰伦 | 0]]')).toBe('[[SEND_EMOJI: 揉脸]]\n[[SHARE_SONG: 晴天 | 周杰伦 | 0]]');
+    });
 });
