@@ -65,13 +65,6 @@ const TheaterApp: React.FC = () => {
     const sessionRef = useRef(session);
     useEffect(() => { sessionRef.current = session; }, [session]);
 
-    // ── Keep local char in sync with global characters (e.g. after sprite config save) ──
-    useEffect(() => {
-        if (!char) return;
-        const latest = characters.find(c => c.id === char.id);
-        if (latest && latest !== char) setChar(latest);
-    }, [characters, char]);
-
     // ── Init locations ──
     useEffect(() => {
         const presets = getPresetLocations();

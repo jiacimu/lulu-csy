@@ -135,14 +135,9 @@ const TheaterSettings: React.FC<TheaterSettingsProps> = ({ char, location, isOpe
         const file = e.target.files?.[0];
         if (!file) return;
 
-        try {
-            const reader = new FileReader();
-            const base64 = await new Promise<string>((resolve, reject) => {
-                reader.onload = () => resolve(reader.result as string);
-                reader.onerror = () => reject(new Error('文件读取失败'));
-                reader.readAsDataURL(file);
-            });
-
+        const reader = new FileReader();
+        reader.onload = () => {
+            const base64 = reader.result as string;
             if (uploadTarget.type === 'user-avatar') {
                 updateUserProfile({ avatar: base64 });
                 addToast('用户头像已更新', 'success');
@@ -151,18 +146,14 @@ const TheaterSettings: React.FC<TheaterSettingsProps> = ({ char, location, isOpe
                 updateCharacter(char.id, { sprites: newSprites });
                 addToast(`立绘 [${uploadTarget.emotionKey}] 已保存`, 'success');
             }
-        } catch (err: any) {
-            addToast(err.message || '上传失败', 'error');
-        } finally {
-            // Clear AFTER read completes, not during
-            if (fileInputRef.current) fileInputRef.current.value = '';
-        }
+        };
+        reader.readAsDataURL(file);
+        e.target.value = '';
     };
 
     const triggerUpload = (type: 'sprite' | 'user-avatar', emotionKey?: string) => {
         setUploadTarget({ type, emotionKey });
-        // Use setTimeout to ensure state update is committed before file picker opens
-        setTimeout(() => fileInputRef.current?.click(), 50);
+        fileInputRef.current?.click();
     };
 
     if (!isOpen) return null;

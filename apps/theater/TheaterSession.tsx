@@ -8,7 +8,6 @@ import type { CharacterProfile, UserProfile, Message, DirectorEvent, TheaterLoca
 import { TIME_SLOT_LABELS } from '../../types/theater';
 import { useOS } from '../../context/OSContext';
 import TheaterSettings from './TheaterSettings';
-import TheaterFloatingBall from './TheaterFloatingBall';
 
 const EVENT_TYPE_ZH: Record<string, string> = {
     ambient: '氛围', encounter: '偶遇', romantic: '浪漫',
@@ -134,12 +133,9 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
     const [autoMode, setAutoMode] = useState(false);
     const [showLog, setShowLog] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
-    const [hideDialog, setHideDialog] = useState(false);
     const [input, setInput] = useState('');
     const [eventCollapsed, setEventCollapsed] = useState(false);
     const autoTimerRef = useRef<ReturnType<typeof setTimeout>>();
-    const prevPagesLenRef = useRef(0);
-    const hasInitializedRef = useRef(false);
     const timeLabel = TIME_SLOT_LABELS[timeSlot];
 
     const currentPage = pages[pageIndex] || null;
@@ -149,21 +145,11 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
     // ── Typewriter ──
     const { displayed, done, skipToEnd } = useTypewriter(currentPage?.text || '', 30);
 
-    // ── Page navigation: distinguish initial load vs new content ──
+    // ── Jump to last page when new messages arrive ──
     useEffect(() => {
-        if (pages.length === 0) return;
-
-        if (!hasInitializedRef.current) {
-            // First time we have pages (async messages loaded): jump to LAST page
-            hasInitializedRef.current = true;
+        if (pages.length > 0) {
             setPageIndex(pages.length - 1);
-            prevPagesLenRef.current = pages.length;
-        } else if (pages.length !== prevPagesLenRef.current) {
-            // New content from AI: jump to first NEW page
-            const firstNewIndex = Math.max(0, prevPagesLenRef.current);
-            setPageIndex(firstNewIndex);
             setShowInput(false);
-            prevPagesLenRef.current = pages.length;
         }
     }, [pages.length]);
 
@@ -235,15 +221,6 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
         setPageIndex(i => i + 1);
     }, [done, skipToEnd, isLastPage]);
 
-    // ── Skip all remaining pages ──
-    const handleSkipAll = useCallback((e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (pages.length > 0) {
-            setPageIndex(pages.length - 1);
-            skipToEnd();
-        }
-    }, [pages.length, skipToEnd]);
-
     // ── Send message ──
     const handleSend = async () => {
         if (!input.trim() || isLoading) return;
@@ -273,10 +250,10 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
                     background: location.bgImage
                         ? `url(${location.bgImage}) center/cover`
                         : location.bgGradient || '#111',
+                    opacity: hasSprites ? 0.8 : 0.3,
+                    filter: hasSprites ? 'none' : 'blur(20px) brightness(0.6)',
                 }}
             />
-            {/* Gradient mask — replaces old panel background */}
-            <div className="theater-vn-gradient-mask" />
 
             {/* Character Sprite */}
             {hasSprites && currentSprite && (
@@ -290,19 +267,37 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
                 </div>
             )}
 
-            {/* Top Bar — minimal */}
+            {/* Top Bar */}
             <div className="relative z-50 flex items-center justify-between px-4 pt-12 pb-3 shrink-0">
-                <button onClick={onExit} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="rgba(255,255,255,0.6)" width={16} height={16}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-                    </svg>
-                </button>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={onChangeLocation}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold"
+                        style={{ background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.8)' }}
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" width={14} height={14}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498 4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 0 0-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0Z" />
+                        </svg>
+                        换地点
+                    </button>
+                    <span className="text-white/60 text-xs font-medium">{location.name}</span>
+                </div>
                 <div className="flex items-center gap-2">
-                    <span className="text-white/30 text-[11px] font-medium tracking-wide">{location.name}</span>
                     <div className="theater-time-badge" style={{ padding: '4px 10px', fontSize: 11 }}>
                         <span>{timeLabel.icon}</span>
                         <span>{timeLabel.zh}</span>
                     </div>
+                    <button onClick={() => setShowSettings(true)} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="rgba(255,255,255,0.7)" width={14} height={14}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 0 1 0 .136c.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.212 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 0 1 0-.136c-.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281Z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                        </svg>
+                    </button>
+                    <button onClick={onExit} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'rgba(255,80,80,0.3)', border: '1px solid rgba(255,80,80,0.3)' }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="#fff" width={14} height={14}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                        </svg>
+                    </button>
                 </div>
             </div>
 
@@ -334,10 +329,20 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
                 </div>
             )}
 
-            {/* ════════ VN Dialog Box — borderless ════════ */}
+            {/* ════════ VN Dialog Box ════════ */}
             {!showInput && (
-                <div className={`theater-vn-dialog ${hideDialog ? 'dialog-hidden' : ''}`} onClick={handleDialogClick}>
-                    {/* Name tag — simple floating text */}
+                <div className="theater-vn-dialog" onClick={handleDialogClick}>
+                    {/* Control buttons: Auto / Log */}
+                    <div className="theater-vn-controls" onClick={e => e.stopPropagation()}>
+                        <button className={`theater-vn-ctrl-btn ${autoMode ? 'active' : ''}`} onClick={toggleAuto}>
+                            AUTO
+                        </button>
+                        <button className="theater-vn-ctrl-btn" onClick={(e) => { e.stopPropagation(); setShowLog(true); }}>
+                            LOG
+                        </button>
+                    </div>
+
+                    {/* Name tag — dialogue: char name, user: user name, narration: hidden */}
                     {currentPage && currentPage.type !== 'narration' && (
                         <div className={`theater-vn-name-tag ${currentPage.type === 'user' ? 'user' : ''}`}>
                             {currentPage.type === 'user' ? (userProfile.name || '你') : char.name}
@@ -382,36 +387,7 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
                             点击回复
                         </div>
                     )}
-
-                    {/* Bottom Control Bar */}
-                    <div className="theater-vn-controls" onClick={e => e.stopPropagation()}>
-                        <button className="theater-vn-ctrl-btn" onClick={(e) => { e.stopPropagation(); setShowLog(true); }}>
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
-                            <span>回顾</span>
-                        </button>
-                        <button className="theater-vn-ctrl-btn" onClick={(e) => { e.stopPropagation(); setHideDialog(true); }}>
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
-                            <span>隐藏</span>
-                        </button>
-                        <button className="theater-vn-ctrl-btn" onClick={handleSkipAll}>
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 0 1 0 1.954l-7.108 4.061A1.125 1.125 0 0 1 3 16.811V8.69ZM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 0 1 0 1.954l-7.108 4.061a1.125 1.125 0 0 1-1.683-.977V8.69Z" /></svg>
-                            <span>跳过</span>
-                        </button>
-                        <button className={`theater-vn-ctrl-btn ${autoMode ? 'active' : ''}`} onClick={toggleAuto}>
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" /></svg>
-                            <span>自动</span>
-                        </button>
-                    </div>
                 </div>
-            )}
-
-            {/* Tap to restore dialog when hidden */}
-            {hideDialog && (
-                <div
-                    className="absolute inset-0 z-30 cursor-pointer"
-                    onClick={() => setHideDialog(false)}
-                    style={{ WebkitTapHighlightColor: 'transparent' }}
-                />
             )}
 
             {/* ════════ Input Area ════════ */}
@@ -438,9 +414,9 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
                     </div>
                     <button
                         onClick={() => setShowInput(false)}
-                        style={{ width: '100%', marginTop: 10, padding: '7px 0', fontSize: 11, color: 'rgba(255,255,255,0.25)', background: 'none', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, cursor: 'pointer', letterSpacing: 1, fontWeight: 400 }}
+                        style={{ width: '100%', marginTop: 8, padding: '6px 0', fontSize: 11, color: 'rgba(255,255,255,0.3)', background: 'none', border: 'none', cursor: 'pointer' }}
                     >
-                        ▾ 返回对话
+                        返回对话
                     </button>
                 </div>
             )}
@@ -480,13 +456,6 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
                 location={location}
                 isOpen={showSettings}
                 onClose={() => setShowSettings(false)}
-            />
-
-            {/* Floating Ball */}
-            <TheaterFloatingBall
-                charId={char.id}
-                onChangeLocation={onChangeLocation}
-                onOpenSettings={() => setShowSettings(true)}
             />
         </div>
     );
