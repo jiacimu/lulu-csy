@@ -265,7 +265,9 @@ export const ChatParser = {
         let result = stripLeakedChatLinePrefixes(normalizeChatTextEnvelope(text))
             .replace(/\[\d{4}[-/年]\d{1,2}[-/月]\d{1,2}.*?\]/g, '')
             .replace(/^[\w\u4e00-\u9fa5·•._ -]{1,40}\s*[:：]\s*/, '')
-            .replace(/[【\[](?:(?:你|User|用户|System|我)\s*)?发送了?表情包?[:：]\s*(.*?)[】\]]/g, '[[SEND_EMOJI: $1]]');
+            .replace(/[【\[](?:(?:你|User|用户|System|我)\s*)?发送了?表情包?[:：]\s*(.*?)[】\]]/g, '[[SEND_EMOJI: $1]]')
+            // Normalize single-bracket [SEND_EMOJI: ...] / 【SEND_EMOJI: ...】 → [[SEND_EMOJI: ...]]
+            .replace(/(?:\[{1,2}|【)\s*SEND_EMOJI\s*[:：]\s*([\s\S]*?)\s*(?:\]{1,2}|】)/gi, '[[SEND_EMOJI: $1]]');
         result = normalizeSongShareTags(result);
         // Strip any CoT protocol residual that leaked through (e.g. from Gemini native thinking)
         result = stripCoTResidual(result);
