@@ -163,13 +163,73 @@ ${charName}，这个选择权在你。
  */
 export function parseDirectorResponse(raw: string): DirectorEvent | null {
     try {
-        // Try to extract JSON from markdown code block
-        const jsonMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-        const jsonStr = jsonMatch ? jsonMatch[1].trim() : raw.trim();
+        // 1. Strip thinking tokens (<think>...</think>, <Thought>...</Thought>, etc.)
+        let cleaned = raw.replace(/<(?:think|thought|reasoning)[^>]*>[\s\S]*?<\/(?:think|thought|reasoning)>/gi, '').trim();
+        if (!cleaned) cleaned = raw.trim();
 
-        const parsed = JSON.parse(jsonStr);
+        // 2. Try to extract JSON — multiple strategies
+        let jsonStr: string | null = null;
 
-        // Validate required fields
+        // Strategy A: markdown code block (```json ... ```)
+        const codeBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+        if (codeBlockMatch) {
+            jsonStr = codeBlockMatch[1].trim();
+        }
+
+        // Strategy B: find first { ... } block
+        if (!jsonStr) {
+            const braceStart = cleaned.indexOf('{');
+            const braceEnd = cleaned.lastIndexOf('}');
+            if (braceStart !== -1 && braceEnd > braceStart) {
+                jsonStr = cleaned.slice(braceStart, braceEnd + 1);
+            }
+        }
+
+        // Strategy C: starts with { but may be truncated (no closing brace)
+        if (!jsonStr) {
+            const braceStart = cleaned.indexOf('{');
+            if (braceStart !== -1) {
+                jsonStr = cleaned.slice(braceStart);
+            }
+        }
+
+        if (!jsonStr) {
+            console.warn('[TheaterDirector] No JSON found in response:', cleaned.slice(0, 200));
+            return null;
+        }
+
+        // 3. Attempt to repair truncated JSON
+        let parsed: any;
+        try {
+            parsed = JSON.parse(jsonStr);
+        } catch {
+            // Try to fix common truncation issues: missing closing brackets/braces
+            let repaired = jsonStr;
+            // Count unmatched braces and brackets
+            const openBraces = (repaired.match(/{/g) || []).length;
+            const closeBraces = (repaired.match(/}/g) || []).length;
+            const openBrackets = (repaired.match(/\[/g) || []).length;
+            const closeBrackets = (repaired.match(/\]/g) || []).length;
+
+            // Strip trailing incomplete string/value (e.g. `"suggestedBeats": ["foo`, "bar`)
+            repaired = repaired.replace(/,\s*"[^"]*$/, '');  // trailing incomplete key
+            repaired = repaired.replace(/,\s*$/, '');          // trailing comma
+
+            // Add missing brackets then braces
+            for (let i = closeBrackets; i < openBrackets; i++) repaired += ']';
+            for (let i = closeBraces; i < openBraces; i++) repaired += '}';
+
+            try {
+                parsed = JSON.parse(repaired);
+                console.info('[TheaterDirector] Repaired truncated JSON successfully');
+            } catch (e2) {
+                console.error('[TheaterDirector] Failed to parse director response:', (e2 as Error).message);
+                console.error('[TheaterDirector] Raw (first 300 chars):', raw.slice(0, 300));
+                return null;
+            }
+        }
+
+        // 4. Validate required fields
         if (!parsed.sceneType || !parsed.atmosphere || !parsed.event) {
             console.warn('[TheaterDirector] Incomplete director response:', parsed);
             return null;
@@ -187,7 +247,8 @@ export function parseDirectorResponse(raw: string): DirectorEvent | null {
             timestamp: Date.now(),
         };
     } catch (e) {
-        console.error('[TheaterDirector] Failed to parse director response:', e, raw);
+        console.error('[TheaterDirector] Unexpected error parsing director response:', e);
+        console.error('[TheaterDirector] Raw (first 300 chars):', raw.slice(0, 300));
         return null;
     }
 }

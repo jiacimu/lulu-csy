@@ -35,13 +35,13 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
     const skinSets = char.dateSkinSets || [];
     const activeSkinId = char.activeSkinSetId || null;
 
-    // Sync config on mount
+    // Sync config on mount and when char data changes
     useEffect(() => {
         if (char.spriteConfig) {
             setTempSpriteConfig(char.spriteConfig);
         }
         setSummaryPrompt(char.dateSummaryPrompt || DEFAULT_DATE_SUMMARY_PROMPT);
-    }, [char.id]);
+    }, [char.id, char.spriteConfig]);
 
     const sprites = char.sprites || {};
     // Preview shows active skin set's sprites if one is selected
@@ -65,7 +65,13 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
         if (!file) return;
 
         try {
-            const base64 = await processImage(file);
+            // Background: full quality, no compression (displayed full-screen)
+            // Sprites: high quality, large maxWidth (displayed as character art)
+            const isBackground = uploadTarget === 'bg';
+            const base64 = await processImage(file, isBackground
+                ? { skipCompression: true }
+                : { maxWidth: 2048, quality: 0.95 }
+            );
             if (uploadTarget === 'bg') {
                 updateCharacter(char.id, { dateBackground: base64 });
                 addToast('背景已更新', 'success');
@@ -202,13 +208,13 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
                 <div className="w-8"></div>
             </div>
             
-            {/* Live Preview Area */}
-            <div className="h-64 bg-black relative overflow-hidden shrink-0 border-b border-slate-200">
-                    <div className="absolute inset-0 bg-cover bg-center opacity-60" style={{ backgroundImage: char.dateBackground ? `url(${char.dateBackground})` : 'none' }}></div>
-                    <div className="absolute inset-0 flex items-end justify-center pointer-events-none">
+            {/* Live Preview Area — matches DateSession visual mode layout */}
+            <div className="aspect-[9/16] max-h-[320px] bg-black relative overflow-hidden shrink-0 border-b border-slate-200">
+                    <div className="absolute inset-0 bg-cover bg-center opacity-80" style={{ backgroundImage: char.dateBackground ? `url(${char.dateBackground})` : 'none' }}></div>
+                    <div className="absolute inset-x-0 bottom-0 h-[90%] flex items-end justify-center pointer-events-none overflow-hidden">
                         <img 
                         src={currentSpriteImg}
-                        className="max-h-[90%] object-contain transition-transform"
+                        className="max-h-full max-w-full object-contain transition-transform origin-bottom drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)]"
                         style={{ 
                             transform: `translate(${tempSpriteConfig.x}%, ${tempSpriteConfig.y}%) scale(${tempSpriteConfig.scale})`
                         }}
