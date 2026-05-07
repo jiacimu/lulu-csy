@@ -69,7 +69,6 @@ export const Icons: Record<string, React.FC<{ className?: string }>> = {
   StatusWorkshop: ({ className }) => <Wrench className={className} weight="bold" />,
   Music: ({ className }) => <MusicNote className={className} weight="bold" />,
   HalfSugar: ({ className }) => <Heartbeat className={className} weight="bold" />,
-  Theater: ({ className }) => <Sparkle className={className} weight="fill" />,
 };
 
 export const INSTALLED_APPS: AppConfig[] = [
@@ -86,7 +85,6 @@ export const INSTALLED_APPS: AppConfig[] = [
   { id: AppID.Schedule, name: '时光契约', icon: 'Schedule', color: 'cyan' },
   { id: AppID.Journal, name: '交换日记', icon: 'Journal', color: 'amber' },
   { id: AppID.Date, name: '见面', icon: 'Date', color: 'pink' },
-  { id: AppID.Theater, name: '约会剧场', icon: 'Theater', color: 'rose' },
   { id: AppID.Study, name: '自习室', icon: 'Study', color: 'emerald' },
   { id: AppID.Game, name: 'TRPG', icon: 'Game', color: 'orange' },
   { id: AppID.Novel, name: '笔友会', icon: 'Novel', color: 'amber' },

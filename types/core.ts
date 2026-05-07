@@ -33,7 +33,6 @@ export enum AppID {
     CognitiveNetwork = 'cognitive_network', // 认知网络
     StatusWorkshop = 'status_workshop', // 状态栏工坊
     HalfSugar = 'half_sugar', // 半糖主义
-    Theater = 'theater', // 520 约会剧场
 }
 
 export interface SystemLog {
