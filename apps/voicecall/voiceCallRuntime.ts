@@ -60,7 +60,9 @@ export function getVoiceCallRuntimeProfile(
     if (lowMemoryMode) {
         return {
             lowMemoryMode: true,
-            voiceInputMode: 'text-only',
+            // 不再预先禁用语音输入 — 让引擎尝试加载 VAD，
+            // 如果 ONNX/WASM 加载失败，try-catch 会自动降级为 text-only
+            voiceInputMode: 'voice',
             recentContextLimit: VOICE_CALL_LOW_MEMORY_RECENT_CONTEXT_LIMIT,
             ttsSampleRate: VOICE_CALL_LOW_MEMORY_SAMPLE_RATE,
             persistAssistantAudio: false,

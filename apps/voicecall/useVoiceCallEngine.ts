@@ -968,7 +968,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                     return [] as VoiceCallRecentContextMessage[];
                 });
 
-            // 1. 获取麦克风；iOS/Safari 省内存档位直接跳过 VAD/ONNX/WASM
+            // 1. 获取麦克风（所有平台均尝试，失败则自动降级为文字输入）
             let stream: MediaStream | null = null;
             let nextVoiceInputMode = runtime.voiceInputMode;
             if (runtime.voiceInputMode === 'voice') {
