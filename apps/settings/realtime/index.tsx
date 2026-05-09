@@ -2,7 +2,7 @@
 import React,{ useState } from 'react';
 import { useOS } from '../../../context/OSContext';
 import Modal from '../../../components/os/Modal';
-import { WeatherSection,NewsSection,HotSearchSection,NotionSection,FeishuSection,XhsMcpSection } from './sections';
+import { WeatherSection,NewsSection,HotSearchSection,AiHotSection,NotionSection,FeishuSection,XhsMcpSection } from './sections';
 
 const RealtimeSettings: React.FC = () => {
     const { realtimeConfig, updateRealtimeConfig, addToast } = useOS();
@@ -14,6 +14,7 @@ const RealtimeSettings: React.FC = () => {
         newsEnabled: realtimeConfig.newsEnabled,
         newsApiKey: realtimeConfig.newsApiKey || '',
         hotSearchEnabled: realtimeConfig.hotSearchEnabled ?? false,
+        aihotEnabled: realtimeConfig.aihotEnabled ?? false,
         notionEnabled: realtimeConfig.notionEnabled,
         notionApiKey: realtimeConfig.notionApiKey,
         notionDbId: realtimeConfig.notionDatabaseId,
@@ -39,6 +40,7 @@ const RealtimeSettings: React.FC = () => {
         updateRealtimeConfig({
             weatherEnabled: rt.weatherEnabled, weatherApiKey: rt.weatherApiKey, weatherCity: rt.weatherCity,
             newsEnabled: rt.newsEnabled, newsApiKey: rt.newsApiKey, hotSearchEnabled: rt.hotSearchEnabled,
+            aihotEnabled: rt.aihotEnabled,
             notionEnabled: rt.notionEnabled, notionApiKey: rt.notionApiKey, notionDatabaseId: rt.notionDbId,
             notionNotesDatabaseId: rt.notionNotesDbId || undefined,
             feishuEnabled: rt.feishuEnabled, feishuAppId: rt.feishuAppId, feishuAppSecret: rt.feishuAppSecret,
@@ -98,6 +100,11 @@ const RealtimeSettings: React.FC = () => {
                         <div className="text-2xl mb-1.5">{rt.xhsEnabled ? '📕' : '📋'}</div>
                         <div className={`text-xs font-bold ${rt.xhsEnabled ? 'text-red-700' : ''}`}>小红书</div>
                     </div>
+
+                    <div className={`p-3 rounded-2xl transition-all border ${rt.aihotEnabled ? 'bg-gradient-to-br from-violet-50 to-purple-50 border-violet-100 shadow-sm' : 'bg-slate-50/50 border-transparent text-slate-400 opacity-60'}`}>
+                        <div className="text-2xl mb-1.5">{rt.aihotEnabled ? '💡' : '📋'}</div>
+                        <div className={`text-xs font-bold ${rt.aihotEnabled ? 'text-violet-700' : ''}`}>AI 动态</div>
+                    </div>
                 </div>
             </section>
 
@@ -108,6 +115,7 @@ const RealtimeSettings: React.FC = () => {
                     <WeatherSection enabled={rt.weatherEnabled} apiKey={rt.weatherApiKey} city={rt.weatherCity} set={set} onTestStatus={setTestStatus} />
                     <NewsSection enabled={rt.newsEnabled} apiKey={rt.newsApiKey} set={set} />
                     <HotSearchSection enabled={rt.hotSearchEnabled} set={set} />
+                    <AiHotSection enabled={rt.aihotEnabled} set={set} />
                     <NotionSection enabled={rt.notionEnabled} apiKey={rt.notionApiKey} dbId={rt.notionDbId} notesDbId={rt.notionNotesDbId} set={set} onTestStatus={setTestStatus} />
                     <FeishuSection enabled={rt.feishuEnabled} appId={rt.feishuAppId} appSecret={rt.feishuAppSecret} baseId={rt.feishuBaseId} tableId={rt.feishuTableId} set={set} onTestStatus={setTestStatus} />
                     <XhsMcpSection enabled={rt.xhsMcpEnabled} mcpUrl={rt.xhsMcpUrl} nickname={rt.xhsNickname} userId={rt.xhsUserId} set={set} onTestStatus={setTestStatus}

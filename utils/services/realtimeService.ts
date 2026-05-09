@@ -41,6 +41,9 @@ export interface RealtimeConfig {
     // 热搜配置
     hotSearchEnabled?: boolean;
 
+    // AI HOT 资讯配置
+    aihotEnabled?: boolean;
+
     // Notion 配置
     notionEnabled: boolean;
     notionApiKey: string;   // Notion Integration Token
@@ -71,6 +74,7 @@ export const defaultRealtimeConfig: RealtimeConfig = {
     newsEnabled: false,
     newsApiKey: '',
     hotSearchEnabled: false,
+    aihotEnabled: false,
     notionEnabled: false,
     notionApiKey: '',
     notionDatabaseId: '',
@@ -83,6 +87,7 @@ export const defaultRealtimeConfig: RealtimeConfig = {
 let weatherCache: { data: WeatherData | null; timestamp: number } = { data: null, timestamp: 0 };
 let newsCache: { data: NewsItem[]; timestamp: number } = { data: [], timestamp: 0 };
 let hotSearchCache: { data: any[]; timestamp: number } = { data: [], timestamp: 0 };
+let aihotCache: { data: any[]; timestamp: number } = { data: [], timestamp: 0 };
 
 // 特殊日期表
 const SPECIAL_DATES: Record<string, string> = {
@@ -252,6 +257,38 @@ export const RealtimeContextManager = {
             }
         } catch (e) {
             console.error('Fetch hot search failed:', e);
+        }
+        return [];
+    },
+
+    /**
+     * 获取 AI HOT 资讯（精选条目）
+     */
+    fetchAiHot: async (config: RealtimeConfig): Promise<any[]> => {
+        if (!config.aihotEnabled) {
+            return [];
+        }
+
+        const now = Date.now();
+        const cacheMs = config.cacheMinutes * 60 * 1000;
+
+        // 检查缓存
+        if (aihotCache.data.length > 0 && (now - aihotCache.timestamp) < cacheMs) {
+            return aihotCache.data;
+        }
+
+        try {
+            const res = await fetch('https://sully-n.sully-tts-proxy.workers.dev/aihot');
+            if (res.ok) {
+                const json = await res.json() as any;
+                if (json.success && json.items) {
+                    const items = json.items.slice(0, 30);
+                    aihotCache = { data: items, timestamp: now };
+                    return items;
+                }
+            }
+        } catch (e) {
+            console.error('Fetch AI HOT failed:', e);
         }
         return [];
     },
@@ -456,6 +493,7 @@ export const RealtimeContextManager = {
         weatherCache = { data: null, timestamp: 0 };
         newsCache = { data: [], timestamp: 0 };
         hotSearchCache = { data: [], timestamp: 0 };
+        aihotCache = { data: [], timestamp: 0 };
     },
 
     /**
@@ -520,4 +558,3 @@ export const RealtimeContextManager = {
         }
     }
 };
-

@@ -6,6 +6,7 @@ import { ContextBuilder } from './context';
 import { DB } from './db';
 import { RealtimeContextManager,NotionManager,FeishuManager,defaultRealtimeConfig } from './realtimeContext';
 import { buildCharacterHotSearch } from './hotSearchContext';
+import { buildCharacterAiHot } from './aihotContext';
 import { VectorMemoryRetriever } from './vectorMemoryRetriever';
 import { buildTemporalContext } from './temporalContext';
 import { buildCurrentLifeAnchorForCharacter,formatCurrentLifeAnchorForPrompt } from './lifeAnchor';
@@ -216,6 +217,19 @@ export const ChatPrompts = {
             }
         } catch (e) {
             console.error('[HotSearch] inject failed:', e);
+        }
+
+        // AI HOT 资讯独立注入 — 解耦于热搜
+        try {
+            const config = realtimeConfig || defaultRealtimeConfig;
+            if (config.aihotEnabled) {
+                const aihotContext = await buildCharacterAiHot(config, char);
+                if (aihotContext) {
+                    baseSystemPrompt += `\n${aihotContext}\n`;
+                }
+            }
+        } catch (e) {
+            console.error('[AIHot] inject failed:', e);
         }
 
         const lifeAnchor = buildCurrentLifeAnchorForCharacter(char, currentMsgs);

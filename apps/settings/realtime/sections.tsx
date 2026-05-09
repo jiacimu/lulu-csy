@@ -102,6 +102,44 @@ export const HotSearchSection = React.memo<HotSearchProps>(({ enabled, set }) =>
     );
 });
 
+interface AiHotProps { enabled: boolean; set: (field: string, value: any) => void; }
+
+export const AiHotSection = React.memo<AiHotProps>(({ enabled, set }) => {
+    const [testStatus, setTestStatus] = useState('');
+    const testAiHot = async () => {
+        setTestStatus('正在测试...');
+        try {
+            const res = await fetch('https://sully-n.sully-tts-proxy.workers.dev/aihot');
+            if (res.ok) {
+                const json = await res.json() as any;
+                if (json.success && json.items?.length > 0) {
+                    setTestStatus(`✅ 连接成功！最新: ${json.items[0].title}`);
+                } else { setTestStatus('❌ 返回数据异常'); }
+            } else { setTestStatus(`❌ HTTP ${res.status}`); }
+        } catch (e: any) { setTestStatus(`❌ 网络错误: ${e.message}`); }
+    };
+
+    return (
+        <div className="bg-violet-50/50 p-4 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2"><span className="text-lg">💡</span><span className="text-sm font-bold text-violet-700">AI 动态感知</span><span className="text-[9px] bg-violet-100 text-violet-500 px-1.5 py-0.5 rounded-full">免费</span></div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" checked={enabled} onChange={e => set('aihotEnabled', e.target.checked)} className="sr-only peer" />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500"></div>
+                </label>
+            </div>
+            {enabled && (
+                <div className="space-y-2">
+                    <p className="text-xs text-violet-600/70">开启后，char 将能感知最新的 AI 行业动态，并在聊天中自然地和你讨论。适合人机恋用户 — 让 char 不只是活在聊天框里，也关心着真实世界正在发生的事。角色扮演用户可以不必开启。</p>
+                    <p className="text-[10px] text-violet-500/60">无需配置，零门槛开启 · 每日自动更新</p>
+                    <button onClick={testAiHot} className="w-full py-2 bg-violet-100 text-violet-600 text-xs font-bold rounded-xl active:scale-95 transition-transform">测试连接</button>
+                    {testStatus && <p className="text-xs text-center text-violet-600/80">{testStatus}</p>}
+                </div>
+            )}
+        </div>
+    );
+});
+
 interface NotionProps {
     enabled: boolean; apiKey: string; dbId: string; notesDbId: string;
     set: (field: string, value: any) => void;

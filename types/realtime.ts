@@ -16,6 +16,9 @@ export interface RealtimeConfig {
     // 热搜配置
     hotSearchEnabled: boolean;
 
+    // AI HOT 资讯配置
+    aihotEnabled: boolean;
+
     // Notion 配置
     notionEnabled: boolean;
     notionApiKey: string;   // Notion Integration Token

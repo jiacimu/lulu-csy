@@ -53,6 +53,7 @@ export const DEFAULT_RUNTIME_REALTIME_CONFIG: RealtimeConfig = {
     newsEnabled: false,
     newsApiKey: '',
     hotSearchEnabled: false,
+    aihotEnabled: false,
     notionEnabled: false,
     notionApiKey: '',
     notionDatabaseId: '',
