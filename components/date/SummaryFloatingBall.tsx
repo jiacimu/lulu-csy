@@ -1,6 +1,6 @@
 import React,{ memo,useEffect,useMemo,useRef,useState } from 'react';
 import { motion,useMotionValue,PanInfo } from 'framer-motion';
-import { GearSix,NotePencil,X,WarningCircle } from '@phosphor-icons/react';
+import { GearSix,NotePencil,X,WarningCircle,ArrowCounterClockwise } from '@phosphor-icons/react';
 import { CharacterProfile } from '../../types';
 import { DATE_DEFAULT_WORD_COUNT } from '../../utils/datePrompts';
 import WritingStyleSheet, { getStyleDisplayLabel } from './WritingStyleSheet';
@@ -32,11 +32,17 @@ interface SummaryFloatingBallProps {
 }
 
 const BALL_SIZE = 56;
-const EDGE_PADDING = 12;
 const DEFAULT_THRESHOLD = 20;
 const SUMMARY_HEARTS_ICON = '/images/date-summary-hearts.png';
 
 const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
+
+/**
+ * Safe zone padding — generous minimums to avoid status bars,
+ * notches, gesture bars, and rounded corners on mobile.
+ * Status bar ≈ 44-50px, gesture bar ≈ 34px, rounded corners ≈ 20px.
+ */
+const SAFE_ZONE = { top: 56, bottom: 44, left: 20, right: 20 } as const;
 
 const readStoredPosition = (key: string) => {
     if (typeof window === 'undefined') return null;
@@ -47,11 +53,22 @@ const readStoredPosition = (key: string) => {
     } catch { return null; }
 };
 
+/** Clamp a position into the safe reachable rectangle */
+const clampToSafe = (pos: { x: number; y: number }) => {
+    if (typeof window === 'undefined') return pos;
+    const maxX = Math.max(SAFE_ZONE.left, window.innerWidth  - BALL_SIZE - SAFE_ZONE.right);
+    const maxY = Math.max(SAFE_ZONE.top,  window.innerHeight - BALL_SIZE - SAFE_ZONE.bottom);
+    return {
+        x: clamp(pos.x, SAFE_ZONE.left, maxX),
+        y: clamp(pos.y, SAFE_ZONE.top,  maxY),
+    };
+};
+
 const getDefaultPosition = () => {
     if (typeof window === 'undefined') return { x: 20, y: 160 };
     return {
-        x: Math.max(EDGE_PADDING, window.innerWidth - BALL_SIZE - 20),
-        y: Math.max(EDGE_PADDING, Math.round(window.innerHeight * 0.58)),
+        x: Math.max(SAFE_ZONE.left, window.innerWidth - BALL_SIZE - 20),
+        y: Math.max(SAFE_ZONE.top, Math.round(window.innerHeight * 0.58)),
     };
 };
 
@@ -72,6 +89,7 @@ const C = {
 } as const;
 
 /* Soft outer shadow for raised elements */
+const _raised = `2px 2px 5px ${C.shadow}, -2px -2px 5px ${C.hi}`; // panel outer shadow base
 const raisedSm = `1.5px 1.5px 3px ${C.shadow}, -1.5px -1.5px 3px ${C.hi}`;
 /* Gentle inset for recessed slots */
 const inset    = `inset 1.5px 1.5px 3px ${C.shadow}, inset -1.5px -1.5px 3px ${C.hi}`;
@@ -137,22 +155,30 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
     const [styleSheetOpen, setStyleSheetOpen] = useState(false);
     const [position, setPosition] = useState(() => readStoredPosition(storageKey) || getDefaultPosition());
     const [dragging, setDragging] = useState(false);
+    const lastTapRef = useRef(0);
     const x = useMotionValue(position.x);
     const y = useMotionValue(position.y);
 
+    /** Double-tap → reset to default position */
+    const resetToDefault = () => {
+        const def = getDefaultPosition();
+        setPosition(def); x.set(def.x); y.set(def.y);
+        localStorage.removeItem(storageKey);
+    };
+
     useEffect(() => {
-        const next = readStoredPosition(storageKey) || getDefaultPosition();
-        const maxX = Math.max(EDGE_PADDING, window.innerWidth - BALL_SIZE - EDGE_PADDING);
-        const maxY = Math.max(EDGE_PADDING, window.innerHeight - BALL_SIZE - EDGE_PADDING);
-        const c = { x: clamp(next.x, EDGE_PADDING, maxX), y: clamp(next.y, EDGE_PADDING, maxY) };
+        const raw = readStoredPosition(storageKey) || getDefaultPosition();
+        const c = clampToSafe(raw);
         setPosition(c); x.set(c.x); y.set(c.y);
+        // Persist corrected position so bad stored values get fixed
+        if (raw.x !== c.x || raw.y !== c.y) {
+            localStorage.setItem(storageKey, JSON.stringify(c));
+        }
     }, [char.id, storageKey, x, y]);
 
     useEffect(() => {
         const onResize = () => {
-            const maxX = Math.max(EDGE_PADDING, window.innerWidth - BALL_SIZE - EDGE_PADDING);
-            const maxY = Math.max(EDGE_PADDING, window.innerHeight - BALL_SIZE - EDGE_PADDING);
-            const c = { x: clamp(x.get(), EDGE_PADDING, maxX), y: clamp(y.get(), EDGE_PADDING, maxY) };
+            const c = clampToSafe({ x: x.get(), y: y.get() });
             setPosition(c); x.set(c.x); y.set(c.y);
             localStorage.setItem(storageKey, JSON.stringify(c));
         };
@@ -176,9 +202,7 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
     };
 
     const commitPosition = (_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
-        const maxX = Math.max(EDGE_PADDING, window.innerWidth - BALL_SIZE - EDGE_PADDING);
-        const maxY = Math.max(EDGE_PADDING, window.innerHeight - BALL_SIZE - EDGE_PADDING);
-        const next = { x: clamp(x.get(), EDGE_PADDING, maxX), y: clamp(y.get(), EDGE_PADDING, maxY) };
+        const next = clampToSafe({ x: x.get(), y: y.get() });
         setPosition(next); x.set(next.x); y.set(next.y);
         if (Math.hypot(info.offset.x, info.offset.y) >= 10) localStorage.setItem(storageKey, JSON.stringify(next));
         window.setTimeout(() => setDragging(false), 0);
@@ -206,7 +230,20 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
             >
                 {/* ── Floating ball ── */}
                 <button type="button"
-                    onClick={(e) => { e.stopPropagation(); if (!dragging) setPanelOpen(v => !v); }}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (dragging) return;
+                        const now = Date.now();
+                        if (now - lastTapRef.current < 350) {
+                            // Double-tap → reset position
+                            resetToDefault();
+                            setPanelOpen(false);
+                            lastTapRef.current = 0;
+                            return;
+                        }
+                        lastTapRef.current = now;
+                        setPanelOpen(v => !v);
+                    }}
                     className={`relative flex h-14 w-14 items-center justify-center rounded-full transition-opacity active:scale-95 ${dragging ? 'opacity-70' : 'opacity-100'}`}
                     title="见面总结">
                     <img src={SUMMARY_HEARTS_ICON} alt="" aria-hidden="true"
@@ -402,7 +439,7 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
                             </div>
                         )}
 
-                        {/* ── Bottom: 设置 / 关闭 ── */}
+                        {/* ── Bottom: 设置 / 归位 / 关闭 ── */}
                         <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
                             <button type="button"
                                 onClick={() => { setPanelOpen(false); onOpenSettings(); }}
@@ -414,6 +451,18 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
                                     fontSize: 10, fontWeight: 500, color: C.textSec,
                                 }}>
                                 <GearSix size={12} color={C.textSec} />设置
+                            </button>
+                            <button type="button"
+                                onClick={() => { resetToDefault(); setPanelOpen(false); }}
+                                className="transition-all active:scale-[0.96]"
+                                title="双击悬浮球也可复原"
+                                style={{
+                                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
+                                    padding: '6px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
+                                    background: C.base, boxShadow: raisedSm,
+                                    fontSize: 10, fontWeight: 500, color: C.accent,
+                                }}>
+                                <ArrowCounterClockwise size={11} color={C.accent} />归位
                             </button>
                             <button type="button" onClick={() => setPanelOpen(false)}
                                 className="transition-all active:scale-[0.96]"
