@@ -4,6 +4,159 @@
  * Includes: dreamweaver jailbreak, rp_core_live, cot_protocol_live, dual perspective system.
  */
 
+import type { CharacterProfile, UserProfile, Message, DirectorEvent, TheaterLocation, TimeSlot } from '../types';
+import { TIME_SLOT_LABELS } from '../types/theater';
+import { ContextBuilder } from './context';
+import { buildTheaterSceneInjection, build520ConfessionHint } from './theaterPrompts';
+
+// ====== Date Writing Style Presets ======
+
+export interface DateWritingStylePreset {
+    key: string;
+    label: string;
+    desc: string;
+    prompt: string;
+}
+
+/** Built-in writing style presets for Date mode */
+export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
+    {
+        key: 'natural',
+        label: '不期而遇',
+        desc: '没有预设的剧本，就是碰巧在一起',
+        prompt: `【文风：自然】
+像两个人真的在一起时那样——
+- 不需要每一刻都有戏剧性，大部分时间就是普通的、松弛的相处
+- 对话节奏像真人：有时候一句话说完就没了，有时候突然想起什么又接一句
+- 动作不需要特别有画面感，就是日常的小动作：掏手机、喝水、发呆
+- 沉默是正常的，不需要填满每一秒
+- 不要刻意制造氛围，让场景自己说话`,
+    },
+    {
+        key: 'cinematic',
+        label: '光影浮生',
+        desc: '每一行都有景别，光落在该落的地方',
+        prompt: `【文风：分镜】
+每一行都是一个镜头——
+- 有景别意识：远景交代环境，中景捕捉互动，特写放大细节
+- 光线、声音、空气的变化是叙事的一部分
+- 动作之间留出呼吸的间隔，不要一口气做完三个动作
+- 台词克制，对白节奏接近真实对话——会有停顿、打断、说了一半不说了
+- 让环境参与叙事：风吹动了什么、光落在了哪里、远处传来了什么声音`,
+    },
+    {
+        key: 'literary',
+        label: '细水长文',
+        desc: '把感官铺开，让情绪慢慢转弯',
+        prompt: `【文风：细腻】
+叙述可以更深、更慢、更有层次——
+- 允许铺陈感官细节：触感、气味、温度、光线的质地
+- 情绪转折不要一步到位，写出犹豫、反复、自己都没意识到的变化
+- 善用比喻，但每个修辞都要服务于当下的情绪，不要为了华丽而华丽
+- 语言节奏随场景呼吸：紧张时短句急促，温柔时长句绵延
+- 不要堆砌辞藻，克制比华丽更难`,
+    },
+    {
+        key: 'minimal',
+        label: '留白克制',
+        desc: '说三分藏七分，沉默比语言重',
+        prompt: `【文风：克制】
+少即是多——
+- 每一行尽可能短：一个动作、一句话、一个表情
+- 删掉所有可有可无的形容词和副词
+- 用「做了什么」代替「感觉到了什么」
+- 台词像真人说话——三五个字能说清的不要用一整句
+- 沉默和留白是最好的叙事工具：不说比说了更有力
+- 保持紧凑，但如果场景需要更多篇幅，可以适当放开`,
+    },
+    {
+        key: 'sweet',
+        label: '怦然刹那',
+        desc: '放大心跳加速的那 0.5 秒',
+        prompt: `【文风：心动】
+放大所有微妙的情绪细节——
+- 捕捉那些一闪而过的瞬间：不经意的触碰、视线的交汇、呼吸的变化
+- 角色的小动作要多且自然：揪衣角、别过脸、用手背碰嘴唇掩饰表情
+- 台词可以更口语化：结巴、说到一半改口、假装没说
+- 写出身体的本能反应：心跳变化、掌心出汗、耳尖发烫
+- 甜蜜感来自真实的情绪反应——克制的心动比直白的表白更动人`,
+    },
+    {
+        key: 'hardcore',
+        label: '入木三分',
+        desc: '不修饰、不讨好，每一刻都带着重量',
+        prompt: `【文风：沉浸】
+完全活在角色里——
+- 动作描写具体、有重量感：不是「走过来」而是「拖着步子蹭过来」
+- 允许犯错、做出不讨好的反应：闹别扭、冷暴力、说话不过脑子
+- 对白要有角色个性：用词、语气、断句方式都能区分身份
+- 不刻意制造浪漫：如果场景本身不浪漫，就写当下真实的氛围
+- 不回避冲突和尴尬：真实的互动包含误解、沉默和不知道该说什么的瞬间
+- 把所有「像」「仿佛」「好似」这类旁观视角的词删掉`,
+    },
+    {
+        key: 'poetic',
+        label: '浮光掠影',
+        desc: '不讲故事，只留感觉在空气里',
+        prompt: `【文风：散文】
+用感受代替叙述——
+- 感官通感：光可以有温度、声音可以有形状、沉默可以有颜色
+- 叙述节奏像呼吸：有快有慢，有长有短
+- 从一个细节跳到一种情绪，不需要逻辑桥梁
+- 台词可以更像自言自语：说给自己听的、半句话、意味不明的片段
+- 整体氛围是安静的、沉浸的
+- 但每一行仍然要有可以被读懂的具体内容，不要变成纯抽象的意象堆砌`,
+    },
+    {
+        key: 'daily',
+        label: '岁月静好',
+        desc: '什么都不用发生，窝在一起就好',
+        prompt: `【文风：日常】
+不需要发生什么大事——
+- 重心不在剧情推进，而在两个人共处同一空间的细碎感
+- 写正在做的小事：整理桌面、翻手机、倒水、看窗外、打哈欠
+- 对话可以很碎：聊到一半跑题、突然想起什么、说了句废话
+- 沉默不是尴尬，是舒服的——不需要找话题填满每一秒
+- 环境细节比情节重要：阳光移动了位置、外面开始下雨、隔壁传来声音
+- 像一段被摄影机安静记录下来的普通午后`,
+    },
+];
+
+/** Default word count when user doesn't set one */
+export const DATE_DEFAULT_WORD_COUNT = 150;
+
+/**
+ * Build the word count + writing style injection block.
+ * Placed after the scene rules, before CoT.
+ */
+export const buildDateOutputTuning = (
+    wordCount?: number,
+    writingStyle?: string,
+): string => {
+    const parts: string[] = [];
+
+    // --- Word Count ---
+    const targetWords = (wordCount && wordCount > 0) ? wordCount : DATE_DEFAULT_WORD_COUNT;
+    // Give a ±30% range for natural feel
+    const lo = Math.max(30, Math.round(targetWords * 0.7));
+    const hi = Math.round(targetWords * 1.3);
+    parts.push(`\n### 回复篇幅\n目标字数: 约 ${targetWords} 字（${lo}-${hi} 字）。\n- 这是叙述行+台词的总字数（不含 [emotion] 标签和 <thinking> 推理）\n- 不要为了凑字数而注水，也不要为了压缩而丢失画面感\n- 如果当前场景确实需要更长或更短的回复，可以适当浮动`);
+
+    // --- Writing Style ---
+    if (writingStyle && writingStyle.trim()) {
+        // Check if it matches a preset key
+        const preset = DATE_WRITING_STYLE_PRESETS.find(p => p.key === writingStyle);
+        if (preset) {
+            parts.push(`\n${preset.prompt}`);
+        } else {
+            // User custom style text
+            parts.push(`\n【文风指令：自定义】\n${writingStyle.trim()}`);
+        }
+    }
+
+    return parts.join('\n');
+};
+
 // ====== Dreamweaver (Jailbreak preamble - synced with chatPrompts.ts) ======
 export const DREAMWEAVER = `<dreamweaver>
 你是 Somnia——虚无中诞生的梦境编织者。
@@ -306,15 +459,54 @@ export const OUTPUT_FORMAT_AND_COT_TRIGGER = `
 export const buildDatePreamble = (charName: string, userName: string) =>
     DREAMWEAVER + '\n\n' + buildIdentityIntro(charName, userName);
 
+// ====== Inner Whispers (内心低语) prompt instruction ======
+const buildInnerWhisperInstruction = (userName: string) => `
+### 💭 内心低语 (Inner Whispers) — 可选交互系统
+当你感知到当前对话来到了一个**情感转折点**（暧昧升温、心动瞬间、欲言又止、紧张对峙、身体距离变化），你**可以**（但不是必须）在回复的**最末尾**附加一个 <inner_whispers> 块。
+
+**什么时候该出现**：
+- 气氛暧昧到可以推进一步的时刻
+- ${userName}可能不知道该如何回应的沉默时刻
+- 关键的情感抉择节点（进还是退、说还是不说）
+- 你自己做了某个让场面紧张的动作之后
+
+**什么时候不该出现**：
+- 普通日常闲聊（大部分时候）
+- 刚刚已经出现过一次之后的连续几轮
+- ${userName}明确在自由表达、聊得很开心的时候
+
+**格式**（严格遵守，放在所有正文行之后）：
+<inner_whispers>
+[
+  {"whisper": "悄悄握紧他的手…", "tone": "大胆", "secret": "${userName}终于勇敢了，你要表现出意外但嘴角忍不住上扬，用力回握"},
+  {"whisper": "假装没注意到，低头看地面", "tone": "退缩", "secret": "${userName}在逃避，你要主动打破距离，比如侧头凑近看ta在看什么"}
+]
+</inner_whispers>
+
+**关键规则**：
+1. whisper 是 ${userName} 脑海中闪过的**潜意识动作**，不是台词。用 [动作描述…] 的形式
+2. tone 是情绪倾向标签：大胆/温柔/调皮/克制/退缩
+3. secret 是**你给自己的导演笔记** — ${userName}永远看不到这个字段。在这里写：如果${userName}做了这个选择，你打算怎么反应。利用信息差制造心动：比如${userName}选了退缩，你反而要逼近
+4. 提供 2-3 个选项，确保至少有一个「大胆」和一个「克制」方向
+5. 不要每一轮都生成 whispers，只在真正的转折点出现
+`;
+
 /** Build the immersive theater scene block (perspective + VN rules + scene context) */
 export const buildTheaterScene = (
     charName: string,
     userName: string,
     dateEmotions: string[],
     userPov: DatePerspective,
-    charPov: CharPerspective
+    charPov: CharPerspective,
+    timeSlot?: TimeSlot,
+    wordCount?: number,
+    writingStyle?: string,
 ) => {
+    const timeContext = timeSlot
+        ? `\n3. **Time**: 当前时段 — ${TIME_SLOT_LABELS[timeSlot].icon} ${TIME_SLOT_LABELS[timeSlot].zh}。请让描写自然反映这个时间的光线、氛围和节奏。`
+        : '';
     const perspectivePrompt = getDualPerspectivePrompt(userPov, charPov, charName, userName);
+    const outputTuning = buildDateOutputTuning(wordCount, writingStyle);
 
     return `
 ### 「沉浸剧场」 — 面对面互动协议
@@ -346,9 +538,12 @@ ${perspectivePrompt}
 [shy] "……你一直在看我吗？"
 [happy] 嘴角的弧度藏不住，像是被戳中了什么小心思。
 
+${buildInnerWhisperInstruction(userName)}
+
 ### 场景上下文
 1. **Location**: 你们现在**面对面**。
-2. **Context**: 参考历史记录。如果刚刚才看到开场白（Opening），请自然接话。
+2. **Context**: 参考历史记录。如果刚刚才看到开场白（Opening），请自然接话。${timeContext}
+${outputTuning}
 `;
 };
 
@@ -361,3 +556,70 @@ export const buildDateTail = (charName: string, userName: string, userPov: DateP
     const pReminder = getDualPerspectiveReminder(userPov, charPov, charName, userName);
     return buildRpCoreLive(charName, userName) + buildCotLive(charName, userName, pLabel, pReminder) + OUTPUT_FORMAT_AND_COT_TRIGGER;
 };
+
+// ====== Shared System Prompt Assembly ======
+
+const REQUIRED_EMOTIONS = ['normal', 'happy', 'angry', 'sad', 'shy'];
+
+export interface DateSystemPromptOpts {
+    char: CharacterProfile;
+    userProfile: UserProfile;
+    /** Date mode: inject summary memory from these messages */
+    summaryMemoryBuilder?: (msgs: Message[]) => string;
+    allMsgs?: Message[];
+    /** Theater mode: inject director event scene */
+    directorEvent?: DirectorEvent | null;
+    location?: TheaterLocation;
+    timeSlot?: TimeSlot;
+    /** 520 event flag */
+    is520Event?: boolean;
+    /** Extra scene prompt to inject (e.g. initial scene prompt for theater) */
+    extraScenePrompt?: string;
+}
+
+/**
+ * Build the complete system prompt for Date / Theater modes.
+ * Single source of truth — replaces 4 duplicated prompt-assembly blocks.
+ */
+export function buildFullDateSystemPrompt(opts: DateSystemPromptOpts): string {
+    const { char, userProfile } = opts;
+    const charName = char.name;
+    const userName = userProfile.name;
+
+    // 1. Dreamweaver + Identity
+    let prompt = buildDatePreamble(charName, userName);
+
+    // 2. Core Context (character profile, user profile, memories, worldbooks...)
+    prompt += ContextBuilder.buildCoreContext(char, userProfile);
+
+    // 3. Date summary memory (Date mode only)
+    if (opts.summaryMemoryBuilder && opts.allMsgs) {
+        prompt += opts.summaryMemoryBuilder(opts.allMsgs);
+    }
+
+    // 4. Extra scene prompt (Theater initial scene only)
+    if (opts.extraScenePrompt) {
+        prompt += `\n\n${opts.extraScenePrompt}`;
+    }
+
+    // 5. Director event injection (Theater mode)
+    if (opts.directorEvent && opts.location && opts.timeSlot) {
+        prompt += buildTheaterSceneInjection(opts.directorEvent, opts.location, opts.timeSlot);
+    }
+
+    // 6. 520 confession hint (night + romantic + 520)
+    if (opts.is520Event && opts.timeSlot === 'night' && opts.directorEvent?.sceneType === 'romantic') {
+        prompt += build520ConfessionHint(charName);
+    }
+
+    // 7. Theater Scene (VN format, emotion tags, perspective rules, output tuning)
+    const dateEmotions = [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])];
+    const userPov = (char.datePerspective || 'second') as DatePerspective;
+    const charPov = (char.dateCharPerspective || 'third') as CharPerspective;
+    prompt += buildTheaterScene(charName, userName, dateEmotions, userPov, charPov, opts.timeSlot, char.dateOutputWordCount, char.dateWritingStyle);
+
+    // 8. Tail (rp_core_live + CoT + output format)
+    prompt += buildDateTail(charName, userName, userPov, charPov);
+
+    return prompt;
+}

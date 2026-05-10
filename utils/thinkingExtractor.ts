@@ -162,3 +162,66 @@ export function stripCoTResidual(content: string): string {
     console.log(`🧹 [CoT Strip] Stripped CoT residual: ${content.length} → ${result.length} chars`);
     return result;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Inner Whispers (内心低语) — 520 约会剧场 CYOA 选项提取器
+// ═══════════════════════════════════════════════════════════════
+
+/** A single whisper option surfaced from the AI's response */
+export interface InnerWhisper {
+    /** Displayed text — an implicit action/emotion, NOT dialogue.  e.g. "悄悄握紧他的手…" */
+    whisper: string;
+    /** Emotional tone tag: 大胆 | 温柔 | 克制 | 调皮 | 退缩 … */
+    tone: string;
+    /** Hidden director note injected into the NEXT turn's system prompt.
+     *  The user never sees this — it tells the AI how to react to the user's choice. */
+    secret: string;
+}
+
+export interface WhisperExtractionResult {
+    /** Display content with the whisper block stripped */
+    content: string;
+    /** Extracted whispers (empty array if none or parse failure) */
+    whispers: InnerWhisper[];
+}
+
+/**
+ * Extract `<inner_whispers>[...]</inner_whispers>` from AI output.
+ *
+ * Designed to be called AFTER `extractThinking()` on the already-cleaned content.
+ * The whisper block should appear at the very end of the response.
+ */
+export function extractInnerWhispers(raw: string): WhisperExtractionResult {
+    if (!raw) return { content: raw, whispers: [] };
+
+    // Match the tagged block (case-insensitive, may have whitespace around JSON)
+    const match = raw.match(/<inner_whispers>\s*([\s\S]*?)\s*<\/inner_whispers>/i);
+
+    if (!match) return { content: raw, whispers: [] };
+
+    // Strip the block from display content
+    const content = raw.replace(/<inner_whispers>[\s\S]*?<\/inner_whispers>/gi, '').trim();
+
+    // Parse JSON array
+    let whispers: InnerWhisper[] = [];
+    try {
+        const parsed = JSON.parse(match[1]);
+        if (Array.isArray(parsed)) {
+            whispers = parsed
+                .filter((w: any) => w && typeof w.whisper === 'string' && w.whisper.trim())
+                .map((w: any) => ({
+                    whisper: w.whisper.trim(),
+                    tone: typeof w.tone === 'string' ? w.tone.trim() : '',
+                    secret: typeof w.secret === 'string' ? w.secret.trim() : '',
+                }));
+        }
+    } catch (e) {
+        console.warn('[InnerWhispers] Failed to parse whispers JSON:', e);
+    }
+
+    if (whispers.length > 0) {
+        console.log(`💭 [InnerWhispers] Extracted ${whispers.length} whisper(s)`);
+    }
+
+    return { content, whispers };
+}

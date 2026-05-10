@@ -5,6 +5,8 @@ import { CharacterProfile,SpriteConfig,SkinSet } from '../../types';
 import { processImage } from '../../utils/file';
 import { getGuardedInputProps } from '../../utils/inputGuards';
 import { DEFAULT_DATE_SUMMARY_PROMPT } from '../../utils/dateSummaryPrompts';
+import { DATE_WRITING_STYLE_PRESETS, DATE_DEFAULT_WORD_COUNT } from '../../utils/datePrompts';
+import WritingStyleSheet, { isPresetKey } from './WritingStyleSheet';
 
 // 标准情绪列表
 const REQUIRED_EMOTIONS = ['normal', 'happy', 'angry', 'sad', 'shy'];
@@ -25,12 +27,25 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
     const [newEmotionName, setNewEmotionName] = useState<string>('');
     const [summaryPrompt, setSummaryPrompt] = useState<string>(char.dateSummaryPrompt || DEFAULT_DATE_SUMMARY_PROMPT);
 
+    // Output tuning state
+    const [tempWordCount, setTempWordCount] = useState<string>(
+        (char.dateOutputWordCount && char.dateOutputWordCount > 0) ? String(char.dateOutputWordCount) : ''
+    );
+    const isPresetStyle = DATE_WRITING_STYLE_PRESETS.some(p => p.key === (char.dateWritingStyle || ''));
+    const [selectedStyleKey, setSelectedStyleKey] = useState<string | null>(
+        isPresetStyle ? (char.dateWritingStyle || null) : (char.dateWritingStyle ? '__custom__' : null)
+    );
+    const [customStyleText, setCustomStyleText] = useState<string>(
+        (!isPresetStyle && char.dateWritingStyle) ? char.dateWritingStyle : ''
+    );
+
     // Skin system state
     const [newSkinName, setNewSkinName] = useState('');
     const [editingSkinId, setEditingSkinId] = useState<string | null>(null);
     const [skinUrlInput, setSkinUrlInput] = useState('');
     const [skinUrlEmotionKey, setSkinUrlEmotionKey] = useState('');
     const [showUrlModal, setShowUrlModal] = useState(false);
+    const [styleSheetOpen, setStyleSheetOpen] = useState(false);
     const [urlTargetSkinId, setUrlTargetSkinId] = useState<string | null>(null); // null = default sprites
     const skinSets = char.dateSkinSets || [];
     const activeSkinId = char.activeSkinSetId || null;
@@ -42,6 +57,16 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
         }
         setSummaryPrompt(char.dateSummaryPrompt || DEFAULT_DATE_SUMMARY_PROMPT);
     }, [char.id]);
+
+    // Also sync output tuning on mount
+    useEffect(() => {
+        setTempWordCount(
+            (char.dateOutputWordCount && char.dateOutputWordCount > 0) ? String(char.dateOutputWordCount) : ''
+        );
+        const isPre = DATE_WRITING_STYLE_PRESETS.some(p => p.key === (char.dateWritingStyle || ''));
+        setSelectedStyleKey(isPre ? (char.dateWritingStyle || null) : (char.dateWritingStyle ? '__custom__' : null));
+        setCustomStyleText((!isPre && char.dateWritingStyle) ? char.dateWritingStyle : '');
+    }, [char.id, char.dateOutputWordCount, char.dateWritingStyle]);
 
     const sprites = char.sprites || {};
     // Preview shows active skin set's sprites if one is selected
@@ -154,9 +179,23 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
     };
 
     const handleSaveSettings = () => {
+        // Resolve writing style to save
+        let writingStyleToSave: string | undefined;
+        if (selectedStyleKey === '__custom__' && customStyleText.trim()) {
+            writingStyleToSave = customStyleText.trim();
+        } else if (selectedStyleKey && selectedStyleKey !== '__custom__') {
+            writingStyleToSave = selectedStyleKey;
+        } else {
+            writingStyleToSave = undefined;
+        }
+
+        const wordCountNum = tempWordCount ? parseInt(tempWordCount, 10) : undefined;
+
         updateCharacter(char.id, {
             spriteConfig: tempSpriteConfig,
             dateSummaryPrompt: summaryPrompt.trim() || DEFAULT_DATE_SUMMARY_PROMPT,
+            dateOutputWordCount: (wordCountNum && wordCountNum > 0) ? wordCountNum : undefined,
+            dateWritingStyle: writingStyleToSave,
         });
         addToast('配置已保存', 'success');
         onBack();
@@ -202,10 +241,10 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
                 <div className="w-8"></div>
             </div>
             
-            {/* Live Preview Area */}
-            <div className="h-64 bg-black relative overflow-hidden shrink-0 border-b border-slate-200">
-                    <div className="absolute inset-0 bg-cover bg-center opacity-60" style={{ backgroundImage: char.dateBackground ? `url(${char.dateBackground})` : 'none' }}></div>
-                    <div className="absolute inset-0 flex items-end justify-center pointer-events-none">
+            {/* Live Preview Area — matches DateSession visual mode layout */}
+            <div className="aspect-[9/16] max-h-[320px] bg-black relative overflow-hidden shrink-0 border-b border-slate-200">
+                    <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: char.dateBackground ? `url(${char.dateBackground})` : 'none' }}></div>
+                    <div className="absolute inset-x-0 bottom-0 h-[90%] flex items-end justify-center pointer-events-none overflow-hidden">
                         <img 
                         src={currentSpriteImg}
                         className="max-h-[90%] object-contain transition-transform"
@@ -249,6 +288,99 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
                             <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform ${char.dateLightReading ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
                         </button>
                     </div>
+                </section>
+
+                {/* Output Word Count */}
+                <section className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                    <h3 className="text-xs font-bold text-slate-400 uppercase mb-1">回复字数</h3>
+                    <p className="text-[11px] text-slate-400 mb-3">AI 每次回复的目标字数。留空则使用默认值 ({DATE_DEFAULT_WORD_COUNT} 字)。</p>
+                    <div className="flex items-center gap-3">
+                        <input
+                            type="number"
+                            value={tempWordCount}
+                            onChange={e => setTempWordCount(e.target.value)}
+                            placeholder={String(DATE_DEFAULT_WORD_COUNT)}
+                            min="30"
+                            max="2000"
+                            step="10"
+                            className="flex-1 px-4 py-3 bg-slate-100 rounded-xl text-sm focus:ring-1 focus:ring-primary/30 outline-none transition-all tabular-nums"
+                        />
+                        <span className="text-xs text-slate-400 shrink-0">字</span>
+                        {tempWordCount && (
+                            <button
+                                onClick={() => setTempWordCount('')}
+                                className="text-[10px] text-slate-400 hover:text-slate-600 underline shrink-0"
+                            >
+                                重置
+                            </button>
+                        )}
+                    </div>
+                    {tempWordCount && parseInt(tempWordCount) > 0 && (
+                        <div className="mt-2 text-[10px] text-slate-400">
+                            实际输出范围: 约 {Math.max(30, Math.round(parseInt(tempWordCount) * 0.7))}-{Math.round(parseInt(tempWordCount) * 1.3)} 字
+                        </div>
+                    )}
+                </section>
+
+                {/* Writing Style */}
+                <section className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                    <h3 className="text-xs font-bold text-slate-400 uppercase mb-1">文风</h3>
+                    <p className="text-[11px] text-slate-400 mb-4">选择一种内置文风，或自定义你想要的叙述风格。不选则使用默认风格。</p>
+
+                    {/* Current style display + open sheet button */}
+                    <div className="flex items-center gap-3">
+                        <div className="flex-1 flex items-center gap-2 px-4 py-3 bg-slate-50 rounded-xl border border-slate-100">
+                            <span className="text-[13px]">🖊</span>
+                            <span className={`text-sm font-bold ${
+                                selectedStyleKey ? 'text-primary' : 'text-slate-400'
+                            }`}>
+                                {selectedStyleKey === '__custom__'
+                                    ? '自定义'
+                                    : selectedStyleKey
+                                        ? (DATE_WRITING_STYLE_PRESETS.find(p => p.key === selectedStyleKey)?.label || selectedStyleKey)
+                                        : '未选择'
+                                }
+                            </span>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setStyleSheetOpen(true)}
+                            className="px-5 py-3 bg-primary/10 text-primary text-sm font-bold rounded-xl hover:bg-primary/15 active:scale-95 transition-all"
+                        >
+                            选择文风
+                        </button>
+                    </div>
+
+                    {/* Show desc when a preset is selected */}
+                    {selectedStyleKey && selectedStyleKey !== '__custom__' && (() => {
+                        const preset = DATE_WRITING_STYLE_PRESETS.find(p => p.key === selectedStyleKey);
+                        return preset ? (
+                            <div className="mt-3 px-3 py-2 bg-slate-50 rounded-lg border border-slate-100">
+                                <div className="text-[11px] text-slate-500 leading-relaxed">{preset.desc}</div>
+                            </div>
+                        ) : null;
+                    })()}
+
+                    {/* Show custom text preview */}
+                    {selectedStyleKey === '__custom__' && customStyleText && (
+                        <div className="mt-3 px-3 py-2 bg-slate-50 rounded-lg border border-slate-100">
+                            <div className="text-[11px] text-slate-500 leading-relaxed line-clamp-3">{customStyleText}</div>
+                        </div>
+                    )}
+
+                    {/* Clear button */}
+                    {selectedStyleKey && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSelectedStyleKey(null);
+                                setCustomStyleText('');
+                            }}
+                            className="mt-2 text-[11px] text-slate-400 hover:text-slate-600 underline"
+                        >
+                            清除文风选择
+                        </button>
+                    )}
                 </section>
 
                 {/* Dual Perspective Toggle - Premium UI */}
@@ -620,6 +752,29 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
                     </div>
                 </div>
             )}
+
+            {/* Writing Style Sheet */}
+            <WritingStyleSheet
+                isOpen={styleSheetOpen}
+                currentStyle={
+                    selectedStyleKey === '__custom__'
+                        ? (customStyleText || undefined)
+                        : (selectedStyleKey || undefined)
+                }
+                onSelect={(style) => {
+                    if (!style) {
+                        setSelectedStyleKey(null);
+                        setCustomStyleText('');
+                    } else if (isPresetKey(style)) {
+                        setSelectedStyleKey(style);
+                        setCustomStyleText('');
+                    } else {
+                        setSelectedStyleKey('__custom__');
+                        setCustomStyleText(style);
+                    }
+                }}
+                onClose={() => setStyleSheetOpen(false)}
+            />
 
             <div className="p-4 border-t border-slate-200 bg-white/90 backdrop-blur-sm sticky bottom-0 z-20">
                 <button onClick={handleSaveSettings} className="w-full py-3 bg-primary text-white font-bold rounded-2xl shadow-lg active:scale-95 transition-transform">

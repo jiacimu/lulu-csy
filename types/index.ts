@@ -13,3 +13,4 @@ export * from './backup';
 export * from './tts';
 export * from './stt';
 export * from './memoryRecord';
+export * from './theater';

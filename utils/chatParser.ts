@@ -163,6 +163,110 @@ export function parseBilingual(
     return { hasBilingual: true, langA: a, langB: b };
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+//  Translation XML Utilities — 见面/剧场翻译标签工具
+//  Philosophy: 先救再杀 — rescue content first, strip tags second.
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Strip `<翻译><原文>...<译文>...</翻译>` XML tags, keeping ONLY 原文 content.
+ * Tolerant of:
+ *   - Extra whitespace / newlines between tags
+ *   - Missing closing tags (unclosed `<翻译>` blocks)
+ *   - Stray orphan tags after extraction
+ * Safe to call on content that has no translation tags (returns unchanged).
+ */
+export function stripTranslationTags(content: string): string {
+    if (!content) return content;
+    // Fast path: no tags at all
+    if (!content.includes('<翻译>') && !content.includes('<原文>') && !content.includes('<译文>')) {
+        return content;
+    }
+
+    let result = content;
+
+    // 1. Well-formed blocks: extract 原文 only
+    result = result.replace(
+        /<翻译>\s*<原文>([\s\S]*?)<\/原文>\s*<译文>[\s\S]*?<\/译文>\s*<\/翻译>/g,
+        '$1'
+    );
+
+    // 2. Partially formed: <原文>content</原文> without outer <翻译> wrapper
+    result = result.replace(/<原文>([\s\S]*?)<\/原文>\s*(?:<译文>[\s\S]*?<\/译文>)?/g, '$1');
+
+    // 3. Unclosed <翻译> with 原文 inside (AI got cut off)
+    result = result.replace(/<翻译>\s*<原文>([\s\S]*?)(?:<\/原文>)?[\s\S]*$/g, '$1');
+
+    // 4. Kill any orphaned tags that survived
+    result = result.replace(/<\/?翻译>|<\/?原文>|<\/?译文>/g, '');
+
+    return result.trim();
+}
+
+/**
+ * Extract structured { original, translated } pairs from `<翻译>` XML blocks.
+ * Tolerant of:
+ *   - Multiple blocks in one string
+ *   - Blocks with only 原文 (no 译文) — translated defaults to ''
+ *   - Blocks with only 译文 (no 原文) — original defaults to the 译文 (rescue)
+ *   - Non-translation text between blocks — returned as { original: text, translated: '' }
+ *   - Completely malformed input — returns single { original: rawInput, translated: '' }
+ */
+export function extractTranslationPairs(
+    content: string
+): { original: string; translated: string }[] {
+    if (!content) return [];
+
+    // Fast path: no translation tags
+    if (!content.includes('<翻译>') && !content.includes('<原文>')) {
+        return [{ original: content, translated: '' }];
+    }
+
+    const pairs: { original: string; translated: string }[] = [];
+
+    // Well-formed pattern (tolerant whitespace)
+    const re = /<翻译>\s*<原文>([\s\S]*?)<\/原文>\s*(?:<译文>([\s\S]*?)<\/译文>)?\s*<\/翻译>/g;
+    let lastIndex = 0;
+    let m;
+
+    while ((m = re.exec(content)) !== null) {
+        // Rescue any plain text before this block
+        const textBefore = content.slice(lastIndex, m.index).trim();
+        if (textBefore) {
+            // Strip orphan tags from inter-block text
+            const cleaned = textBefore.replace(/<\/?翻译>|<\/?原文>|<\/?译文>/g, '').trim();
+            if (cleaned) pairs.push({ original: cleaned, translated: '' });
+        }
+
+        const original = m[1]?.trim() || '';
+        const translated = m[2]?.trim() || '';
+
+        if (original) {
+            pairs.push({ original, translated });
+        } else if (translated) {
+            // Rescue: no 原文 but has 译文 — use 译文 as display content
+            pairs.push({ original: translated, translated: '' });
+        }
+
+        lastIndex = m.index + m[0].length;
+    }
+
+    // Rescue any trailing text after the last block
+    const trailing = content.slice(lastIndex).trim();
+    if (trailing) {
+        const cleaned = trailing.replace(/<\/?翻译>|<\/?原文>|<\/?译文>/g, '').trim();
+        if (cleaned) pairs.push({ original: cleaned, translated: '' });
+    }
+
+    // Fallback: if regex matched nothing, return entire content as single pair
+    if (pairs.length === 0) {
+        const fallback = content.replace(/<\/?翻译>|<\/?原文>|<\/?译文>/g, '').trim();
+        return [{ original: fallback || content, translated: '' }];
+    }
+
+    return pairs;
+}
+
 export const ChatParser = {
     // Return cleaned content and perform side effects
     parseAndExecuteActions: async (
@@ -263,11 +367,62 @@ export const ChatParser = {
      */
     cleanAiSecondPass: (text: string): string => {
         let result = stripLeakedChatLinePrefixes(normalizeChatTextEnvelope(text))
-            .replace(/\[\d{4}[-/年]\d{1,2}[-/月]\d{1,2}.*?\]/g, '')
+            // ══════════════════════════════════════════════════════════════
+            // Layer 1: TIMESTAMP STRIPPING
+            // ══════════════════════════════════════════════════════════════
+            .replace(/\[\d{4}[-/年]\d{1,2}[-/月]\d{1,2}.*?\]/g, '')       // [2026-05-09 10:44] full year
+            .replace(/\[\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[：:]\d{2}\]/g, '') // [05/09 10:44] [5月9日 10:44]
+            .replace(/\[\d{1,2}[：:]\d{2}(?:\s*(?:AM|PM))?\]\s*/gi, '')    // [10:44] [10:44 AM]
+            .replace(/^\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}[：:]\d{2}\s*/gm, '') // 2026-05-09 10:44
+            .replace(/^\d{1,2}[-/]\d{1,2}\s+\d{1,2}[：:]\d{2}\s*/gm, '')  // 05/09 10:44
+
+            // ══════════════════════════════════════════════════════════════
+            // Layer 2: NAME PREFIX STRIPPING
+            // ══════════════════════════════════════════════════════════════
             .replace(/^[\w\u4e00-\u9fa5·•._ -]{1,40}\s*[:：]\s*/, '')
-            .replace(/[【\[](?:(?:你|User|用户|System|我)\s*)?发送了?表情包?[:：]\s*(.*?)[】\]]/g, '[[SEND_EMOJI: $1]]')
-            // Normalize single-bracket [SEND_EMOJI: ...] / 【SEND_EMOJI: ...】 → [[SEND_EMOJI: ...]]
-            .replace(/(?:\[{1,2}|【)\s*SEND_EMOJI\s*[:：]\s*([\s\S]*?)\s*(?:\]{1,2}|】)/gi, '[[SEND_EMOJI: $1]]');
+
+            // ══════════════════════════════════════════════════════════════
+            // Layer 3: EMOJI TAG RESCUE — normalize variants → [[SEND_EMOJI: name]]
+            // Order: most specific first, then progressively broader
+            // ══════════════════════════════════════════════════════════════
+            // 3a. AI mimics history log: [你 发送了表情包: xxx] [发送表情: xxx] [我发送了表情包：xxx]
+            .replace(/[【\[](?:(?:你|我|User|用户|System|系统)\s*)?发送了?(?:一个)?表情包?[：:]\s*(.+?)[】\]]/g, '[[SEND_EMOJI: $1]]')
+            // 3b. Shortened: [表情包: xxx] 【表情包：xxx】 [表情: xxx] 【表情：xxx】
+            .replace(/[【\[]表情包?\s*[：:]\s*(.+?)[】\]]/g, '[[SEND_EMOJI: $1]]')
+            // 3c. English variants: [emoji: xxx] [sticker: xxx]
+            .replace(/[【\[](?:emoji|sticker)\s*[：:]\s*(.+?)[】\]]/gi, '[[SEND_EMOJI: $1]]')
+            // 3d. Bracket normalization: [SEND_EMOJI: xxx] 【SEND_EMOJI：xxx】→ [[SEND_EMOJI: xxx]]
+            .replace(/(?:\[{1,2}|【)\s*SEND_EMOJI\s*[：:]\s*([\s\S]*?)\s*(?:\]{1,2}|】)/gi, '[[SEND_EMOJI: $1]]')
+
+            // ══════════════════════════════════════════════════════════════
+            // Layer 4: VOICE TAG RESCUE — normalize variants → 【语音消息：content】
+            // so downstream VOICE_WRAP_RE can detect them
+            // ══════════════════════════════════════════════════════════════
+            // 4a. [语音: content] [语音：content] — missing "消息"
+            .replace(/[【\[]\s*语音\s*[：:]\s*([\s\S]+?)\s*[】\]]/g, '【语音消息：$1】')
+            // 4b. (语音消息：content) （语音消息：content）— parenthetical
+            .replace(/[（(]\s*语音(?:消息)?\s*[：:]\s*([\s\S]+?)\s*[）)]/g, '【语音消息：$1】')
+            // 4c. [voice: content] — English
+            .replace(/[【\[]\s*voice\s*[：:]\s*([\s\S]+?)\s*[】\]]/gi, '【语音消息：$1】')
+            // 4d. Normalize [语音消息：content] half-width brackets → full-width 【】
+            //     (VOICE_WRAP_RE already catches both, but this ensures consistency)
+
+            // ══════════════════════════════════════════════════════════════
+            // Layer 5: KILL SYSTEM LOG MIMICRY — AI copies internal formats
+            // ══════════════════════════════════════════════════════════════
+            // 5a. [🎤用户语音] [🎤语音] — history voice marker
+            .replace(/[【\[]\s*🎤\s*(?:用户)?语音\s*[】\]]\s*/g, '')
+            // 5b. [用户发送了一条语音消息（N秒）] — history voice description
+            .replace(/[【\[](?:用户|你|我)?(?:发送了?)?一?条?语音(?:消息)?[（(]?\d*\s*秒?[）)]?[】\]]/g, '')
+            // 5c. [语音通话] [图片] [视频] [文件] [位置] — bare media type tags
+            .replace(/[【\[](?:语音通话|图片|视频|文件|位置|联系人|名片|红包)[】\]]/g, '')
+            // 5d. [系统: xxx] [系统提示: xxx] [System: xxx] — leaked system tags
+            .replace(/[【\[]\s*(?:系统|System)\s*(?:提示|消息|通知)?\s*[：:]\s*[^\]】]*[】\]]\s*/gi, '')
+            // 5e. [时间感知] [情境补充] [系统功能] — leaked internal prompt section tags
+            .replace(/[【\[]\s*(?:时间感知|情境补充|系统功能|思考链格式锁定|Reminder)\s*[：:]?\s*[^\]】]*[】\]]\s*/gi, '')
+            // 5f. [用户 发送了xxx] [你 发送了xxx] — any remaining log-style action description
+            .replace(/[【\[](?:用户|你|我|User)\s*发送了[\s\S]*?[】\]]/g, '');
+
         result = normalizeSongShareTags(result);
         // Strip any CoT protocol residual that leaked through (e.g. from Gemini native thinking)
         result = stripCoTResidual(result);
@@ -278,42 +433,50 @@ export const ChatParser = {
      * Comprehensive sanitizer for AI output before saving to DB.
      * Removes AI-specific artifacts that should never appear in chat bubbles.
      * Safe to call multiple times (idempotent). Preserves %%BILINGUAL%% markers.
+     * Preserves [[SEND_EMOJI:]] and [[SHARE_SONG:]] for downstream splitResponse.
      */
     sanitize: (text: string): string => {
         return stripLeakedChatLinePrefixes(normalizeChatTextEnvelope(text))
-            // Strip leaked timestamps from chat history context:
-            // [2026-02-11 13:52] format (bracketed, from history entries)
-            .replace(/\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\]\s*/g, '')
-            // 2026-02-11 13:52 format (unbracketed, at line start)
-            .replace(/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s*/gm, '')
-            // （下午1:52）or（上午10:30）Chinese 12h parenthetical
+            // ── Strip leaked timestamps ──
+            .replace(/\[\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}[：:]\d{2}\]\s*/g, '')
+            .replace(/\[\d{1,2}[-/]\d{1,2}\s+\d{1,2}[：:]\d{2}\]\s*/g, '')
+            .replace(/\[\d{1,2}月\d{1,2}日?\s+\d{1,2}[：:]\d{2}\]\s*/g, '')
+            .replace(/\[\d{1,2}[：:]\d{2}(?:\s*(?:AM|PM))?\]\s*/gi, '')
+            .replace(/^\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}[：:]\d{2}\s*/gm, '')
+            .replace(/^\d{1,2}[-/]\d{1,2}\s+\d{1,2}[：:]\d{2}\s*/gm, '')
             .replace(/（[上下]午\d{1,2}[：:]\d{2}）/g, '')
-            // (1:52 PM) or (10:30 AM) English 12h parenthetical
             .replace(/\(\d{1,2}:\d{2}\s*[AP]M\)/gi, '')
-            // Strip markdown headers (# ## ### etc) → keep the text
+            .replace(/\(\d{1,2}[：:]\d{2}\)/g, '')
+            // ── Strip markdown headers ──
             .replace(/^#{1,6}\s+/gm, '')
-            // Strip residual action/system tags that weren't caught earlier
-            .replace(/\[\[(?:ACTION|RECALL|SEARCH|DIARY|READ_DIARY|FS_DIARY|FS_READ_DIARY|DIARY_START|DIARY_END|FS_DIARY_START|FS_DIARY_END|CALL)[:\s][\s\S]*?\]\]/g, '')
+            // ── Strip residual action/system tags ──
+            .replace(/\[\[(?:ACTION|RECALL|SEARCH|DIARY|READ_DIARY|FS_DIARY|FS_READ_DIARY|DIARY_START|DIARY_END|FS_DIARY_START|FS_DIARY_END|CALL|WEIBO_SEARCH|XHS_SEARCH|XHS_BROWSE|XHS_POST|XHS_SHARE|XHS_COMMENT|XHS_LIKE|XHS_FAV|XHS_DETAIL|XHS_REPLY|XHS_MY_PROFILE|READ_NOTE)[:\s][\s\S]*?\]\]/g, '')
+            .replace(/\[\[(?:ACTION|CALL)[:\s]\w*\]\]/g, '')
             .replace(/\[schedule_message[^\]]*\]/g, '')
             .replace(/\[\[(?:QU[OA]TE|引用)[：:][\s\S]*?\]\]/g, '')
             .replace(/\[(?:QU[OA]TE|引用)[：:][^\]]*\]/g, '')
-            // [回复 "content"]: format (AI mimics history context format)
             .replace(/\[回复\s*[""\u201C][^""\u201D]*?[""\u201D](?:\.{0,3})\]\s*[：:]?\s*/g, '')
-            // Strip backtick-wrapped action tags and empty backtick pairs
+            // ── Kill system log mimicry that escaped cleanAiSecondPass ──
+            .replace(/[【\[]\s*🎤\s*(?:用户)?语音\s*[】\]]\s*/g, '')
+            .replace(/[【\[](?:用户|你|我|User)\s*发送了[\s\S]*?[】\]]/g, '')
+            .replace(/[【\[](?:语音通话|图片|视频|文件|位置|联系人|名片|红包)[】\]]/g, '')
+            .replace(/[【\[]\s*(?:系统|System)\s*(?:提示|消息|通知)?\s*[：:]\s*[^\]】]*[】\]]\s*/gi, '')
+            // ── Kill leaked internal prompt/protocol tags ──
+            .replace(/<\/?(?:rp_core|speech_soul|cot_protocol|dreamweaver|character_depth|behavior|no_nagging|no_deify|ability_boundary|anti_template|dynamics|equality|subtlety|CRITICAL_OUTPUT_FORMAT|think)>/gi, '')
+            // ── Strip backtick artifacts ──
             .replace(/`(\[\[[\s\S]*?\]\])`/g, '$1')
             .replace(/``+/g, '')
             .replace(/(^|\s)`(\s|$)/gm, '$1$2')
-            // Strip markdown links → keep text only: [text](url) → text
+            // ── Strip markdown links → keep text ──
             .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-            // Strip all ** sequences (orphaned bold markers are common AI artifacts;
-            // in chat context, losing bold formatting is acceptable for clean display)
+            // ── Strip orphaned bold markers ──
             .replace(/\*{2,}/g, '')
-            // Strip standalone separators and bullets
+            // ── Strip separators and bullets ──
             .replace(/^\s*---\s*$/gm, '')
             .replace(/^\s*[-*+]\s*$/gm, '')
-            // Strip legacy translation marker (but keep %%BILINGUAL%% and <翻译> XML tags)
+            // ── Strip legacy translation marker ──
             .replace(/%%TRANS%%[\s\S]*/gi, '')
-            // Collapse excessive whitespace
+            // ── Collapse excessive whitespace ──
             .replace(/\n{3,}/g, '\n\n')
             .trim();
     },
@@ -402,7 +565,6 @@ export const ChatParser = {
          * Short segments (<=15 chars) are kept as-is to avoid over-splitting.
          */
         const splitCjkSpaces = (segment: string): string[] => {
-            if (segment.length <= 15) return [segment];
             const parts: string[] = [];
             let lastIdx = 0;
             CJK_SPACE_CJK_RE.lastIndex = 0;

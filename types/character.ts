@@ -8,6 +8,8 @@ import { StatusBarMode,CustomStatusTemplate,StatusCardData } from './statusCard'
 export interface DialogueItem {
     text: string;
     emotion?: string;
+    /** Translated text (populated when translation is enabled) */
+    translationText?: string;
 }
 
 export interface DateState {
@@ -149,6 +151,17 @@ export interface CharacterProfile {
     dateSummaryAutoThreshold?: number; // Message threshold for auto summaries
     dateSummaryLastAutoMsgId?: number; // Last date message id covered by auto summary
     dateSummaryAutoHideEnabled?: boolean; // Hide summarized date messages, keeping only recent context
+
+    // Date output tuning
+    dateOutputWordCount?: number;          // Target reply word count (0 or undefined = default ~150)
+    dateWritingStyle?: string;             // Writing style preset key or custom prompt text
+
+    // Theater (520) Summary System
+    theaterSummaryPrompt?: string;           // User-customized theater summary prompt
+    theaterSummaryAutoEnabled?: boolean;     // Auto theater summary toggle
+    theaterSummaryAutoThreshold?: number;    // Message threshold for auto summaries
+    theaterSummaryLastAutoMsgId?: number;    // Last theater message id covered by auto summary
+    theaterSummaryAutoHideEnabled?: boolean; // Hide summarized theater messages, keeping only recent context
 
     savedDateState?: DateState;
     specialMomentRecords?: Record<string, SpecialMomentRecord>;
