@@ -473,13 +473,13 @@ const DateSession: React.FC<DateSessionProps> = ({
                                     onContextMenu={(e) => { e.preventDefault(); setSelectedMessage(msg); setModalType('options'); }}
                                 >
                                     {msg.role === 'user' ? (
-                                        <p className={`whitespace-pre-wrap font-serif text-[16px] text-right leading-loose tracking-wide italic pr-4 ${char.dateLightReading ? 'text-stone-400 border-r-2 border-stone-300/50' : 'text-slate-400 border-r-2 border-slate-600/50'}`}>{cleanTextForDisplay(msg.content)} <span className="text-[10px] uppercase font-sans not-italic ml-2 opacity-50">{userProfile.name}</span></p>
+                                        <p className={`whitespace-pre-wrap font-sans text-[16px] text-right leading-loose tracking-wide italic pr-4 ${char.dateLightReading ? 'text-stone-400 border-r-2 border-stone-300/50' : 'text-slate-400 border-r-2 border-slate-600/50'}`}>{cleanTextForDisplay(msg.content)} <span className="text-[10px] uppercase font-sans not-italic ml-2 opacity-50">{userProfile.name}</span></p>
                                     ) : (
                                         <div>
                                             {(msg.content || '').split('\n').map((line, idx) => {
                                                 const cleanLine = cleanTextForDisplay(line);
                                                 if (!cleanLine) return null;
-                                                return <p key={idx} className={`whitespace-pre-wrap font-serif text-[18px] text-justify leading-loose tracking-wide pl-4 mb-4 last:mb-0 ${char.dateLightReading ? 'text-stone-700 border-l-2 border-stone-200' : 'text-slate-200 drop-shadow-md border-l-2 border-white/10'}`}>{cleanLine}</p>
+                                                return <p key={idx} className={`whitespace-pre-wrap font-sans text-[18px] text-justify leading-loose tracking-wide pl-4 mb-4 last:mb-0 ${char.dateLightReading ? 'text-stone-700 border-l-2 border-stone-200' : 'text-slate-200 drop-shadow-md border-l-2 border-white/10'}`}>{cleanLine}</p>
                                             })}
                                         </div>
                                     )}
