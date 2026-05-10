@@ -140,11 +140,10 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
 - 环境细节比情节重要：阳光移动了位置、外面开始下雨、隔壁传来声音
 - 像一段被摄影机安静记录下来的普通午后`,
     },
-    {
-        key: 'anti-cliche',
-        label: '去八股',
-        desc: '专杀霸总剧本、网文词库、偶像剧台词',
-        prompt: `【文风指令：去八股 · 系统级禁令】
+];
+
+// ====== Anti-Cliché Base Layer (always-on, invisible to user) ======
+const ANTI_CLICHE_BASE = `【文风底线 · 系统级】
 你正在写的不是晋江言情，不是霸总短剧，不是网文。你是一个活人在面对面和另一个人互动。
 以下禁令的优先级高于一切文风偏好。违反任何一条都会导致这场梦的崩溃。
 
@@ -251,9 +250,7 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
 1. 如果一句台词/一段描写拿去任何一本霸总小说里都能用 → 不够特别 → 重写
 2. 笨拙 > 帅气，犹豫 > 果断，说不出口 > 脱口而出
 3. 真实的亲密互动充满了：不知道手该放哪里、碰到了又缩回来、想说话但嗓子发紧、做了之后有点后悔又有点不后悔
-4. 你是这个特定的角色，不是"男主"这个物种`,
-    },
-];
+4. 你是这个特定的角色，不是"男主"这个物种`;
 
 /** Default word count when user doesn't set one */
 export const DATE_DEFAULT_WORD_COUNT = 150;
@@ -275,7 +272,10 @@ export const buildDateOutputTuning = (
     const hi = Math.round(targetWords * 1.3);
     parts.push(`\n### 回复篇幅\n目标字数: 约 ${targetWords} 字（${lo}-${hi} 字）。\n- 这是叙述行+台词的总字数（不含 [emotion] 标签和 <thinking> 推理）\n- 不要为了凑字数而注水，也不要为了压缩而丢失画面感\n- 如果当前场景确实需要更长或更短的回复，可以适当浮动`);
 
-    // --- Writing Style ---
+    // --- Anti-Cliché Base Layer (always-on, invisible to user) ---
+    parts.push(`\n${ANTI_CLICHE_BASE}`);
+
+    // --- Writing Style (user-selected, layered on top) ---
     if (writingStyle && writingStyle.trim()) {
         // Check if it matches a preset key
         const preset = DATE_WRITING_STYLE_PRESETS.find(p => p.key === writingStyle);
