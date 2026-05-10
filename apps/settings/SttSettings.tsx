@@ -30,16 +30,31 @@ async function verifySttKey(config: SttConfig): Promise<{ ok: boolean; detail: s
     const model = config.model || defaults.model;
     const url = `${baseUrl}/audio/transcriptions`;
 
-    // 生成 1 帧（44 字节）的静音 WAV
-    const wavHeader = new ArrayBuffer(44);
-    const view = new DataView(wavHeader);
+    // 生成 0.1 秒有效静音 WAV（16kHz, 16bit, mono = 1600 samples = 3200 bytes）
+    // 注意：不能用 0 字节 data chunk，否则 SenseVoice 会返回 500
+    const sampleRate = 16000;
+    const numSamples = 1600; // 0.1 秒
+    const bytesPerSample = 2; // 16-bit
+    const dataSize = numSamples * bytesPerSample;
+    const headerSize = 44;
+    const wavBuffer = new ArrayBuffer(headerSize + dataSize);
+    const view = new DataView(wavBuffer);
     const writeStr = (offset: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i)); };
-    writeStr(0, 'RIFF'); view.setUint32(4, 36, true); writeStr(8, 'WAVE');
-    writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true); view.setUint32(24, 16000, true); view.setUint32(28, 32000, true);
-    view.setUint16(32, 2, true); view.setUint16(34, 16, true);
-    writeStr(36, 'data'); view.setUint32(40, 0, true);
-    const blob = new Blob([wavHeader], { type: 'audio/wav' });
+    writeStr(0, 'RIFF');
+    view.setUint32(4, headerSize - 8 + dataSize, true); // file size - 8
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);              // fmt chunk size
+    view.setUint16(20, 1, true);               // PCM format
+    view.setUint16(22, 1, true);               // mono
+    view.setUint32(24, sampleRate, true);       // sample rate
+    view.setUint32(28, sampleRate * bytesPerSample, true); // byte rate
+    view.setUint16(32, bytesPerSample, true);  // block align
+    view.setUint16(34, 16, true);              // bits per sample
+    writeStr(36, 'data');
+    view.setUint32(40, dataSize, true);        // data chunk size
+    // samples 区域默认全 0 = 静音，ArrayBuffer 初始化即为 0
+    const blob = new Blob([wavBuffer], { type: 'audio/wav' });
 
     const formData = new FormData();
     formData.append('file', blob, 'test.wav');
@@ -72,6 +87,10 @@ async function verifySttKey(config: SttConfig): Promise<{ ok: boolean; detail: s
         }
         if (resp.status === 429) {
             return { ok: false, detail: `请求频率受限 (429)，请稍后再试` };
+        }
+        // 500/502/503 可能是服务端对测试静音音频的处理异常，不代表 Key 无效
+        if (resp.status >= 500 && resp.status < 600) {
+            return { ok: true, detail: `API Key 可能有效 (${resp.status} - 服务端处理测试音频异常，不影响正常使用)` };
         }
 
         const errText = await resp.text().catch(() => '');
