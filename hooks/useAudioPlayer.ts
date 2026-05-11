@@ -40,7 +40,6 @@ type Listener = (state: PlaybackState) => void;
 
 let globalAudio: HTMLAudioElement | null = null;
 let audioEventsBound = false;
-let audioPlaybackPrimed = false;
 let currentRequestId = 0;
 let currentState: PlaybackState = { ...initialState };
 const listeners = new Set<Listener>();

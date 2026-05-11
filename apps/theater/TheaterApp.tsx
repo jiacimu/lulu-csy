@@ -57,6 +57,7 @@ type SummaryDraft = {
     fromPendingAuto?: boolean;
     /** Set only during exit flow — after saving, also create bridge + finishExit */
     bridgeOnSave?: boolean;
+    injectToVectorMemory?: boolean;
 };
 
 const THEATER_SUMMARY_CONTEXT_KEEP_COUNT = 5;
@@ -1091,6 +1092,56 @@ ${exitPromptContent}
         if (draft.fromPendingAuto || pendingAutoSummary?.lastCoveredMsgId === draft.lastCoveredMsgId) setPendingAutoSummary(null);
         setActiveSummaryDraft(null);
         await refreshTimelineMessages();
+        
+        if (draft.injectToVectorMemory) {
+            try {
+                const { getEmbeddingConfig, hasCloudSyncTarget } = await import('../../utils/runtimeConfig');
+                const { EmbeddingService } = await import('../../utils/embeddingService');
+                const { markVectorMemoryAsPendingSync, markVectorMemoryAsLocalOnly, markVectorMemoryAsSynced } = await import('../../utils/vectorMemorySyncState');
+                const { pushMemories } = await import('../../utils/backendClient');
+
+                const embedConfig = getEmbeddingConfig();
+                const embedKey = embedConfig.apiKey;
+                
+                if (!embedKey) {
+                    addToast('无法刻入向量记忆：未配置 Embedding API Key', 'error');
+                } else {
+                    const vector = await EmbeddingService.embed(draft.content, 'VECTOR_MEMORY', embedKey);
+                    const newMemId = crypto.randomUUID();
+                    const newMem = {
+                        id: newMemId,
+                        charId: char.id,
+                        title: '约会记忆总结',
+                        content: draft.content,
+                        vector,
+                        modelId: embedConfig.model,
+                        source: 'import' as const,
+                        importance: 5,
+                        createdAt: Date.now(),
+                        mentionCount: 0,
+                        lastMentioned: 0,
+                        sourceMessageIds: Array.isArray(draft.coveredMsgIds) ? draft.coveredMsgIds.filter(id => typeof id === 'number') as number[] : [],
+                    };
+                    
+                    const isCloud = hasCloudSyncTarget();
+                    const finalMem = isCloud ? markVectorMemoryAsPendingSync(newMem) : markVectorMemoryAsLocalOnly(newMem);
+                    await DB.saveVectorMemory(finalMem);
+                    
+                    if (isCloud) {
+                        pushMemories(char.id, [finalMem]).then(success => {
+                            if (success) {
+                                DB.saveVectorMemory(markVectorMemoryAsSynced(finalMem)).catch(() => {});
+                            }
+                        }).catch(() => {});
+                    }
+                    addToast('已存入永久记忆库', 'success');
+                }
+            } catch (e: any) {
+                console.error('[TheaterApp] Save vector memory failed', e);
+                addToast('向量记忆写入失败，但总结已保存', 'error');
+            }
+        }
+
         // If this save was triggered from exit flow, create bridge then exit
         if (draft.bridgeOnSave) {
             const bridged = await createBridgeFromSummary();
@@ -1638,7 +1689,22 @@ ${exitPromptContent}
                             <button onClick={() => saveSummaryDraft(activeSummaryDraft)} className="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-2xl">{activeSummaryDraft.bridgeOnSave ? '保存并同步' : '保存'}</button>
                         </>
                     }>
-                        <div className="prose prose-sm max-w-none text-slate-700 leading-relaxed">{renderMarkdown(activeSummaryDraft.content)}</div>
+                        <div className="flex flex-col gap-4">
+                            <div className="prose prose-sm max-w-none text-slate-700 leading-relaxed">
+                                {renderMarkdown(activeSummaryDraft.content)}
+                            </div>
+                            {activeSummaryDraft.summaryType === 'manual' && activeSummaryDraft.bridgeOnSave && (
+                                <label className="flex items-center gap-2 mt-4 cursor-pointer p-3 bg-slate-50 rounded-xl border border-slate-200 transition-colors hover:bg-slate-100">
+                                    <input 
+                                        type="checkbox" 
+                                        className="w-4 h-4 text-emerald-500 rounded border-slate-300 focus:ring-emerald-500" 
+                                        checked={activeSummaryDraft.injectToVectorMemory || false} 
+                                        onChange={e => setActiveSummaryDraft({ ...activeSummaryDraft, injectToVectorMemory: e.target.checked })} 
+                                    />
+                                    <span className="text-sm font-medium text-slate-700">将此段总结刻入永久向量记忆库 (Vector Memory)</span>
+                                </label>
+                            )}
+                        </div>
                     </Modal>
                 )}
 

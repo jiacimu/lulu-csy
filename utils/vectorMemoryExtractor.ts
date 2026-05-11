@@ -101,7 +101,9 @@ export const VectorMemoryExtractor = {
         const msgsAfterExtract = await DB.getMessagesByCharIdAfterTimestamp(charId, lastExtractAt);
         const allNewMsgs = msgsAfterExtract.filter(m =>
             (m.role === 'user' || m.role === 'assistant') &&
-            (m.type === 'text' || m.type === 'call_log')
+            (m.type === 'text' || m.type === 'call_log') &&
+            m.metadata?.source !== 'theater' &&
+            m.metadata?.source !== 'date'
         );
 
         // Exclude the newest TAIL_BUFFER messages — they're in the "draft zone"
@@ -298,7 +300,7 @@ export const VectorMemoryExtractor = {
 
         try {
             const filteredMsgs = (await DB.getMessagesByCharId(charId))
-                .filter(m => (m.role === 'user' || m.role === 'assistant') && (m.type === 'text' || m.type === 'call_log'));
+                .filter(m => (m.role === 'user' || m.role === 'assistant') && (m.type === 'text' || m.type === 'call_log') && m.metadata?.source !== 'theater' && m.metadata?.source !== 'date');
             const boundedStartIdx = Math.max(0, startIdx);
             const boundedEndIdx = Math.min(endIdx, filteredMsgs.length - 1);
 
