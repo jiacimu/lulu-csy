@@ -41,6 +41,8 @@ type Listener = (state: PlaybackState) => void;
 let globalAudio: HTMLAudioElement | null = null;
 let audioEventsBound = false;
 let currentRequestId = 0;
+let pendingPlayPromise: Promise<void> | null = null;
+let audioPlaybackPrimed = false;
 let currentState: PlaybackState = { ...initialState };
 const listeners = new Set<Listener>();
 const SILENT_AUDIO_DATA_URI = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA/+M4wAAAAAAAAAAAAEluZm8AAAAPAAAAAwAAAbAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV////////////////////////////////////////////AAAAAExhdmM1OC4xMwAAAAAAAAAAAAAAACQAAAAAAAAAAaC9GQMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/+MYxAANCAKeeUAQBAA0oyq1HwfB8Hw+BAMfwfB8EAfD4EAgGP4Pg+D4Ph8CAfB8HwfB8CAIB8Hw+BAMfwfB8Hw+D4EAx/B8HwfB8Hw+D4EAx/+MYxA0AAADSAAAAALhj4fg+D4Pg+H4IB8PwfB8CAY/g+D4Pg+HwIB8HwfB8HwIBj+D4Pg+D4Ph8CAfB8HwfB8CAQD4fB8HwfB8';
@@ -138,7 +140,7 @@ function getAudio(): HTMLAudioElement | null {
     return globalAudio;
 }
 
-function primeAudioPlayback(audio: HTMLAudioElement): void {
+async function primeAudioPlayback(audio: HTMLAudioElement): Promise<void> {
     if (audioPlaybackPrimed) return;
 
     audioPlaybackPrimed = true;
@@ -172,20 +174,15 @@ function primeAudioPlayback(audio: HTMLAudioElement): void {
             }
         };
 
-        const playPromise = audio.play();
-        if (playPromise && typeof playPromise.then === 'function') {
-            playPromise
-                .then(() => restore())
-                .catch(() => {
-                    audioPlaybackPrimed = false;
-                    restore();
-                });
-            return;
+        pendingPlayPromise = audio.play();
+        if (pendingPlayPromise) {
+            await pendingPlayPromise;
         }
-
         restore();
     } catch {
         audioPlaybackPrimed = false;
+    } finally {
+        pendingPlayPromise = null;
     }
 }
 
@@ -213,12 +210,31 @@ function syncStateFromAudio(overrides: Partial<PlaybackState> = {}): void {
     }));
 }
 
+async function safelyPause(audio: HTMLAudioElement): Promise<void> {
+    // Wait for any in-flight play() to settle before calling pause(),
+    // otherwise the browser throws "play() interrupted by pause()".
+    if (pendingPlayPromise) {
+        try { await pendingPlayPromise; } catch { /* swallow */ }
+        pendingPlayPromise = null;
+    }
+    audio.pause();
+}
+
+async function safelyPlay(audio: HTMLAudioElement): Promise<void> {
+    pendingPlayPromise = audio.play();
+    try {
+        await pendingPlayPromise;
+    } finally {
+        pendingPlayPromise = null;
+    }
+}
+
 async function playSongInternal(song: MusicPlayable, playlist?: MusicPlayable[]): Promise<void> {
     const audio = getAudio();
     if (!audio) return;
 
     bindAudioEvents();
-    primeAudioPlayback(audio);
+    await primeAudioPlayback(audio);
 
     const sourceQueue = playlist && playlist.length > 0 ? playlist : [song];
     const queue = sourceQueue
@@ -248,10 +264,12 @@ async function playSongInternal(song: MusicPlayable, playlist?: MusicPlayable[])
             throw new Error('没有可用的播放链接');
         }
 
+        await safelyPause(audio);
         audio.src = targetUrl;
         audio.currentTime = 0;
         audio.load();
-        await audio.play();
+        await safelyPlay(audio);
+        audio.muted = false;
         syncStateFromAudio({
             currentSong: clonePlayable(song),
             playlist: queue,
@@ -265,10 +283,12 @@ async function playSongInternal(song: MusicPlayable, playlist?: MusicPlayable[])
 
             if (fallbackUrl) {
                 try {
+                    await safelyPause(audio);
                     audio.src = fallbackUrl;
                     audio.currentTime = 0;
                     audio.load();
-                    await audio.play();
+                    await safelyPlay(audio);
+                    audio.muted = false;
                     syncStateFromAudio({
                         currentSong: clonePlayable(song),
                         playlist: queue,
@@ -297,7 +317,7 @@ function pauseInternal(): void {
     const audio = getAudio();
     if (!audio) return;
 
-    audio.pause();
+    void safelyPause(audio);
     syncStateFromAudio({ isPlaying: false });
 }
 
@@ -306,9 +326,10 @@ function stopInternal(): void {
 
     const audio = getAudio();
     if (audio) {
-        audio.pause();
-        audio.removeAttribute('src');
-        audio.load();
+        void safelyPause(audio).then(() => {
+            audio.removeAttribute('src');
+            audio.load();
+        });
     }
 
     updateState((state) => ({
@@ -322,7 +343,7 @@ async function resumeInternal(): Promise<void> {
     if (!audio?.src) return;
 
     try {
-        await audio.play();
+        await safelyPlay(audio);
         syncStateFromAudio({ isPlaying: true });
     } catch (error) {
         console.error('[AudioPlayer] Resume error:', error);
