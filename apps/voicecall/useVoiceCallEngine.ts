@@ -1047,6 +1047,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                 try {
                     const { MicVAD } = await import('@ricky0123/vad-web');
                     const vad = await MicVAD.new({
+                        model: 'v5',
                         getStream: async () => stream,
                         pauseStream: async () => { /* no-op */ },
                         resumeStream: async () => stream,

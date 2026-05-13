@@ -173,6 +173,7 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
                     const { MicVAD } = await import('@ricky0123/vad-web');
                     // Pass the already-acquired stream so VAD doesn't request mic again
                     const vad = await MicVAD.new({
+                        model: 'v5',
                         // Pass existing stream via callbacks so VAD doesn't request mic again
                         getStream: async () => stream,
                         pauseStream: async () => { /* no-op: we manage the stream ourselves */ },
