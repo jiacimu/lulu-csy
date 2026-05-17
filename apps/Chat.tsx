@@ -27,6 +27,26 @@ import {
   getLifeStreamVisibleInChat,
   LIFE_STREAM_VISIBILITY_EVENT_NAME,
 } from '../utils/autonomousAgent';
+import {
+  ensureAgentTodayLife,
+  fetchAgentTodaySchedule,
+  saveAgentScheduleRevision,
+  TODAY_SCHEDULE_UPDATED_EVENT_NAME,
+  type AgentApiConfig,
+  type AgentTodayScheduleState,
+} from '../utils/agentBackendClient';
+import { buildLifeProfileContextSnapshot } from '../utils/lifeProfileContextSnapshot';
+import { getSecondaryApiConfig } from '../utils/runtimeConfig';
+
+function toAgentApiConfig(value: unknown): AgentApiConfig | undefined {
+    const record = value as Partial<AgentApiConfig> | undefined;
+    if (!record?.baseUrl || !record.apiKey || !record.model) return undefined;
+    return {
+        baseUrl: record.baseUrl,
+        apiKey: record.apiKey,
+        model: record.model,
+    };
+}
 
 const Chat: React.FC = () => {
     const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, closeApp, openApp, customThemes, removeCustomTheme, addToast, userProfile, lastMsgTimestamp, groups, clearUnread, realtimeConfig, ttsConfig, sttConfig, isDataLoaded } = useOS();
@@ -36,6 +56,23 @@ const Chat: React.FC = () => {
     const [lifeStreamVisibleInChat, setLifeStreamVisibleInChat] = useState(() => (
         activeCharacterId ? getLifeStreamVisibleInChat(activeCharacterId) : false
     ));
+    const [todayLifeSyncText, setTodayLifeSyncText] = useState('');
+    const [todayLifeSyncTone, setTodayLifeSyncTone] = useState<'soft' | 'ready'>('soft');
+    const [todaySchedule, setTodaySchedule] = useState<AgentTodayScheduleState | null>(null);
+    const [isTodayScheduleOpen, setIsTodayScheduleOpen] = useState(false);
+    const [isTodayScheduleLoading, setIsTodayScheduleLoading] = useState(false);
+    const [showManualScheduleForm, setShowManualScheduleForm] = useState(false);
+    const [manualScheduleSaving, setManualScheduleSaving] = useState(false);
+    const [isTodayScheduleEntryHidden, setIsTodayScheduleEntryHidden] = useState(false);
+    const [manualScheduleDraft, setManualScheduleDraft] = useState({
+        startTime: '',
+        endTime: '',
+        timeHint: '',
+        title: '',
+        description: '',
+        reason: '',
+        innerVoice: '',
+    });
     const [visibleCount, setVisibleCount] = useState(30);
     const [input, setInput] = useState('');
     const [showPanel, setShowPanel] = useState<'none' | 'actions' | 'emojis' | 'chars'>('none');
@@ -53,6 +90,10 @@ const Chat: React.FC = () => {
     const activeCharIdRef = useRef(activeCharacterId);
     const lifeStreamVisibleRef = useRef(lifeStreamVisibleInChat);
     const messagesRef = useRef<Message[]>(messages);
+    const todayLifeEnsureSeqRef = useRef(0);
+    const todayLifeSlowTimerRef = useRef<number | null>(null);
+    const todayLifeHideTimerRef = useRef<number | null>(null);
+    const lastTodayLifeEnsureKeyRef = useRef('');
     messagesRef.current = messages;
 
     // Reply Logic
@@ -165,6 +206,213 @@ const Chat: React.FC = () => {
         () => ttsConfig && char ? withCharacterTtsVoice(ttsConfig, char) : ttsConfig,
         [ttsConfig, char?.id, char?.ttsVoiceId],
     );
+
+    const clearTodayLifeTimers = useCallback(() => {
+        if (todayLifeSlowTimerRef.current !== null) {
+            window.clearTimeout(todayLifeSlowTimerRef.current);
+            todayLifeSlowTimerRef.current = null;
+        }
+        if (todayLifeHideTimerRef.current !== null) {
+            window.clearTimeout(todayLifeHideTimerRef.current);
+            todayLifeHideTimerRef.current = null;
+        }
+    }, []);
+
+    const buildTodayLifeContextSnapshot = useCallback(async () => {
+        if (!char) return null;
+        const baseSnapshot = await buildLifeProfileContextSnapshot(char, userProfile.name);
+        const recentMessages = messagesRef.current
+            .filter(message => message.role === 'user' || message.role === 'assistant')
+            .slice(-14)
+            .map(message => ({
+                id: message.id,
+                role: message.role,
+                content: (message.content || '').slice(0, 1200),
+                timestamp: message.timestamp,
+            }));
+        return {
+            ...baseSnapshot,
+            recentMessages,
+        };
+    }, [char, userProfile.name]);
+
+    const refreshTodaySchedule = useCallback(async (visible = false) => {
+        if (!char) return;
+        if (visible) setIsTodayScheduleLoading(true);
+        try {
+            const result = await fetchAgentTodaySchedule(char.id);
+            setTodaySchedule(result);
+        } catch (error) {
+            if (visible) {
+                addToast('今日行程暂时没有接上，可以稍后再看。', 'info');
+            } else {
+                console.warn('[Chat] Today schedule fetch failed:', error instanceof Error ? error.message : error);
+            }
+        } finally {
+            if (visible) setIsTodayScheduleLoading(false);
+        }
+    }, [addToast, char]);
+
+    const handleOpenTodaySchedule = useCallback(() => {
+        setIsTodayScheduleOpen(true);
+        void refreshTodaySchedule(true);
+    }, [refreshTodaySchedule]);
+
+    const handleSaveManualSchedule = useCallback(async () => {
+        if (!char) return;
+        const title = manualScheduleDraft.title.trim();
+        const description = manualScheduleDraft.description.trim();
+        const timeHint = manualScheduleDraft.timeHint.trim() || '稍后';
+        if (!title && !description) {
+            addToast('先写一点这段行程的内容。', 'info');
+            return;
+        }
+
+        setManualScheduleSaving(true);
+        try {
+            const contextSnapshot = await buildTodayLifeContextSnapshot();
+            const result = await saveAgentScheduleRevision(char.id, {
+                changeType: 'insert',
+                newSchedule: {
+                    startTime: manualScheduleDraft.startTime.trim() || undefined,
+                    endTime: manualScheduleDraft.endTime.trim() || undefined,
+                    timeHint,
+                    title: title || '新的安排',
+                    description: description || title,
+                    mode: 'loose',
+                },
+                reason: manualScheduleDraft.reason.trim() || '由你手动写入今日行程。',
+                innerVoice: manualScheduleDraft.innerVoice.trim(),
+            }, contextSnapshot || undefined);
+            setTodaySchedule(result);
+            setShowManualScheduleForm(false);
+            setManualScheduleDraft({ startTime: '', endTime: '', timeHint: '', title: '', description: '', reason: '', innerVoice: '' });
+            addToast('今日行程已写入。', 'success');
+        } catch (error) {
+            addToast('这段行程暂时没能写入，可以稍后再试。', 'info');
+            console.warn('[Chat] Manual schedule revision failed:', error instanceof Error ? error.message : error);
+        } finally {
+            setManualScheduleSaving(false);
+        }
+    }, [addToast, buildTodayLifeContextSnapshot, char, manualScheduleDraft]);
+
+    const syncTodayLife = useCallback(async (visible: boolean) => {
+        if (!char) return;
+        const recentKey = messagesRef.current
+            .filter(message => message.role === 'user' || message.role === 'assistant')
+            .slice(-8)
+            .map(message => `${message.id}:${message.timestamp}`)
+            .join('|');
+        const requestKey = `${char.id}:${recentKey}`;
+        if (!visible && lastTodayLifeEnsureKeyRef.current === requestKey) return;
+        lastTodayLifeEnsureKeyRef.current = requestKey;
+
+        let seq = todayLifeEnsureSeqRef.current;
+        if (visible) {
+            seq = todayLifeEnsureSeqRef.current + 1;
+            todayLifeEnsureSeqRef.current = seq;
+            clearTodayLifeTimers();
+            setTodayLifeSyncTone('soft');
+            setTodayLifeSyncText('正在靠近 ta 今天的此刻...');
+            todayLifeSlowTimerRef.current = window.setTimeout(() => {
+                if (todayLifeEnsureSeqRef.current === seq) {
+                    setTodayLifeSyncText('今日行程还在整理，你可以先和 ta 说话。');
+                }
+            }, 3000);
+        }
+
+        try {
+            const contextSnapshot = await buildTodayLifeContextSnapshot();
+            if (!contextSnapshot) return;
+            const result = await ensureAgentTodayLife(char.id, contextSnapshot, {
+                mainApiConfig: toAgentApiConfig(apiConfig),
+                apiConfig: toAgentApiConfig(getSecondaryApiConfig()),
+            });
+            if (visible) {
+                if (todayLifeEnsureSeqRef.current !== seq) return;
+                clearTodayLifeTimers();
+                const isReady = result.status === 'ready';
+                setTodayLifeSyncTone(isReady ? 'ready' : 'soft');
+                setTodayLifeSyncText(isReady ? '今日行程已同步' : '今日行程暂时没有接上，可以稍后再看。');
+                todayLifeHideTimerRef.current = window.setTimeout(() => {
+                    if (todayLifeEnsureSeqRef.current === seq) {
+                        setTodayLifeSyncText('');
+                    }
+                }, 2600);
+            }
+            if (result.status === 'ready') {
+                void refreshTodaySchedule(false);
+            }
+        } catch (error) {
+            if (visible && todayLifeEnsureSeqRef.current === seq) {
+                clearTodayLifeTimers();
+                setTodayLifeSyncTone('soft');
+                setTodayLifeSyncText('今天的生活状态会先轻轻接上。');
+                todayLifeHideTimerRef.current = window.setTimeout(() => {
+                    if (todayLifeEnsureSeqRef.current === seq) {
+                        setTodayLifeSyncText('');
+                    }
+                }, 2600);
+            }
+            if (!visible) {
+                console.warn('[Chat] Today life sync failed:', error instanceof Error ? error.message : error);
+            }
+        }
+    }, [apiConfig, buildTodayLifeContextSnapshot, char, clearTodayLifeTimers, refreshTodaySchedule]);
+
+    useEffect(() => {
+        if (!isDataLoaded || !char) return;
+        const timer = window.setTimeout(() => {
+            syncTodayLife(true);
+        }, 500);
+        return () => window.clearTimeout(timer);
+    }, [char?.id, isDataLoaded, syncTodayLife]);
+
+    useEffect(() => {
+        if (!char) {
+            setIsTodayScheduleEntryHidden(false);
+            return;
+        }
+        setIsTodayScheduleEntryHidden(localStorage.getItem(`chat_today_schedule_entry_hidden_${char.id}`) === 'true');
+    }, [char?.id]);
+
+    useEffect(() => {
+        if (!isDataLoaded || !char) {
+            setTodaySchedule(null);
+            return;
+        }
+        const timer = window.setTimeout(() => {
+            void refreshTodaySchedule(false);
+        }, 900);
+        return () => window.clearTimeout(timer);
+    }, [char?.id, isDataLoaded, refreshTodaySchedule]);
+
+    useEffect(() => {
+        const handleScheduleUpdated = (event: Event) => {
+            const detail = (event as CustomEvent<{ charId?: string }>).detail;
+            if (detail?.charId && detail.charId !== char?.id) return;
+            void refreshTodaySchedule(false);
+        };
+        window.addEventListener(TODAY_SCHEDULE_UPDATED_EVENT_NAME, handleScheduleUpdated);
+        return () => {
+            window.removeEventListener(TODAY_SCHEDULE_UPDATED_EVENT_NAME, handleScheduleUpdated);
+        };
+    }, [char?.id, refreshTodaySchedule]);
+
+    useEffect(() => {
+        if (!isDataLoaded || !char || messages.length === 0) return;
+        const latest = messages[messages.length - 1];
+        if (!latest || (latest.role !== 'user' && latest.role !== 'assistant')) return;
+        const timer = window.setTimeout(() => {
+            syncTodayLife(false);
+        }, 1200);
+        return () => window.clearTimeout(timer);
+    }, [char?.id, isDataLoaded, messages.length, lastMsgTimestamp, syncTodayLife]);
+
+    useEffect(() => () => {
+        todayLifeEnsureSeqRef.current += 1;
+        clearTodayLifeTimers();
+    }, [clearTodayLifeTimers]);
 
     useEffect(() => {
         if (!isDataLoaded || characters.length === 0) return;
@@ -1265,6 +1513,15 @@ const Chat: React.FC = () => {
     const canReroll = !isTyping && displayMessages.length > 0 && displayMessages[displayMessages.length - 1].role === 'assistant';
 
     const collapsedCount = Math.max(0, totalMsgCount - displayMessages.length);
+    const todayScheduleItems = todaySchedule?.effectiveItems || [];
+    const todayScheduleRevisionCount = todaySchedule?.revisions?.length || 0;
+    const todayScheduleBadgeText = todaySchedule?.status === 'failed'
+        ? '未接上'
+        : todayScheduleRevisionCount > 0
+            ? `${todayScheduleRevisionCount} 处改写`
+            : todayScheduleItems.length > 0
+                ? `${todayScheduleItems.length} 段`
+                : '待同步';
 
     // Reset active category if it becomes invisible for the current character
     useEffect(() => {
@@ -1538,6 +1795,53 @@ const Chat: React.FC = () => {
                 onCallPress={() => { unlockAudio(); openApp(AppID.VoiceCall, { direction: 'outgoing' }); }}
             />
 
+            {!selectionMode && !isTodayScheduleEntryHidden && (
+                <button
+                    type="button"
+                    onClick={handleOpenTodaySchedule}
+                    className="absolute right-3 top-[calc(var(--safe-top)+62px)] z-40 flex max-w-[52%] items-center gap-2 rounded-full border border-[#eadfd2]/80 bg-[#fffaf4]/88 px-3 py-2 shadow-[0_10px_28px_rgba(76,52,38,0.12)] backdrop-blur-md active:scale-95"
+                    aria-label="打开今日行程"
+                >
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#f4ded3] text-[11px] text-[#a86c63]">⌁</span>
+                    <span className="truncate text-[13px] font-normal tracking-[0.04em] text-[#5f5047]">今日行程</span>
+                    <span className="shrink-0 rounded-full bg-white/80 px-2 py-0.5 text-[10px] text-[#a68f83]">{todayScheduleBadgeText}</span>
+                    <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            if (char) localStorage.setItem(`chat_today_schedule_entry_hidden_${char.id}`, 'true');
+                            setIsTodayScheduleEntryHidden(true);
+                        }}
+                        onKeyDown={(event) => {
+                            if (event.key !== 'Enter' && event.key !== ' ') return;
+                            event.preventDefault();
+                            event.stopPropagation();
+                            if (char) localStorage.setItem(`chat_today_schedule_entry_hidden_${char.id}`, 'true');
+                            setIsTodayScheduleEntryHidden(true);
+                        }}
+                        className="-mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#c2afa4]"
+                        aria-label="隐藏今日行程入口"
+                    >
+                        ×
+                    </span>
+                </button>
+            )}
+
+            {!selectionMode && isTodayScheduleEntryHidden && (
+                <button
+                    type="button"
+                    onClick={() => {
+                        if (char) localStorage.removeItem(`chat_today_schedule_entry_hidden_${char.id}`);
+                        setIsTodayScheduleEntryHidden(false);
+                    }}
+                    className="absolute right-3 top-[calc(var(--safe-top)+62px)] z-40 flex h-9 w-9 items-center justify-center rounded-full border border-[#eadfd2]/80 bg-[#fffaf4]/88 text-[15px] text-[#a68f83] shadow-[0_10px_28px_rgba(76,52,38,0.12)] backdrop-blur-md active:scale-95"
+                    aria-label="显示今日行程"
+                >
+                    ⌁
+                </button>
+            )}
+
             <div ref={scrollRef} className="flex-1 overflow-y-auto pt-6 pb-6 no-scrollbar" style={{ backgroundImage: activeTheme.type === 'custom' && activeTheme.user.backgroundImage ? 'none' : undefined }}>
                 {collapsedCount > 0 && (
                     <div className="flex justify-center mb-6">
@@ -1553,6 +1857,13 @@ const Chat: React.FC = () => {
                 {isHistoryLoading && displayMessages.length === 0 && (
                     <div className="px-4 py-8 text-center text-xs text-slate-400">
                         正在载入最近的聊天记录...
+                    </div>
+                )}
+
+                {todayLifeSyncText && (
+                    <div className="mx-auto mb-5 flex w-fit max-w-[82%] items-center gap-2 rounded-full border border-white/60 bg-white/65 px-3.5 py-2 text-[11px] text-slate-500 shadow-sm backdrop-blur-md">
+                        <span className={`h-1.5 w-1.5 rounded-full ${todayLifeSyncTone === 'ready' ? 'bg-emerald-300' : 'bg-slate-300'}`} />
+                        <span>{todayLifeSyncText}</span>
                     </div>
                 )}
 
@@ -1677,6 +1988,211 @@ const Chat: React.FC = () => {
                     isSpeaking={voiceRecorder.isSpeaking}
                 />
             </div>
+
+            {isTodayScheduleOpen && (
+                <div className="fixed inset-0 z-[96] flex items-end justify-center bg-[#211918]/35 px-0 pb-[calc(var(--safe-bottom)+8px)] pt-[calc(var(--safe-top)+12px)] backdrop-blur-sm sm:items-center sm:p-4">
+                    <div className="font-schedule-serif flex max-h-[calc(100dvh-var(--safe-top)-var(--safe-bottom)-20px)] w-full max-w-xl flex-col overflow-hidden rounded-t-[28px] border border-[#f0e7dc] bg-[#fbf7ef] shadow-[0_24px_80px_rgba(42,28,22,0.24)] sm:max-h-[86vh] sm:rounded-[28px]">
+                        <div className="flex shrink-0 items-start justify-between border-b border-[#eadfd2] bg-[#fffbf5]/70 px-5 py-4">
+                            <div>
+                                <div className="font-sans text-[10px] font-semibold tracking-[0.3em] text-[#c98b84]">TODAY</div>
+                                <h3 className="mt-1 text-xl font-normal tracking-[0.05em] text-[#3f342f]">今日行程</h3>
+                                <p className="mt-1 text-[13px] leading-relaxed text-[#8a7a70]">
+                                    按时间查看 ta 今天原本的安排；聊天里真的改变了计划时，会在这里划去旧行程，写入新的走向。
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsTodayScheduleOpen(false)}
+                                className="font-sans ml-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[#b8a99d] shadow-sm active:scale-95"
+                                aria-label="关闭今日行程"
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 pb-[calc(1.5rem+var(--safe-bottom))] no-scrollbar overscroll-contain">
+                            <div className="mb-4 flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => void refreshTodaySchedule(true)}
+                                    className="font-sans rounded-full border border-[#e5d8ca] bg-white px-3 py-1.5 text-xs text-[#6f6259] shadow-sm active:scale-95"
+                                >
+                                    {isTodayScheduleLoading ? '同步中...' : '重新同步'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowManualScheduleForm(value => !value)}
+                                    className="font-sans rounded-full bg-[#342722] px-3 py-1.5 text-xs text-white shadow-sm active:scale-95"
+                                >
+                                    手动写入
+                                </button>
+                                {todaySchedule?.localDate && (
+                                    <span className="rounded-full bg-white px-3 py-1.5 text-[12px] tracking-[0.03em] text-[#9a8d82] shadow-sm">
+                                        {todaySchedule.localDate}
+                                    </span>
+                                )}
+                            </div>
+
+                            {showManualScheduleForm && (
+                                <div className="font-sans mb-4 rounded-[22px] border border-[#eadfd2] bg-white/80 p-4 shadow-sm">
+                                    <div className="mb-3 text-sm font-semibold text-slate-700">手动写入一段变化</div>
+                                    <div className="space-y-2">
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <input
+                                                value={manualScheduleDraft.startTime}
+                                                onChange={event => setManualScheduleDraft(prev => ({ ...prev, startTime: event.target.value }))}
+                                                placeholder="开始 18:30"
+                                                className="w-full rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-rose-200"
+                                            />
+                                            <input
+                                                value={manualScheduleDraft.endTime}
+                                                onChange={event => setManualScheduleDraft(prev => ({ ...prev, endTime: event.target.value }))}
+                                                placeholder="结束 20:00"
+                                                className="w-full rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-rose-200"
+                                            />
+                                        </div>
+                                        <input
+                                            value={manualScheduleDraft.timeHint}
+                                            onChange={event => setManualScheduleDraft(prev => ({ ...prev, timeHint: event.target.value }))}
+                                            placeholder="时间段，例如：今晚 / 傍晚 / 下班后"
+                                            className="w-full rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-rose-200"
+                                        />
+                                        <input
+                                            value={manualScheduleDraft.title}
+                                            onChange={event => setManualScheduleDraft(prev => ({ ...prev, title: event.target.value }))}
+                                            placeholder="新安排标题"
+                                            className="w-full rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-rose-200"
+                                        />
+                                        <textarea
+                                            value={manualScheduleDraft.description}
+                                            onChange={event => setManualScheduleDraft(prev => ({ ...prev, description: event.target.value }))}
+                                            placeholder="这段安排具体发生了什么"
+                                            rows={3}
+                                            className="w-full resize-none rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-rose-200"
+                                        />
+                                        <input
+                                            value={manualScheduleDraft.reason}
+                                            onChange={event => setManualScheduleDraft(prev => ({ ...prev, reason: event.target.value }))}
+                                            placeholder="原因，例如：刚才答应见面 / 临时改口 / 用户需要照顾"
+                                            className="w-full rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-rose-200"
+                                        />
+                                        <textarea
+                                            value={manualScheduleDraft.innerVoice}
+                                            onChange={event => setManualScheduleDraft(prev => ({ ...prev, innerVoice: event.target.value }))}
+                                            placeholder="角色心声，可不填"
+                                            rows={2}
+                                            className="w-full resize-none rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-rose-200"
+                                        />
+                                    </div>
+                                    <div className="mt-3 flex justify-end gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowManualScheduleForm(false)}
+                                            className="rounded-full px-3 py-1.5 text-xs text-slate-500"
+                                        >
+                                            取消
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={manualScheduleSaving}
+                                            onClick={handleSaveManualSchedule}
+                                            className="rounded-full bg-rose-400 px-4 py-1.5 text-xs font-medium text-white shadow-sm disabled:opacity-50"
+                                        >
+                                            {manualScheduleSaving ? '写入中...' : '保存'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {todayScheduleItems.length === 0 ? (
+                                <div className="rounded-[22px] border border-dashed border-[#dccfc2] bg-white/70 px-4 py-8 text-center text-[15px] leading-relaxed tracking-[0.03em] text-[#9a8d82]">
+                                    {isTodayScheduleLoading
+                                        ? '正在靠近 ta 今天的行程...'
+                                        : todaySchedule?.visibleMessage || '今天的行程还没有稳定内容，可以先聊天，或稍后再打开看看。'}
+                                </div>
+                            ) : (
+                                <div className="overflow-hidden rounded-[22px] border border-[#eadfd2] bg-[#fffdf8]/90 shadow-[0_12px_30px_rgba(80,62,44,0.06)]">
+                                    <div className="grid grid-cols-[88px_minmax(0,1fr)] border-b border-[#eadfd2] bg-[#f5efe7] px-4 py-2 font-sans text-[10px] font-semibold tracking-[0.16em] text-[#9a8d82] sm:grid-cols-[112px_minmax(0,1fr)_82px]">
+                                        <div>时间</div>
+                                        <div>安排</div>
+                                        <div className="hidden text-right sm:block">状态</div>
+                                    </div>
+                                    {todayScheduleItems.map((item, index) => {
+                                        const startTimeLabel = item.startTime || item.timeHint || '时间待定';
+                                        const endTimeLabel = item.endTime || (item.startTime ? item.timeHint : '');
+                                        const statusLabel = item.cancelled
+                                            ? '已划去'
+                                            : item.kind === 'revision'
+                                                ? '改写后'
+                                                : '原安排';
+                                        const statusClass = item.cancelled
+                                            ? 'bg-[#f5f1eb] text-[#a79a8f]'
+                                            : item.kind === 'revision'
+                                                ? 'bg-[#fff1ee] text-[#c47770]'
+                                                : 'bg-[#f3ece3] text-[#7b6f65]';
+                                        const rowToneClass = item.cancelled
+                                            ? 'opacity-70'
+                                            : item.kind === 'revision'
+                                                ? 'bg-[#fff8f6]'
+                                                : 'bg-[#fffdf8]';
+
+                                        return (
+                                            <div
+                                                key={item.id}
+                                                className={`grid grid-cols-[88px_minmax(0,1fr)] border-b border-[#efe4d8] px-4 py-4 last:border-b-0 sm:grid-cols-[112px_minmax(0,1fr)_82px] ${rowToneClass}`}
+                                            >
+                                                <div className="relative pr-4">
+                                                    <div className={`font-sans text-[12px] font-semibold tabular-nums leading-tight ${item.cancelled ? 'text-[#a79a8f]' : 'text-[#4d413a]'}`}>
+                                                        {startTimeLabel}
+                                                    </div>
+                                                    {endTimeLabel && endTimeLabel !== startTimeLabel && (
+                                                        <div className="mt-1 font-sans text-[10px] tabular-nums text-[#b2a59a]">
+                                                            至 {endTimeLabel}
+                                                        </div>
+                                                    )}
+                                                    <div className={`absolute right-2 top-5 h-2 w-2 rounded-full border border-white ${item.cancelled ? 'bg-[#c8baae]' : item.kind === 'revision' ? 'bg-[#d98a82]' : 'bg-[#8f7f72]'}`} />
+                                                    {index < todayScheduleItems.length - 1 && (
+                                                        <div className="absolute right-[11px] top-8 bottom-[-18px] w-px bg-[#e3d8cc]" />
+                                                    )}
+                                                </div>
+
+                                                <div className="min-w-0 pr-0 sm:pr-4">
+                                                    <div className="mb-2 flex flex-wrap items-center gap-2 sm:hidden">
+                                                        <span className={`font-sans rounded-full px-2.5 py-1 text-[11px] font-medium ${statusClass}`}>
+                                                            {statusLabel}
+                                                        </span>
+                                                    </div>
+                                                    <div className={`text-[17px] font-normal leading-snug tracking-[0.04em] text-[#3f342f] ${item.cancelled ? 'line-through decoration-[#a79a8f] decoration-2' : ''}`}>
+                                                        {item.title}
+                                                    </div>
+                                                    <p className={`mt-2 text-[14px] leading-relaxed tracking-[0.02em] text-[#6f6259] ${item.cancelled ? 'line-through decoration-[#c8baae]' : ''}`}>
+                                                        {item.description}
+                                                    </p>
+                                                    {item.place && (
+                                                        <p className="mt-2 font-sans text-[11px] text-[#9a8d82]">地点：{item.place}</p>
+                                                    )}
+                                                    {(item.reason || item.innerVoice) && (
+                                                        <div className="mt-3 border-l border-[#e7d9cc] pl-3 text-[12px] leading-relaxed tracking-[0.02em] text-[#827469]">
+                                                            {item.reason && <p><span className="font-sans text-[10px] font-semibold text-[#b0968b]">变更原因：</span>{item.reason}</p>}
+                                                            {item.innerVoice && <p className="mt-1 text-[#c47770]"><span className="font-sans text-[10px] font-semibold text-[#b0968b]">心声：</span>{item.innerVoice}</p>}
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="hidden justify-self-end sm:block">
+                                                    <span className={`font-sans rounded-full px-2.5 py-1 text-[11px] font-medium ${statusClass}`}>
+                                                        {statusLabel}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ═══ Soul Reflection — Immersive Black Panel ═══ */}
             {showSoulReflectionPanel && (

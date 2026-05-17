@@ -12,7 +12,7 @@
  */
 
 import { CharacterProfile,InternalState,Message } from '../types';
-import { extractJsonTyped } from './safeApi';
+import { extractJson, extractJsonTyped } from './safeApi';
 import { StatusCardData,CustomStatusTemplate,SKELETON_REGISTRY } from '../types/statusCard';
 import { DB } from './db';
 import { RealtimeContextManager } from './realtimeContext';
@@ -34,6 +34,7 @@ import {
 const SENSE_TIMEOUT_MS = 60000;   // senseBefore 超时（与 embedding/rerank 并行，不影响用户等待）
 const VOICE_TIMEOUT_MS = 180000;  // innerVoice 超时（不阻塞，可以慢一点）
 const AUTO_RETRY_DELAY_MS = 3000;
+const SECONDARY_LLM_MAX_TOKENS = 65536;
 const CLASSIC_INNER_VOICE_MAX_LENGTH = 120;
 
 // Module-level: abort-and-replace controllers
@@ -243,6 +244,16 @@ function validateSenseOutput(obj: any): RawSenseOutput | null {
     return result as RawSenseOutput;
 }
 
+function normalizeScheduleSignal(value: unknown): 'none' | 'soft' | 'candidate' | 'direct' {
+    const normalized = String(value || '').trim();
+    if (normalized === 'soft' || normalized === 'candidate' || normalized === 'direct') return normalized;
+    return 'none';
+}
+
+function sanitizeScheduleReason(value: unknown): string {
+    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+}
+
 function buildSensePrompt(
     charName: string,
     recentContext: string,
@@ -272,6 +283,12 @@ function buildSensePrompt(
 注意：日常闲聊大部分维度是 "stable"。不要过度解读。
 注意：pressure 要注意方向——用户给角色带来压力时是 "+high"（压力增大），用户让角色放松时是 "-low"。
 注意：energyDrain 表示消耗——高消耗是 "+high"，不消耗是 "stable"。
+额外顺手判断这轮对话是否可能影响角色“今天接下来”的生活轨迹。你只负责点灯，不写日程：
+- scheduleSignal = "none": 不影响今天轨迹。
+- scheduleSignal = "soft": 只影响生活碎片氛围，不应该划掉日程。
+- scheduleSignal = "candidate": 可能会改变今天安排，但需要看角色接下来是否答应、拒绝或改口。
+- scheduleSignal = "direct": 用户给出了明确事实或照顾需求，可以交给主模型判断是否改写。
+- scheduleReason 用一句很短的话说明原因；没有就空字符串。
 ${goalListStr ? `
 目标感知：
 以下是角色潜意识里在意的事：
@@ -303,7 +320,9 @@ ${recentContext}
   "focus": "...",
   "relief": "...",
   "energyDrain": "...",
-  "goalImpact": "none"
+  "goalImpact": "none",
+  "scheduleSignal": "none",
+  "scheduleReason": ""
 }`;
 
     return { system, user };
@@ -339,7 +358,7 @@ async function senseBefore(
 
         const prompt = buildSensePrompt(char.name, recentContext, charContext, timeContext, goalListStr);
 
-        const content = await callSecondaryLLM(apiConfig, prompt.system, prompt.user, controller.signal, 800, 0.4);
+        const content = await callSecondaryLLM(apiConfig, prompt.system, prompt.user, controller.signal, SECONDARY_LLM_MAX_TOKENS, 0.4);
         if (!content) return null;
 
         const sense = extractJsonTyped(content, validateSenseOutput);
@@ -348,12 +367,11 @@ async function senseBefore(
             return null;
         }
 
+        const rawParsed = extractJson(content) || {};
+
         // 解析 goalImpact → GoalAppraisal
         let goalAppraisal: GoalAppraisal | undefined;
         try {
-            const rawParsed = JSON.parse(
-                content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
-            );
             const goalImpactRaw = rawParsed?.goalImpact;
             if (goalImpactRaw && typeof goalImpactRaw === 'string' && goalImpactRaw !== 'none') {
                 const colonIdx = goalImpactRaw.indexOf(':');
@@ -376,6 +394,9 @@ async function senseBefore(
             }
         } catch { /* goalImpact 解析失败静默降级 */ }
 
+        const scheduleSignal = normalizeScheduleSignal((rawParsed as any)?.scheduleSignal);
+        const scheduleReason = sanitizeScheduleReason((rawParsed as any)?.scheduleReason);
+
         // Resolve previous state (handle legacy migration)
         const previous = resolveInternalState(char.moodState as any);
 
@@ -387,6 +408,8 @@ async function senseBefore(
             ...computed,
             innerVoice: previous?.innerVoice || '',
             surfaceEmotion: previous?.surfaceEmotion || '平静',
+            scheduleSignal,
+            scheduleReason,
         };
 
         // Persist
@@ -566,7 +589,7 @@ async function generateInnerVoice(
             goalListStr,
         );
 
-        const content = await callSecondaryLLM(apiConfig, prompt.system, prompt.user, controller.signal, 800, 0.6);
+        const content = await callSecondaryLLM(apiConfig, prompt.system, prompt.user, controller.signal, SECONDARY_LLM_MAX_TOKENS, 0.6);
         if (!content) return null;
 
         let parsed = extractJsonTyped(content, (obj: any) => {
@@ -837,7 +860,7 @@ async function generateCreativeCard(
             recentContext, charContext, currentState, timeContext, customTemplate,
         );
 
-        const content = await callSecondaryLLM(apiConfig, prompt.system, prompt.user, controller.signal, 1200, 0.7);
+        const content = await callSecondaryLLM(apiConfig, prompt.system, prompt.user, controller.signal, SECONDARY_LLM_MAX_TOKENS, 0.7);
         if (!content) return null;
 
         const parsed = extractJsonTyped<StatusCardData>(content, (obj: any) => {
@@ -1087,7 +1110,7 @@ async function generateFreeformCard(
             recentContext, charContext, currentState, timeContext,
         );
 
-        const content = await callSecondaryLLM(apiConfig, prompt.system, prompt.user, controller.signal, 2000, 0.85);
+        const content = await callSecondaryLLM(apiConfig, prompt.system, prompt.user, controller.signal, SECONDARY_LLM_MAX_TOKENS, 0.85);
         if (!content) return null;
 
         const html = extractHtmlFromResponse(content);
@@ -1231,7 +1254,7 @@ ${aiReply.slice(0, 500)}
 
 请根据以上信息，按你的规则生成输出。`;
 
-        const content = await callSecondaryLLM(apiConfig, system, user, controller.signal, 2000, 0.8);
+        const content = await callSecondaryLLM(apiConfig, system, user, controller.signal, SECONDARY_LLM_MAX_TOKENS, 0.8);
         if (!content) return null;
 
         // ── 用用户的正则或新版结构化解析器提取内容 ──
@@ -1409,7 +1432,7 @@ async function batchSenseForWindow(
         try {
             const content = await callSecondaryLLM(
                 apiConfig, prompt.system, prompt.user,
-                localController.signal, 800, 0.4,
+                localController.signal, SECONDARY_LLM_MAX_TOKENS, 0.4,
             );
             if (!content) return null;
 

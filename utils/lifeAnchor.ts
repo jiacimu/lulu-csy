@@ -85,7 +85,6 @@ export function formatCurrentLifeAnchorForPrompt(anchor: CurrentLifeAnchor): str
         '### 【当前日程锚点】',
         `- 当前本地时间: ${anchor.localDate} ${anchor.weekday} ${anchor.timeStr}（${anchor.timeLabel}）`,
         `- 此刻状态: ${anchor.summary}`,
-        `- 来源/置信度: ${anchor.sourceDetail} / ${anchor.confidence}`,
         '- 优先级: 当前轮/当天明确事实 > 角色当前日程安排 > 当天生成快照 > 位置缓存 > 旧聊天/旧生活碎片/旧记忆。',
         '- 约束: 旧聊天里“在店里/上班/刚吃饭”等内容若与这个锚点冲突，只能当过去发生过，不能当现在正在发生。',
     ];

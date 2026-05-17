@@ -3,8 +3,12 @@
 import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import {
     buildAgentSseUrl,
+    fetchAgentLifeProfile,
     fetchPendingAgentMessages,
+    generateAgentLifeProfile,
+    ensureAgentTodayLife,
     startAgentOnBackend,
+    updateAgentLifeProfileSection,
 } from './agentBackendClient';
 import { getBackendToken } from './backendConfig';
 
@@ -85,5 +89,116 @@ describe('agentBackendClient', () => {
         expect(parsed.searchParams.get('userId')).toBe('csy-user-1');
         expect(parsed.searchParams.get('_clientId')).toBe('csy-client-1');
         expect(parsed.searchParams.get('token')).toBe(getBackendToken());
+    });
+
+    it('fetches a life profile by character id', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'missing' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        }));
+
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(fetchAgentLifeProfile('char-1')).resolves.toEqual({ status: 'missing' });
+
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            `${BACKEND_URL}/api/agent/life-profile?charId=char-1`,
+        );
+    });
+
+    it('posts context and optional secondary API config when generating a life profile', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'ready', profile: { lifeIdentity: {} } }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        }));
+
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(generateAgentLifeProfile('char-1', {
+            charId: 'char-1',
+            charName: 'Sully',
+        }, {
+            baseUrl: 'https://llm.example.com',
+            apiKey: 'sub-key',
+            model: 'profile-model',
+        })).resolves.toMatchObject({ status: 'ready' });
+
+        expect(String(fetchMock.mock.calls[0][0])).toBe(`${BACKEND_URL}/api/agent/life-profile/generate`);
+        expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+            charId: 'char-1',
+            contextSnapshot: {
+                charId: 'char-1',
+                charName: 'Sully',
+            },
+            apiConfig: {
+                baseUrl: 'https://llm.example.com',
+                apiKey: 'sub-key',
+                model: 'profile-model',
+            },
+        });
+    });
+
+    it('patches one life profile section with context snapshot', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'ready', sectionMeta: { activities: { source: 'manual', updatedAt: 1 } } }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        }));
+
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(updateAgentLifeProfileSection(
+            'char-1',
+            'activities',
+            { activityPalette: { stable: ['????'] } },
+            { charName: 'Sully' },
+        )).resolves.toMatchObject({ status: 'ready' });
+
+        expect(String(fetchMock.mock.calls[0][0])).toBe(`${BACKEND_URL}/api/agent/life-profile/section`);
+        expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+            charId: 'char-1',
+            section: 'activities',
+            value: {
+                activityPalette: {
+                    stable: ['????'],
+                },
+            },
+            contextSnapshot: {
+                charName: 'Sully',
+            },
+        });
+    });
+
+    it('ensures today life with main and secondary API configs', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+            status: 'ready',
+            localDate: '2026-05-16',
+            timeLabel: '??',
+            visibleMessage: '???????',
+        }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        }));
+
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(ensureAgentTodayLife('char-1', {
+            charId: 'char-1',
+            charName: 'Sully',
+            recentMessages: [{ role: 'user', content: '??????', timestamp: 1 }],
+        }, {
+            mainApiConfig: { baseUrl: 'https://main.example.com', apiKey: 'main-key', model: 'main-model' },
+            apiConfig: { baseUrl: 'https://sub.example.com', apiKey: 'sub-key', model: 'sub-model' },
+        })).resolves.toMatchObject({ status: 'ready' });
+
+        expect(String(fetchMock.mock.calls[0][0])).toBe(`${BACKEND_URL}/api/agent/today-life/ensure`);
+        expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+            charId: 'char-1',
+            contextSnapshot: {
+                charName: 'Sully',
+                recentMessages: [{ role: 'user', content: '??????', timestamp: 1 }],
+            },
+            mainApiConfig: { baseUrl: 'https://main.example.com', apiKey: 'main-key', model: 'main-model' },
+            apiConfig: { baseUrl: 'https://sub.example.com', apiKey: 'sub-key', model: 'sub-model' },
+        });
     });
 });

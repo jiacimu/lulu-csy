@@ -69,7 +69,7 @@ function user(): UserProfile {
 }
 
 describe('ChatPrompts life anchor injection', () => {
-    it('injects the current schedule anchor into ordinary chat history before temporal context', () => {
+    it('keeps the schedule anchor out of ordinary chat history while preserving temporal context', () => {
         const now = new Date(2026, 3, 29, 20, 0, 0).getTime();
         vi.setSystemTime(now);
         const messages: Message[] = [
@@ -92,10 +92,9 @@ describe('ChatPrompts life anchor injection', () => {
         const history = ChatPrompts.buildMessageHistory(messages, 20, character(), user(), []);
         const last = history.apiMessages[history.apiMessages.length - 1].content as string;
 
-        expect(last).toContain('【当前日程锚点】');
-        expect(last).toContain('休息/不上班');
-        expect(last).toContain('只能当过去发生过');
-        expect(last.indexOf('【当前日程锚点】')).toBeLessThan(last.indexOf('[时间感知]'));
+        expect(last).not.toContain('【当前日程锚点】');
+        expect(last).toContain('[时间感知]');
+        expect(last).toContain('现在 20:00 晚上');
         vi.useRealTimers();
     });
 

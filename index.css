@@ -36,6 +36,10 @@
   font-display: swap;
 }
 
+.font-schedule-serif {
+  font-family: 'Songti SC', 'Noto Serif SC', SimSun, serif;
+}
+
 /* ==========================================
    Custom Theme (migrated from CDN inline config)
    Tailwind v4 CSS-first configuration

@@ -14,7 +14,12 @@ import { EventExtractor } from '../utils/eventExtractor';
 import { extractThinking, safeThinkingFallbackReply } from '../utils/thinkingExtractor';
 import { isDeepSeekMode } from '../utils/deepseekPrompts';
 import { getEmbeddingConfig,getSecondaryApiConfig } from '../utils/runtimeConfig';
-import { BackendAgentManager } from '../utils/autonomousAgent';
+import { BackendAgentManager, buildContextSnapshot } from '../utils/autonomousAgent';
+import {
+    generateAgentScheduleRevision,
+    TODAY_SCHEDULE_UPDATED_EVENT_NAME,
+    type AgentScheduleSignal,
+} from '../utils/agentBackendClient';
 import type { HandlerContext } from './handlers/types';
 import { handleRecall } from './handlers/handleRecall';
 import { handleSearch } from './handlers/handleSearch';
@@ -115,6 +120,59 @@ export const useChatAI = ({
         }
     };
 
+    const maybeGenerateScheduleRevision = (
+        signal: AgentScheduleSignal,
+        reason: string | undefined,
+        aiContent: string,
+        currentMsgs: Message[],
+        secondaryConfig: any,
+    ) => {
+        if (!char || !apiConfig?.baseUrl || signal === 'none' || signal === 'soft') return;
+        const sourceMessageIds = currentMsgs
+            .slice(-8)
+            .filter(message => message.role === 'user' || message.role === 'assistant')
+            .map(message => message.id)
+            .filter((id): id is number => typeof id === 'number')
+            .map(String);
+
+        setTimeout(() => {
+            (async () => {
+                try {
+                    const freshChar = await DB.getCharacterById(char.id) || char;
+                    const contextSnapshot = await buildContextSnapshot(char.id, freshChar);
+                    const cleanApiConfig = {
+                        baseUrl: apiConfig.baseUrl,
+                        apiKey: apiConfig.apiKey || 'sk-none',
+                        model: apiConfig.model,
+                    };
+                    const cleanSecondary = secondaryConfig?.baseUrl && secondaryConfig?.model
+                        ? {
+                            baseUrl: secondaryConfig.baseUrl,
+                            apiKey: secondaryConfig.apiKey || 'sk-none',
+                            model: secondaryConfig.model,
+                        }
+                        : undefined;
+                    const result = await generateAgentScheduleRevision(char.id, {
+                        contextSnapshot,
+                        mainApiConfig: cleanApiConfig,
+                        apiConfig: cleanSecondary,
+                        scheduleSignal: signal,
+                        scheduleReason: reason || '',
+                        assistantReply: aiContent.slice(0, 2000),
+                        sourceMessageIds,
+                    });
+                    if (result.rewritten && typeof window !== 'undefined') {
+                        window.dispatchEvent(new CustomEvent(TODAY_SCHEDULE_UPDATED_EVENT_NAME, {
+                            detail: { charId: char.id, revision: result.revision },
+                        }));
+                    }
+                } catch (error) {
+                    console.warn('[TodaySchedule] revision generation skipped:', error instanceof Error ? error.message : error);
+                }
+            })();
+        }, 800);
+    };
+
     const triggerAI = async (currentMsgs: Message[]) => {
         if (isTyping || !char) return;
         if (!apiConfig.baseUrl) { alert("请先在设置中配置 API URL"); return; }
@@ -195,12 +253,17 @@ export const useChatAI = ({
             ]);
 
             let systemPrompt = systemPromptResult;
+            const scheduleSignal = (senseResult?.scheduleSignal || 'none') as AgentScheduleSignal;
+            const scheduleReason = typeof senseResult?.scheduleReason === 'string'
+                ? senseResult.scheduleReason
+                : '';
 
             // If senseBefore returned a new state, update char in memory and notify UI
             if (senseResult && onMoodUpdate) {
-                onMoodUpdate(char.id, senseResult);
+                const { scheduleSignal: _scheduleSignal, scheduleReason: _scheduleReason, ...moodForUi } = senseResult as any;
+                onMoodUpdate(char.id, moodForUi);
                 // Also update the local char ref so subsequent code sees the new state
-                char.moodState = senseResult;
+                char.moodState = moodForUi;
             }
 
             // 1.1 Inject voice message format instruction (only when autoVoice is enabled)
@@ -1079,6 +1142,8 @@ mode 可选值：
                         .catch(e => console.error('⏰ [EventExtractor] Background:', e));
                 }
             }
+
+            maybeGenerateScheduleRevision(scheduleSignal, scheduleReason, aiContent, currentMsgs, secondaryConfig);
 
         } catch (e: any) {
             await DB.saveMessage({ charId: char.id, role: 'system', type: 'text', content: `[连接中断: ${e.message}]` });

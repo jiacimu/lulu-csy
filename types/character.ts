@@ -81,6 +81,10 @@ export interface InternalState {
     innerVoice: string;        // 心声: 角色此刻脑中闪过的念头
     surfaceEmotion: string;    // 外显情绪标签 (2-4字, 用于日志/debug)
 
+    // ─── 今日轨迹轻触发 ───
+    scheduleSignal?: 'none' | 'soft' | 'candidate' | 'direct';
+    scheduleReason?: string;
+
     // ─── 情绪惯性 ───
     streaks?: Partial<Record<string, number>>;  // 各维度连续偏离轮数（可选，旧数据自动兼容）
 

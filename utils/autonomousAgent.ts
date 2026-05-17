@@ -347,7 +347,7 @@ function setLifeStreamVisibleInChat(charId: string, visibleInChat: boolean): voi
     }
 }
 
-async function buildContextSnapshot(
+export async function buildContextSnapshot(
     charId: string,
     char: CharacterProfile,
 ): Promise<ContextSnapshot> {
@@ -387,10 +387,10 @@ async function buildContextSnapshot(
     }
 
     const moodState = (char.moodState as unknown as Record<string, unknown> | undefined) || null;
-    const charSystemPrompt = (char.systemPrompt || '').slice(0, 2000);
-    const charPersonality = (char.description || '').slice(0, 300);
+    const charSystemPrompt = char.systemPrompt || '';
+    const charPersonality = char.description || '';
     const topMemory = await loadTopMemorySummary(charId);
-    const worldview = (char.worldview || '').slice(0, 1200) || undefined;
+    const worldview = char.worldview || undefined;
     const mountedWorldbooksDigest = buildMountedWorldbooksDigest(char.mountedWorldbooks);
     const coreMemoryDigest = buildCoreMemoryDigest(char, topMemory);
     const cityOverride = char.cityOverride?.trim() || undefined;

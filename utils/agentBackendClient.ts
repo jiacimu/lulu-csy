@@ -8,7 +8,7 @@ import {
   getBackendUrl,
 } from './backendClient';
 import { safeTimeoutSignal } from './safeTimeout';
-import type { AgentConfig } from './autonomousAgent';
+import type { AgentConfig } from './agentTypes';
 
 export type AgentApiConfig = {
     baseUrl: string;
@@ -33,6 +33,7 @@ type AgentStartPayload = {
 
 const STOP_REQUEST_DEDUPE_WINDOW_MS = 1500;
 const AGENT_PROTOCOL_VERSION = '2';
+export const TODAY_SCHEDULE_UPDATED_EVENT_NAME = 'agent-today-schedule-updated';
 const lastStopRequestAt = new Map<string, number>();
 
 export type AgentBackendMessage = {
@@ -118,6 +119,106 @@ export type AgentLifeProfileState = {
     sectionMeta?: Partial<Record<AgentLifeProfileSection, AgentLifeProfileSectionMeta>>;
 };
 
+export type AgentTodayLifeEnsureStatus = 'ready' | 'preparing' | 'fallback' | 'failed';
+
+export type AgentTodayLifeEnsureResponse = {
+    status: AgentTodayLifeEnsureStatus;
+    localDate: string;
+    timeLabel: string;
+    visibleMessage: string;
+    debugCode?: string;
+    debugMessage?: string;
+};
+
+export type AgentScheduleSignal = 'none' | 'soft' | 'candidate' | 'direct';
+
+export type AgentScheduleRevisionNode = {
+    startTime?: string;
+    endTime?: string;
+    timeHint: string;
+    place?: string;
+    title: string;
+    description: string;
+    mode?: 'stable' | 'loose';
+    durationMin?: number;
+};
+
+export type AgentScheduleRevision = {
+    id: string;
+    localDate: string;
+    targetOriginalNodeId?: string;
+    targetOriginalNodeHint?: string;
+    changeType: 'cancel' | 'delay' | 'replace' | 'insert';
+    newSchedule?: AgentScheduleRevisionNode;
+    reason: string;
+    innerVoice?: string;
+    scheduleSignal?: AgentScheduleSignal;
+    scheduleReason?: string;
+    source: 'generated' | 'manual';
+    sourceMessageIds?: string[];
+    createdAt: number;
+    updatedAt: number;
+    debugCode?: string;
+    debugMessage?: string;
+};
+
+export type AgentDaySnapshotNode = {
+    id?: string;
+    startTime?: string;
+    endTime?: string;
+    timeHint: string;
+    place: string;
+    mode: 'stable' | 'loose';
+    plan: string;
+    whyNatural: string;
+    durationMin?: number;
+};
+
+export type AgentDaySnapshot = {
+    schemaVersion?: number;
+    localDate: string;
+    timezone: string;
+    weekday: string;
+    isWorkday: boolean;
+    dayTone: string;
+    baseRhythm: string;
+    planNodes: AgentDaySnapshotNode[];
+    aftertasteSeed: string;
+    weatherSummary?: string;
+    generatedAt: number;
+};
+
+export type AgentEffectiveScheduleItem = {
+    id: string;
+    kind: 'original' | 'revision';
+    startTime?: string;
+    endTime?: string;
+    timeHint: string;
+    place?: string;
+    title: string;
+    description: string;
+    mode?: 'stable' | 'loose';
+    cancelled?: boolean;
+    cancelledByRevisionId?: string;
+    reason?: string;
+    innerVoice?: string;
+    revision?: AgentScheduleRevision;
+};
+
+export type AgentTodayScheduleState = {
+    status: 'ready' | 'missing' | 'failed';
+    localDate: string;
+    timezone: string;
+    daySnapshot?: AgentDaySnapshot;
+    revisions: AgentScheduleRevision[];
+    effectiveItems: AgentEffectiveScheduleItem[];
+    visibleMessage?: string;
+    debugCode?: string;
+    debugMessage?: string;
+    rewritten?: boolean;
+    revision?: AgentScheduleRevision;
+};
+
 export type AgentTickResult = {
     action: string;
     messageGenerated: boolean;
@@ -141,6 +242,8 @@ function withAgentProtocolQuery(
 function getTimeoutMs(path: string): number {
     if (path.startsWith('/api/agent/start')) return 45000;
     if (path.startsWith('/api/agent/life-profile/generate')) return 180000;
+    if (path.startsWith('/api/agent/today-life/ensure')) return 60000;
+    if (path.startsWith('/api/agent/today-life/revision/generate')) return 60000;
     return 15000;
 }
 
@@ -370,6 +473,72 @@ export async function updateAgentLifeProfileSection(
             charId,
             section,
             value,
+            ...(contextSnapshot ? { contextSnapshot } : {}),
+        }),
+    });
+}
+
+export async function ensureAgentTodayLife(
+    charId: string,
+    contextSnapshot: Record<string, unknown>,
+    options: {
+        apiConfig?: AgentApiConfig;
+        mainApiConfig?: AgentApiConfig;
+        weatherConfig?: AgentWeatherConfig;
+    } = {},
+): Promise<AgentTodayLifeEnsureResponse> {
+    return agentFetch<AgentTodayLifeEnsureResponse>('/api/agent/today-life/ensure', {
+        method: 'POST',
+        body: JSON.stringify({
+            charId,
+            contextSnapshot,
+            ...(options.apiConfig ? { apiConfig: options.apiConfig } : {}),
+            ...(options.mainApiConfig ? { mainApiConfig: options.mainApiConfig } : {}),
+            ...(options.weatherConfig ? { weatherConfig: options.weatherConfig } : {}),
+        }),
+    });
+}
+
+export async function fetchAgentTodaySchedule(charId: string): Promise<AgentTodayScheduleState> {
+    return agentFetch<AgentTodayScheduleState>(
+        '/api/agent/today-life/schedule',
+        {},
+        { charId },
+    );
+}
+
+export async function generateAgentScheduleRevision(
+    charId: string,
+    payload: {
+        contextSnapshot?: Record<string, unknown>;
+        mainApiConfig?: AgentApiConfig;
+        apiConfig?: AgentApiConfig;
+        weatherConfig?: AgentWeatherConfig;
+        scheduleSignal: AgentScheduleSignal;
+        scheduleReason?: string;
+        assistantReply?: string;
+        sourceMessageIds?: string[];
+    },
+): Promise<AgentTodayScheduleState> {
+    return agentFetch<AgentTodayScheduleState>('/api/agent/today-life/revision/generate', {
+        method: 'POST',
+        body: JSON.stringify({
+            charId,
+            ...payload,
+        }),
+    });
+}
+
+export async function saveAgentScheduleRevision(
+    charId: string,
+    revision: Partial<AgentScheduleRevision> | Record<string, unknown>,
+    contextSnapshot?: Record<string, unknown>,
+): Promise<AgentTodayScheduleState> {
+    return agentFetch<AgentTodayScheduleState>('/api/agent/today-life/revision', {
+        method: 'POST',
+        body: JSON.stringify({
+            charId,
+            revision,
             ...(contextSnapshot ? { contextSnapshot } : {}),
         }),
     });

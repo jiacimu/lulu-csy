@@ -708,7 +708,7 @@ const ScheduleApp: React.FC = () => {
             </div>
 
             {/* Task Modal */}
-            <Modal isOpen={showTaskModal} title={currentThemeMode === 'cyber' ? "INITIALIZE QUEST" : "新建任务"} onClose={() => setShowTaskModal(false)} footer={<button onClick={handleAddTask} className={`w-full py-3 font-bold transition-all ${theme.buttonPrimary}`}>确认添加</button>}>
+            <Modal isOpen={showTaskModal} title={editingTaskId ? (currentThemeMode === 'cyber' ? "EDIT QUEST" : "编辑任务") : (currentThemeMode === 'cyber' ? "INITIALIZE QUEST" : "新建任务")} onClose={() => setShowTaskModal(false)} footer={<button onClick={handleAddTask} className={`w-full py-3 font-bold transition-all ${theme.buttonPrimary}`}>{editingTaskId ? '保存修改' : '确认添加'}</button>}>
                 <div className={`space-y-6 ${currentThemeMode === 'minimal' ? 'p-2' : ''}`}>
                     <input autoFocus value={newTaskTitle} onChange={e => setNewTaskTitle(e.target.value)} placeholder="任务目标 (例如: 背单词)" className={`w-full px-4 py-3 text-sm focus:outline-none ${theme.input}`} />
 
@@ -727,7 +727,7 @@ const ScheduleApp: React.FC = () => {
             </Modal>
 
             {/* Anniversary Modal */}
-            <Modal isOpen={showAnniModal} title={currentThemeMode === 'cyber' ? "REGISTER EVENT" : "添加纪念日"} onClose={() => setShowAnniModal(false)} footer={<button onClick={handleAddAnni} className={`w-full py-3 font-bold transition-all ${theme.buttonPrimary}`}>保存记录</button>}>
+            <Modal isOpen={showAnniModal} title={editingAnniId ? (currentThemeMode === 'cyber' ? "MODIFY EVENT" : "编辑纪念日") : (currentThemeMode === 'cyber' ? "REGISTER EVENT" : "添加纪念日")} onClose={() => setShowAnniModal(false)} footer={<button onClick={handleAddAnni} className={`w-full py-3 font-bold transition-all ${theme.buttonPrimary}`}>{editingAnniId ? '保存修改' : '保存记录'}</button>}>
                 <div className={`space-y-4 ${currentThemeMode === 'minimal' ? 'p-2' : ''}`}>
                     <input value={newAnniTitle} onChange={e => setNewAnniTitle(e.target.value)} placeholder="事件名称 (例如: 第一次见面)" className={`w-full px-4 py-3 text-sm focus:outline-none ${theme.input}`} />
                     <input type="date" value={newAnniDate} onChange={e => setNewAnniDate(e.target.value)} className={`w-full px-4 py-3 text-sm focus:outline-none ${theme.input}`} />
