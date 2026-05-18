@@ -90,6 +90,11 @@ function stripLeakedChatLinePrefixes(text: string): string {
         .replace(/^[ \t]*(?:\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2}日?)?[ T\t]+(?:[上下]午[ \t]*)?\d{1,2}[：:]\d{2}(?:[ \t]*(?:AM|PM))?[ \t]+(?:[\w\u4e00-\u9fa5·•._ -]{1,40}[：:][ \t]*)?|(?:[上下]午[ \t]*)?\d{1,2}[：:]\d{2}(?:[ \t]*(?:AM|PM))?[ \t]+[\w\u4e00-\u9fa5·•._ -]{1,40}[：:][ \t]*)/gim, '');
 }
 
+function stripLeakedVoiceHistoryLabels(text: string): string {
+    return text
+        .replace(/[【\[]\s*(?:你上一条语音|你上一條語音|上一条语音|上一條語音|你刚才的语音|你剛才的語音|你发出的语音|你發出的語音)(?:消息)?(?:[（(]\s*\d+\s*秒\s*[）)])?\s*[】\]]\s*/g, '');
+}
+
 function normalizeSongShareTags(text: string): string {
     let result = text.replace(
         /(?:\[\[|\[|【)\s*(?:分享(?:歌曲|音乐)|(?:share[-_]?)?song)\s*[:：]\s*([\s\S]*?)\s*(?:\]\]|]|】)/gi,
@@ -445,6 +450,8 @@ export const ChatParser = {
             // ══════════════════════════════════════════════════════════════
             // 5a. [🎤用户语音] [🎤语音] — history voice marker
             .replace(/[【\[]\s*🎤\s*(?:用户)?语音\s*[】\]]\s*/g, '')
+            // 5a.1 [你上一条语音] — assistant voice history marker
+            .replace(/[【\[]\s*(?:你上一条语音|你上一條語音|上一条语音|上一條語音|你刚才的语音|你剛才的語音|你发出的语音|你發出的語音)(?:消息)?(?:[（(]\s*\d+\s*秒\s*[）)])?\s*[】\]]\s*/g, '')
             // 5b. [用户发送了一条语音消息（N秒）] — history voice description
             .replace(/[【\[](?:用户|你|我)?(?:发送了?)?一?条?语音(?:消息)?[（(]?\d*\s*秒?[）)]?[】\]]/g, '')
             // 5c. [语音通话] [图片] [视频] [文件] [位置] — bare media type tags
@@ -460,7 +467,7 @@ export const ChatParser = {
         result = normalizeSongShareTags(result);
         // Strip any CoT protocol residual that leaked through (e.g. from Gemini native thinking)
         result = stripCoTResidual(result);
-        return stripLeakedChatLinePrefixes(result);
+        return stripLeakedVoiceHistoryLabels(stripLeakedChatLinePrefixes(result));
     },
 
     /**
@@ -470,7 +477,7 @@ export const ChatParser = {
      * Preserves [[SEND_EMOJI:]] and [[SHARE_SONG:]] for downstream splitResponse.
      */
     sanitize: (text: string): string => {
-        return stripLeakedChatLinePrefixes(normalizeChatTextEnvelope(text))
+        return stripLeakedVoiceHistoryLabels(stripLeakedChatLinePrefixes(normalizeChatTextEnvelope(text)))
             // ── Strip leaked timestamps ──
             .replace(/\[\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}[：:]\d{2}\]\s*/g, '')
             .replace(/\[\d{1,2}[-/]\d{1,2}\s+\d{1,2}[：:]\d{2}\]\s*/g, '')
@@ -492,6 +499,7 @@ export const ChatParser = {
             .replace(/\[回复\s*[""\u201C][^""\u201D]*?[""\u201D](?:\.{0,3})\]\s*[：:]?\s*/g, '')
             // ── Kill system log mimicry that escaped cleanAiSecondPass ──
             .replace(/[【\[]\s*🎤\s*(?:用户)?语音\s*[】\]]\s*/g, '')
+            .replace(/[【\[]\s*(?:你上一条语音|你上一條語音|上一条语音|上一條語音|你刚才的语音|你剛才的語音|你发出的语音|你發出的語音)(?:消息)?(?:[（(]\s*\d+\s*秒\s*[）)])?\s*[】\]]\s*/g, '')
             .replace(/[【\[](?:用户|你|我|User)\s*发送了[\s\S]*?[】\]]/g, '')
             .replace(/[【\[](?:语音通话|图片|视频|文件|位置|联系人|名片|红包)[】\]]/g, '')
             .replace(/[【\[]\s*(?:系统|System)\s*(?:提示|消息|通知)?\s*[：:]\s*[^\]】]*[】\]]\s*/gi, '')

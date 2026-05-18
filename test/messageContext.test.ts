@@ -49,7 +49,8 @@ describe('message context formatter', () => {
             }),
         ], 10, character, user, []);
 
-        expect(apiMessages[0]?.content).toContain('[你上一条语音] 我刚才说的是饭团，不是别的。');
+        expect(apiMessages[0]?.content).toContain('[语音消息] 我刚才说的是饭团，不是别的。');
+        expect(apiMessages[0]?.content).not.toContain('[你上一条语音]');
     });
 
     it('keeps user read-aloud voice via sourceText', () => {

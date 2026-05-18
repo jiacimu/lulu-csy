@@ -221,7 +221,7 @@ function formatVoice(message: ContextMessage, options: FormatMessageContextOptio
     }
 
     if (message.role === 'assistant') {
-        if (generation) return text ? `[你上一条语音] ${clipText(text, options.maxContentChars)}` : `[你上一条语音（${duration}秒）]`;
+        if (generation) return text ? `[语音消息] ${clipText(text, options.maxContentChars)}` : `[语音消息（${duration}秒）]`;
         if (neutral) return text ? `[语音消息] ${clipText(text, options.maxContentChars)}` : `[语音消息（${duration}秒）]`;
         const name = options.charName || '角色';
         return `[${name}发送了语音消息]${text ? ` ${clipText(text, options.maxContentChars)}` : ''}`;

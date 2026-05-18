@@ -5,6 +5,10 @@ import {
     saveAgentConfig,
     type AgentConfig,
 } from '../../utils/autonomousAgent';
+import {
+    getChatBackgroundNotificationsEnabled,
+    setChatBackgroundNotificationsEnabled,
+} from '../../utils/chatBackgroundNotifications';
 import { haptic } from '../../utils/haptics';
 import { forceResubscribe,getPushDebugInfo } from '../../utils/pushSubscription';
 
@@ -14,6 +18,9 @@ import { forceResubscribe,getPushDebugInfo } from '../../utils/pushSubscription'
  */
 const AgentSettings: React.FC = () => {
     const [config, setConfig] = useState<AgentConfig>(getAgentConfig);
+    const [chatBackgroundNotifications, setChatBackgroundNotificationsState] = useState(
+        getChatBackgroundNotificationsEnabled,
+    );
     const [saved, setSaved] = useState(false);
     const [pushInfo, setPushInfo] = useState(getPushDebugInfo);
     const [pushBusy, setPushBusy] = useState(false);
@@ -78,6 +85,24 @@ const AgentSettings: React.FC = () => {
 
         update({ notificationsEnabled: enabled });
         setPushInfo(getPushDebugInfo());
+    };
+
+    const handleChatBackgroundNotificationsToggle = async (enabled: boolean) => {
+        haptic.medium();
+
+        if (
+            enabled
+            && typeof window !== 'undefined'
+            && 'Notification' in window
+            && Notification.permission === 'default'
+        ) {
+            await Notification.requestPermission();
+        }
+
+        setChatBackgroundNotificationsEnabled(enabled);
+        setChatBackgroundNotificationsState(enabled);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 1500);
     };
 
     return (
@@ -236,6 +261,30 @@ const AgentSettings: React.FC = () => {
                             className="sr-only peer"
                         />
                         <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#7faa95]"></div>
+                    </label>
+                </div>
+
+                <div className="mt-3 rounded-2xl bg-white/45 border border-white/40 p-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                        <span className="text-[11px] font-bold text-[#7faa95]">后台回复通知</span>
+                        <p className="text-[10px] text-[#a89b91] leading-relaxed max-w-[230px] mt-0.5">
+                            普通聊天发出后切后台，回复完成时尝试进入系统通知栏。
+                        </p>
+                        <a
+                            href="/notification-guide.html#recommend"
+                            className="mt-1 inline-block max-w-[230px] text-[10px] font-bold leading-relaxed text-[#7faa95] underline decoration-[#7faa95]/30 underline-offset-2 break-words active:scale-[0.98] transition-transform"
+                        >
+                            不知道怎么开？查看机型/浏览器设置说明
+                        </a>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input
+                            type="checkbox"
+                            checked={chatBackgroundNotifications}
+                            onChange={e => { void handleChatBackgroundNotificationsToggle(e.target.checked); }}
+                            className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#7faa95]"></div>
                     </label>
                 </div>
 

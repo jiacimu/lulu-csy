@@ -39,6 +39,7 @@ import {
 } from '../utils/playbackLyricsRuntime';
 import { shouldInjectPlaybackContextFromState } from '../utils/playbackContextRuntime';
 import { showLocalNotification } from '../utils/localNotification';
+import { getChatBackgroundNotificationsEnabled } from '../utils/chatBackgroundNotifications';
 
 interface UseChatAIProps {
     char: CharacterProfile | undefined;
@@ -723,6 +724,7 @@ mode 可选值：
                     content: string,
                     fallback?: string,
                 ) => {
+                    if (!getChatBackgroundNotificationsEnabled()) return;
                     if (typeof document !== 'undefined' && document.visibilityState === 'visible') return;
 
                     void showLocalNotification({

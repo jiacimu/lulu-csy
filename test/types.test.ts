@@ -120,6 +120,15 @@ describe('ChatParser', () => {
         expect(ChatParser.sanitize('12:30 我会到')).toBe('12:30 我会到');
     });
 
+    it('strips leaked assistant voice history labels without breaking real voice tags', () => {
+        const { ChatParser } = chatParserModule;
+
+        expect(ChatParser.sanitize('[你上一条语音] 还有，人都躺在我怀里了。')).toBe('还有，人都躺在我怀里了。');
+        expect(ChatParser.sanitize('【你上一条语音】凑过来点，bb。')).toBe('凑过来点，bb。');
+        expect(ChatParser.cleanAiSecondPass('[你上一条语音（6秒）] 晚安。')).toBe('晚安。');
+        expect(ChatParser.sanitize('【语音消息：晚安。】')).toBe('【语音消息：晚安。】');
+    });
+
     it('keeps chat control markers while normalising escaped formatting', () => {
         const { ChatParser } = chatParserModule;
 
