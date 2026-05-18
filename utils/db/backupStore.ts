@@ -10,6 +10,7 @@ import {
   STORE_SCHEDULED,STORE_LETTERS,STORE_VOICE_AUDIO,
   DB_NAME_CONST
 } from './core';
+import { normalizeImportedMessage } from '../messageCompatibility';
 
 export const deleteDB = async (): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -254,7 +255,10 @@ export const importFullData = async (data: FullBackupData): Promise<void> => {
         if (availableStores.includes(STORE_MESSAGES) && data.messages.length > 0) {
             const store = tx.objectStore(STORE_MESSAGES);
             if (data.characters) store.clear();
-            data.messages.forEach(m => store.put(m));
+            data.messages
+                .map(m => normalizeImportedMessage(m))
+                .filter((m): m is Record<string, any> => Boolean(m))
+                .forEach(m => store.put(m));
         }
     }
 

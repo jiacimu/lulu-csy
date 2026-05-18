@@ -11,6 +11,9 @@ import { VectorMemoryExtractor } from '../../utils/vectorMemoryExtractor';
 vi.mock('../../utils/db', () => ({
     DB: {
         getAllVectorMemories: vi.fn(),
+        getCharacterById: vi.fn(),
+        countVectorMemories: vi.fn(),
+        saveCharacter: vi.fn(),
         getMessagesByCharId: vi.fn(),
         getMessagesByIds: vi.fn(),
         getVectorMemoryById: vi.fn(),
@@ -149,6 +152,8 @@ describe('MemoryCenter hormone backfill flow', () => {
         mockedDB.replaceVectorMemories.mockImplementation(async (_charId, memories) => {
             localMemories = Array.isArray(memories) ? [...memories] : [];
         });
+        mockedDB.getCharacterById.mockResolvedValue({ id: 'char-1', name: 'Sully', vectorMemoryEnabled: true } as any);
+        mockedDB.countVectorMemories.mockResolvedValue(1);
         mockedDB.getAllVectorMemories.mockImplementation(async () => localMemories as any);
         mockedDB.getMessagesByCharId.mockResolvedValue([]);
         mockedDB.getMessagesByIds.mockResolvedValue([

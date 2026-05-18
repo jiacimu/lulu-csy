@@ -1,4 +1,4 @@
-import React,{ useState,useMemo,useRef,useEffect } from 'react';
+import React,{ useState,useMemo,useRef,useEffect,useCallback } from 'react';
 import { MemoryFragment,CharacterProfile,VectorMemory,Message } from '../../types';
 import Modal from '../os/Modal';
 import { DEFAULT_REFINE_PROMPTS } from '../../constants/archivePrompts';
@@ -36,6 +36,7 @@ import {
     upsertVectorMemoriesManaged,
 } from './memoryCenterActions';
 import { markVectorMemoryAsPendingSync } from '../../utils/vectorMemorySyncState';
+import { normalizeMessageForVectorExtraction } from '../../utils/messageCompatibility';
 
 interface MemoryCenterProps {
     // Traditional Memory Props
@@ -56,6 +57,30 @@ interface MemoryCenterProps {
     handleChange: (key: keyof CharacterProfile, value: any) => void;
     addToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
     apiConfig: any;
+}
+
+interface VectorExtractionOverview {
+    lastExtractAt: number;
+    latestMessageAt: number;
+    pendingCount: number;
+}
+
+function getVectorBatchMessages(messages: Message[]): Message[] {
+    return messages
+        .map(m => normalizeMessageForVectorExtraction(m))
+        .filter((m): m is Message => Boolean(m));
+}
+
+function formatExtractionTimestamp(timestamp: number): string {
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return '未记录';
+    return new Date(timestamp).toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    });
 }
 
 const MemoryCenter: React.FC<MemoryCenterProps> = ({
@@ -107,6 +132,11 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
     const [batchStart, setBatchStart] = useState('1');
     const [batchEnd, setBatchEnd] = useState('100');
     const [totalMsgCount, setTotalMsgCount] = useState(0);
+    const [vectorExtractionOverview, setVectorExtractionOverview] = useState<VectorExtractionOverview>({
+        lastExtractAt: formData?.vectorMemoryLastExtractAt || 0,
+        latestMessageAt: 0,
+        pendingCount: 0,
+    });
     
     const [searchQuery, setSearchQuery] = useState('');
     const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'importance' | 'frequent'>('newest');
@@ -186,6 +216,89 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
         return `已完成 ${checkpoint.processedWindows}/${checkpoint.totalWindows || '?'} 个窗口，约 ${processedCount}/${rangeTotal} 条记录；将从第 ${nextRecord} 条${nextTimeText ? `（约 ${nextTimeText}）` : ''}继续。`;
     };
 
+    const vectorExtractionHint = useMemo(() => {
+        if (!vectorExtractionOverview.latestMessageAt) {
+            return '当前还没有可用于批量提取的文字或通话聊天。';
+        }
+        if (!vectorExtractionOverview.lastExtractAt) {
+            return '还没有记录提取位置，历史聊天需要从头建立向量索引。';
+        }
+        if (vectorExtractionOverview.lastExtractAt >= vectorExtractionOverview.latestMessageAt) {
+            return '提取位置已经覆盖到当前可提取聊天。';
+        }
+        return `还有约 ${vectorExtractionOverview.pendingCount} 条可补提，建议从最近提取时间之后继续。`;
+    }, [vectorExtractionOverview]);
+
+    const refreshVectorExtractionOverview = useCallback(async (options?: { preserveRange?: boolean }) => {
+        if (!formData?.id) {
+            setTotalMsgCount(0);
+            setBatchCheckpoint(null);
+            setVectorExtractionOverview({ lastExtractAt: 0, latestMessageAt: 0, pendingCount: 0 });
+            return;
+        }
+
+        const [msgs, freshChar] = await Promise.all([
+            DB.getMessagesByCharId(formData.id),
+            DB.getCharacterById(formData.id).catch(() => undefined),
+        ]);
+        const chatMsgs = getVectorBatchMessages(msgs);
+        const latestMessageAt = chatMsgs[chatMsgs.length - 1]?.timestamp || 0;
+        let lastExtractAt = freshChar?.vectorMemoryLastExtractAt || formData.vectorMemoryLastExtractAt || 0;
+        if (lastExtractAt > 0) {
+            const vectorCount = await DB.countVectorMemories(formData.id).catch(() => -1);
+            if (vectorCount === 0 && freshChar) {
+                await DB.saveCharacter({ ...freshChar, vectorMemoryLastExtractAt: 0 }).catch(() => {});
+                lastExtractAt = 0;
+            }
+        }
+        const pendingCount = lastExtractAt > 0
+            ? chatMsgs.filter(m => (m.timestamp || 0) > lastExtractAt).length
+            : chatMsgs.length;
+
+        setTotalMsgCount(chatMsgs.length);
+        setVectorExtractionOverview({ lastExtractAt, latestMessageAt, pendingCount });
+
+        const savedCheckpoint = loadVectorMemoryBatchCheckpoint(formData.id);
+        const restoredCheckpoint = savedCheckpoint ? withCheckpointStatus(savedCheckpoint, 'paused') : null;
+        if (restoredCheckpoint) {
+            const maxIdx = Math.max(chatMsgs.length - 1, 0);
+            if (chatMsgs.length === 0 || restoredCheckpoint.rangeStartIdx > maxIdx) {
+                clearVectorMemoryBatchCheckpoint(formData.id);
+                setBatchCheckpoint(null);
+                setBatchStart('1');
+                setBatchEnd(String(chatMsgs.length));
+                return;
+            }
+
+            const clampedCheckpoint = createVectorMemoryBatchCheckpoint({
+                charId: restoredCheckpoint.charId,
+                rangeStartIdx: Math.min(restoredCheckpoint.rangeStartIdx, maxIdx),
+                rangeEndIdx: Math.min(restoredCheckpoint.rangeEndIdx, maxIdx),
+                nextStartIdx: Math.min(restoredCheckpoint.nextStartIdx, maxIdx + 1),
+                nextStartMessageId: restoredCheckpoint.nextStartMessageId,
+                nextStartTimestamp: restoredCheckpoint.nextStartTimestamp,
+                totalCreated: restoredCheckpoint.totalCreated,
+                totalUpdated: restoredCheckpoint.totalUpdated,
+                processedWindows: restoredCheckpoint.processedWindows,
+                totalWindows: restoredCheckpoint.totalWindows,
+                lastProcessedTimestamp: restoredCheckpoint.lastProcessedTimestamp,
+                status: 'paused',
+            });
+
+            setBatchCheckpoint(clampedCheckpoint);
+            saveVectorMemoryBatchCheckpoint(clampedCheckpoint);
+            setBatchStart(String(clampedCheckpoint.rangeStartIdx + 1));
+            setBatchEnd(String(clampedCheckpoint.rangeEndIdx + 1));
+            return;
+        }
+
+        setBatchCheckpoint(null);
+        if (!options?.preserveRange) {
+            setBatchStart('1');
+            setBatchEnd(String(chatMsgs.length));
+        }
+    }, [formData?.id, formData?.vectorMemoryLastExtractAt]);
+
     useEffect(() => {
         const savedPrompts = getCharacterRefinePrompts();
         if (savedPrompts.length > 0) {
@@ -196,50 +309,11 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
     useEffect(() => {
         if (formData?.id) {
             refreshVmList();
-            DB.getMessagesByCharId(formData.id).then(msgs => {
-                const chatMsgs = msgs.filter(m => (m.role === 'user' || m.role === 'assistant') && (m.type === 'text' || m.type === 'call_log'));
-                setTotalMsgCount(chatMsgs.length);
-                const savedCheckpoint = loadVectorMemoryBatchCheckpoint(formData.id);
-                const restoredCheckpoint = savedCheckpoint ? withCheckpointStatus(savedCheckpoint, 'paused') : null;
-                if (restoredCheckpoint) {
-                    const maxIdx = Math.max(chatMsgs.length - 1, 0);
-                    if (chatMsgs.length === 0 || restoredCheckpoint.rangeStartIdx > maxIdx) {
-                        clearVectorMemoryBatchCheckpoint(formData.id);
-                        setBatchCheckpoint(null);
-                        setBatchStart('1');
-                        setBatchEnd(String(chatMsgs.length));
-                        return;
-                    }
-
-                    const clampedCheckpoint = createVectorMemoryBatchCheckpoint({
-                        charId: restoredCheckpoint.charId,
-                        rangeStartIdx: Math.min(restoredCheckpoint.rangeStartIdx, maxIdx),
-                        rangeEndIdx: Math.min(restoredCheckpoint.rangeEndIdx, maxIdx),
-                        nextStartIdx: Math.min(restoredCheckpoint.nextStartIdx, maxIdx + 1),
-                        nextStartMessageId: restoredCheckpoint.nextStartMessageId,
-                        nextStartTimestamp: restoredCheckpoint.nextStartTimestamp,
-                        totalCreated: restoredCheckpoint.totalCreated,
-                        totalUpdated: restoredCheckpoint.totalUpdated,
-                        processedWindows: restoredCheckpoint.processedWindows,
-                        totalWindows: restoredCheckpoint.totalWindows,
-                        lastProcessedTimestamp: restoredCheckpoint.lastProcessedTimestamp,
-                        status: 'paused',
-                    });
-
-                    setBatchCheckpoint(clampedCheckpoint);
-                    saveVectorMemoryBatchCheckpoint(clampedCheckpoint);
-                    setBatchStart(String(clampedCheckpoint.rangeStartIdx + 1));
-                    setBatchEnd(String(clampedCheckpoint.rangeEndIdx + 1));
-                    return;
-                }
-                setBatchCheckpoint(null);
-                setBatchStart('1');
-                setBatchEnd(String(chatMsgs.length));
-            }).catch(() => {});
+            refreshVectorExtractionOverview().catch(() => {});
         } else {
             setBatchCheckpoint(null);
         }
-    }, [formData?.id, formData?.vectorMemoryEnabled]);
+    }, [formData?.id, formData?.vectorMemoryEnabled, refreshVectorExtractionOverview]);
 
     const memoryActionDeps = {
         pullCloudMemories: pullMemories,
@@ -560,6 +634,7 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
             setIsAborting(false);
             setBatchProgress('');
             abortRef.current = null;
+            refreshVectorExtractionOverview({ preserveRange: true }).catch(() => {});
             refreshVmList();
         }
     };
@@ -1098,6 +1173,19 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
                         {/* Batch Operations */}
                         <div className="bg-white/60 backdrop-blur-md rounded-3xl p-4 border border-white shadow-sm space-y-3">
                             <h4 className="text-[11px] font-bold text-slate-700 tracking-widest uppercase">存档沉淀与提取</h4>
+                            <div className="rounded-2xl border border-emerald-100/70 bg-emerald-50/45 p-3">
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <p className="text-[8px] font-bold tracking-widest text-emerald-500/80 uppercase">最近提取到</p>
+                                        <p className="mt-1 text-[10px] font-semibold text-slate-700 leading-snug">{formatExtractionTimestamp(vectorExtractionOverview.lastExtractAt)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[8px] font-bold tracking-widest text-emerald-500/80 uppercase">最新可提取聊天</p>
+                                        <p className="mt-1 text-[10px] font-semibold text-slate-700 leading-snug">{formatExtractionTimestamp(vectorExtractionOverview.latestMessageAt)}</p>
+                                    </div>
+                                </div>
+                                <p className="mt-2 text-[9px] leading-relaxed text-slate-500">{vectorExtractionHint}</p>
+                            </div>
                             {pausedBatchCheckpoint && (
                                 <div className="bg-amber-50/80 border border-amber-100 rounded-2xl p-3 space-y-2">
                                     <div>

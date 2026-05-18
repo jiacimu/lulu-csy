@@ -107,7 +107,7 @@ export interface ChatTheme {
     timestampIntervalMs?: number;
 }
 
-export type MessageType = 'text' | 'image' | 'emoji' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'moments' | 'voice' | 'call_log' | 'soul_reflection';
+export type MessageType = 'text' | 'image' | 'emoji' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'score_card' | 'music_card' | 'mcd_card' | 'html_card' | 'moments' | 'voice' | 'call_log' | 'soul_reflection';
 
 export interface Message {
     id: number;
