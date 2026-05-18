@@ -1,5 +1,6 @@
 import { safeResponseJson } from './safeApi';
 import { safeTimeoutSignal } from './safeTimeout';
+import { buildBackendUrl, buildBackendHeaders } from './backendConfig';
 
 const DEFAULT_BASE_URL = '/minimax-music-api';
 const FREE_MODEL = 'music-2.6-free';
@@ -15,6 +16,8 @@ export interface MinimaxMusicGenerateOptions {
     model?: string;
     prompt: string;
     lyrics: string;
+    /** When true, generate instrumental music without vocals. */
+    isInstrumental?: boolean;
     signal?: AbortSignal;
     timeoutMs?: number;
 }
@@ -49,15 +52,45 @@ interface MinimaxMusicResponse {
     trace_id?: string;
 }
 
+/**
+ * Resolve the base URL for MiniMax Music API requests.
+ *
+ * Priority:
+ *   1. Explicit `url` param (e.g. from user config)
+ *   2. csyos-workers backend via `/api/music` (avoids Pages Function 30s timeout)
+ *   3. Pages Function proxy `/minimax-music-api` (Vite dev / legacy fallback)
+ */
 function resolveBaseUrl(url?: string): string {
-    return (url || DEFAULT_BASE_URL).replace(/\/+$/, '');
+    if (url) return url.replace(/\/+$/, '');
+
+    // Prefer the csyos-workers backend — Workers can hold the 60-180s music gen request.
+    try {
+        const workersUrl = buildBackendUrl('/api/music');
+        if (workersUrl) return workersUrl.replace(/\/+$/, '');
+    } catch { /* fallback below */ }
+
+    return DEFAULT_BASE_URL;
 }
 
-function makeHeaders(apiKey: string, groupId?: string): Record<string, string> {
-    const headers: Record<string, string> = {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-    };
+function makeHeaders(apiKey: string, groupId?: string, useWorkersProxy?: boolean): Record<string, string> {
+    let headers: Record<string, string>;
+
+    if (useWorkersProxy) {
+        // When going through csyos-workers, the backend auth middleware consumes
+        // Authorization for API_SECRET validation. Pass MiniMax key via X-MiniMax-Key
+        // and the proxy handler forwards it to MiniMax as Authorization.
+        headers = {
+            ...buildBackendHeaders(),
+            'X-MiniMax-Key': apiKey,
+            'Content-Type': 'application/json',
+        };
+    } else {
+        headers = {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+        };
+    }
+
     if (groupId?.trim()) {
         const normalizedGroupId = groupId.trim();
         headers['Group-Id'] = normalizedGroupId;
@@ -145,21 +178,30 @@ export async function generateMinimaxMusic(options: MinimaxMusicGenerateOptions)
     const lyrics = options.lyrics.trim();
     const prompt = options.prompt.trim();
     const model = options.model || DEFAULT_MODEL;
+    const isInstrumental = options.isInstrumental === true;
 
     if (!apiKey) throw new Error('请先配置 MiniMax API Key');
-    if (!lyrics) throw new Error('歌词不能为空');
+    if (!isInstrumental && !lyrics) throw new Error('歌词不能为空');
 
-    const response = await fetch(`${resolveBaseUrl(options.baseUrl)}/v1/music_generation`, {
+    const baseUrl = resolveBaseUrl(options.baseUrl);
+    // Detect if routing through csyos-workers proxy
+    const isWorkersProxy = baseUrl.includes('/api/music');
+    // When going through Workers proxy, use the dedicated route
+    const fetchUrl = isWorkersProxy
+        ? `${baseUrl}/minimax-generate`
+        : `${baseUrl}/v1/music_generation`;
+
+    const response = await fetch(fetchUrl, {
         method: 'POST',
-        headers: makeHeaders(apiKey, options.groupId),
+        headers: makeHeaders(apiKey, options.groupId, isWorkersProxy),
         body: JSON.stringify({
             model,
             prompt: prompt.slice(0, 2000),
-            lyrics: lyrics.slice(0, 3500),
+            ...(isInstrumental ? {} : { lyrics: lyrics.slice(0, 3500) }),
             stream: false,
-            output_format: 'hex',
+            output_format: 'url',
             lyrics_optimizer: false,
-            is_instrumental: false,
+            is_instrumental: isInstrumental,
             audio_setting: {
                 sample_rate: 44100,
                 bitrate: 256000,

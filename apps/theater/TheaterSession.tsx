@@ -30,6 +30,11 @@ import {
     type TheaterUserBeat,
     type TheaterVNPage,
 } from '../../utils/theaterDialogueFormat';
+import {
+    DATE_WORLDLINE_THEATER_GUIDE_KEY,
+    readStorageFlag,
+    writeStorageFlag,
+} from '../../utils/dateWorldlineOrb';
 
 const REQUIRED_EMOTIONS = ['normal', 'happy', 'angry', 'sad', 'shy'];
 
@@ -279,6 +284,7 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
     const [showSettings, setShowSettings] = useState(false);
     const [showExitModal, setShowExitModal] = useState(false);
     const [hideDialog, setHideDialog] = useState(false);
+    const [showWorldlineGuide, setShowWorldlineGuide] = useState(false);
     const [inputBeats, setInputBeats] = useState<TheaterInputBeat[]>(() => [createInputBeat('speech')]);
     const autoTimerRef = useRef<ReturnType<typeof setTimeout>>();
     const prevPagesLenRef = useRef(0);
@@ -328,6 +334,17 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
         () => sanitizeTheaterUserBeats(inputBeats.map(({ kind, text }) => ({ kind, text }))),
         [inputBeats],
     );
+
+    useEffect(() => {
+        if (readStorageFlag(DATE_WORLDLINE_THEATER_GUIDE_KEY)) return;
+        const timer = window.setTimeout(() => setShowWorldlineGuide(true), 700);
+        return () => window.clearTimeout(timer);
+    }, []);
+
+    const handleCloseWorldlineGuide = useCallback(() => {
+        writeStorageFlag(DATE_WORLDLINE_THEATER_GUIDE_KEY);
+        setShowWorldlineGuide(false);
+    }, []);
 
     // ── Typewriter ──
     const { displayed, done, skipToEnd } = useTypewriter(currentPage?.text || '', 30);
@@ -1240,6 +1257,23 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
                 isOpen={showSettings}
                 onClose={() => setShowSettings(false)}
             />
+
+            {showWorldlineGuide && (
+                <div className="pointer-events-auto absolute right-4 top-[5.7rem] z-[72] w-[min(18rem,calc(100vw-2rem))] rounded-[22px] border border-white/25 bg-black/40 p-3.5 text-[13px] leading-relaxed text-white shadow-[0_18px_48px_rgba(0,0,0,0.28)] backdrop-blur-xl">
+                    <div className="mb-1 text-[12px] font-semibold tracking-[0.16em] text-white/70">吱吱吱探头。</div>
+                    <p>戳约会里的小光球，可以切场景、调立绘，也能找到声音/语音入口。</p>
+                    <p className="mt-1 text-white/70">约会途中想换地方，也从这里走。</p>
+                    <div className="mt-3 flex justify-end">
+                        <button
+                            type="button"
+                            onClick={handleCloseWorldlineGuide}
+                            className="rounded-full bg-white/90 px-3.5 py-1.5 text-[12px] font-medium text-[#4d3341] active:scale-95"
+                        >
+                            知道啦
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Floating Ball */}
             <TheaterFloatingBall

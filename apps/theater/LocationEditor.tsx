@@ -2,11 +2,16 @@
  * LocationEditor — 用户自定义地点编辑器 Modal
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import type { TheaterLocation, LocationTag } from '../../types';
 import Modal from '../../components/os/Modal';
 import { processImage } from '../../utils/file';
 import { saveTheaterBgImage, deleteTheaterBgImage, resolveTheaterBg } from '../../utils/db/theaterStore';
+import {
+    DATE_WORLDLINE_LOCATION_GUIDE_KEY,
+    readStorageFlag,
+    writeStorageFlag,
+} from '../../utils/dateWorldlineOrb';
 
 const ALL_TAGS: { value: LocationTag; label: string }[] = [
     { value: 'romantic', label: '浪漫' },
@@ -36,6 +41,7 @@ const LocationEditor: React.FC<LocationEditorProps> = ({ isOpen, onClose, onSave
     const [pendingDataUrl, setPendingDataUrl] = useState<string>('');
     const [uploading, setUploading] = useState(false);
     const [removedImage, setRemovedImage] = useState(false);
+    const [showZhiGuide, setShowZhiGuide] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Resolve existing bgImage on open
@@ -53,6 +59,19 @@ const LocationEditor: React.FC<LocationEditorProps> = ({ isOpen, onClose, onSave
             });
         }
     }, [isOpen, editingLocation?.bgImage]);
+
+    useEffect(() => {
+        if (!isOpen || editingLocation) {
+            setShowZhiGuide(false);
+            return;
+        }
+        setShowZhiGuide(!readStorageFlag(DATE_WORLDLINE_LOCATION_GUIDE_KEY));
+    }, [isOpen, editingLocation]);
+
+    const handleDismissZhiGuide = () => {
+        writeStorageFlag(DATE_WORLDLINE_LOCATION_GUIDE_KEY);
+        setShowZhiGuide(false);
+    };
 
     const toggleTag = (tag: LocationTag) => {
         setTags(prev =>
@@ -135,6 +154,23 @@ const LocationEditor: React.FC<LocationEditorProps> = ({ isOpen, onClose, onSave
             </div>
         }>
             <div className="space-y-4" style={{ color: '#3a3a3a' }}>
+                {showZhiGuide && (
+                    <div className="rounded-[20px] border border-[#f5c8d6] bg-[#fff7fa] p-3.5 text-[13px] leading-relaxed text-[#6a4252] shadow-sm">
+                        <div className="mb-1 text-[12px] font-bold tracking-[0.16em] text-[#d97998]">吱吱吱探头。</div>
+                        <p>这里可以加你们自己的约会地点。</p>
+                        <p className="mt-1">没有合适的场景图，就去 DC 找本体吱吱吱，约会场景生成咒语/焚诀已经双手奉上了。</p>
+                        <div className="mt-3 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={handleDismissZhiGuide}
+                                className="rounded-full bg-[#3f2733] px-3.5 py-1.5 text-[12px] font-medium text-white active:scale-95"
+                            >
+                                知道啦
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {/* Name */}
                 <div className="theater-editor-field">
                     <label className="theater-editor-label">地点名称 *</label>
