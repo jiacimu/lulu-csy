@@ -23,7 +23,7 @@ import '../styles/trajectory.css';
 type View = 'select' | 'timeline' | 'monologue';
 
 const TrajectoryApp: React.FC = () => {
-    const { closeApp, characters, apiConfig, addToast, userProfile } = useOS();
+    const { closeApp, characters, apiConfig, addToast, userProfile, openApp } = useOS();
     const [view, setView] = useState<View>('select');
     const [char, setChar] = useState<CharacterProfile | null>(null);
     const [nodes, setNodes] = useState<TrajectoryNode[]>([]);
@@ -451,6 +451,23 @@ const TrajectoryApp: React.FC = () => {
                                         </div>
                                     );
                                 })}
+                            </div>
+
+                            {/* Crosstime Entry */}
+                            <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                                <button
+                                    className="traj-continue-card"
+                                    onClick={() => openApp(AppID.Crosstime)}
+                                    style={{ cursor: 'pointer', textAlign: 'left', width: '100%', border: '1px solid rgba(139,92,246,0.15)', background: 'rgba(139,92,246,0.05)' }}
+                                >
+                                    <div className="traj-continue-header">
+                                        <span className="traj-continue-label" style={{ color: '#a78bfa' }}>跨时空对话</span>
+                                        <span className="traj-continue-status" style={{ color: '#7c3aed' }}>Crosstime</span>
+                                    </div>
+                                    <div className="traj-continue-name" style={{ fontSize: 13, color: '#8b92a5' }}>
+                                        让不同时间的他们坐在一起，聊聊天。
+                                    </div>
+                                </button>
                             </div>
                         </>
                     )}

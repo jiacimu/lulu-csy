@@ -38,6 +38,9 @@ import {
   stopAgentOnBackend,
 } from './agentBackendClient';
 import { getClientId } from './backendClient';
+import type { AgentConfig } from './agentTypes';
+
+export type { AgentConfig } from './agentTypes';
 
 export interface SecondaryApiConfig {
     baseUrl: string;
@@ -50,19 +53,6 @@ export interface LLMDecision {
     topic?: string;
     reason?: string;
     content?: string;
-}
-
-export interface AgentConfig {
-    enabled: boolean;
-    minIntervalMin: number;
-    maxIntervalMin: number;
-    cooldownHours: number;
-    maxDailyActions: number;
-    maxConsecutiveIgnored: number;
-    baseProb: number;
-    notificationsEnabled: boolean;
-    debugMode: boolean;
-    debugIntervalSec: number;
 }
 
 type ContextSnapshot = {

@@ -36,6 +36,8 @@ export enum AppID {
     HalfSugar = 'half_sugar', // 半糖主义
     Theater = 'theater', // 520 约会
     Trajectory = 'trajectory', // 人生轨迹
+    Crosstime = 'crosstime', // 跨时空对话
+    LoveShow = 'love_show', // 恋综
 }
 
 export interface SystemLog {
