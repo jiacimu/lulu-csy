@@ -2172,7 +2172,7 @@ const Chat: React.FC = () => {
                                 innerVoice={isLastAssistant ? (char.moodState as any)?.innerVoice : undefined}
                                 statusCardData={isLastAssistant && (char.statusBarMode === 'creative' || char.statusBarMode === 'custom' || char.statusBarMode === 'freeform') ? char.lastStatusCard : undefined}
                                 onRetryInnerVoice={isLastAssistant ? retryMindSnapshot : undefined}
-                                showThinking={false} // Hidden from user UI, developer can still check DB/logs
+                                showThinking={char.showThinking !== false}
                             />
                         </div>
                     );
