@@ -33,6 +33,7 @@ import {
   Wrench,
   MusicNote,
   Heartbeat,
+  Path,
 } from '@phosphor-icons/react';
 
 // SVG 图标库 - Phosphor Icons
@@ -70,6 +71,7 @@ export const Icons: Record<string, React.FC<{ className?: string }>> = {
   Music: ({ className }) => <MusicNote className={className} weight="bold" />,
   HalfSugar: ({ className }) => <Heartbeat className={className} weight="bold" />,
   Theater: ({ className }) => <Sparkle className={className} weight="fill" />,
+  Trajectory: ({ className }) => <Path className={className} weight="bold" />,
 };
 
 export const INSTALLED_APPS: AppConfig[] = [
@@ -87,6 +89,7 @@ export const INSTALLED_APPS: AppConfig[] = [
   { id: AppID.Journal, name: '交换日记', icon: 'Journal', color: 'amber' },
   { id: AppID.Date, name: '见面', icon: 'Date', color: 'pink' },
   { id: AppID.Theater, name: '约会', icon: 'Theater', color: 'rose' },
+  { id: AppID.Trajectory, name: '轨迹', icon: 'Trajectory', color: 'indigo' },
   { id: AppID.Study, name: '自习室', icon: 'Study', color: 'emerald' },
   { id: AppID.Game, name: 'TRPG', icon: 'Game', color: 'orange' },
   { id: AppID.Novel, name: '笔友会', icon: 'Novel', color: 'amber' },
