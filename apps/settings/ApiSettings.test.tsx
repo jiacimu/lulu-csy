@@ -1,18 +1,26 @@
 // @vitest-environment jsdom
 
-import { render,screen } from '@testing-library/react';
+import { fireEvent,render,screen } from '@testing-library/react';
 import { beforeEach,describe,expect,it,vi } from 'vitest';
 import ApiSettings from './ApiSettings';
 
 const {
     addApiPreset,
     addToast,
+    mockApiConfig,
     removeApiPreset,
     setAvailableModels,
     updateApiConfig,
 } = vi.hoisted(() => ({
     addApiPreset: vi.fn(),
     addToast: vi.fn(),
+    mockApiConfig: {
+        apiKey: 'seed-key',
+        baseUrl: 'https://api.example.com',
+        model: 'gpt-4o-mini',
+        temperature: 0.85,
+        disablePrefill: false,
+    },
     removeApiPreset: vi.fn(),
     setAvailableModels: vi.fn(),
     updateApiConfig: vi.fn(),
@@ -20,12 +28,7 @@ const {
 
 vi.mock('../../context/OSContext', () => ({
     useOS: () => ({
-        apiConfig: {
-            apiKey: 'seed-key',
-            baseUrl: 'https://api.example.com',
-            model: 'gpt-4o-mini',
-            disablePrefill: false,
-        },
+        apiConfig: mockApiConfig,
         updateApiConfig,
         availableModels: [],
         setAvailableModels,
@@ -63,5 +66,16 @@ describe('ApiSettings', () => {
         expect(keyInput.getAttribute('name')).toMatch(/^sully-field-[a-z0-9]+-[a-z0-9]+$/);
         expect(keyInput).toHaveAttribute('data-lpignore', 'true');
         expect(keyInput).toHaveAttribute('data-1p-ignore', 'true');
+    });
+
+    it('saves the exposed main chat temperature', () => {
+        render(<ApiSettings />);
+
+        fireEvent.change(screen.getByLabelText('主聊天自由度数值'), { target: { value: '1.25' } });
+        fireEvent.click(screen.getByText('保存配置'));
+
+        expect(updateApiConfig).toHaveBeenCalledWith(expect.objectContaining({
+            temperature: 1.25,
+        }));
     });
 });

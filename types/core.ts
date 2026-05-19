@@ -104,6 +104,7 @@ export interface APIConfig {
     baseUrl: string;
     apiKey: string;
     model: string;
+    temperature?: number;
     useGeminiJailbreak?: boolean;
     useDeepSeekMode?: boolean;
     disablePrefill?: boolean;

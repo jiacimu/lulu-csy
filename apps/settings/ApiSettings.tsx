@@ -4,6 +4,14 @@ import { useOS } from '../../context/OSContext';
 import { safeResponseJson } from '../../utils/safeApi';
 import Modal from '../../components/os/Modal';
 import { getGuardedInputProps } from '../../utils/inputGuards';
+import {
+    DEFAULT_CHAT_TEMPERATURE,
+    MAX_CHAT_TEMPERATURE,
+    MIN_CHAT_TEMPERATURE,
+    normalizeChatTemperature,
+} from '../../utils/runtimeConfig';
+
+const getConfigTemperature = (value: unknown) => normalizeChatTemperature(value, DEFAULT_CHAT_TEMPERATURE);
 
 const ApiSettings: React.FC = () => {
     const { apiConfig, updateApiConfig, availableModels, setAvailableModels, apiPresets, addApiPreset, removeApiPreset, addToast } = useOS();
@@ -11,6 +19,7 @@ const ApiSettings: React.FC = () => {
     const [localKey, setLocalKey] = useState(apiConfig.apiKey);
     const [localUrl, setLocalUrl] = useState(apiConfig.baseUrl);
     const [localModel, setLocalModel] = useState(apiConfig.model);
+    const [localTemperature, setLocalTemperature] = useState(getConfigTemperature(apiConfig.temperature));
     const [localDisablePrefill, setLocalDisablePrefill] = useState(apiConfig.disablePrefill || false);
     const [localDeepSeekMode, setLocalDeepSeekMode] = useState(apiConfig.useDeepSeekMode || false);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -25,6 +34,7 @@ const ApiSettings: React.FC = () => {
         setLocalUrl(apiConfig.baseUrl);
         setLocalKey(apiConfig.apiKey);
         setLocalModel(apiConfig.model);
+        setLocalTemperature(getConfigTemperature(apiConfig.temperature));
         setLocalDisablePrefill(apiConfig.disablePrefill || false);
         setLocalDeepSeekMode(apiConfig.useDeepSeekMode || false);
     }, [apiConfig]);
@@ -33,6 +43,7 @@ const ApiSettings: React.FC = () => {
         setLocalUrl(preset.config.baseUrl);
         setLocalKey(preset.config.apiKey);
         setLocalModel(preset.config.model);
+        setLocalTemperature(getConfigTemperature(preset.config.temperature));
         setLocalDisablePrefill(preset.config.disablePrefill || false);
         setLocalDeepSeekMode(preset.config.useDeepSeekMode || false);
         addToast(`已加载配置: ${preset.name}`, 'info');
@@ -40,17 +51,21 @@ const ApiSettings: React.FC = () => {
 
     const handleSavePreset = () => {
         if (!newPresetName.trim()) { addToast('请输入预设名称', 'error'); return; }
-        addApiPreset(newPresetName, { baseUrl: localUrl, apiKey: localKey, model: localModel, disablePrefill: localDisablePrefill, useDeepSeekMode: localDeepSeekMode });
+        addApiPreset(newPresetName, { baseUrl: localUrl, apiKey: localKey, model: localModel, temperature: localTemperature, disablePrefill: localDisablePrefill, useDeepSeekMode: localDeepSeekMode });
         setNewPresetName('');
         setShowPresetModal(false);
         addToast('预设已保存', 'success');
     };
 
     const handleSaveApi = () => {
-        updateApiConfig({ apiKey: localKey, baseUrl: localUrl, model: localModel, disablePrefill: localDisablePrefill, useDeepSeekMode: localDeepSeekMode });
+        updateApiConfig({ apiKey: localKey, baseUrl: localUrl, model: localModel, temperature: localTemperature, disablePrefill: localDisablePrefill, useDeepSeekMode: localDeepSeekMode });
         setStatusMsg('配置已保存');
         setTimeout(() => setStatusMsg(''), 2000);
         setTestConnectionStatus('idle');
+    };
+
+    const handleTemperatureChange = (value: string) => {
+        setLocalTemperature(normalizeChatTemperature(value, localTemperature));
     };
 
     const fetchModels = async () => {
@@ -190,6 +205,46 @@ const ApiSettings: React.FC = () => {
                                 ) : (<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>)}
                                 {isLoadingModels ? '获取中...' : '获取列表'}
                             </button>
+                        </div>
+                    </div>
+
+                    <div className="group bg-white/50 border border-slate-200/60 rounded-xl px-4 py-3">
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                            <div>
+                                <label htmlFor="chatTemperature" className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">主聊天自由度</label>
+                                <span className="text-[10px] text-slate-400">Temperature，默认 {DEFAULT_CHAT_TEMPERATURE}</span>
+                            </div>
+                            <input
+                                type="number"
+                                min={MIN_CHAT_TEMPERATURE}
+                                max={MAX_CHAT_TEMPERATURE}
+                                step="0.05"
+                                value={localTemperature}
+                                onChange={(e) => handleTemperatureChange(e.target.value)}
+                                className="w-20 bg-white border border-slate-200/80 rounded-lg px-2 py-1.5 text-xs font-mono text-slate-600 text-center focus:outline-primary"
+                                aria-label="主聊天自由度数值"
+                            />
+                        </div>
+                        <input
+                            id="chatTemperature"
+                            type="range"
+                            min={MIN_CHAT_TEMPERATURE}
+                            max={MAX_CHAT_TEMPERATURE}
+                            step="0.05"
+                            value={localTemperature}
+                            onChange={(e) => handleTemperatureChange(e.target.value)}
+                            className="w-full accent-primary"
+                        />
+                        <div className="mt-2 flex items-center justify-between text-[10px] font-medium text-slate-400">
+                            <span>稳一点</span>
+                            <button
+                                type="button"
+                                onClick={() => setLocalTemperature(DEFAULT_CHAT_TEMPERATURE)}
+                                className="rounded-full bg-slate-100 px-2.5 py-1 font-bold text-slate-500 active:scale-95 transition-transform"
+                            >
+                                重置默认
+                            </button>
+                            <span>更发散</span>
                         </div>
                     </div>
 
