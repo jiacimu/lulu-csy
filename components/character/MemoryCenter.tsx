@@ -99,8 +99,7 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
     onDeleteRefinedMemory,
     formData,
     handleChange,
-    addToast,
-    apiConfig
+    addToast
 }) => {
     // --- Global State ---
     const [activeTab, setActiveTab] = useState<'timeline' | 'vector' | 'stats'>('timeline');
@@ -595,10 +594,10 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
         const embKey = getEmbeddingConfig().apiKey;
         if (!embKey) { addToast('请先在设置中配置 Embedding API Key', 'error'); return; }
 
-        // Use secondary API if configured, otherwise fall back to main API
-        const extractConfig = getSecondaryApiConfig() || apiConfig;
+        // Batch extraction is an assistive/background task, so it must not fall back to the primary chat API.
+        const extractConfig = getSecondaryApiConfig();
 
-        if (!extractConfig?.apiKey) { addToast('请先在设置中配置 API（主 API 或副 API）', 'error'); return; }
+        if (!extractConfig?.apiKey) { addToast('请先在设置中配置副 API', 'error'); return; }
 
         const startVal = Math.max(1, parseInt(batchStart) || 1);
         const endVal = Math.min(totalMsgCount, parseInt(batchEnd) || totalMsgCount);

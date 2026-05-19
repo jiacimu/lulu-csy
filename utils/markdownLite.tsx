@@ -80,15 +80,9 @@ export const renderMarkdown = (text: string): React.ReactNode => {
             .replace(/``+/g, '')
             .replace(/(^|\s)`(\s|$)/gm, '$1$2');
 
-        // Normalize CJK-space-CJK → newline for proper line breaking
-        // Chinese text normally has no spaces between characters; when AI uses spaces
-        // instead of newlines, we treat them as intended line breaks.
-        // Uses capture-group approach for Safari ≤ 16.3 compatibility (no lookbehind).
-        cleanedPart = cleanedPart.replace(
-            /([\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef\u2000-\u206f\u2e80-\u2eff\u3001-\u3003\u2018-\u201f\u300a-\u300f\uff01-\uff0f\uff1a-\uff20])\s+([\u4e00-\u9fff\u3400-\u4dbf])/g,
-            '$1\n$2'
-        );
-
+        // Display should only honor real line breaks. CJK-space compatibility
+        // lives in chatParser.chunkText so CSS skins cannot amplify spaces into
+        // accidental one-character vertical layouts.
         // Render Regular Text (split by newlines for paragraph spacing)
         return cleanedPart.split('\n').map((line, lineIdx) => {
             const key = `${index}-${lineIdx}`;

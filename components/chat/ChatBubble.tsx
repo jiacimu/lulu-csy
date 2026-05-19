@@ -17,7 +17,8 @@ import type { BubbleStyle } from '../../types/chat';
  *           └── Translate Toggle
  *
  * 气泡工坊兼容:
- *   - background / borderRadius / color 均通过 setProperty + !important 写入
+ *   - background / borderRadius / color 默认通过 setProperty + !important 写入
+ *   - 当高级 CSS 明确接管气泡壳时，可降级为普通 inline style，让 CSS !important 胜出
  *   - 圆角精细化: 尾巴侧角 4px，其余角跟随 borderRadius 值
  *   - 底纹图片由 overflow-hidden 按圆角裁切
  */
@@ -32,6 +33,7 @@ interface ChatBubbleProps {
     isShowingTarget?: boolean;
     onTranslateToggle?: () => void;
     thinking?: string;
+    allowCssOverride?: boolean;
 }
 
 const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -44,37 +46,41 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
     isShowingTarget,
     onTranslateToggle,
     thinking,
+    allowCssOverride = false,
 }) => {
     const radius = styleConfig.borderRadius ?? 6;
     const showTail = !styleConfig.hideTail;
     const bubbleRef = useRef<HTMLDivElement>(null);
     const [thinkingExpanded, setThinkingExpanded] = useState(false);
 
-    // Apply Workshop-customizable properties via setProperty with !important
-    // This guarantees custom bubble styles override any theme CSS
+    // Apply Workshop-customizable properties via inline styles.
+    // Default mode keeps visual-editor values above preset theme CSS. When an
+    // advanced CSS skin explicitly targets bubbles, drop the priority so
+    // author CSS with !important can intentionally override the shell.
     useEffect(() => {
         if (!bubbleRef.current) return;
         const el = bubbleRef.current;
+        const priority: '' | 'important' = allowCssOverride ? '' : 'important';
 
         // Background: gradient takes priority over solid color
         if (styleConfig.gradient) {
             const { from, to, direction } = styleConfig.gradient;
-            el.style.setProperty('background', `linear-gradient(${direction}deg, ${from}, ${to})`, 'important');
+            el.style.setProperty('background', `linear-gradient(${direction}deg, ${from}, ${to})`, priority);
         } else if (styleConfig.backgroundColor) {
-            el.style.setProperty('background', styleConfig.backgroundColor, 'important');
+            el.style.setProperty('background', styleConfig.backgroundColor, priority);
         }
 
         // Fine-grained border-radius: tail-side bottom corner → 4px only when the tail is visible.
         const mainR = `${radius}px`;
         const tailR = showTail ? '4px' : mainR;
-        el.style.setProperty('border-top-left-radius', mainR, 'important');
-        el.style.setProperty('border-top-right-radius', mainR, 'important');
-        el.style.setProperty('border-bottom-left-radius', isUser ? mainR : tailR, 'important');
-        el.style.setProperty('border-bottom-right-radius', isUser ? tailR : mainR, 'important');
+        el.style.setProperty('border-top-left-radius', mainR, priority);
+        el.style.setProperty('border-top-right-radius', mainR, priority);
+        el.style.setProperty('border-bottom-left-radius', isUser ? mainR : tailR, priority);
+        el.style.setProperty('border-bottom-right-radius', isUser ? tailR : mainR, priority);
 
         // Text color
         if (styleConfig.textColor) {
-            el.style.setProperty('color', styleConfig.textColor, 'important');
+            el.style.setProperty('color', styleConfig.textColor, priority);
         }
 
         // Opacity
@@ -84,25 +90,25 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
 
         // Border
         if (styleConfig.borderWidth && styleConfig.borderWidth > 0) {
-            el.style.setProperty('border', `${styleConfig.borderWidth}px solid ${styleConfig.borderColor || 'transparent'}`, 'important');
+            el.style.setProperty('border', `${styleConfig.borderWidth}px solid ${styleConfig.borderColor || 'transparent'}`, priority);
         } else {
             el.style.removeProperty('border');
         }
 
         // Box Shadow
         if (styleConfig.boxShadow) {
-            el.style.setProperty('box-shadow', styleConfig.boxShadow, 'important');
+            el.style.setProperty('box-shadow', styleConfig.boxShadow, priority);
         } else {
             el.style.removeProperty('box-shadow');
         }
 
         // Font Size
         if (styleConfig.fontSize) {
-            el.style.setProperty('font-size', `${styleConfig.fontSize}px`, 'important');
+            el.style.setProperty('font-size', `${styleConfig.fontSize}px`, priority);
         } else {
             el.style.removeProperty('font-size');
         }
-    }, [styleConfig.backgroundColor, styleConfig.gradient, styleConfig.textColor, radius, styleConfig.opacity, isUser, showTail, styleConfig.borderWidth, styleConfig.borderColor, styleConfig.boxShadow, styleConfig.fontSize]);
+    }, [allowCssOverride, styleConfig.backgroundColor, styleConfig.gradient, styleConfig.textColor, radius, styleConfig.opacity, isUser, showTail, styleConfig.borderWidth, styleConfig.borderColor, styleConfig.boxShadow, styleConfig.fontSize]);
 
     return (
         /* Outer Wrapper — relative container; SVG tail & decoration sticker live here
@@ -230,7 +236,22 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
                 )}
 
                 {/* Layer 4: Text Content */}
-                <div className="relative z-10 leading-relaxed whitespace-pre-wrap" style={{ color: styleConfig.textColor, overflowWrap: 'break-word', wordBreak: 'normal', fontSize: styleConfig.fontSize ? `${styleConfig.fontSize}px` : '15px', textShadow: styleConfig.textShadow || undefined }}>
+                <div
+                    className="sully-bubble-text relative z-10 block leading-relaxed whitespace-pre-wrap"
+                    style={{
+                        color: styleConfig.textColor,
+                        display: 'block',
+                        maxWidth: '100%',
+                        minWidth: 0,
+                        whiteSpace: 'pre-wrap',
+                        overflowWrap: 'break-word',
+                        wordBreak: 'normal',
+                        writingMode: 'horizontal-tb',
+                        textOrientation: 'mixed',
+                        fontSize: styleConfig.fontSize ? `${styleConfig.fontSize}px` : '15px',
+                        textShadow: styleConfig.textShadow || undefined,
+                    }}
+                >
                     {renderMarkdown(displayContent)}
                 </div>
 

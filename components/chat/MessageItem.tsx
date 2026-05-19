@@ -27,6 +27,7 @@ import InteractionPill from './InteractionPill';
 import VoiceBubble from './VoiceBubble';
 const StatusCardRenderer = React.lazy(() => import('./StatusCardRenderer'));
 const CLASSIC_INNER_VOICE_PREVIEW_THRESHOLD = 48;
+const customCssTargetsBubbleShell = (css: string | undefined) => /\.sully-bubble-(?:user|ai)\b/.test(css || '');
 
 // --- Deduplicated Selection Checkbox ---
 const SelectionCheckbox: React.FC<{ isSelected: boolean; onToggle: () => void }> = ({ isSelected, onToggle }) => (
@@ -123,6 +124,7 @@ const MessageItem = React.memo(({
     const [isClassicInnerVoiceExpanded, setIsClassicInnerVoiceExpanded] = useState(false);
 
     const styleConfig = isUser ? activeTheme.user : activeTheme.ai;
+    const allowBubbleCssOverride = customCssTargetsBubbleShell(activeTheme.customCss);
 
     const handleTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
         // Record initial position
@@ -789,6 +791,7 @@ const MessageItem = React.memo(({
             isUser={isUser}
             styleConfig={styleConfig}
             displayContent={displayContent}
+            allowCssOverride={allowBubbleCssOverride}
             sourceTag={sourceTag}
             replyTo={m.replyTo}
             showTranslateButton={showTranslateButton}

@@ -6,6 +6,7 @@ import React,{ useState,useRef,useEffect,useMemo } from 'react';
 import { useOS } from '../context/OSContext';
 import { ChatTheme,BubbleStyle,Message } from '../types';
 import { processImage } from '../utils/file';
+import ChatBubble from '../components/chat/ChatBubble';
 import VoiceBubble from '../components/chat/VoiceBubble';
 import DefaultTransferCard from '../components/chat/plugins/DefaultTransferCard';
 
@@ -77,6 +78,146 @@ const CSS_EXAMPLES = [
 }`
     }
 ];
+
+type CssIssue = {
+    message: string;
+    line?: number;
+};
+
+type CssAnalysis = {
+    errors: CssIssue[];
+    warnings: CssIssue[];
+    importantCount: number;
+};
+
+const ADVANCED_CSS_ALLOWED_SELECTORS = [
+    ':root',
+    '.sully-chat-container',
+    '.sully-chat-header',
+    '.sully-chat-input',
+    '.sully-bubble-user',
+    '.sully-bubble-ai',
+    '.sully-bubble-tail',
+    '.sully-voice-bubble',
+    '.sully-voice-bar',
+    '.sully-typing-bubble',
+    '.sully-typing-tail',
+    '.sully-image-msg',
+    '.sully-msg-timestamp',
+    '.sully-system-pill',
+    '.sully-interaction-pill',
+    '.sully-card-container',
+    '.sully-transfer-card',
+    '.sully-bubble-text',
+];
+
+const CSS_SELECTOR_REFERENCE = [
+    { selector: '.sully-chat-container', desc: '整页聊天区域：背景图、渐变底色、整体氛围。' },
+    { selector: '.sully-chat-header', desc: '顶部栏：角色头像、名字、返回按钮、通话按钮所在区域。' },
+    { selector: '.sully-chat-input', desc: '底部输入栏：输入框、加号、表情、发送/语音按钮所在区域。' },
+    { selector: '.sully-bubble-user', desc: '用户气泡外壳：背景、边框、圆角、阴影、内边距。' },
+    { selector: '.sully-bubble-ai', desc: '角色气泡外壳：背景、边框、圆角、阴影、内边距。' },
+    { selector: '.sully-bubble-text', desc: '气泡文字层：建议只改颜色/阴影，不建议改 display、换行、writing-mode。' },
+    { selector: '.sully-bubble-tail polygon', desc: '气泡小尖角颜色：尾巴是 SVG，改颜色用 fill。' },
+    { selector: '.sully-voice-bubble', desc: '语音条气泡：语音消息的圆角、背景、边框、阴影。' },
+    { selector: '.sully-image-msg', desc: '图片消息：图片圆角、边框、阴影、尺寸限制。' },
+    { selector: '.sully-msg-timestamp', desc: '时间戳：消息中间的“下午04:14”这类时间分隔。' },
+    { selector: '.sully-system-pill', desc: '系统提示胶囊：转账提示、事件提示等系统小条。' },
+    { selector: '.sully-card-container', desc: '聊天卡片容器：小红书、转发、其他结构化卡片的外框。' },
+];
+
+const PREVIEW_CHAT_COPY = {
+    userFirst: '今天放学有点晚',
+    userSecond: '操场的灯又坏了一半',
+    timestamp: '下午06:12',
+    aiFirst: '嗯，夏天快过去了',
+    aiSecond: '有些话那时候没说出口，后来就只剩下风替我们翻旧试卷。你看，连教室后门那块掉漆的地方，都比我们更擅长留在原地。',
+    imageSrc: '/assets/theater/library.png',
+    imageAlt: '黄昏旧教室预览图',
+    aiVoiceSeconds: 6,
+    userVoiceSeconds: 3,
+};
+
+const findLineNumberByIndex = (input: string,index: number) => input.slice(0,index).split('\n').length;
+
+const selectorIsAllowed = (selector: string) => (
+    ADVANCED_CSS_ALLOWED_SELECTORS.some((allowed) => selector === allowed || selector.startsWith(`${allowed} `) || selector.startsWith(`${allowed}.`) || selector.startsWith(`${allowed}:`) || selector.startsWith(`${allowed}[`) || selector.startsWith(`${allowed}>`))
+);
+
+const customCssTargetsBubbleShell = (css: string | undefined) => /\.sully-bubble-(?:user|ai)\b/.test(css || '');
+
+const analyzeCustomCss = (css: string): CssAnalysis => {
+    const source = css || '';
+    const errors: CssIssue[] = [];
+    const warnings: CssIssue[] = [];
+    const importantCount = (source.match(/!important/g) || []).length;
+
+    const pushError = (message: string,line?: number) => errors.push({ message,line });
+    const pushWarning = (message: string,line?: number) => warnings.push({ message,line });
+
+    if (!source.trim()) {
+        return { errors,warnings,importantCount };
+    }
+
+    try {
+        if (typeof CSSStyleSheet !== 'undefined') {
+            const sheet = new CSSStyleSheet();
+            if (typeof sheet.replaceSync === 'function') {
+                sheet.replaceSync(source);
+            }
+        }
+    } catch (error: any) {
+        pushError(`CSS 语法错误：${error?.message || '请检查语法。'}`);
+    }
+
+    const braceStack: number[] = [];
+    [...source].forEach((char,index) => {
+        if (char === '{') braceStack.push(index);
+        if (char === '}') {
+            if (braceStack.length === 0) {
+                pushError('发现多余的 `}`，请检查大括号闭合。',findLineNumberByIndex(source,index));
+            } else {
+                braceStack.pop();
+            }
+        }
+    });
+    braceStack.forEach((index) => pushError('存在未闭合的 `{`，请补全规则块。',findLineNumberByIndex(source,index)));
+
+    const sourceWithoutComments = source.replace(/\/\*[\s\S]*?\*\//g,'');
+    const selectorRegex = /([^{}]+)\{/g;
+    let selectorMatch: RegExpExecArray | null;
+    while ((selectorMatch = selectorRegex.exec(sourceWithoutComments)) !== null) {
+        const selectorGroup = selectorMatch[1].trim();
+        if (!selectorGroup || selectorGroup.startsWith('@')) continue;
+        const selectorList = selectorGroup.split(',').map(item => item.trim()).filter(Boolean);
+        selectorList.forEach((selector) => {
+            if (selector === 'from' || selector === 'to' || selector.includes('%')) return;
+            const line = findLineNumberByIndex(sourceWithoutComments,selectorMatch?.index ?? 0);
+            if (/^(?:html|body|#root|\*)\b/.test(selector)) {
+                pushWarning(`选择器 \`${selector}\` 会影响聊天页外部，建议改用 .sully-chat-container 作用域。`,line);
+                return;
+            }
+            if (!selectorIsAllowed(selector)) {
+                pushWarning(`选择器 \`${selector}\` 不在推荐白名单内，可能导致预览和实际页面不一致。`,line);
+            }
+        });
+    }
+
+    if (/\.sully-bubble-(?:ai|user)[^{]*{[^}]*?(?:^|[;{\s])height\s*:/is.test(sourceWithoutComments)) {
+        pushWarning('检测到气泡固定 height，短句/长句可能被挤成异常分行。建议使用 min-height。');
+    }
+    if (/\bword-break\s*:\s*break-all\b/i.test(sourceWithoutComments)) {
+        pushWarning('检测到 word-break: break-all，中文气泡可能出现单字断行。建议使用 overflow-wrap: break-word。');
+    }
+    if (/\bwriting-mode\s*:/i.test(sourceWithoutComments)) {
+        pushWarning('检测到 writing-mode，可能让聊天文字竖排。');
+    }
+    if (/\.sully-bubble-text[^{]*{[^}]*\b(?:display|white-space|word-break|writing-mode)\s*:/is.test(sourceWithoutComments)) {
+        pushWarning('检测到直接覆盖 .sully-bubble-text 排版核心，请确认不会造成文字竖排或异常断行。');
+    }
+
+    return { errors,warnings,importantCount };
+};
 
 // --- Helpers for Color & CSS ---
 
@@ -236,6 +377,7 @@ const ThemeMaker: React.FC = () => {
     const [toolSection, setToolSection] = useState<'base' | 'sticker' | 'avatar'>('base');
     const [sharePanel, setSharePanel] = useState<'none' | 'export' | 'import'>('none');
     const [importText, setImportText] = useState('');
+    const [lastUsableCss, setLastUsableCss] = useState('');
 
     // Local state for sliders
     const [paddingVal, setPaddingVal] = useState(12);
@@ -251,6 +393,9 @@ const ThemeMaker: React.FC = () => {
 
     const activeStyle = editingTheme[activeTab === 'css' ? 'user' : activeTab];
     const themeJson = useMemo(() => JSON.stringify(editingTheme, null, 2), [editingTheme]);
+    const cssAnalysis = useMemo(() => analyzeCustomCss(editingTheme.customCss || ''), [editingTheme.customCss]);
+    const cssControlsBubbleShell = useMemo(() => customCssTargetsBubbleShell(editingTheme.customCss), [editingTheme.customCss]);
+    const canRestoreLastUsableCss = cssAnalysis.errors.length > 0 && (editingTheme.customCss || '') !== lastUsableCss;
 
     // Edit mode: load existing theme from sessionStorage if set by Chat.tsx
     useEffect(() => {
@@ -275,6 +420,12 @@ const ThemeMaker: React.FC = () => {
             setPaddingVal(extractPaddingFromCss(editingTheme.customCss));
         }
     }, []);
+
+    useEffect(() => {
+        if (cssAnalysis.errors.length === 0) {
+            setLastUsableCss(editingTheme.customCss || '');
+        }
+    }, [cssAnalysis.errors.length, editingTheme.customCss]);
 
     const togglePanel = (id: string) => {
         setOpenPanels(prev => {
@@ -321,6 +472,10 @@ const ThemeMaker: React.FC = () => {
 
     const saveTheme = async () => {
         if (!editingTheme.name.trim()) return;
+        if (cssAnalysis.errors.length > 0) {
+            addToast('CSS 语法未通过，先修一下再保存', 'error');
+            return;
+        }
         const char = characters.find(c => c.id === activeCharacterId);
         const currentCustomTheme = customThemes.find(t => t.id === char?.bubbleStyle);
         const inheritedBaseId = currentCustomTheme?.baseThemeId || char?.bubbleStyle || 'default';
@@ -339,6 +494,36 @@ const ThemeMaker: React.FC = () => {
             addToast('已保存到主题库', 'success');
         }
         closeApp();
+    };
+
+    const restoreLastUsableCss = () => {
+        if ((editingTheme.customCss || '') === lastUsableCss) {
+            addToast('当前已是上次可用 CSS', 'success');
+            return;
+        }
+        setEditingTheme(prev => ({ ...prev, customCss: lastUsableCss }));
+        addToast('已恢复到上次语法通过的 CSS', 'success');
+    };
+
+    const copyCssSelector = async (selector: string) => {
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(selector);
+            } else {
+                const textarea = document.createElement('textarea');
+                textarea.value = selector;
+                textarea.setAttribute('readonly','true');
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+            }
+            addToast(`已复制 ${selector}`, 'success');
+        } catch {
+            addToast('复制失败，请手动长按类名复制', 'error');
+        }
     };
 
     const resetTheme = () => {
@@ -487,65 +672,23 @@ const ThemeMaker: React.FC = () => {
     /** Text bubble preview (with decoration sticker, bg image, gradient support) */
     const renderTextPreview = (role: 'user' | 'ai', text: string) => {
         const style = role === 'user' ? editingTheme.user : editingTheme.ai;
-        const isUser = role === 'user';
-        const showTail = !style.hideTail;
-        const containerStyle: React.CSSProperties = {
-            backgroundColor: style.backgroundColor,
-            borderRadius: `${style.borderRadius}px`,
-            opacity: style.opacity,
-            borderBottomLeftRadius: isUser || !showTail ? `${style.borderRadius}px` : '4px',
-            borderBottomRightRadius: isUser && showTail ? '4px' : `${style.borderRadius}px`,
-            borderTopLeftRadius: `${style.borderRadius}px`,
-            borderTopRightRadius: `${style.borderRadius}px`,
-            border: style.borderWidth && style.borderWidth > 0 ? `${style.borderWidth}px solid ${style.borderColor || 'transparent'}` : undefined,
-            boxShadow: style.boxShadow || undefined,
-            background: style.gradient ? `linear-gradient(${style.gradient.direction}deg, ${style.gradient.from}, ${style.gradient.to})` : style.backgroundColor,
-        };
-
         return renderPreviewRow(role, (
-            <>
-                {showTail && (
-                    <svg
-                        className={`sully-bubble-tail absolute top-[12px] w-[6px] h-[10px] pointer-events-none ${isUser ? '-right-[5.5px]' : '-left-[5.5px]'}`}
-                        version="1.1"
-                        xmlns="http://www.w3.org/2000/svg"
-                    >
-                        {isUser ? (
-                            <polygon points="0,0 6,5 0,10" style={{ fill: style.gradient?.from || style.backgroundColor || '#95ec69' }} />
-                        ) : (
-                            <polygon points="6,0 0,5 6,10" style={{ fill: style.gradient?.from || style.backgroundColor || '#ffffff' }} />
-                        )}
-                    </svg>
-                )}
-                {style.decoration && (
-                    <img
-                        src={style.decoration}
-                        className="absolute z-20 w-8 h-8 object-contain drop-shadow-sm pointer-events-none"
-                        style={{
-                            left: `${style.decorationX ?? (isUser ? 90 : 10)}%`,
-                            top: `${style.decorationY ?? -10}%`,
-                            transform: `translate(-50%, -50%) scale(${style.decorationScale ?? 1}) rotate(${style.decorationRotate ?? 0}deg)`
-                        }}
-                    />
-                )}
-                <div
-                    className={`relative px-5 py-3 shadow-sm text-sm overflow-hidden ${isUser ? 'sully-bubble-user' : 'sully-bubble-ai'}`}
-                    style={containerStyle}
-                >
-                    {style.backgroundImage && (
-                        <div
-                            className="absolute inset-0 bg-cover bg-center pointer-events-none z-0"
-                            style={{
-                                backgroundImage: `url(${style.backgroundImage})`,
-                                opacity: style.backgroundImageOpacity ?? 0.5
-                            }}
-                        ></div>
-                    )}
-                    <span className="relative z-10 leading-relaxed" style={{ color: style.textColor, fontSize: style.fontSize ? `${style.fontSize}px` : '15px', textShadow: style.textShadow }}>{text}</span>
-                </div>
-            </>
+            <ChatBubble
+                isUser={role === 'user'}
+                styleConfig={style}
+                displayContent={text}
+                allowCssOverride={cssControlsBubbleShell}
+            />
         ));
     };
+
+    const renderImagePreview = (role: 'user' | 'ai') => renderPreviewRow(role, (
+        <img
+            src={PREVIEW_CHAT_COPY.imageSrc}
+            className="sully-image-msg max-w-[180px] max-h-[220px] rounded-2xl shadow-sm border border-black/5 object-cover"
+            alt={PREVIEW_CHAT_COPY.imageAlt}
+        />
+    ));
 
     /** Voice bubble preview */
     const renderVoicePreview = (role: 'user' | 'ai', duration: number) => {
@@ -612,20 +755,51 @@ const ThemeMaker: React.FC = () => {
             </div>
 
             {/* Preview Area — Mini Chat Simulator */}
-            <div className="flex-1 bg-slate-100 relative overflow-y-auto flex flex-col pt-4 pb-4 px-6 items-center gap-3">
-                <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
-
-                {/* Live CSS Injection for Preview */}
+            <div className="sully-chat-container flex-1 bg-slate-100 relative overflow-hidden flex flex-col">
+                {/* Live CSS Injection for Preview — same placement as Chat.tsx */}
                 {editingTheme.customCss && <style>{editingTheme.customCss}</style>}
 
-                {/* Rich Preview Conversation */}
-                <div className="w-full max-w-sm space-y-3 my-auto">
-                    {renderTextPreview('ai', '我觉得非常棒，完全符合人设！')}
-                    {renderTextPreview('user', '这个样式看起来怎么样？')}
-                    {renderVoicePreview('ai', 5)}
-                    {renderVoicePreview('user', 3)}
-                    {renderTransferPreview('ai')}
-                    {renderTransferPreview('user')}
+                <div className="sully-chat-header min-h-[4.25rem] bg-white/80 backdrop-blur-xl px-5 flex items-end pb-3 border-b border-slate-200/60 shrink-0 z-20 shadow-sm">
+                    <div className="flex items-center gap-3 w-full">
+                        <button className="p-2 -ml-2 text-slate-500 rounded-full" aria-label="返回预览">‹</button>
+                        <div className="flex-1 min-w-0 flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-slate-200 overflow-hidden shadow-sm shrink-0">
+                                {activeChar?.avatar ? <img src={activeChar.avatar} className="w-full h-full object-cover" alt="" /> : null}
+                            </div>
+                            <div className="min-w-0">
+                                <div className="font-bold text-slate-800 truncate">{activeChar?.name || '角色'}</div>
+                                <div className="text-[10px] text-slate-400 uppercase">Online</div>
+                            </div>
+                        </div>
+                        <button className="p-2 text-slate-500 rounded-full" aria-label="更多预览">•••</button>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto no-scrollbar relative pt-4 pb-4 px-5">
+                    <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '20px 20px' }} />
+
+                    {/* Rich Preview Conversation */}
+                    <div className="relative z-10 w-full max-w-sm mx-auto space-y-3">
+                        {renderTextPreview('user', PREVIEW_CHAT_COPY.userFirst)}
+                        {renderTextPreview('user', PREVIEW_CHAT_COPY.userSecond)}
+                        {renderImagePreview('user')}
+                        <div className="sully-msg-timestamp flex justify-center w-full py-1">
+                            <span className="text-[11px] text-gray-400">{PREVIEW_CHAT_COPY.timestamp}</span>
+                        </div>
+                        {renderTextPreview('ai', PREVIEW_CHAT_COPY.aiFirst)}
+                        {renderTextPreview('ai', PREVIEW_CHAT_COPY.aiSecond)}
+                        {renderVoicePreview('ai', PREVIEW_CHAT_COPY.aiVoiceSeconds)}
+                        {renderVoicePreview('user', PREVIEW_CHAT_COPY.userVoiceSeconds)}
+                        {renderTransferPreview('ai')}
+                    </div>
+                </div>
+
+                <div className="sully-chat-input bg-white/90 backdrop-blur-2xl border-t border-slate-200/50 shrink-0 z-20 shadow-[0_-5px_15px_rgba(0,0,0,0.02)]">
+                    <div className="p-3 px-4 flex gap-3 items-center">
+                        <button className="w-10 h-10 shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-slate-500" aria-label="加号预览">+</button>
+                        <div className="flex-1 min-w-0 bg-slate-100 rounded-[24px] flex items-center px-4 py-2.5 text-[15px] text-slate-400 border border-transparent">Message...</div>
+                        <button className="w-10 h-10 shrink-0 rounded-full bg-primary text-white flex items-center justify-center" aria-label="发送预览">➤</button>
+                    </div>
                 </div>
             </div>
 
@@ -690,10 +864,26 @@ const ThemeMaker: React.FC = () => {
                     {/* --- CSS EDITOR --- */}
                     {activeTab === 'css' && (
                         <div className="space-y-6 animate-fade-in h-full flex flex-col">
-                            <div className="text-[10px] text-slate-400 bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed">
+                            <div className="text-[10px] text-slate-400 bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed space-y-2">
                                 <span className="font-bold block mb-1 text-slate-500">CSS 增强模式</span>
-                                可使用CSS类名 <code className="bg-slate-200 px-1 rounded">.sully-bubble-user</code>、<code className="bg-slate-200 px-1 rounded">.sully-bubble-ai</code> 和 <code className="bg-slate-200 px-1 rounded">.sully-bubble-tail</code> 来统一定制气泡样式。
+                                普通面板继续负责捏气泡；这里是高级整页皮肤。推荐作用域：<code className="bg-slate-200 px-1 rounded">.sully-chat-container</code>、<code className="bg-slate-200 px-1 rounded">.sully-chat-header</code>、<code className="bg-slate-200 px-1 rounded">.sully-chat-input</code>、<code className="bg-slate-200 px-1 rounded">.sully-bubble-user</code>、<code className="bg-slate-200 px-1 rounded">.sully-bubble-ai</code>、<code className="bg-slate-200 px-1 rounded">.sully-voice-bubble</code>、<code className="bg-slate-200 px-1 rounded">.sully-image-msg</code>。
                                 <br />支持使用 <code className="text-red-400">!important</code> 覆盖可视化编辑器的设置。
+                                <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2">
+                                    <div>
+                                        <div className={`font-semibold ${cssAnalysis.errors.length === 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                            {cssAnalysis.errors.length === 0 ? '语法检查通过' : '语法检查未通过'}
+                                        </div>
+                                        <div>提示 {cssAnalysis.warnings.length} 条，<code className="text-red-500">!important</code> {cssAnalysis.importantCount} 处</div>
+                                    </div>
+                                    {canRestoreLastUsableCss && (
+                                        <button
+                                            onClick={restoreLastUsableCss}
+                                            className="shrink-0 px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-600 active:scale-95 transition-transform"
+                                        >
+                                            恢复上次通过
+                                        </button>
+                                    )}
+                                </div>
                             </div>
 
                             <textarea
@@ -703,6 +893,46 @@ const ThemeMaker: React.FC = () => {
                                 className="flex-1 w-full bg-slate-800 text-slate-300 font-mono text-xs p-4 rounded-xl resize-none shadow-inner focus:ring-2 focus:ring-indigo-500 outline-none leading-relaxed"
                                 spellCheck={false}
                             />
+
+                            {(cssAnalysis.errors.length > 0 || cssAnalysis.warnings.length > 0) && (
+                                <div className={`text-[11px] rounded-xl border px-3 py-2 max-h-28 overflow-y-auto no-scrollbar ${cssAnalysis.errors.length > 0 ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                                    <div className="font-semibold mb-1">{cssAnalysis.errors.length > 0 ? 'CSS 错误提示' : '皮肤风险提示'}</div>
+                                    <ul className="space-y-1 list-disc pl-4">
+                                        {[...cssAnalysis.errors,...cssAnalysis.warnings].map((issue,idx) => (
+                                            <li key={`${issue.message}-${idx}`}>{issue.line ? `第 ${issue.line} 行：` : ''}{issue.message}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+
+                            <details className="group rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-[11px] text-slate-500">
+                                <summary className="cursor-pointer select-none font-bold text-slate-600 outline-none">
+                                    变量 / 类名速查
+                                    <span className="ml-2 font-normal text-slate-400">不知道写谁，就先看这里</span>
+                                </summary>
+                                <div className="mt-3 grid gap-2">
+                                    {CSS_SELECTOR_REFERENCE.map((item) => (
+                                        <div key={item.selector} className="rounded-lg bg-slate-50 px-2.5 py-2">
+                                            <div className="flex items-center gap-2">
+                                                <code className="min-w-0 flex-1 font-mono text-[10px] text-indigo-600 break-all">{item.selector}</code>
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.preventDefault();
+                                                        event.stopPropagation();
+                                                        void copyCssSelector(item.selector);
+                                                    }}
+                                                    className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-500 active:scale-95 transition-transform"
+                                                    aria-label={`复制 ${item.selector}`}
+                                                >
+                                                    复制
+                                                </button>
+                                            </div>
+                                            <span className="mt-1 block leading-relaxed">{item.desc}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </details>
 
                             <div>
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">快速模板 (Templates)</label>

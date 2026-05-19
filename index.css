@@ -407,6 +407,21 @@ textarea[readonly] {
   scrollbar-width: none;
 }
 
+.sully-bubble-text {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+}
+
+.sully-bubble-text>* {
+  max-width: 100%;
+}
+
 input:focus,
 textarea:focus,
 select:focus {

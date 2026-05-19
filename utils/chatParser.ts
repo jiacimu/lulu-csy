@@ -607,6 +607,11 @@ export const ChatParser = {
          * Short segments (<=15 chars) are kept as-is to avoid over-splitting.
          */
         const splitCjkSpaces = (segment: string): string[] => {
+            const visibleLength = segment.replace(/\s+/g, '').length;
+            if (visibleLength <= 15) {
+                return [segment];
+            }
+
             const parts: string[] = [];
             let lastIdx = 0;
             CJK_SPACE_CJK_RE.lastIndex = 0;
