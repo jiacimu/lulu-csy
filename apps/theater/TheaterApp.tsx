@@ -1555,8 +1555,8 @@ ${exitPromptContent}
 
     // ====== Theater Ending Three-Act Ceremony API Calls ======
 
-    const getEndingContextBundle = async (): Promise<{ sessionMessages: Message[]; savedSummaries: Message[]; sessionContext: string }> => {
-        if (!char) return { sessionMessages: [], savedSummaries: [], sessionContext: '' };
+    const getEndingContextBundle = async (): Promise<{ allMsgs: Message[]; sessionMessages: Message[]; savedSummaries: Message[]; sessionContext: string }> => {
+        if (!char) return { allMsgs: [], sessionMessages: [], savedSummaries: [], sessionContext: '' };
         const allMsgs = await DB.getMessagesByCharId(char.id);
         const sessionMessages = getCurrentTimelineSessionMessages(allMsgs);
         const savedSummaries = getCurrentTimelineSavedSummaries(allMsgs);
@@ -1568,7 +1568,7 @@ ${exitPromptContent}
             eventHistory: session?.eventHistory || [],
             currentEvent,
         });
-        return { sessionMessages, savedSummaries, sessionContext };
+        return { allMsgs, sessionMessages, savedSummaries, sessionContext };
     };
 
     const retrieveEndingVectorMemory = async (contextMessages: Message[]): Promise<string | null> => {
@@ -1689,10 +1689,16 @@ ${exitPromptContent}
 
     const handleGenerateMetaLetter = async (): Promise<string> => {
         if (!char || !session) throw new Error('No char');
-        const { sessionMessages, sessionContext } = await getEndingContextBundle();
+        const { allMsgs, sessionMessages, sessionContext } = await getEndingContextBundle();
         const systemPrompt = await buildEndingSystemPrompt(sessionMessages);
+        const hasPreviousMetaLetter = allMsgs.some(m =>
+            m.metadata?.source === 'theater'
+            && (m.metadata?.endingAct === 'meta-letter' || m.metadata?.isMetaLetter === true)
+        );
 
-        const prompt = buildMetaLetterPrompt(char.name, userProfile.name, sessionContext);
+        const prompt = buildMetaLetterPrompt(char.name, userProfile.name, sessionContext, {
+            isFirstMetaLetter: !hasPreviousMetaLetter,
+        });
 
         const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST',

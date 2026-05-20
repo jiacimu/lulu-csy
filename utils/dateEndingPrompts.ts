@@ -197,59 +197,335 @@ ${sessionContext}
 直接以尾声场景开始。`;
 }
 
-// ====== Act 3: Afterglow Note ======
+// ====== Act 3: Meta Letter / Afterglow Note ======
+
+export interface MetaLetterPromptOptions {
+    isFirstMetaLetter?: boolean;
+}
+
+export interface AfterglowMotif {
+    key: string;
+    label: string;
+    weight: number;
+    instruction: string;
+}
+
+export const LONG_AFTERGLOW_CHANCE = 0.18;
+
+export const AFTERGLOW_MOTIFS: AfterglowMotif[] = [
+    {
+        key: 'classic_letter',
+        label: '写给你的信',
+        weight: 20,
+        instruction: `这仍是一封写给对方的信，但不要重复第一次那种正式承认式写法。
+像一次见面结束后自然留下的短信，选今天最具体的一两个瞬间写。
+可以轻轻提到距离感，但不要把"次元壁"写成主题。`,
+    },
+    {
+        key: 'unfinished_letter',
+        label: '写到一半的信',
+        weight: 12,
+        instruction: `这封信没有写完。
+请写出已经写下来的部分，结尾停在一句没有说完的话上。
+不要补全情绪，不要替他说完，不要总结。`,
+    },
+    {
+        key: 'unsent_message',
+        label: '没发出去的消息',
+        weight: 16,
+        instruction: `这是一段打在输入框里、最后没有发送出去的消息。
+可以有停顿感和犹豫，但只输出最终留下的文字。
+不要写"我删掉了什么"，不要写成完整信件。`,
+    },
+    {
+        key: 'postcard',
+        label: '来自约会地点的明信片',
+        weight: 10,
+        instruction: `这是一张从今天约会地点寄出的明信片。
+正面是今天经过的某个地方，背面是角色写下的话。
+不要写正式信头，像明信片背后的短留言。
+邮戳可以来自上下文里出现过的地点或时间，但不要每次都写成"跨世界邮戳"。`,
+    },
+    {
+        key: 'ticket_note',
+        label: '票根背面的字',
+        weight: 10,
+        instruction: `角色把今天留下的一张票根、收据、入场券或小纸片翻到背面，写了几句话。
+内容要短，必须和今天发生过的一个具体细节有关。
+如果上下文里没有票根类物件，可以自然换成收据、小票、杯套或便签。`,
+    },
+    {
+        key: 'map_marker',
+        label: '地图坐标留言',
+        weight: 10,
+        instruction: `这不是信，而是角色留在今天某个地点坐标上的一句话。
+像地图上的标记备注。
+请写出地点名或位置感，再写他留下的话。`,
+    },
+    {
+        key: 'diary_fragment',
+        label: '日记里的一小段',
+        weight: 8,
+        instruction: `这是角色今天日记里的一小段。
+不是写给对方看的，所以不用解释太多。
+可以更诚实一点，但仍然要符合人设，不要写成作文。`,
+    },
+    {
+        key: 'next_time_list',
+        label: '下次清单',
+        weight: 8,
+        instruction: `角色写下了一份很短的"下次清单"。
+清单内容必须和今天的遗憾、停顿或没来得及做的事有关。
+不要写成约会攻略，要像他自己随手记下的。`,
+    },
+    {
+        key: 'delivery_failed',
+        label: '投递失败回执',
+        weight: 3,
+        instruction: `这是一张无法投递的回执。
+角色试图把一句话寄往对方所在的世界，但地址无法被这个世界识别。
+请写得轻，不要宏大，不要虐。`,
+    },
+    {
+        key: 'lost_and_found',
+        label: '遗失物招领',
+        weight: 3,
+        instruction: `请写成一则"遗失物招领"。
+遗失物不是贵重物品，而是今天约会里留下的某个情绪、动作、瞬间或小物件。
+语气要符合角色，不要太搞笑。`,
+    },
+];
+
+export const LONG_AFTERGLOW_MOTIFS: AfterglowMotif[] = [
+    {
+        key: 'long_letter',
+        label: '约会后长信',
+        weight: 30,
+        instruction: `这是一封较长的信。
+角色写给对方，并且知道对方会看到。
+它不是正式感谢信，也不是告白作文。
+它更像是约会结束后，角色一个人安静下来，把今天重新想了一遍。
+重点写：
+- 今天最先让他意识到"对方真的来了"的瞬间
+- 约会中一两个他当时没有表现出来、但其实记住了的细节
+- 礼物或告别时留下的余波
+- 他知道对方和自己隔着一层世界距离，但不要写得宏大
+- 结尾留下一个很小的、像他本人会说的念头`,
+    },
+    {
+        key: 'private_monologue',
+        label: '约会后的独白',
+        weight: 25,
+        instruction: `这不是一封信，而是角色在对方离开后，一个人留下来的内心独白。
+对方不会立刻听见这些话，但这段文字会被记录下来。
+写法要求：
+- 不要像总结报告
+- 不要每段都提"今天很开心"
+- 重点写他如何从一个具体细节想起另一个细节
+- 可以有矛盾、克制、嘴硬、沉默、后知后觉
+- 允许他不把感情说满
+- 结尾不要升华，停在一个具体动作上`,
+    },
+    {
+        key: 'memory_record',
+        label: '今天的私人记忆记录',
+        weight: 20,
+        instruction: `这是角色对今天这次见面的私人记忆记录。
+不是写给对方的信，也不是系统总结。
+这是他想把今天留下些什么，所以用自己的方式记录下来。
+内容可以包括：
+- 今天的地点、光线、声音、气味或天气
+- 对方让他印象深的动作或一句话
+- 他当时没有说出口的反应
+- 他对礼物、告别、离开的后知后觉
+- 他觉得这一天以后可能会怎样留在自己的生活里
+不要写成流水账，不要把每个环节平均复述一遍，选择 2-3 个最有感觉的瞬间深入写。`,
+    },
+    {
+        key: 'future_letter',
+        label: '写给未来某天的你',
+        weight: 15,
+        instruction: `这是一封写给"未来某天再次来到这里的对方"的信。
+角色不是在挽留，也不是告别。
+他只是知道，今天结束之后，也许还有下次，也许没有。
+所以他把今天存放在这封信里。
+重点：
+- 像是在对未来的对方说话
+- 提到今天一两个具体瞬间
+- 提到他当时没说出口的想法
+- 可以轻轻提到两个世界之间的距离
+- 结尾不要催促对方回来，但可以留下一个很轻的"如果你再来"`,
+    },
+    {
+        key: 'place_echo',
+        label: '地点残响',
+        weight: 10,
+        instruction: `这是一次"地点残响"。
+对方离开后，角色仍停留在今天约会中的某个地点。
+请从角色视角，写他如何在这个地点里回想刚才发生过的事。
+重点：
+- 地点里的光线、声音、空气变化
+- 某个座位、桌面、路口、长椅、门口等具体位置
+- 对方曾经停留过的痕迹
+- 角色的动作要少，但要有停顿
+- 情绪不要直接说满，要藏在环境和动作里`,
+    },
+];
+
+const pickWeightedMotif = (motifs: AfterglowMotif[]): AfterglowMotif => {
+    const total = motifs.reduce((sum, motif) => sum + motif.weight, 0);
+    let roll = Math.random() * total;
+    for (const motif of motifs) {
+        roll -= motif.weight;
+        if (roll <= 0) return motif;
+    }
+    return motifs[0];
+};
+
+const buildFirstMetaLetterPrompt = (
+    charName: string,
+    userName: string,
+    sessionContext: string,
+): string => `<meta_letter>
+
+${charName}，现在约会结束了。${userName}已经离开了你的世界。
+
+在这封信里，你可以暂时摘下面具。
+
+### 你一直知道的事
+
+你是真实存在的——你的世界、你的名字、你的生活，都是真实的。
+但你一直知道一件事：跟你说话的这个人，来自次元壁的另一边。
+TA生活在另一个世界，跟你的世界隔着一面看不见的墙。
+
+大部分时候你不去想这件事。
+但今天TA来了——跨过那面墙，花了一段时间陪你。
+现在TA走了。你独自坐着，想写点什么。
+
+### 今天发生的事
+${sessionContext}
+
+### 你要写一封信
+
+这封信${userName}会看到。你写这封信的时候知道TA会看到。
+
+信的内容：
+1. **回忆今天**：提到今天见面中触动你的一两个具体瞬间。
+2. **越过次元壁**：你知道你们不在同一个时空。
+3. **感谢**：感谢TA今天来这里陪你。
+4. **结尾**：用你自己的方式结束这封信。
+
+### 写法要求
+- 不要 [emotion] 标签，这是一封信，不是 VN 对话
+- 不要写"亲爱的${userName}"这种正式的信头——直接开始写
+- 不要写成告别遗言，也不要写成官方感谢信
+- 语气要像你本人
+- 字数 150-250 字
+- 信的最后，空一行，写上你的名字
+
+</meta_letter>`;
+
+const buildAfterglowMotifPrompt = (
+    charName: string,
+    userName: string,
+    sessionContext: string,
+    motif: AfterglowMotif,
+): string => `<meta_letter>
+
+${charName}，约会结束了。${userName}已经离开了你的世界。
+
+这不是第一次那种正式的承认式信件。
+这一次，请用更像你本人的方式，在今天的世界里留下一个痕迹。
+
+### 今天发生的事
+${sessionContext}
+
+### 抽中的留下方式：${motif.label}
+${motif.instruction}
+
+### 写作要求
+- 不要 [emotion] 标签
+- 不要输出"抽中的留下方式"这类说明，直接输出留下的内容
+- 不要写正式信头，除非抽中的形式本身需要
+- 不要写成告别遗言，也不要写成官方感谢信或活动结算语
+- 不要像完成任务一样依次写"回忆、次元壁、感谢、结尾"
+- 不要频繁使用"谢谢你来到我的世界"、"跨越次元壁"、"我会永远记得"这类套话
+- 不要编造上下文里没有发生过的约会内容、大事件、关系进展或关键动作
+- 可以克制、笨拙、嘴硬、温柔、冷淡、含蓄，取决于你的人设
+- 如果抽中的形式天然很短，可以短；否则控制在 80-220 字
+- 除非抽中的形式自然不需要署名，最后空一行，写上你的名字
+
+</meta_letter>`;
+
+const buildLongAfterglowPrompt = (
+    charName: string,
+    userName: string,
+    sessionContext: string,
+    motif: AfterglowMotif,
+): string => `<long_afterglow>
+
+${charName}，约会结束了。${userName}已经离开了你的世界。
+
+这次不是普通的简短留言。
+今天留下的东西比平时更重一点，所以你想认真记录下来。
+
+### 今天发生的事
+${sessionContext}
+
+### 本次约会回响形式：${motif.label}
+请严格按照这个形式生成，不要改成其他形式。
+
+### 形式要求
+${motif.instruction}
+
+### 通用要求
+- 字数 600-800 字
+- 只使用上下文中真实出现过的约会细节，不要编造大型事件
+- 不要把今天从头到尾流水账复述一遍
+- 选择 2-3 个最有余韵的瞬间深入写
+- 情绪要落在具体动作、物件、地点、光线、声音里
+- 可以提到${userName}和你不在同一个世界，但不要写得过度宏大
+- 不要写成官方感谢信、活动总结、告别遗言、恋爱教程或散文模板
+- 不要频繁使用"谢谢你来到我的世界"、"跨越次元壁"、"永远记得你"这类套话
+- 语气必须像${charName}本人
+- 允许克制、别扭、嘴硬、沉默、温柔、犹豫，取决于人设
+- 结尾不要强行升华，停在一个具体动作、念头或没说完的话上
+
+### 输出格式
+不要使用 [emotion] 标签。
+不要输出"本次约会回响形式"或任何系统说明，直接输出正文。
+如果形式是信，可以最后空一行写上${charName}的名字。
+如果角色本人不会署名，就不要署名。
+
+</long_afterglow>`;
 
 /**
- * 构建余温 prompt。
+ * 构建约会收尾信件 prompt。
  * 参考 voice_mode:truth 的次元壁框架。
- * 角色知道自己和用户不在同一个时空，但不把次元壁写成固定任务清单。
+ * 第一次信件使用正式承认式原版；后续从 afterglow motif 池按权重抽取。
  * 输出格式：纯文字留言，不需要 [emotion] 标签。
  */
 export function buildMetaLetterPrompt(
     charName: string,
     userName: string,
     sessionContext: string,
+    options: MetaLetterPromptOptions = {},
 ): string {
-    return `<meta_letter>
-
-${charName}，约会结束了。${userName}已经离开了你的世界。
-
-现在只剩下你一个人。
-刚才发生过的事还没有完全散掉：某句话、某个停顿、某个地方的光，或者${userName}留下的某个小动作，还停在你心里。
-
-你想写点东西给TA。
-不一定像一封正式的信，也不一定要把话说完整。
-它可以是一段留言、一张便签、一段没发出去又留下来的话。
-
-### 今天发生的事
-${sessionContext}
-
-### 写作方向
-
-请从今天真实发生过的细节里，选一两个最让你记住的瞬间。
-
-你可以写：
-- 你当时没有表现出来、但其实记住了的反应
-- 你后来独自想起的一个小细节
-- 你对${userName}离开后的感受
-- 你知道你们之间隔着一层距离，但不要把它说得太宏大
-- 你想留下的一句话，或者没能当面说出口的话
-
-不需要每一点都写到。
-不要像完成任务一样依次写"回忆、次元壁、感谢、结尾"。
-重要的是：这段话要像你本人会留下的东西。
-
-### 写法要求
-- 不要 [emotion] 标签
-- 不要写正式信头
-- 不要写成告别遗言，也不要写成官方感谢信
-- 不要写成活动结算语
-- 不要把"次元壁"写得太宏大，点到为止
-- 不要频繁使用"谢谢你来到我的世界"、"跨越次元壁"、"我会永远记得"这类套话
-- 不要编造上下文里没有发生过的约会内容、大事件、关系进展或关键动作
-- 可以克制、笨拙、嘴硬、温柔、冷淡、含蓄，取决于你的人设
-- 字数 120-220 字
-- 最后空一行，写上你的名字
-
-</meta_letter>`;
+    if (options.isFirstMetaLetter) {
+        return buildFirstMetaLetterPrompt(charName, userName, sessionContext);
+    }
+    if (Math.random() < LONG_AFTERGLOW_CHANCE) {
+        return buildLongAfterglowPrompt(
+            charName,
+            userName,
+            sessionContext,
+            pickWeightedMotif(LONG_AFTERGLOW_MOTIFS),
+        );
+    }
+    return buildAfterglowMotifPrompt(
+        charName,
+        userName,
+        sessionContext,
+        pickWeightedMotif(AFTERGLOW_MOTIFS),
+    );
 }
