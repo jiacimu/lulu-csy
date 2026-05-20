@@ -11,6 +11,7 @@ import { VectorMemoryRetriever } from './vectorMemoryRetriever';
 import { buildTemporalContext } from './temporalContext';
 import { buildCurrentLifeAnchorForCharacter,formatCurrentLifeAnchorForPrompt } from './lifeAnchor';
 import { formatMessageForContext,shouldIncludeMessageInContext } from './messageContext';
+import { formatCalendarContextForPrompt, loadCalendarContextForCharacter } from './calendarContext';
 import type { PlaybackLyricSnapshot } from './playbackLyricsRuntime';
 
 const buildDateContextBridgePrompt = (messages: Message[], char: CharacterProfile, userProfile: UserProfile): string => {
@@ -206,6 +207,16 @@ export const ChatPrompts = {
             }
         } catch (e) {
             console.error('Failed to inject realtime context:', e);
+        }
+
+        try {
+            const calendarContext = await loadCalendarContextForCharacter(char.id);
+            const calendarPrompt = formatCalendarContextForPrompt(calendarContext);
+            if (calendarPrompt) {
+                baseSystemPrompt += `\n${calendarPrompt}\n`;
+            }
+        } catch (e) {
+            console.error('Failed to inject calendar context:', e);
         }
 
         // 热搜独立注入 — 完全解耦于天气/新闻

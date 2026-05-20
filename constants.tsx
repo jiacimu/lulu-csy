@@ -119,6 +119,7 @@ export const APP_CONFIGS: AppConfig[] = [
 
 const HIDDEN_LAUNCHER_APPS = new Set<AppID>([
   AppID.Crosstime,
+  AppID.LoveShow,
 ]);
 
 export const INSTALLED_APPS: AppConfig[] = APP_CONFIGS.filter(app => !HIDDEN_LAUNCHER_APPS.has(app.id));

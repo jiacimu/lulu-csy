@@ -454,18 +454,30 @@ const TrajectoryApp: React.FC = () => {
                             </div>
 
                             {/* Crosstime Entry */}
-                            <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                            <div className="traj-crosstime-entry-wrap">
                                 <button
-                                    className="traj-continue-card"
+                                    type="button"
+                                    className="traj-crosstime-entry"
                                     onClick={() => openApp(AppID.Crosstime)}
-                                    style={{ cursor: 'pointer', textAlign: 'left', width: '100%', border: '1px solid rgba(139,92,246,0.15)', background: 'rgba(139,92,246,0.05)' }}
                                 >
-                                    <div className="traj-continue-header">
-                                        <span className="traj-continue-label" style={{ color: '#a78bfa' }}>跨时空对话</span>
-                                        <span className="traj-continue-status" style={{ color: '#7c3aed' }}>Crosstime</span>
+                                    <div className="traj-crosstime-entry-top">
+                                        <div>
+                                            <div className="traj-crosstime-title">对影</div>
+                                            <div className="traj-crosstime-subtitle">举杯邀明月，对影成几人</div>
+                                        </div>
+                                        <span className="traj-crosstime-action">进入</span>
                                     </div>
-                                    <div className="traj-continue-name" style={{ fontSize: 13, color: '#8b92a5' }}>
-                                        让不同时间的他们坐在一起，聊聊天。
+                                    <div className="traj-crosstime-copy">
+                                        让不同时期的他，在同一个空间里相遇。
+                                    </div>
+                                    <div className="traj-crosstime-axis" aria-hidden="true">
+                                        <span>AGE 06</span>
+                                        <i />
+                                        <span>AGE 18</span>
+                                        <i />
+                                        <span>NOW</span>
+                                        <i />
+                                        <span>AFTER</span>
                                     </div>
                                 </button>
                             </div>

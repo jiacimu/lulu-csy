@@ -28,8 +28,31 @@ import './crosstime.css';
 
 type View = 'setup' | 'room' | 'history';
 type ModalStep = 'none' | 'pick_char' | 'pick_slice';
+type UserInputKind = 'speech' | 'action';
+interface CrosstimeInputSegment {
+    id: string;
+    kind: UserInputKind;
+    text: string;
+}
 
 const MAX_PARTICIPANTS = 5;
+const CROSSTIME_MAX_TOKENS = 65536;
+const getUserInputKindLabel = (kind?: UserInputKind): string =>
+    kind === 'action' ? '动作' : '发言';
+
+const createInputSegment = (kind: UserInputKind = 'speech'): CrosstimeInputSegment => ({
+    id: `segment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    kind,
+    text: '',
+});
+
+const sanitizeInputSegments = (segments: CrosstimeInputSegment[]): Array<Omit<CrosstimeInputSegment, 'id'>> =>
+    segments
+        .map(segment => ({
+            kind: segment.kind,
+            text: segment.text.trim(),
+        }))
+        .filter(segment => segment.text.length > 0);
 
 const getParticipantSliceKey = (participant: CrosstimeParticipant): string =>
     participant.timeSlice === 'current'
@@ -45,8 +68,6 @@ const getTrajectorySliceDetail = (node: TrajectoryNode): string =>
     node.era === 'after_meeting'
         ? '相遇后 · 认识你'
         : `${node.age}岁 · 不认识你`;
-
-const WHISPER_MAX_TOKENS = 8192;
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -149,8 +170,9 @@ const CrosstimeApp: React.FC = () => {
     // ── Room State ──
     const [room, setRoom] = useState<CrosstimeRoom | null>(null);
     const [messages, setMessages] = useState<CrosstimeMessage[]>([]);
-    const [input, setInput] = useState('');
+    const [inputSegments, setInputSegments] = useState<CrosstimeInputSegment[]>(() => [createInputSegment('speech')]);
     const [whisperInput, setWhisperInput] = useState('');
+    const [whisperInputKind, setWhisperInputKind] = useState<UserInputKind>('speech');
     const [isTyping, setIsTyping] = useState(false);
     const [privateTarget, setPrivateTarget] = useState<CrosstimeParticipant | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -195,10 +217,38 @@ const CrosstimeApp: React.FC = () => {
     const openWhisperTarget = (target: CrosstimeParticipant) => {
         setPrivateTarget(target);
         setWhisperInput('');
+        setWhisperInputKind('speech');
     };
     const closeWhisper = () => {
         setPrivateTarget(null);
         setWhisperInput('');
+        setWhisperInputKind('speech');
+    };
+    const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSend();
+        }
+    };
+    const whisperPlaceholder = whisperInputKind === 'action'
+        ? '只让他察觉的小动作...'
+        : '贴近他耳边说...';
+    const sendableInputSegments = sanitizeInputSegments(inputSegments);
+    const hasPublicInput = sendableInputSegments.length > 0;
+    const updateInputSegment = (id: string, updates: Partial<Omit<CrosstimeInputSegment, 'id'>>) => {
+        setInputSegments(prev => prev.map(segment => (
+            segment.id === id ? { ...segment, ...updates } : segment
+        )));
+    };
+    const addInputSegment = (kind: UserInputKind) => {
+        setInputSegments(prev => [...prev, createInputSegment(kind)]);
+    };
+    const removeInputSegment = (id: string) => {
+        setInputSegments(prev => (
+            prev.length <= 1
+                ? [{ ...prev[0], text: '' }]
+                : prev.filter(segment => segment.id !== id)
+        ));
     };
     const selectedBaseCharId = participants[0]?.charId;
     const selectedBaseChar = selectedBaseCharId
@@ -212,6 +262,12 @@ const CrosstimeApp: React.FC = () => {
         ? !isSliceAlreadySelected(selectedBaseChar.id, 'current')
             || getTrajectoryNodes(selectedBaseChar.id).some(node => !isSliceAlreadySelected(selectedBaseChar.id, node))
         : true;
+    const canSelectMoreSlices = participants.length < MAX_PARTICIPANTS && canAddMoreSlices;
+    const setupSliceCount = selectedBaseChar ? getTrajectoryNodes(selectedBaseChar.id).length + 1 : 0;
+    const setupAccessText = selectedBaseChar
+        ? `${setupSliceCount} 条时间切片可接入`
+        : '相遇前 · 相遇后 · NOW 可接入';
+    const startDisabled = participants.length < 2 || !apiConfig?.apiKey;
 
     // ── Setup: Add Participant ──
     const openAddParticipant = () => {
@@ -226,7 +282,7 @@ const CrosstimeApp: React.FC = () => {
 
     const handlePickChar = (c: CharacterProfile) => {
         if (selectedBaseCharId && c.id !== selectedBaseCharId) {
-            addToast('跨时空对话会围绕同一个角色展开', 'info');
+            addToast('对影会围绕同一个角色展开', 'info');
             return;
         }
         setPickedChar(c);
@@ -303,42 +359,69 @@ const CrosstimeApp: React.FC = () => {
         saveCrosstimeRoom(updated);
         setPrivateTarget(null);
         setWhisperInput('');
+        setWhisperInputKind('speech');
     };
 
     // ── Send Message ──
     const handleSend = async () => {
-        const activeInput = privateTarget ? whisperInput : input;
-        if (!room || !activeInput.trim() || isTyping) return;
-        const text = activeInput.trim();
-        if (privateTarget) setWhisperInput('');
-        else setInput('');
+        if (!room || isTyping) return;
 
-        saveCrosstimeMessage({
-            roomId: room.id,
-            participantId: 'user',
-            charId: 'user',
-            role: 'user',
-            content: text,
-            isPrivate: !!privateTarget,
-            privateTargetId: privateTarget?.id,
-            timestamp: Date.now(),
+        if (privateTarget) {
+            if (!whisperInput.trim()) return;
+            const text = whisperInput.trim();
+            const activeInputKind = whisperInputKind;
+            setWhisperInput('');
+
+            saveCrosstimeMessage({
+                roomId: room.id,
+                participantId: 'user',
+                charId: 'user',
+                role: 'user',
+                content: text,
+                userInputKind: activeInputKind,
+                isPrivate: true,
+                privateTargetId: privateTarget.id,
+                timestamp: Date.now(),
+            });
+
+            setMessages(getCrosstimeMessages(room.id));
+            // 悄悄话 → 只触发目标角色单独回复
+            const target = privateTarget;
+            await triggerWhisperReply(room, target, text, activeInputKind);
+            return;
+        }
+
+        const publicSegments = sanitizeInputSegments(inputSegments);
+        if (publicSegments.length === 0) return;
+        const batchId = publicSegments.length > 1 ? safeUUID() : undefined;
+        const now = Date.now();
+        setInputSegments([createInputSegment('speech')]);
+
+        publicSegments.forEach((segment, index) => {
+            saveCrosstimeMessage({
+                roomId: room.id,
+                participantId: 'user',
+                charId: 'user',
+                role: 'user',
+                content: segment.text,
+                userInputKind: segment.kind,
+                ...(batchId ? {
+                    userInputBatchId: batchId,
+                    userInputBatchIndex: index + 1,
+                    userInputBatchSize: publicSegments.length,
+                } : {}),
+                timestamp: now + index,
+            });
         });
 
         setMessages(getCrosstimeMessages(room.id));
-
-        if (privateTarget) {
-            // 悄悄话 → 只触发目标角色单独回复
-            const target = privateTarget;
-            await triggerWhisperReply(room, target, text);
-        } else {
-            // 公开发言 → 触发导演
-            await triggerDirector(room);
-        }
+        // 公开输入 → 多个气泡作为同一轮现场刺激，再触发导演
+        await triggerDirector(room);
     };
 
     // ── Whisper Reply (1-on-1 private response) ──
     const triggerWhisperReply = useCallback(async (
-        currentRoom: CrosstimeRoom, target: CrosstimeParticipant, whisperText: string,
+        currentRoom: CrosstimeRoom, target: CrosstimeParticipant, whisperText: string, whisperKind: UserInputKind = 'speech',
     ) => {
         if (!apiConfig?.apiKey) return;
         setIsTyping(true);
@@ -368,7 +451,7 @@ const CrosstimeApp: React.FC = () => {
             const historyWithoutCurrent = whisperHistory.slice(0, -1);
 
             const prompt = buildWhisperReplyPrompt(
-                participantContext, historyWithoutCurrent, whisperText, userProfile, displayName,
+                participantContext, historyWithoutCurrent, whisperText, userProfile, displayName, whisperKind,
             );
 
             const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -377,11 +460,17 @@ const CrosstimeApp: React.FC = () => {
                 body: JSON.stringify({
                     model: apiConfig.model,
                     messages: [
-                        { role: 'system', content: DREAMWEAVER_SYSTEM + '\n你就是这个角色本身。按要求只输出悄悄话回复 JSON 数组，不解释规则，不加角色名前缀。' },
+                        {
+                            role: 'system',
+                            content: DREAMWEAVER_SYSTEM + `你现在是${displayName}。
+有人靠近你，压低声音，只对你说了一句话。
+按这一刻的本能反应输出 JSON 数组。
+不要解释，不要总结，不要加角色名前缀，不要输出 JSON 以外的任何内容。`,
+                        },
                         { role: 'user', content: prompt },
                     ],
                     temperature: 0.85,
-                    max_tokens: WHISPER_MAX_TOKENS,
+                    max_tokens: CROSSTIME_MAX_TOKENS,
                 }),
             });
 
@@ -389,7 +478,7 @@ const CrosstimeApp: React.FC = () => {
             const data = await safeResponseJson(response);
             let replyText = data.choices?.[0]?.message?.content || '';
             if (data.choices?.[0]?.finish_reason === 'length') {
-                console.warn('[Crosstime] Whisper reply reached max token limit:', WHISPER_MAX_TOKENS);
+                console.warn('[Crosstime] Whisper reply reached max token limit:', CROSSTIME_MAX_TOKENS);
             }
 
             // Strip thinking tags if present
@@ -463,12 +552,15 @@ const CrosstimeApp: React.FC = () => {
                         { role: 'user', content: prompt },
                     ],
                     temperature: 0.9,
-                    max_tokens: 4000,
+                    max_tokens: CROSSTIME_MAX_TOKENS,
                 }),
             });
 
             if (!response.ok) throw new Error('Director Failed');
             const data = await safeResponseJson(response);
+            if (data.choices?.[0]?.finish_reason === 'length') {
+                console.warn('[Crosstime] Director reached max token limit:', CROSSTIME_MAX_TOKENS);
+            }
             let jsonStr = data.choices[0].message.content;
 
             // Parse JSON
@@ -561,11 +653,15 @@ const CrosstimeApp: React.FC = () => {
                         { role: 'user', content: prompt },
                     ],
                     temperature: 0.4,
+                    max_tokens: CROSSTIME_MAX_TOKENS,
                 }),
             });
 
             if (!response.ok) throw new Error('Summary API failed');
             const data = await safeResponseJson(response);
+            if (data.choices?.[0]?.finish_reason === 'length') {
+                console.warn('[Crosstime] Summary reached max token limit:', CROSSTIME_MAX_TOKENS);
+            }
             const raw = data.choices?.[0]?.message?.content || '';
             const extracted = extractThinking(raw);
             let jsonStr = extracted.content.trim();
@@ -608,7 +704,9 @@ const CrosstimeApp: React.FC = () => {
         setMessages([]);
         setParticipants([]);
         setPrivateTarget(null);
+        setInputSegments([createInputSegment('speech')]);
         setWhisperInput('');
+        setWhisperInputKind('speech');
     };
 
     // ── View History ──
@@ -647,12 +745,13 @@ const CrosstimeApp: React.FC = () => {
                         const p = viewingRoom.participants.find(pp => pp.id === m.participantId);
                         const char = p ? characters.find(c => c.id === p.charId) : null;
                         const isUser = m.role === 'user';
+                        const userKind = isUser ? getUserInputKindLabel(m.userInputKind) : '';
                         return (
-                            <div key={m.id} className={`crosstime-msg ${isUser ? 'crosstime-msg--user' : ''} ${m.isPrivate ? 'crosstime-msg--private' : ''}`}>
+                            <div key={m.id} className={`crosstime-msg ${isUser ? 'crosstime-msg--user' : ''} ${m.userInputKind === 'action' ? 'crosstime-msg--user-action' : ''} ${m.isPrivate ? 'crosstime-msg--private' : ''}`}>
                                 <img className={`crosstime-msg-avatar ${p?.timeSlice === 'trajectory' ? 'crosstime-msg-avatar--past' : ''}`}
                                      src={isUser ? userProfile.avatar : (char?.avatar || '')} alt="" />
                                 <div className="crosstime-msg-body">
-                                    <div className="crosstime-msg-name">{isUser ? userProfile.name : getTimelineLabel(p)}</div>
+                                    <div className="crosstime-msg-name">{isUser ? userProfile.name : getTimelineLabel(p)}{isUser && <span className="crosstime-msg-kind"> · {userKind}</span>}</div>
                                     <div className="crosstime-msg-bubble">{m.content}</div>
                                 </div>
                             </div>
@@ -688,8 +787,8 @@ const CrosstimeApp: React.FC = () => {
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>
                     </button>
                     <div className="crosstime-header-text">
-                        <div className="crosstime-header-title">跨时空对话</div>
-                        <div className="crosstime-header-subtitle crosstime-header-subtitle--script">Across the Worldlines</div>
+                        <div className="crosstime-header-title">对影</div>
+                        <div className="crosstime-header-subtitle crosstime-header-subtitle--script">举杯邀明月，对影成几人</div>
                     </div>
                     <button className={`crosstime-header-mode-btn ${isInvisible ? 'crosstime-header-mode-btn--invisible' : ''}`} onClick={toggleMode}>
                         {isInvisible ? '隐身中' : '现身中'}
@@ -736,12 +835,13 @@ const CrosstimeApp: React.FC = () => {
                         const p = room.participants.find(pp => pp.id === m.participantId);
                         const char = p ? characters.find(c => c.id === p.charId) : null;
                         const isUser = m.role === 'user';
+                        const userKind = isUser ? getUserInputKindLabel(m.userInputKind) : '';
                         return (
-                            <div key={m.id} className={`crosstime-msg ${isUser ? 'crosstime-msg--user' : ''} ${m.isPrivate ? 'crosstime-msg--private' : ''}`}>
+                            <div key={m.id} className={`crosstime-msg ${isUser ? 'crosstime-msg--user' : ''} ${m.userInputKind === 'action' ? 'crosstime-msg--user-action' : ''} ${m.isPrivate ? 'crosstime-msg--private' : ''}`}>
                                 <img className={`crosstime-msg-avatar ${p?.timeSlice === 'trajectory' ? 'crosstime-msg-avatar--past' : ''}`}
                                      src={isUser ? userProfile.avatar : (char?.avatar || '')} alt="" />
                                 <div className="crosstime-msg-body">
-                                    <div className="crosstime-msg-name">{isUser ? userProfile.name : getTimelineLabel(p)}</div>
+                                    <div className="crosstime-msg-name">{isUser ? userProfile.name : getTimelineLabel(p)}{isUser && <span className="crosstime-msg-kind"> · {userKind}</span>}</div>
                                     <div className="crosstime-msg-bubble">{m.content}</div>
                                 </div>
                             </div>
@@ -776,22 +876,69 @@ const CrosstimeApp: React.FC = () => {
                     </div>
                 ) : (
                     <div className="crosstime-bottom-bar">
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                            <input className="crosstime-input"
-                                   placeholder="输入你想说的话"
-                                   value={input} onChange={e => setInput(e.target.value)}
-                                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                                   disabled={isTyping} />
+                        <div className="crosstime-composer">
+                            <div className="crosstime-input-segment-list">
+                                {inputSegments.map(segment => (
+                                    <div key={segment.id} className={`crosstime-input-segment crosstime-input-segment--${segment.kind}`}>
+                                        <div className="crosstime-input-segment-head">
+                                            <div className="crosstime-input-mode" role="tablist" aria-label="输入类型">
+                                                <button
+                                                    type="button"
+                                                    className={`crosstime-input-mode-btn ${segment.kind === 'speech' ? 'crosstime-input-mode-btn--active' : ''}`}
+                                                    onClick={() => updateInputSegment(segment.id, { kind: 'speech' })}
+                                                    disabled={isTyping}>
+                                                    说话
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className={`crosstime-input-mode-btn ${segment.kind === 'action' ? 'crosstime-input-mode-btn--active' : ''}`}
+                                                    onClick={() => updateInputSegment(segment.id, { kind: 'action' })}
+                                                    disabled={isTyping}>
+                                                    动作
+                                                </button>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                className="crosstime-input-remove"
+                                                onClick={() => removeInputSegment(segment.id)}
+                                                disabled={isTyping}
+                                                aria-label={inputSegments.length > 1 ? '删除这一段' : '清空这一段'}
+                                                title={inputSegments.length > 1 ? '删除这一段' : '清空这一段'}>
+                                                ×
+                                            </button>
+                                        </div>
+                                        <textarea className="crosstime-input"
+                                                  placeholder={segment.kind === 'action' ? '描述一个动作...' : '说一句话...'}
+                                                  value={segment.text}
+                                                  onChange={e => updateInputSegment(segment.id, { text: e.target.value })}
+                                                  onKeyDown={handleComposerKeyDown}
+                                                  disabled={isTyping}
+                                                  rows={1} />
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="crosstime-input-actions">
+                                <button type="button" className="crosstime-input-add-btn" onClick={() => addInputSegment('speech')} disabled={isTyping}>
+                                    + 说话
+                                </button>
+                                <button type="button" className="crosstime-input-add-btn" onClick={() => addInputSegment('action')} disabled={isTyping}>
+                                    + 动作
+                                </button>
+                            </div>
                         </div>
-                        <button className="crosstime-send-btn" onClick={handleSend} disabled={isTyping || !input.trim()}>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-                        </button>
-                        <button className="crosstime-director-btn" onClick={() => triggerDirector(room)} disabled={isTyping} title="让角色继续对话">
-                            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M5 12h11" />
-                                <path d="m13 7 5 5-5 5" />
-                            </svg>
-                        </button>
+                        {hasPublicInput ? (
+                            <button className="crosstime-send-btn" onClick={handleSend} disabled={isTyping}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                            </button>
+                        ) : (
+                            <button className="crosstime-director-btn" onClick={() => triggerDirector(room)} disabled={isTyping} title="让现场自然推进一轮">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M5 12h11" />
+                                    <path d="m13 7 5 5-5 5" />
+                                </svg>
+                                推进现场
+                            </button>
+                        )}
                     </div>
                 )}
 
@@ -824,10 +971,11 @@ const CrosstimeApp: React.FC = () => {
                                     <div className="crosstime-whisper-empty">还没有悄悄话。</div>
                                 ) : whisperMessages.map(m => {
                                     const isUserWhisper = m.role === 'user';
+                                    const userKind = isUserWhisper ? getUserInputKindLabel(m.userInputKind) : '';
                                     return (
-                                        <div key={m.id} className={`crosstime-whisper-msg ${isUserWhisper ? 'crosstime-whisper-msg--user' : ''}`}>
+                                        <div key={m.id} className={`crosstime-whisper-msg ${isUserWhisper ? 'crosstime-whisper-msg--user' : ''} ${m.userInputKind === 'action' ? 'crosstime-whisper-msg--action' : ''}`}>
                                             <div className="crosstime-whisper-msg-name">
-                                                {isUserWhisper ? userProfile.name : getTimelineLabel(privateTarget)}
+                                                {isUserWhisper ? userProfile.name : getTimelineLabel(privateTarget)}{isUserWhisper && ` · ${userKind}`}
                                             </div>
                                             <div className="crosstime-whisper-msg-bubble">{m.content}</div>
                                         </div>
@@ -839,12 +987,31 @@ const CrosstimeApp: React.FC = () => {
                             </div>
 
                             <div className="crosstime-whisper-input-row">
-                                <input className="crosstime-whisper-input"
-                                       value={whisperInput}
-                                       onChange={e => setWhisperInput(e.target.value)}
-                                       onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                                       placeholder="写下只想让他听见的话"
-                                       disabled={isTyping} />
+                                <div className="crosstime-whisper-composer">
+                                    <div className="crosstime-input-mode crosstime-input-mode--whisper" role="tablist" aria-label="悄悄话输入类型">
+                                        <button
+                                            type="button"
+                                            className={`crosstime-input-mode-btn ${whisperInputKind === 'speech' ? 'crosstime-input-mode-btn--active' : ''}`}
+                                            onClick={() => setWhisperInputKind('speech')}
+                                            disabled={isTyping}>
+                                            低语
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`crosstime-input-mode-btn ${whisperInputKind === 'action' ? 'crosstime-input-mode-btn--active' : ''}`}
+                                            onClick={() => setWhisperInputKind('action')}
+                                            disabled={isTyping}>
+                                            动作
+                                        </button>
+                                    </div>
+                                    <textarea className="crosstime-whisper-input"
+                                              value={whisperInput}
+                                              onChange={e => setWhisperInput(e.target.value)}
+                                              onKeyDown={handleComposerKeyDown}
+                                              placeholder={whisperPlaceholder}
+                                              disabled={isTyping}
+                                              rows={1} />
+                                </div>
                                 <button className="crosstime-send-btn" onClick={handleSend} disabled={isTyping || !whisperInput.trim()}>
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
                                 </button>
@@ -866,13 +1033,51 @@ const CrosstimeApp: React.FC = () => {
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>
                 </button>
                 <div className="crosstime-header-text">
-                    <div className="crosstime-header-title">跨时空对话</div>
-                    <div className="crosstime-header-subtitle crosstime-header-subtitle--script">Across the Worldlines</div>
+                    <div className="crosstime-header-title">对影</div>
+                    <div className="crosstime-header-subtitle crosstime-header-subtitle--script">举杯邀明月，对影成几人</div>
                 </div>
             </div>
 
             <div className="crosstime-setup-scroll">
-                <div className="crosstime-setup-intro">选择多个不同时间线的他。</div>
+                <section className="crosstime-setup-hero" aria-label="对影入口">
+                    <div className="crosstime-setup-hero-top">
+                        <div>
+                            <div className="crosstime-setup-hero-title">对影</div>
+                            <div className="crosstime-setup-hero-subtitle">举杯邀明月，对影成几人</div>
+                        </div>
+                        <span className="crosstime-setup-hero-signal">SIGNAL</span>
+                    </div>
+                    <div className="crosstime-setup-hero-copy">
+                        <span>让不同时期的他，</span>
+                        <span>在同一个空间里相遇。</span>
+                    </div>
+                    <div className="crosstime-setup-hero-meta">{setupAccessText}</div>
+                    <div className="crosstime-setup-axis" aria-hidden="true">
+                        <span className="crosstime-setup-axis-point">AGE 06</span>
+                        <span className="crosstime-setup-axis-line" />
+                        <span className="crosstime-setup-axis-point">AGE 18</span>
+                        <span className="crosstime-setup-axis-line" />
+                        <span className="crosstime-setup-axis-point crosstime-setup-axis-point--now">NOW</span>
+                        <span className="crosstime-setup-axis-line" />
+                        <span className="crosstime-setup-axis-point">AFTER</span>
+                    </div>
+                    <div className="crosstime-setup-hero-actions">
+                        <button
+                            type="button"
+                            className="crosstime-setup-hero-btn crosstime-setup-hero-btn--primary"
+                            onClick={openAddParticipant}
+                            disabled={!canSelectMoreSlices}>
+                            选择时间线
+                        </button>
+                        <button
+                            type="button"
+                            className="crosstime-setup-hero-btn crosstime-setup-hero-btn--secondary"
+                            onClick={handleStartRoom}
+                            disabled={startDisabled}>
+                            进入对话
+                        </button>
+                    </div>
+                </section>
 
                 <div className="crosstime-section-title">已选择的时间线</div>
                 {selectedBaseChar && (
@@ -896,19 +1101,6 @@ const CrosstimeApp: React.FC = () => {
                         );
                     })}
                 </div>
-
-                {participants.length < MAX_PARTICIPANTS && (
-                    <button className="crosstime-add-btn" onClick={openAddParticipant} disabled={!canAddMoreSlices}>
-                        {selectedBaseChar
-                            ? (canAddMoreSlices ? '+ 添加时间线' : '没有更多时间线')
-                            : '+ 添加时间线'}
-                    </button>
-                )}
-
-                <button className="crosstime-start-btn" onClick={handleStartRoom}
-                        disabled={participants.length < 2 || !apiConfig?.apiKey}>
-                    开始对话
-                </button>
 
                 {/* History */}
                 {historyRooms.length > 0 && (

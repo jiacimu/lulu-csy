@@ -38,6 +38,11 @@ import {
 } from '../utils/agentBackendClient';
 import { buildLifeProfileContextSnapshot } from '../utils/lifeProfileContextSnapshot';
 import { formatMemoryArchiveLine,selectMessagesForMemoryArchive } from '../utils/archiveMessageSelector';
+import {
+    getCalendarDisplayLabels,
+    loadCalendarContextForCharacter,
+    type CalendarContext,
+} from '../utils/calendarContext';
 
 function toAgentApiConfig(value: unknown): AgentApiConfig | undefined {
     const record = value as Partial<AgentApiConfig> | undefined;
@@ -55,6 +60,10 @@ function isMainChatVisibleMessage(message: Message): boolean {
     return source !== 'date' && source !== 'theater';
 }
 
+type ScopedAgentTodayScheduleState = AgentTodayScheduleState & {
+    charId: string;
+};
+
 const Chat: React.FC = () => {
     const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, closeApp, openApp, appParams, customThemes, removeCustomTheme, addToast, userProfile, lastMsgTimestamp, groups, clearUnread, realtimeConfig, ttsConfig, sttConfig, isDataLoaded } = useOS();
     const [messages, setMessages] = useState<Message[]>([]);
@@ -65,7 +74,8 @@ const Chat: React.FC = () => {
     ));
     const [todayLifeSyncText, setTodayLifeSyncText] = useState('');
     const [todayLifeSyncTone, setTodayLifeSyncTone] = useState<'soft' | 'ready'>('soft');
-    const [todaySchedule, setTodaySchedule] = useState<AgentTodayScheduleState | null>(null);
+    const [todaySchedule, setTodaySchedule] = useState<ScopedAgentTodayScheduleState | null>(null);
+    const [calendarContext, setCalendarContext] = useState<CalendarContext | null>(null);
     const [isTodayScheduleOpen, setIsTodayScheduleOpen] = useState(false);
     const [isTodayScheduleLoading, setIsTodayScheduleLoading] = useState(false);
     const [showManualScheduleForm, setShowManualScheduleForm] = useState(false);
@@ -96,11 +106,13 @@ const Chat: React.FC = () => {
     const scrollThrottleRef = useRef(0);
     const visibleCountRef = useRef(30);
     const activeCharIdRef = useRef(activeCharacterId);
+    const currentChatCharIdRef = useRef<string | undefined>(activeCharacterId || undefined);
     const lifeStreamVisibleRef = useRef(lifeStreamVisibleInChat);
     const consumedTargetRef = useRef('');
     const pendingTargetScrollRef = useRef(false);
     const messagesRef = useRef<Message[]>(messages);
     const todayLifeEnsureSeqRef = useRef(0);
+    const todayScheduleRequestSeqRef = useRef(0);
     const todayLifeSlowTimerRef = useRef<number | null>(null);
     const todayLifeHideTimerRef = useRef<number | null>(null);
     const lastTodayLifeEnsureKeyRef = useRef('');
@@ -213,6 +225,7 @@ const Chat: React.FC = () => {
         ? characters.find(c => c.id === activeCharacterId)
         : undefined;
     const char = matchedChar || (isDataLoaded ? characters[0] : undefined);
+    currentChatCharIdRef.current = char?.id;
     const currentThemeId = char?.bubbleStyle || 'default';
     const activeTheme = useMemo(() => customThemes.find(t => t.id === currentThemeId) || PRESET_THEMES[currentThemeId] || PRESET_THEMES.default, [currentThemeId, customThemes]);
     const characterTtsConfig = useMemo(
@@ -249,22 +262,41 @@ const Chat: React.FC = () => {
         };
     }, [char, userProfile.name]);
 
+    const refreshCalendarContext = useCallback(async () => {
+        if (!char?.id) {
+            setCalendarContext(null);
+            return;
+        }
+        const charIdAtStart = char.id;
+        const result = await loadCalendarContextForCharacter(charIdAtStart);
+        if (currentChatCharIdRef.current !== charIdAtStart) return;
+        setCalendarContext(result);
+    }, [char?.id]);
+
     const refreshTodaySchedule = useCallback(async (visible = false) => {
         if (!char) return;
+        const charIdAtStart = char.id;
+        const requestSeq = todayScheduleRequestSeqRef.current + 1;
+        todayScheduleRequestSeqRef.current = requestSeq;
+        void refreshCalendarContext();
         if (visible) setIsTodayScheduleLoading(true);
         try {
-            const result = await fetchAgentTodaySchedule(char.id);
-            setTodaySchedule(result);
+            const result = await fetchAgentTodaySchedule(charIdAtStart);
+            if (currentChatCharIdRef.current !== charIdAtStart || todayScheduleRequestSeqRef.current !== requestSeq) return;
+            setTodaySchedule({ ...result, charId: charIdAtStart });
         } catch (error) {
+            if (currentChatCharIdRef.current !== charIdAtStart || todayScheduleRequestSeqRef.current !== requestSeq) return;
             if (visible) {
                 addToast('今日行程暂时没有接上，可以稍后再看。', 'info');
             } else {
                 console.warn('[Chat] Today schedule fetch failed:', error instanceof Error ? error.message : error);
             }
         } finally {
-            if (visible) setIsTodayScheduleLoading(false);
+            if (visible && currentChatCharIdRef.current === charIdAtStart) {
+                setIsTodayScheduleLoading(false);
+            }
         }
-    }, [addToast, char]);
+    }, [addToast, char, refreshCalendarContext]);
 
     const handleOpenTodaySchedule = useCallback(() => {
         setIsTodayScheduleOpen(true);
@@ -273,6 +305,7 @@ const Chat: React.FC = () => {
 
     const handleSaveManualSchedule = useCallback(async () => {
         if (!char) return;
+        const charIdAtStart = char.id;
         const title = manualScheduleDraft.title.trim();
         const description = manualScheduleDraft.description.trim();
         const timeHint = manualScheduleDraft.timeHint.trim() || '稍后';
@@ -284,7 +317,7 @@ const Chat: React.FC = () => {
         setManualScheduleSaving(true);
         try {
             const contextSnapshot = await buildTodayLifeContextSnapshot();
-            const result = await saveAgentScheduleRevision(char.id, {
+            const result = await saveAgentScheduleRevision(charIdAtStart, {
                 changeType: 'insert',
                 newSchedule: {
                     startTime: manualScheduleDraft.startTime.trim() || undefined,
@@ -297,7 +330,8 @@ const Chat: React.FC = () => {
                 reason: manualScheduleDraft.reason.trim() || '由你手动写入今日行程。',
                 innerVoice: manualScheduleDraft.innerVoice.trim(),
             }, contextSnapshot || undefined);
-            setTodaySchedule(result);
+            if (currentChatCharIdRef.current !== charIdAtStart) return;
+            setTodaySchedule({ ...result, charId: charIdAtStart });
             setShowManualScheduleForm(false);
             setManualScheduleDraft({ startTime: '', endTime: '', timeHint: '', title: '', description: '', reason: '', innerVoice: '' });
             addToast('今日行程已写入。', 'success');
@@ -311,12 +345,13 @@ const Chat: React.FC = () => {
 
     const syncTodayLife = useCallback(async (visible: boolean) => {
         if (!char) return;
+        const charIdAtStart = char.id;
         const recentKey = messagesRef.current
             .filter(message => message.role === 'user' || message.role === 'assistant')
             .slice(-8)
             .map(message => `${message.id}:${message.timestamp}`)
             .join('|');
-        const requestKey = `${char.id}:${recentKey}`;
+        const requestKey = `${charIdAtStart}:${recentKey}`;
         if (!visible && lastTodayLifeEnsureKeyRef.current === requestKey) return;
         lastTodayLifeEnsureKeyRef.current = requestKey;
 
@@ -336,10 +371,12 @@ const Chat: React.FC = () => {
 
         try {
             const contextSnapshot = await buildTodayLifeContextSnapshot();
+            if (currentChatCharIdRef.current !== charIdAtStart) return;
             if (!contextSnapshot) return;
-            const result = await ensureAgentTodayLife(char.id, contextSnapshot, {
+            const result = await ensureAgentTodayLife(charIdAtStart, contextSnapshot, {
                 mainApiConfig: toAgentApiConfig(apiConfig),
             });
+            if (currentChatCharIdRef.current !== charIdAtStart) return;
             if (visible) {
                 if (todayLifeEnsureSeqRef.current !== seq) return;
                 clearTodayLifeTimers();
@@ -381,12 +418,29 @@ const Chat: React.FC = () => {
     }, [char?.id, isDataLoaded, syncTodayLife]);
 
     useEffect(() => {
+        todayLifeEnsureSeqRef.current += 1;
+        todayScheduleRequestSeqRef.current += 1;
+        lastTodayLifeEnsureKeyRef.current = '';
+        clearTodayLifeTimers();
+        setTodayLifeSyncText('');
+        setTodaySchedule(null);
+        setIsTodayScheduleLoading(false);
+        setShowManualScheduleForm(false);
         if (!char) {
             setIsTodayScheduleEntryHidden(false);
+            setCalendarContext(null);
             return;
         }
         setIsTodayScheduleEntryHidden(localStorage.getItem(`chat_today_schedule_entry_hidden_${char.id}`) === 'true');
-    }, [char?.id]);
+    }, [char?.id, clearTodayLifeTimers]);
+
+    useEffect(() => {
+        if (!isDataLoaded || !char) {
+            setCalendarContext(null);
+            return;
+        }
+        void refreshCalendarContext();
+    }, [char?.id, isDataLoaded, refreshCalendarContext]);
 
     useEffect(() => {
         if (!isDataLoaded || !char) {
@@ -1761,9 +1815,12 @@ const Chat: React.FC = () => {
         return null;
     }, [displayMessages]);
 
-    const todayScheduleItems = todaySchedule?.effectiveItems || [];
-    const todayScheduleRevisionCount = todaySchedule?.revisions?.length || 0;
-    const todayScheduleBadgeText = todaySchedule?.status === 'failed'
+    const scopedTodaySchedule = todaySchedule?.charId === char?.id ? todaySchedule : null;
+    const todayScheduleItems = scopedTodaySchedule?.effectiveItems || [];
+    const todayScheduleRevisionCount = scopedTodaySchedule?.revisions?.length || 0;
+    const todayCalendarLabels = calendarContext?.todayLabels || [];
+    const { visibleLabels: visibleTodayCalendarLabels, hiddenCount: hiddenTodayCalendarLabelCount } = getCalendarDisplayLabels(todayCalendarLabels);
+    const todayScheduleBadgeText = scopedTodaySchedule?.status === 'failed'
         ? '未接上'
         : todayScheduleRevisionCount > 0
             ? `${todayScheduleRevisionCount} 处改写`
@@ -2295,10 +2352,26 @@ const Chat: React.FC = () => {
                                 >
                                     手动写入
                                 </button>
-                                {todaySchedule?.localDate && (
-                                    <span className="rounded-full bg-white px-3 py-1.5 text-[12px] tracking-[0.03em] text-[#9a8d82] shadow-sm">
-                                        {todaySchedule.localDate}
-                                    </span>
+                                {(scopedTodaySchedule?.localDate || calendarContext?.localDate) && (
+                                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                        <span className="rounded-full bg-white px-3 py-1.5 text-[12px] tracking-[0.03em] text-[#9a8d82] shadow-sm">
+                                            {scopedTodaySchedule?.localDate || calendarContext?.localDate}
+                                        </span>
+                                        {visibleTodayCalendarLabels.map(label => (
+                                            <span
+                                                key={`${label.kind}-${label.id}`}
+                                                className="max-w-[9rem] truncate rounded-full border border-[#f0d5cc] bg-[#fff4f0] px-2.5 py-1 text-[11px] tracking-[0.03em] text-[#c47770] shadow-sm"
+                                                title={label.title}
+                                            >
+                                                {label.title}
+                                            </span>
+                                        ))}
+                                        {hiddenTodayCalendarLabelCount > 0 && (
+                                            <span className="rounded-full bg-white px-2.5 py-1 text-[11px] tracking-[0.03em] text-[#b0968b] shadow-sm">
+                                                +{hiddenTodayCalendarLabelCount}
+                                            </span>
+                                        )}
+                                    </div>
                                 )}
                             </div>
 
@@ -2377,7 +2450,7 @@ const Chat: React.FC = () => {
                                 <div className="rounded-[22px] border border-dashed border-[#dccfc2] bg-white/70 px-4 py-8 text-center text-[15px] leading-relaxed tracking-[0.03em] text-[#9a8d82]">
                                     {isTodayScheduleLoading
                                         ? '正在靠近 ta 今天的行程...'
-                                        : todaySchedule?.visibleMessage || '今天的行程还没有稳定内容，可以先聊天，或稍后再打开看看。'}
+                                        : scopedTodaySchedule?.visibleMessage || '今天的行程还没有稳定内容，可以先聊天，或稍后再打开看看。'}
                                 </div>
                             ) : (
                                 <div className="overflow-hidden rounded-[22px] border border-[#eadfd2] bg-[#fffdf8]/90 shadow-[0_12px_30px_rgba(80,62,44,0.06)]">

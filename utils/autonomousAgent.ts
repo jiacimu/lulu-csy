@@ -17,6 +17,7 @@ import { buildCoreMemoryDigest,buildMountedWorldbooksDigest } from './agentConte
 import { getPrimaryApiConfig as getRuntimePrimaryApiConfig,getRealtimeConfig } from './runtimeConfig';
 import { buildCurrentLifeAnchorForCharacter } from './lifeAnchor';
 import { formatMessageForContext,shouldIncludeMessageInContext } from './messageContext';
+import { loadCalendarContextForCharacter, type CalendarContext } from './calendarContext';
 import {
     readJsonStorage,
     safeLocalStorageGet,
@@ -80,6 +81,7 @@ type ContextSnapshot = {
     emojiNames: string[];
     topMemory?: string;
     lifeContextAnchor?: ReturnType<typeof buildCurrentLifeAnchorForCharacter>;
+    calendarContext?: CalendarContext;
     updatedAt: number;
 };
 
@@ -397,6 +399,7 @@ export async function buildContextSnapshot(
         ? (char.cityReferenceReal?.trim() || undefined)
         : undefined;
     const lifeContextAnchor = buildCurrentLifeAnchorForCharacter(char, recentMessages);
+    const calendarContext = await loadCalendarContextForCharacter(charId);
 
     return {
         charId,
@@ -432,6 +435,7 @@ export async function buildContextSnapshot(
         emojiNames,
         topMemory,
         lifeContextAnchor,
+        calendarContext,
         updatedAt: now,
     };
 }

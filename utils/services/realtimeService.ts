@@ -5,6 +5,7 @@
 
 import { safeResponseJson } from '../safeApi';
 import { buildBackendUrl } from '../backendClient';
+import { getFixedSpecialDateTitles } from '../calendarContext';
 
 export interface WeatherData {
     temp: number;
@@ -88,24 +89,6 @@ let weatherCache: { data: WeatherData | null; timestamp: number } = { data: null
 let newsCache: { data: NewsItem[]; timestamp: number } = { data: [], timestamp: 0 };
 let hotSearchCache: { data: any[]; timestamp: number } = { data: [], timestamp: 0 };
 let aihotCache: { data: any[]; timestamp: number } = { data: [], timestamp: 0 };
-
-// 特殊日期表
-const SPECIAL_DATES: Record<string, string> = {
-    '01-01': '元旦',
-    '02-14': '情人节',
-    '03-08': '妇女节',
-    '03-12': '植树节',
-    '04-01': '愚人节',
-    '05-01': '劳动节',
-    '05-04': '青年节',
-    '06-01': '儿童节',
-    '09-10': '教师节',
-    '10-01': '国庆节',
-    '10-31': '万圣节',
-    '11-11': '光棍节',
-    '12-24': '平安夜',
-    '12-25': '圣诞节'
-};
 
 export const RealtimeContextManager = {
 
@@ -372,19 +355,7 @@ export const RealtimeContextManager = {
      * 检查特殊日期
      */
     checkSpecialDates: (): string[] => {
-        const now = new Date();
-        const monthDay = `${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
-
-        const special: string[] = [];
-
-        if (SPECIAL_DATES[monthDay]) {
-            special.push(SPECIAL_DATES[monthDay]);
-        }
-
-        // 检查农历节日（简化版，只检查大概日期）
-        // 这里可以后续接入农历API
-
-        return special;
+        return getFixedSpecialDateTitles(new Date());
     },
 
     /**

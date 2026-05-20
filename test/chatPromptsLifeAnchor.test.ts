@@ -9,6 +9,7 @@ vi.mock('../utils/context', () => ({
 vi.mock('../utils/db', () => ({
     DB: {
         getGroupMessages: vi.fn(async () => []),
+        getAllAnniversaries: vi.fn(async () => []),
     },
 }));
 
@@ -48,6 +49,7 @@ vi.mock('../utils/temporalContext', () => ({
 
 import { ChatPrompts } from '../utils/chatPrompts';
 import type { CharacterProfile, Message, UserProfile } from '../types';
+import { DB } from '../utils/db';
 
 function character(): CharacterProfile {
     return {
@@ -113,6 +115,32 @@ describe('ChatPrompts life anchor injection', () => {
         expect(systemPrompt).toContain('### 【当前日程锚点】');
         expect(systemPrompt).toContain('旧聊天、旧生活碎片、旧记忆');
         expect(systemPrompt.indexOf('### 【当前日程锚点】')).toBeLessThan(systemPrompt.indexOf('Step 2 — 现实锚定'));
+        vi.useRealTimers();
+    });
+
+    it('injects today and upcoming calendar context without forcing it every reply', async () => {
+        vi.mocked(DB.getAllAnniversaries).mockResolvedValue([
+            { id: 'anni-1', title: '相识纪念日', date: '2026-05-20', charId: 'char-life-anchor' },
+            { id: 'anni-2', title: '别人的纪念日', date: '2026-05-20', charId: 'other-char' },
+            { id: 'anni-3', title: '第一次约会', date: '2026-05-22', charId: 'char-life-anchor' },
+        ] as any);
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 4, 20, 9, 0, 0));
+
+        const systemPrompt = await ChatPrompts.buildSystemPrompt(
+            character(),
+            user(),
+            [],
+            [],
+            [],
+            [],
+        );
+
+        expect(systemPrompt).toContain('### 【特殊日期与纪念日】');
+        expect(systemPrompt).toContain('今天: 520、相识纪念日');
+        expect(systemPrompt).toContain('未来7天: 2天后 第一次约会（2026-05-22）');
+        expect(systemPrompt).toContain('不需要每次都主动提，也不要硬转节日话题');
+        expect(systemPrompt).not.toContain('别人的纪念日');
         vi.useRealTimers();
     });
 });

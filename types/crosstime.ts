@@ -32,6 +32,10 @@ export interface CrosstimeMessage {
     charId: string;                          // 冗余存储，用于快速查找头像/名字
     role: 'user' | 'assistant' | 'system';
     content: string;
+    userInputKind?: 'speech' | 'action';     // user 消息：公开发言 or 现场动作
+    userInputBatchId?: string;               // 同一次发送拆出的多段输入
+    userInputBatchIndex?: number;            // 多段输入中的顺序（从 1 开始）
+    userInputBatchSize?: number;             // 同一次发送的总段数
     isPrivate?: boolean;                     // 用户私聊某切片的标记
     privateTargetId?: string;                // 私聊目标的 participantId
     timestamp: number;

@@ -242,7 +242,7 @@ function withAgentProtocolQuery(
 function getTimeoutMs(path: string): number {
     if (path.startsWith('/api/agent/start')) return 45000;
     if (path.startsWith('/api/agent/life-profile/generate')) return 180000;
-    if (path.startsWith('/api/agent/today-life/ensure')) return 60000;
+    if (path.startsWith('/api/agent/today-life/ensure')) return 180000;
     if (path.startsWith('/api/agent/today-life/revision/generate')) return 60000;
     return 15000;
 }
