@@ -85,6 +85,12 @@ function formatExtractionTimestamp(timestamp: number): string {
     });
 }
 
+function isRecoverableHormoneBackfillFailure(message: string): boolean {
+    if (!message.trim()) return false;
+    return /\b(?:408|429|500|502|503|504)\b/.test(message)
+        || /timeout|network|failed to fetch|service unavailable|aborted/i.test(message);
+}
+
 const MemoryCenter: React.FC<MemoryCenterProps> = ({
     memories,
     refinedMemories,
@@ -926,6 +932,35 @@ const MemoryCenter: React.FC<MemoryCenterProps> = ({
                 addToast(`Emotion backfill cancelled (${finalJob.completedItems} completed)`, 'info');
             } else if (finalJob.status === 'completed') {
                 addToast(`Emotion backfill completed: ${finalJob.completedItems} memories updated`, 'success');
+            } else if (finalJob.status === 'failed' && isRecoverableHormoneBackfillFailure(failedDetail)) {
+                setBackfillProgress('后端代调连续失败，正在改用本机直连副 API...');
+                const recoverySync = await syncHormoneProgressFromCloud();
+                const remainingMemories = listNeedHormoneBackfill(recoverySync.latestVmList);
+
+                if (remainingMemories.length === 0) {
+                    addToast(
+                        recoverySync.syncedCount > 0
+                            ? `Recovered ${recoverySync.syncedCount} hormone snapshots from cloud. All memories are already up to date`
+                            : 'All memories are already up to date on the backend',
+                        'info',
+                    );
+                    return;
+                }
+
+                if (recoverySync.syncedCount > 0) {
+                    addToast(
+                        `Recovered ${recoverySync.syncedCount} hormone snapshots from cloud, ${remainingMemories.length} memories will continue locally`,
+                        'info',
+                    );
+                }
+
+                await runLocalHormoneBackfillFallback(
+                    remainingMemories,
+                    currentCharName,
+                    subApiConfig,
+                    failedDetail ? `后端代调失败：${failedDetail}` : '后端代调失败',
+                );
+                return;
             } else {
                 addToast(
                     failedDetail

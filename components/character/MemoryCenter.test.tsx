@@ -296,6 +296,52 @@ describe('MemoryCenter hormone backfill flow', () => {
         });
     });
 
+    it('falls back to local hormone backfill when the accepted backend job fails with retryable LLM errors', async () => {
+        mockedRunHormoneBackfillJobFlow.mockResolvedValue({
+            createResult: {
+                job: makeJob('processing'),
+            },
+            finalDetail: {
+                job: makeJob('failed', {
+                    totalItems: 29,
+                    completedItems: 0,
+                    failedItems: 29,
+                    error: 'Hormone LLM API error 503 (attempt 3/3)',
+                }),
+                items: [
+                    {
+                        id: 'item-1',
+                        jobId: 'job-1',
+                        memoryId: 'vm-1',
+                        status: 'failed',
+                        attempts: 3,
+                        lastError: 'Hormone LLM API error 503 (attempt 3/3)',
+                    },
+                ],
+            },
+            cancelled: false,
+        } as any);
+
+        const { addToast } = renderMemoryCenter();
+
+        await openVectorTabAndStartBackfill();
+
+        await waitFor(() => {
+            expect(mockedRunHormoneBackfillJobFlow).toHaveBeenCalledTimes(1);
+            expect(mockedBackfillHormoneSnapshots).toHaveBeenCalledWith(
+                [expect.objectContaining({ id: 'vm-1' })],
+                'Sully',
+                expect.objectContaining({ apiKey: 'sub-key' }),
+                expect.any(Function),
+                expect.any(AbortSignal),
+            );
+            expect(addToast).toHaveBeenCalledWith(
+                'Emotion backfill completed locally: 1 memories updated and synced to cloud',
+                'success',
+            );
+        });
+    });
+
     it('recovers cloud hormone progress before needing to restart the job flow', async () => {
         mockedRunHormoneBackfillJobFlow.mockImplementation(async () => {
             cloudMemories = [
