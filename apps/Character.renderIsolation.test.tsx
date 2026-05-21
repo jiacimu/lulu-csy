@@ -239,6 +239,7 @@ describe('Character render isolation', () => {
                 avatar: 'avatar-import.png',
                 description: '导入测试',
                 systemPrompt: '导入的人设',
+                hideBeforeMessageId: 999999,
                 memories: [{ date: '2026-05-04', summary: 'should be reset' }],
                 mountedWorldbooks: [{
                     id: 'wb-shared',
@@ -272,6 +273,7 @@ describe('Character render isolation', () => {
             memories: [],
             refinedMemories: {},
             activeMemoryMonths: [],
+            hideBeforeMessageId: undefined,
         }));
         expect(savedCharacter.mountedWorldbooks).toEqual([
             expect.objectContaining({

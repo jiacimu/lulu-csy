@@ -99,4 +99,18 @@ describe('voice call recent context', () => {
         expect(recentContext[0]?.id).toBe(10);
         expect(recentContext[recentContext.length - 1]?.id).toBe(55);
     });
+
+    it('ignores stale imported hideBeforeMessageId values that are beyond all local messages', () => {
+        const messages = [
+            createMessage({ id: 1, role: 'user', type: 'text', content: '导入后新消息' }),
+            createMessage({ id: 2, role: 'assistant', type: 'text', content: '导入后新回复' }),
+        ];
+
+        const recentContext = buildVoiceCallRecentContextMessages(messages, {
+            limit: 50,
+            hideBeforeMessageId: 999999,
+        });
+
+        expect(recentContext.map(message => message.id)).toEqual([1, 2]);
+    });
 });

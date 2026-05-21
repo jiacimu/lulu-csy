@@ -100,6 +100,70 @@ describe('ChatPrompts life anchor injection', () => {
         vi.useRealTimers();
     });
 
+    it('ignores stale imported history breakpoints when building chat context', () => {
+        const now = new Date(2026, 3, 29, 20, 0, 0).getTime();
+        const messages: Message[] = [
+            {
+                id: 1,
+                charId: 'char-life-anchor',
+                role: 'user',
+                type: 'text',
+                content: '这条不应该被旧断点吃掉',
+                timestamp: now - 60_000,
+            },
+            {
+                id: 2,
+                charId: 'char-life-anchor',
+                role: 'assistant',
+                type: 'text',
+                content: '我也应该保留在上下文里',
+                timestamp: now,
+            },
+        ];
+
+        const history = ChatPrompts.buildMessageHistory(
+            messages,
+            20,
+            { ...character(), hideBeforeMessageId: 999999 },
+            user(),
+            [],
+        );
+
+        expect(history.historySlice.map(message => message.id)).toEqual([1, 2]);
+    });
+
+    it('does not treat a missing breakpoint id as valid just because later messages exist', () => {
+        const now = new Date(2026, 3, 29, 20, 0, 0).getTime();
+        const messages: Message[] = [
+            {
+                id: 150,
+                charId: 'char-life-anchor',
+                role: 'user',
+                type: 'text',
+                content: '本地较早的新消息',
+                timestamp: now - 60_000,
+            },
+            {
+                id: 201,
+                charId: 'char-life-anchor',
+                role: 'assistant',
+                type: 'text',
+                content: '本地较新的回复',
+                timestamp: now,
+            },
+        ];
+
+        const history = ChatPrompts.buildMessageHistory(
+            messages,
+            20,
+            { ...character(), hideBeforeMessageId: 200 },
+            user(),
+            [],
+        );
+
+        expect(history.historySlice.map(message => message.id)).toEqual([150, 201]);
+    });
+
     it('places the schedule anchor before the COT reality anchoring section', async () => {
         const now = new Date(2026, 3, 29, 20, 0, 0).getTime();
         vi.setSystemTime(now);

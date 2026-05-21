@@ -7,6 +7,7 @@ import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
 import { AGENT_MESSAGE_SAVED_EVENT_NAME } from '../utils/autonomousAgent';
 import { ensureAgentTodayLife } from '../utils/agentBackendClient';
+import type { Message } from '../types';
 
 vi.mock('../context/OSContext', () => ({
     useOS: vi.fn(),
@@ -283,7 +284,7 @@ describe('Chat active character fallback', () => {
     });
 
     it('loads additional history through the lightweight message window', async () => {
-        const makeMessages = (count: number) => Array.from({ length: count }, (_, index) => ({
+        const makeMessages = (count: number): Message[] => Array.from({ length: count }, (_, index) => ({
             id: index + 1,
             charId: 'char-1',
             role: index % 2 === 0 ? 'user' : 'assistant',
@@ -310,6 +311,47 @@ describe('Chat active character fallback', () => {
         });
     });
 
+    it('ignores a stale imported history breakpoint so new chat messages stay visible', async () => {
+        const messages: Message[] = [
+            {
+                id: 1,
+                charId: 'char-1',
+                role: 'user',
+                type: 'text',
+                content: '新导入角色后的第一条消息',
+                timestamp: 1000,
+            },
+            {
+                id: 2,
+                charId: 'char-1',
+                role: 'assistant',
+                type: 'text',
+                content: '我能正常显示回复',
+                timestamp: 2000,
+            },
+        ];
+        mockedUseOS.mockReturnValue(buildOsContext({
+            characters: [{
+                id: 'char-1',
+                name: 'Sully',
+                avatar: 'sully.png',
+                hideBeforeMessageId: 999999,
+            }],
+            activeCharacterId: 'char-1',
+        }));
+        mockedDB.getRecentMessageWindow.mockResolvedValue({
+            messages,
+            hasMore: false,
+        });
+
+        render(<Chat />);
+
+        await waitFor(() => {
+            expect(screen.getByTestId('message-item-1')).toHaveTextContent('新导入角色后的第一条消息');
+            expect(screen.getByTestId('message-item-2')).toHaveTextContent('我能正常显示回复');
+        });
+    });
+
     it('opens the soul reflection panel with the active character name', async () => {
         mockedUseOS.mockReturnValue(buildOsContext({
             characters: [{ id: 'char-1', name: 'Sully', avatar: 'sully.png' }],
@@ -328,7 +370,7 @@ describe('Chat active character fallback', () => {
     });
 
     it('clears the selected message after choosing reply and allows another quote target', async () => {
-        const messages = [
+        const messages: Message[] = [
             {
                 id: 1,
                 charId: 'char-1',

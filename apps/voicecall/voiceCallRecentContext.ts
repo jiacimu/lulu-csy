@@ -1,4 +1,5 @@
 import type { Message } from '../../types';
+import { getEffectiveHistoryStartMessageId,isAfterHistoryStart } from '../../utils/historyStart';
 import { formatMessageForContext,shouldIncludeMessageInContext } from '../../utils/messageContext';
 
 export interface VoiceCallRecentContextMessage {
@@ -29,11 +30,11 @@ export function buildVoiceCallRecentContextMessages(
     options?: { limit?: number; hideBeforeMessageId?: number },
 ): VoiceCallRecentContextMessage[] {
     const limit = options?.limit ?? 50;
-    const hideBeforeMessageId = options?.hideBeforeMessageId;
+    const historyStartMessageId = getEffectiveHistoryStartMessageId(messages, options?.hideBeforeMessageId);
 
     const filtered = messages.filter((message) => {
         if (message.role !== 'user' && message.role !== 'assistant') return false;
-        if (hideBeforeMessageId && message.id < hideBeforeMessageId) return false;
+        if (!isAfterHistoryStart(message, historyStartMessageId)) return false;
         return shouldIncludeMessageInContext(message);
     });
 

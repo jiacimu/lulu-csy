@@ -21,6 +21,7 @@ import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { CloudStt,SttNotConfiguredError } from '../utils/cloudStt';
 import { haptic } from '../utils/haptics';
 import { withCharacterTtsVoice } from '../utils/characterTts';
+import { getEffectiveHistoryStartMessageId,isAfterHistoryStart } from '../utils/historyStart';
 import {
   BackendAgentManager,
   AGENT_MESSAGE_SAVED_EVENT_NAME,
@@ -1349,9 +1350,10 @@ const Chat: React.FC = () => {
             return;
         }
         const allMessages = selectMessagesForMemoryArchive(await DB.getMessagesByCharId(char.id));
+        const historyStartMessageId = getEffectiveHistoryStartMessageId(allMessages, char.hideBeforeMessageId);
         const msgsByDate: Record<string, Message[]> = {};
         allMessages
-            .filter(m => !char.hideBeforeMessageId || m.id >= char.hideBeforeMessageId)
+            .filter(m => isAfterHistoryStart(m, historyStartMessageId))
             .forEach(m => {
                 const d = new Date(m.timestamp);
                 const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -1763,17 +1765,19 @@ const Chat: React.FC = () => {
         setSelectedMsgIds(new Set());
     };
 
-    const displayMessages = useMemo(() => messages
-        .filter(isMainChatVisibleMessage)
-        .filter(m => (m.type as string) !== 'health_signal')  // 半糖健康感知：永远不在聊天UI显示
-        .filter(m => lifeStreamVisibleInChat || (m.type as string) !== 'lifestream')
-        .filter(m => !char?.hideBeforeMessageId || m.id >= char.hideBeforeMessageId)
-        .filter(m => {
-            if (char?.hideSystemLogs && m.role === 'system' && m.type !== 'call_log') return false;
-            return true;
-        })
-        .slice(-visibleCount),
-        [messages, char?.hideBeforeMessageId, char?.hideSystemLogs, lifeStreamVisibleInChat, visibleCount]);
+    const displayMessages = useMemo(() => {
+        const historyStartMessageId = getEffectiveHistoryStartMessageId(messages, char?.hideBeforeMessageId);
+        return messages
+            .filter(isMainChatVisibleMessage)
+            .filter(m => (m.type as string) !== 'health_signal')  // 半糖健康感知：永远不在聊天UI显示
+            .filter(m => lifeStreamVisibleInChat || (m.type as string) !== 'lifestream')
+            .filter(m => isAfterHistoryStart(m, historyStartMessageId))
+            .filter(m => {
+                if (char?.hideSystemLogs && m.role === 'system' && m.type !== 'call_log') return false;
+                return true;
+            })
+            .slice(-visibleCount);
+    }, [messages, char?.hideBeforeMessageId, char?.hideSystemLogs, lifeStreamVisibleInChat, visibleCount]);
 
     useEffect(() => {
         if (!highlightedMessageId) return;

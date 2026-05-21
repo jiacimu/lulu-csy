@@ -1107,6 +1107,7 @@ ${isInitialGeneration ? `
 
         const {
             id, memories, refinedMemories, activeMemoryMonths, impression,
+            hideBeforeMessageId,
             vectorMemoryEnabled, vectorMemoryAutoExtract, vectorMemoryExtractInterval,
             vectorMemoryLastExtractAt, vectorMemoryTakeover, vectorMemoryMode,
             ...cardProps
@@ -1194,6 +1195,7 @@ ${isInitialGeneration ? `
                     memories: [],
                     refinedMemories: {},
                     activeMemoryMonths: [],
+                    hideBeforeMessageId: undefined,
                     embeddedTheme: undefined
                 } as CharacterProfile;
 

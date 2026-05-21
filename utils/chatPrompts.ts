@@ -12,6 +12,7 @@ import { buildTemporalContext } from './temporalContext';
 import { buildCurrentLifeAnchorForCharacter,formatCurrentLifeAnchorForPrompt } from './lifeAnchor';
 import { formatMessageForContext,shouldIncludeMessageInContext } from './messageContext';
 import { formatCalendarContextForPrompt, loadCalendarContextForCharacter } from './calendarContext';
+import { getEffectiveHistoryStartMessageId,isAfterHistoryStart } from './historyStart';
 import type { PlaybackLyricSnapshot } from './playbackLyricsRuntime';
 
 const buildDateContextBridgePrompt = (messages: Message[], char: CharacterProfile, userProfile: UserProfile): string => {
@@ -1053,8 +1054,9 @@ Step 5 — 最后检查
         emojis: Emoji[]
     ) => {
         // Filter Logic
+        const historyStartMessageId = getEffectiveHistoryStartMessageId(messages, char.hideBeforeMessageId);
         const effectiveHistory = messages
-            .filter(m => !char.hideBeforeMessageId || m.id >= char.hideBeforeMessageId)
+            .filter(m => isAfterHistoryStart(m, historyStartMessageId))
             .filter(m => m.metadata?.source !== 'date')
             .filter(m => shouldIncludeMessageInContext(m));
         const historySlice = effectiveHistory.slice(-limit);
