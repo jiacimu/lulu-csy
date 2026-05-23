@@ -545,7 +545,7 @@ export const ChatParser = {
             .replace(/[【\[](?:语音通话|图片|视频|文件|位置|联系人|名片|红包)[】\]]/g, '')
             .replace(/[【\[]\s*(?:系统|System)\s*(?:提示|消息|通知)?\s*[：:]\s*[^\]】]*[】\]]\s*/gi, '')
             // ── Kill leaked internal prompt/protocol tags ──
-            .replace(/<\/?(?:rp_core|speech_soul|cot_protocol|dreamweaver|character_depth|behavior|no_nagging|no_deify|ability_boundary|anti_template|dynamics|equality|subtlety|CRITICAL_OUTPUT_FORMAT|think)>/gi, '')
+            .replace(/<\/?(?:rp_core|speech_soul|cot_protocol|dreamweaver|soft_devotion_chat_mode|character_depth|behavior|no_nagging|no_deify|ability_boundary|anti_template|dynamics|equality|subtlety|CRITICAL_OUTPUT_FORMAT|think)>/gi, '')
             // ── Strip backtick artifacts ──
             .replace(/`(\[\[[\s\S]*?\]\])`/g, '$1')
             .replace(/``+/g, '')

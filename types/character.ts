@@ -37,6 +37,15 @@ export interface PhoneCustomApp {
     prompt: string;
 }
 
+export interface StoryPhoneCustomApp {
+    id: string;
+    name: string;
+    icon: string;
+    color: string;
+    prompt: string;
+    installedAt: number;
+}
+
 export interface PhoneEvidence {
     id: string;
     type: 'chat' | 'order' | 'social' | 'delivery' | string;
@@ -117,6 +126,7 @@ export interface CharacterProfile {
     avatar: string;
     description: string;
     systemPrompt: string;
+    softDevotionChatMode?: boolean;
     worldview?: string;
     cityOverride?: string;
     cityAdcode?: string;
@@ -198,6 +208,10 @@ export interface CharacterProfile {
     phoneState?: {
         records?: PhoneEvidence[];
         customApps?: PhoneCustomApp[];
+    };
+
+    storyPhoneState?: {
+        customApps?: StoryPhoneCustomApp[];
     };
 
     // Vector Memory System

@@ -8,7 +8,7 @@ import { safeFetchJson } from '../utils/safeApi';
 import { haptic,playThemeNotification } from '../utils/haptics';
 import { THEME_PLUGINS } from '../components/chat/ThemeRegistry';
 import { VectorMemoryExtractor } from '../utils/vectorMemoryExtractor';
-import { MindSnapshotExtractor } from '../utils/mindSnapshotExtractor';
+import { MindSnapshotExtractor,type SecondaryFullContextOptions } from '../utils/mindSnapshotExtractor';
 import { loadCharacterGoals, formatGoalListStr } from '../utils/goalService';
 import { EventExtractor } from '../utils/eventExtractor';
 import { extractThinking, safeThinkingFallbackReply } from '../utils/thinkingExtractor';
@@ -105,7 +105,7 @@ export const useChatAI = ({
     const [tokenBreakdown, setTokenBreakdown] = useState<{ prompt: number; completion: number; total: number; msgCount: number; pass: string } | null>(null);
 
     // MindSnapshot retry context
-    const lastMindSnapshotCtx = useRef<{ char: any; aiContent: string; msgs: Message[]; config: any; goalListStr?: string } | null>(null);
+    const lastMindSnapshotCtx = useRef<{ char: any; aiContent: string; msgs: Message[]; config: any; goalListStr?: string; contextOptions?: SecondaryFullContextOptions } | null>(null);
 
     // 跨消息持久化的 noteId→xsecToken 缓存，避免 lastXhsNotes 局部变量每次 triggerAI 都重置
     const xsecTokenCacheRef = useRef<Map<string, string>>(new Map());
@@ -270,7 +270,11 @@ export const useChatAI = ({
 
             const [senseResult, systemPromptResult, playbackContext] = await Promise.all([
                 senseSecondaryConfig?.apiKey
-                    ? MindSnapshotExtractor.senseBefore(char, promptContextMsgs, senseSecondaryConfig, goalListStr, characterGoals)
+                    ? MindSnapshotExtractor.senseBefore(char, promptContextMsgs, senseSecondaryConfig, goalListStr, characterGoals, {
+                        userProfile,
+                        contextLimit: limit,
+                        allowMirrorLookup: false,
+                    })
                         .catch(e => { console.error('💭 [Sense] Parallel error:', e); return null; })
                     : Promise.resolve(null),
                 (async () => {
@@ -725,6 +729,16 @@ mode 可选值：
                 console.warn('[ChatContextMirror] save skipped:', error instanceof Error ? error.message : error);
             });
 
+            const secondaryFullContextOptions: SecondaryFullContextOptions = {
+                userProfile,
+                mirrorMessages: contextMirrorMessages,
+                mirrorAssistantReply: aiContent,
+                mirrorThinking: thinkingContent,
+                contextLimit: limit,
+                historyMsgCount,
+                model: apiConfig.model,
+            };
+
             if (aiContent) {
 
                 // Check for <翻译> XML tags (new bilingual format)
@@ -1144,7 +1158,7 @@ mode 可选值：
             const mindSecondaryConfig = selectSecondaryApiConfig();
             if (mindSecondaryConfig?.apiKey && aiContent) {
                 const charSnapshot = { ...char };
-                lastMindSnapshotCtx.current = { char: charSnapshot, aiContent, msgs: promptContextMsgs, config: mindSecondaryConfig, goalListStr };
+                lastMindSnapshotCtx.current = { char: charSnapshot, aiContent, msgs: promptContextMsgs, config: mindSecondaryConfig, goalListStr, contextOptions: secondaryFullContextOptions };
                 const statusMode = char.statusBarMode || 'classic';
                 // Skip card generation for modes that do not need a background status task.
                 if (statusMode === 'off' || statusMode === 'story_phone') { /* noop — bionic engine still runs */ }
@@ -1155,7 +1169,7 @@ mode 可选值：
                         // ── Classic inner voice ──
                         MindSnapshotExtractor.generateInnerVoice(charSnapshot, aiContent, promptContextMsgs, mindSecondaryConfig,
                             (reason) => addToast(reason, 'error'),
-                            true, goalListStr
+                            true, goalListStr, secondaryFullContextOptions
                         )
                             .then(newState => {
                                 if (newState && char && onMoodUpdate) {
@@ -1169,6 +1183,7 @@ mode 可选值：
                         // ── Freeform HTML card ──
                         MindSnapshotExtractor.generateFreeformCard(charSnapshot, aiContent, promptContextMsgs, mindSecondaryConfig,
                             (reason) => addToast(reason, 'error'),
+                            secondaryFullContextOptions,
                         )
                             .then(cardData => {
                                 if (cardData && char && onMoodUpdate) {
@@ -1187,6 +1202,7 @@ mode 可选值：
                             MindSnapshotExtractor.generateCustomCard(charSnapshot, aiContent, promptContextMsgs, mindSecondaryConfig,
                                 template,
                                 (reason) => addToast(reason, 'error'),
+                                secondaryFullContextOptions,
                             )
                                 .then(cardData => {
                                     if (cardData && char && onMoodUpdate) {
@@ -1203,6 +1219,8 @@ mode 可选值：
                         // ── Creative card ──
                         MindSnapshotExtractor.generateCreativeCard(charSnapshot, aiContent, promptContextMsgs, mindSecondaryConfig,
                             (reason) => addToast(reason, 'error'),
+                            undefined,
+                            secondaryFullContextOptions,
                         )
                             .then(cardData => {
                                 if (cardData && char && onMoodUpdate) {
@@ -1257,7 +1275,7 @@ mode 可选值：
         if (statusMode === 'classic') {
             MindSnapshotExtractor.generateInnerVoice(ctx.char, ctx.aiContent, ctx.msgs, ctx.config,
                 (reason) => addToast(reason, 'error'),
-                true, ctx.goalListStr
+                true, ctx.goalListStr, ctx.contextOptions
             )
                 .then(newState => {
                     if (newState && ctx.char && onMoodUpdate) {
@@ -1268,6 +1286,7 @@ mode 可选值：
         } else if (statusMode === 'freeform') {
             MindSnapshotExtractor.generateFreeformCard(ctx.char, ctx.aiContent, ctx.msgs, ctx.config,
                 (reason) => addToast(reason, 'error'),
+                ctx.contextOptions,
             )
                 .then(cardData => {
                     if (cardData && ctx.char && onMoodUpdate) {
@@ -1283,6 +1302,7 @@ mode 可选值：
                 MindSnapshotExtractor.generateCustomCard(ctx.char, ctx.aiContent, ctx.msgs, ctx.config,
                     template,
                     (reason) => addToast(reason, 'error'),
+                    ctx.contextOptions,
                 )
                     .then(cardData => {
                         if (cardData && ctx.char && onMoodUpdate) {
@@ -1294,6 +1314,8 @@ mode 可选值：
         } else {
             MindSnapshotExtractor.generateCreativeCard(ctx.char, ctx.aiContent, ctx.msgs, ctx.config,
                 (reason) => addToast(reason, 'error'),
+                undefined,
+                ctx.contextOptions,
             )
                 .then(cardData => {
                     if (cardData && ctx.char && onMoodUpdate) {

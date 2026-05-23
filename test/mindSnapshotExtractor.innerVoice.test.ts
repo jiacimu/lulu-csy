@@ -76,6 +76,38 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
         expect(dbMocks.saveCharacter.mock.calls[0][0].moodState.innerVoice).toBe(result?.innerVoice);
     });
 
+    it('sends the main chat mirror before the secondary task prompt when available', async () => {
+        mockFetchContent('{"innerVoice":"先把上方那段完整设定吃进去。"}');
+
+        await MindSnapshotExtractor.generateInnerVoice(
+            baseCharacter,
+            '我会提前看材料。',
+            currentMsgs as any,
+            apiConfig,
+            undefined,
+            true,
+            '',
+            {
+                mirrorMessages: [
+                    { role: 'system', content: 'FULL SYSTEM PROMPT WITH WORLDBOOKS' },
+                    { role: 'user', content: 'full db context line' },
+                ],
+                mirrorThinking: '角色刚刚的思考链',
+                contextLimit: 1000000,
+                historyMsgCount: 2,
+                model: 'main-chat-model',
+            },
+        );
+
+        const body = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body));
+        expect(body.messages[0]).toEqual({ role: 'system', content: 'FULL SYSTEM PROMPT WITH WORLDBOOKS' });
+        expect(body.messages[1]).toEqual({ role: 'user', content: 'full db context line' });
+        expect(body.messages[2].role).toBe('user');
+        expect(body.messages[2].content).toContain('Secondary Task Instructions');
+        expect(body.messages[2].content).toContain('角色刚刚的思考链');
+        expect(body.messages[2].content).toContain('请基于上方主聊天完整上下文镜像执行本任务');
+    });
+
     it('recovers innerVoice from raw output when JSON parsing fails', async () => {
         mockFetchContent('结果如下：\ninnerVoice: "今天不想再拖了，先把这件事做完再说。"');
 

@@ -84,7 +84,7 @@ interface MessageItemProps {
     innerVoice?: string;
     statusCardData?: StatusCardData;
     onRetryInnerVoice?: () => void;
-    onOpenStoryPhone?: () => void;
+    onOpenStoryPhone?: (message: Message) => void;
     // Thinking chain visibility
     showThinking?: boolean;
 }
@@ -274,7 +274,7 @@ const MessageItem = React.memo(({
                     title={`查看${charName}的手机`}
                     onClick={(e) => {
                         e.stopPropagation();
-                        onOpenStoryPhone();
+                        onOpenStoryPhone(m);
                     }}
                 >
                     <DeviceMobileCamera className="h-2.5 w-2.5" weight="bold" />
@@ -906,6 +906,7 @@ const MessageItem = React.memo(({
         prev.onOpenStoryPhone === next.onOpenStoryPhone &&
         prev.showThinking === next.showThinking &&
         prev.msg.metadata?.thinking === next.msg.metadata?.thinking &&
+        prev.msg.metadata?.storyPhoneConsumed === next.msg.metadata?.storyPhoneConsumed &&
         prev.msg.metadata?.source === next.msg.metadata?.source;
 });
 

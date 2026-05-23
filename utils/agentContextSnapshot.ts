@@ -87,6 +87,7 @@ export function didCharacterContextRelevantFieldsChange(
         | 'name'
         | 'description'
         | 'systemPrompt'
+        | 'softDevotionChatMode'
         | 'worldview'
         | 'mountedWorldbooks'
         | 'refinedMemories'
@@ -98,6 +99,7 @@ export function didCharacterContextRelevantFieldsChange(
         | 'name'
         | 'description'
         | 'systemPrompt'
+        | 'softDevotionChatMode'
         | 'worldview'
         | 'mountedWorldbooks'
         | 'refinedMemories'
@@ -110,6 +112,7 @@ export function didCharacterContextRelevantFieldsChange(
     if ((previous.name || '') !== (next.name || '')) return true;
     if ((previous.description || '') !== (next.description || '')) return true;
     if ((previous.systemPrompt || '') !== (next.systemPrompt || '')) return true;
+    if ((previous.softDevotionChatMode || false) !== (next.softDevotionChatMode || false)) return true;
     if ((previous.worldview || '') !== (next.worldview || '')) return true;
 
     const previousWorldbooksDigest = buildMountedWorldbooksDigest(previous.mountedWorldbooks);

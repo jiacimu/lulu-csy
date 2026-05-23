@@ -109,4 +109,24 @@ describe('agentContextSnapshot', () => {
 
         expect(didCharacterContextRelevantFieldsChange(previous, next)).toBe(true);
     });
+
+    it('detects soft devotion mode changes when deciding whether to push context immediately', () => {
+        const previous = {
+            name: 'Sully',
+            description: 'test character',
+            systemPrompt: 'stay in character',
+            softDevotionChatMode: false,
+            worldview: 'modern city',
+            mountedWorldbooks: [],
+            refinedMemories: {},
+            activeMemoryMonths: [],
+            moodState: TEST_INTERNAL_STATE,
+        };
+        const next = {
+            ...previous,
+            softDevotionChatMode: true,
+        };
+
+        expect(didCharacterContextRelevantFieldsChange(previous, next)).toBe(true);
+    });
 });

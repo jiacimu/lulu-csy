@@ -11,10 +11,12 @@
  *   - 激素动力学计算由 hormoneDynamics.ts 完成
  */
 
-import { CharacterProfile,InternalState,Message } from '../types';
+import { CharacterProfile,InternalState,Message,UserProfile } from '../types';
 import { extractJson, extractJsonTyped } from './safeApi';
 import { StatusCardData,CustomStatusTemplate,SKELETON_REGISTRY } from '../types/statusCard';
 import { DB } from './db';
+import { ContextBuilder } from './context';
+import { getChatContextMirror,type ChatContextMirrorMessage } from './chatContextMirror';
 import { RealtimeContextManager } from './realtimeContext';
 import { composeCustomStatusTemplateHtml } from './statusTemplateComposer';
 import { parseStatusBlock } from './statusBlockParser';
@@ -41,6 +43,28 @@ const CLASSIC_INNER_VOICE_MAX_LENGTH = 120;
 // Module-level: abort-and-replace controllers
 let activeSenseController: AbortController | null = null;
 let activeVoiceController: AbortController | null = null;
+
+type SecondaryLLMMessage = {
+    role: string;
+    content: unknown;
+};
+
+export interface SecondaryFullContextOptions {
+    userProfile?: UserProfile;
+    mirrorMessages?: ChatContextMirrorMessage[];
+    mirrorAssistantReply?: string;
+    mirrorThinking?: string;
+    contextLimit?: number;
+    historyMsgCount?: number;
+    model?: string;
+    allowMirrorLookup?: boolean;
+}
+
+interface ResolvedSecondaryContext {
+    charContext: string;
+    recentContext: string;
+    contextMessages?: SecondaryLLMMessage[];
+}
 
 // ─── Shared Helpers ──────────────────────────────────────────
 
@@ -108,6 +132,118 @@ function buildRecentContext(msgs: Message[], charName: string, limit: number = 3
     }
 
     return lines.length > 0 ? lines.join('\n') : null;
+}
+
+function normalizeSecondaryMessages(messages: SecondaryLLMMessage[] | undefined): SecondaryLLMMessage[] {
+    if (!messages?.length) return [];
+
+    return messages
+        .map(message => {
+            const role = ['system', 'user', 'assistant'].includes(message.role)
+                ? message.role
+                : 'user';
+            return { role, content: message.content };
+        })
+        .filter(message => {
+            const serialized = typeof message.content === 'string'
+                ? message.content
+                : JSON.stringify(message.content);
+            return String(serialized || '').trim().length > 0;
+        });
+}
+
+function formatFullHistoryForSecondary(
+    msgs: Message[],
+    char: CharacterProfile,
+    userName: string,
+    limit: number,
+): string | null {
+    const lines = msgs
+        .filter(message => shouldIncludeMessageInContext(message))
+        .slice(-limit)
+        .map(message => formatMessageForContext(message, {
+            surface: 'chat',
+            charName: char.name,
+            userName,
+            includeTimestamp: true,
+            includeSpeaker: true,
+        }))
+        .filter((line): line is string => !!line?.trim());
+
+    return lines.length > 0 ? lines.join('\n') : null;
+}
+
+async function resolveSecondaryContext(
+    char: CharacterProfile,
+    currentMsgs: Message[],
+    options?: SecondaryFullContextOptions,
+): Promise<ResolvedSecondaryContext> {
+    const explicitMirrorMessages = normalizeSecondaryMessages(options?.mirrorMessages);
+    if (explicitMirrorMessages.length > 0) {
+        const metaLines = [
+            '完整角色设定、世界书、记忆、实时上下文与主聊天历史，已在本请求前置消息中按主聊天实际消息数组注入。',
+            options?.historyMsgCount ? `主聊天实际上下文消息数：${options.historyMsgCount}` : '',
+            options?.contextLimit ? `角色上下文上限：${options.contextLimit}` : '',
+            options?.model ? `主聊天模型：${options.model}` : '',
+            options?.mirrorThinking ? `\n【本轮 thinking / 思考链】\n${options.mirrorThinking}` : '',
+        ].filter(Boolean).join('\n');
+
+        return {
+            charContext: `[主聊天完整上下文镜像]\n${metaLines}`,
+            recentContext: buildRecentContext(currentMsgs, char.name, 3) || '最近对话已包含在上方主聊天完整上下文镜像中。',
+            contextMessages: explicitMirrorMessages,
+        };
+    }
+
+    if (char.id && options?.allowMirrorLookup === true) {
+        try {
+            const mirror = await getChatContextMirror(char.id);
+            const mirrorMessages = normalizeSecondaryMessages(mirror?.messages);
+            if (mirror && mirrorMessages.length > 0) {
+                const metaLines = [
+                    '完整角色设定、世界书、记忆、实时上下文与主聊天历史，已在本请求前置消息中按主聊天实际消息数组注入。',
+                    `主聊天实际上下文消息数：${mirror.historyMsgCount}`,
+                    `角色上下文上限：${mirror.contextLimit}`,
+                    mirror.model ? `主聊天模型：${mirror.model}` : '',
+                    mirror.thinking ? `\n【本轮 thinking / 思考链】\n${mirror.thinking}` : '',
+                ].filter(Boolean).join('\n');
+
+                return {
+                    charContext: `[主聊天完整上下文镜像]\n${metaLines}`,
+                    recentContext: buildRecentContext(currentMsgs, char.name, 3) || '最近对话已包含在上方主聊天完整上下文镜像中。',
+                    contextMessages: mirrorMessages,
+                };
+            }
+        } catch (error) {
+            console.warn('[SecondaryContext] chat mirror unavailable:', error instanceof Error ? error.message : error);
+        }
+    }
+
+    if (options?.userProfile) {
+        const contextLimit = options.contextLimit || char.contextLimit || 500;
+        const fullCoreContext = ContextBuilder.buildCoreContext(char, options.userProfile, true);
+        let recentContext = formatFullHistoryForSecondary(currentMsgs, char, options.userProfile.name, contextLimit);
+
+        try {
+            if (char.id && typeof (DB as any).getMessagesByCharId === 'function') {
+                const dbMessages = await DB.getMessagesByCharId(char.id);
+                const dbContext = formatFullHistoryForSecondary(dbMessages, char, options.userProfile.name, contextLimit);
+                if (dbContext) recentContext = dbContext;
+            }
+        } catch (error) {
+            console.warn('[SecondaryContext] full DB history unavailable:', error instanceof Error ? error.message : error);
+        }
+
+        return {
+            charContext: fullCoreContext,
+            recentContext: recentContext || buildRecentContext(currentMsgs, char.name, 3) || '暂无最近对话。',
+        };
+    }
+
+    return {
+        charContext: buildCharContext(char),
+        recentContext: buildRecentContext(currentMsgs, char.name, 3) || '暂无最近对话。',
+    };
 }
 
 function sanitizeClassicInnerVoice(value: string | null | undefined): string | null {
@@ -196,8 +332,23 @@ async function callSecondaryLLM(
     signal: AbortSignal,
     maxTokens: number = 800,
     temperature: number = 0.6,
+    contextMessages?: SecondaryLLMMessage[],
 ): Promise<string | null> {
     const baseUrl = apiConfig.baseUrl.replace(/\/+$/, '');
+    const normalizedContextMessages = normalizeSecondaryMessages(contextMessages);
+    const messages = normalizedContextMessages.length > 0
+        ? [
+            ...normalizedContextMessages,
+            {
+                role: 'user',
+                content: `### [Secondary Task Instructions]\n${system}\n\n### [Secondary Task Input]\n${user}\n\n请基于上方主聊天完整上下文镜像执行本任务。`,
+            },
+        ]
+        : [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+        ];
+
     let resp: Response;
     try {
         resp = await fetch(`${baseUrl}/chat/completions`, {
@@ -208,10 +359,7 @@ async function callSecondaryLLM(
             },
             body: JSON.stringify({
                 model: apiConfig.model,
-                messages: [
-                    { role: 'system', content: system },
-                    { role: 'user', content: user },
-                ],
+                messages,
                 temperature,
                 max_tokens: maxTokens,
             }),
@@ -349,6 +497,7 @@ async function senseBefore(
     apiConfig: { baseUrl: string; model: string; apiKey: string },
     goalListStr?: string,
     goals?: Array<{ description: string; utility: number; category: string }>,
+    contextOptions?: SecondaryFullContextOptions,
 ): Promise<InternalState | null> {
     // Abort previous if still running
     if (activeSenseController) {
@@ -361,15 +510,24 @@ async function senseBefore(
     const timer = setTimeout(() => controller.abort(), SENSE_TIMEOUT_MS);
 
     try {
-        const recentContext = buildRecentContext(currentMsgs, char.name, 2);
+        const resolvedContext = await resolveSecondaryContext(char, currentMsgs, contextOptions);
+        const recentContext = resolvedContext.recentContext;
         if (!recentContext) return null;
 
-        const charContext = buildCharContext(char);
+        const charContext = resolvedContext.charContext;
         const timeContext = RealtimeContextManager.getTimeContext();
 
         const prompt = buildSensePrompt(char.name, recentContext, charContext, timeContext, goalListStr);
 
-        const content = await callSecondaryLLM(apiConfig, prompt.system, prompt.user, controller.signal, SECONDARY_LLM_MAX_TOKENS, 0.4);
+        const content = await callSecondaryLLM(
+            apiConfig,
+            prompt.system,
+            prompt.user,
+            controller.signal,
+            SECONDARY_LLM_MAX_TOKENS,
+            0.4,
+            resolvedContext.contextMessages,
+        );
         if (!content) return null;
 
         const sense = extractJsonTyped(content, validateSenseOutput);
@@ -566,6 +724,7 @@ async function generateInnerVoice(
     onError?: (reason: string) => void,
     allowRetry: boolean = true,
     goalListStr?: string,
+    contextOptions?: SecondaryFullContextOptions,
 ): Promise<InternalState | null> {
     // Abort previous voice generation
     if (activeVoiceController) {
@@ -581,10 +740,11 @@ async function generateInnerVoice(
     const timer = setTimeout(() => controller.abort(), VOICE_TIMEOUT_MS);
 
     try {
-        const recentContext = buildRecentContext(currentMsgs, char.name, 3);
+        const resolvedContext = await resolveSecondaryContext(char, currentMsgs, contextOptions);
+        const recentContext = resolvedContext.recentContext;
         if (!recentContext) return null;
 
-        const charContext = buildCharContext(char);
+        const charContext = resolvedContext.charContext;
         const timeContext = RealtimeContextManager.getTimeContext();
 
         // Get current InternalState (should have been updated by senseBefore already)
@@ -600,7 +760,15 @@ async function generateInnerVoice(
             goalListStr,
         );
 
-        const content = await callSecondaryLLM(apiConfig, prompt.system, prompt.user, controller.signal, SECONDARY_LLM_MAX_TOKENS, 0.6);
+        const content = await callSecondaryLLM(
+            apiConfig,
+            prompt.system,
+            prompt.user,
+            controller.signal,
+            SECONDARY_LLM_MAX_TOKENS,
+            0.6,
+            resolvedContext.contextMessages,
+        );
         if (!content) return null;
 
         let parsed = extractJsonTyped(content, (obj: any) => {
@@ -647,7 +815,7 @@ async function generateInnerVoice(
                 if (allowRetry) {
                     console.log(`💭 [InnerVoice] Auto-retrying in ${AUTO_RETRY_DELAY_MS / 1000}s...`);
                     await new Promise(r => setTimeout(r, AUTO_RETRY_DELAY_MS));
-                    return generateInnerVoice(char, aiReply, currentMsgs, apiConfig, onError, false, goalListStr);
+                    return generateInnerVoice(char, aiReply, currentMsgs, apiConfig, onError, false, goalListStr, contextOptions);
                 }
                 onError?.(`心声生成超时`);
             }
@@ -656,7 +824,7 @@ async function generateInnerVoice(
             if (allowRetry && !wasReplaced) {
                 console.log(`💭 [InnerVoice] Auto-retrying in ${AUTO_RETRY_DELAY_MS / 1000}s...`);
                 await new Promise(r => setTimeout(r, AUTO_RETRY_DELAY_MS));
-                return generateInnerVoice(char, aiReply, currentMsgs, apiConfig, onError, false, goalListStr);
+                return generateInnerVoice(char, aiReply, currentMsgs, apiConfig, onError, false, goalListStr, contextOptions);
             }
             onError?.(`心声生成失败: ${err.message}`);
         }
@@ -845,6 +1013,7 @@ async function generateCreativeCard(
     apiConfig: { baseUrl: string; model: string; apiKey: string },
     onError?: (reason: string) => void,
     customTemplate?: string,
+    contextOptions?: SecondaryFullContextOptions,
 ): Promise<StatusCardData | null> {
     // Abort previous voice generation (shares the same controller)
     if (activeVoiceController) {
@@ -859,10 +1028,11 @@ async function generateCreativeCard(
     const timer = setTimeout(() => controller.abort(), VOICE_TIMEOUT_MS);
 
     try {
-        const recentContext = buildRecentContext(currentMsgs, char.name, 3);
+        const resolvedContext = await resolveSecondaryContext(char, currentMsgs, contextOptions);
+        const recentContext = resolvedContext.recentContext;
         if (!recentContext) return null;
 
-        const charContext = buildCharContext(char);
+        const charContext = resolvedContext.charContext;
         const timeContext = RealtimeContextManager.getTimeContext();
         const currentState = resolveInternalState(char.moodState as any) || createBaselineState();
 
@@ -871,7 +1041,15 @@ async function generateCreativeCard(
             recentContext, charContext, currentState, timeContext, customTemplate,
         );
 
-        const content = await callSecondaryLLM(apiConfig, prompt.system, prompt.user, controller.signal, SECONDARY_LLM_MAX_TOKENS, 0.7);
+        const content = await callSecondaryLLM(
+            apiConfig,
+            prompt.system,
+            prompt.user,
+            controller.signal,
+            SECONDARY_LLM_MAX_TOKENS,
+            0.7,
+            resolvedContext.contextMessages,
+        );
         if (!content) return null;
 
         const parsed = extractJsonTyped<StatusCardData>(content, (obj: any) => {
@@ -1095,6 +1273,7 @@ async function generateFreeformCard(
     currentMsgs: Message[],
     apiConfig: { baseUrl: string; model: string; apiKey: string },
     onError?: (reason: string) => void,
+    contextOptions?: SecondaryFullContextOptions,
 ): Promise<StatusCardData | null> {
     // Abort previous generation (shares the same controller)
     if (activeVoiceController) {
@@ -1109,10 +1288,11 @@ async function generateFreeformCard(
     const timer = setTimeout(() => controller.abort(), VOICE_TIMEOUT_MS);
 
     try {
-        const recentContext = buildRecentContext(currentMsgs, char.name, 3);
+        const resolvedContext = await resolveSecondaryContext(char, currentMsgs, contextOptions);
+        const recentContext = resolvedContext.recentContext;
         if (!recentContext) return null;
 
-        const charContext = buildCharContext(char);
+        const charContext = resolvedContext.charContext;
         const timeContext = RealtimeContextManager.getTimeContext();
         const currentState = resolveInternalState(char.moodState as any) || createBaselineState();
 
@@ -1121,7 +1301,15 @@ async function generateFreeformCard(
             recentContext, charContext, currentState, timeContext,
         );
 
-        const content = await callSecondaryLLM(apiConfig, prompt.system, prompt.user, controller.signal, SECONDARY_LLM_MAX_TOKENS, 0.85);
+        const content = await callSecondaryLLM(
+            apiConfig,
+            prompt.system,
+            prompt.user,
+            controller.signal,
+            SECONDARY_LLM_MAX_TOKENS,
+            0.85,
+            resolvedContext.contextMessages,
+        );
         if (!content) return null;
 
         const html = extractHtmlFromResponse(content);
@@ -1197,6 +1385,7 @@ async function generateCustomCard(
     apiConfig: { baseUrl: string; model: string; apiKey: string },
     template: CustomStatusTemplate,
     onError?: (reason: string) => void,
+    contextOptions?: SecondaryFullContextOptions,
 ): Promise<StatusCardData | null> {
     // Abort previous generation (shares the same controller)
     if (activeVoiceController) {
@@ -1215,10 +1404,11 @@ async function generateCustomCard(
     const timer = setTimeout(() => controller.abort(), VOICE_TIMEOUT_MS);
 
     try {
-        const recentContext = buildRecentContext(currentMsgs, char.name, 3);
+        const resolvedContext = await resolveSecondaryContext(char, currentMsgs, contextOptions);
+        const recentContext = resolvedContext.recentContext;
         if (!recentContext) return null;
 
-        const charContext = buildCharContext(char);
+        const charContext = resolvedContext.charContext;
         const timeContext = RealtimeContextManager.getTimeContext();
         const currentState = resolveInternalState(char.moodState as any) || createBaselineState();
 
@@ -1265,7 +1455,15 @@ ${aiReply.slice(0, 500)}
 
 请根据以上信息，按你的规则生成输出。`;
 
-        const content = await callSecondaryLLM(apiConfig, system, user, controller.signal, SECONDARY_LLM_MAX_TOKENS, 0.8);
+        const content = await callSecondaryLLM(
+            apiConfig,
+            system,
+            user,
+            controller.signal,
+            SECONDARY_LLM_MAX_TOKENS,
+            0.8,
+            resolvedContext.contextMessages,
+        );
         if (!content) return null;
 
         // ── 用用户的正则或新版结构化解析器提取内容 ──

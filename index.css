@@ -48,6 +48,17 @@
   font-family: 'HuiwenMingchao', 'Songti SC', 'Noto Serif SC', SimSun, serif;
 }
 
+.story-phone-scroll {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 18px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 18px), transparent 100%);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.story-phone-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 /* ==========================================
    Custom Theme (migrated from CDN inline config)
    Tailwind v4 CSS-first configuration

@@ -142,6 +142,7 @@ const Chat: React.FC = () => {
     const lastTodayLifeEnsureKeyRef = useRef('');
     const draftPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingDraftPersistRef = useRef<{ key: string; value: string } | null>(null);
+    const openingStoryPhoneMsgIdsRef = useRef<Set<number>>(new Set());
     messagesRef.current = messages;
 
     // Reply Logic
@@ -256,10 +257,43 @@ const Chat: React.FC = () => {
         () => ttsConfig && char ? withCharacterTtsVoice(ttsConfig, char) : ttsConfig,
         [ttsConfig, char?.id, char?.ttsVoiceId],
     );
-    const handleOpenStoryPhone = useCallback(() => {
-        if (!char?.id) return;
-        openApp(AppID.StoryPhone, { targetCharId: char.id, returnApp: AppID.Chat });
-    }, [char?.id, openApp]);
+    const handleOpenStoryPhone = useCallback((sourceMessage: Message) => {
+        if (!char?.id || !sourceMessage?.id) return;
+        if (sourceMessage.metadata?.storyPhoneConsumed || openingStoryPhoneMsgIdsRef.current.has(sourceMessage.id)) return;
+
+        openingStoryPhoneMsgIdsRef.current.add(sourceMessage.id);
+        const metadataUpdates = {
+            storyPhoneConsumed: true,
+            storyPhoneConsumedAt: Date.now(),
+        };
+
+        setMessages(prev => prev.map(message => (
+            message.id === sourceMessage.id
+                ? { ...message, metadata: { ...(message.metadata || {}), ...metadataUpdates } }
+                : message
+        )));
+
+        DB.updateMessageMetadata(sourceMessage.id, metadataUpdates)
+            .then(() => {
+                openApp(AppID.StoryPhone, {
+                    targetCharId: char.id,
+                    returnApp: AppID.Chat,
+                    sourceMessageId: sourceMessage.id,
+                });
+            })
+            .catch(error => {
+                console.error('[StoryPhone] consume marker failed:', error);
+                openingStoryPhoneMsgIdsRef.current.delete(sourceMessage.id);
+                setMessages(prev => prev.map(message => {
+                    if (message.id !== sourceMessage.id) return message;
+                    const metadata = { ...(message.metadata || {}) };
+                    delete metadata.storyPhoneConsumed;
+                    delete metadata.storyPhoneConsumedAt;
+                    return { ...message, metadata };
+                }));
+                addToast('查手机入口标记失败，请再试一次', 'error');
+            });
+    }, [char?.id, openApp, addToast]);
 
     const clearTodayLifeTimers = useCallback(() => {
         if (todayLifeSlowTimerRef.current !== null) {
@@ -2274,7 +2308,7 @@ const Chat: React.FC = () => {
                                 innerVoice={isLastAssistant && statusMode === 'classic' ? (char.moodState as any)?.innerVoice : undefined}
                                 statusCardData={isLastAssistant && hasStatusCardMode ? char.lastStatusCard : undefined}
                                 onRetryInnerVoice={isLastAssistant && statusMode !== 'off' && statusMode !== 'story_phone' ? retryMindSnapshot : undefined}
-                                onOpenStoryPhone={isLastAssistant && statusMode === 'story_phone' ? handleOpenStoryPhone : undefined}
+                                onOpenStoryPhone={isLastAssistant && statusMode === 'story_phone' && !m.metadata?.storyPhoneConsumed ? handleOpenStoryPhone : undefined}
                                 showThinking={char.showThinking !== false}
                             />
                         </div>

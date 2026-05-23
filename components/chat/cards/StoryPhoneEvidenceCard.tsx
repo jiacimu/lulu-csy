@@ -2,6 +2,7 @@ import React from 'react';
 import { Message } from '../../../types';
 import StoryPhoneScreen, {
     getStoryPhoneAppById,
+    type PhoneAppDef,
     type PhoneClue,
     type PhoneClueItem,
     type StoryPhoneAppId,
@@ -24,8 +25,20 @@ function normalizeItems(value: unknown): PhoneClueItem[] {
 }
 
 function toStoryPhoneAppId(value: unknown): StoryPhoneAppId {
-    const app = getStoryPhoneAppById(asText(value));
-    return app?.id || 'messages';
+    return asText(value, 'messages') || 'messages';
+}
+
+function buildAppDefFromMessage(meta: Message['metadata'], appId: StoryPhoneAppId, appName: string): PhoneAppDef {
+    const registeredApp = getStoryPhoneAppById(appId);
+    if (registeredApp) return registeredApp;
+    return {
+        id: appId,
+        name: appName,
+        icon: asText(meta?.phonePeekAppIcon, '▣'),
+        color: asText(meta?.phonePeekAppColor, '#0ea5e9'),
+        prompt: '',
+        isCustom: meta?.phonePeekAppIsCustom === true || asText(meta?.phonePeekAppIsCustom) === 'true',
+    };
 }
 
 function buildClueFromMessage(message: Message): PhoneClue {
@@ -52,6 +65,7 @@ function buildClueFromMessage(message: Message): PhoneClue {
 const StoryPhoneEvidenceCard: React.FC<{ message: Message }> = ({ message }) => {
     const meta = message.metadata || {};
     const clue = buildClueFromMessage(message);
+    const appDef = buildAppDefFromMessage(meta, clue.appId, clue.appName);
 
     return (
         <div className="mx-auto w-[82vw] max-w-[18.5rem]">
@@ -60,6 +74,8 @@ const StoryPhoneEvidenceCard: React.FC<{ message: Message }> = ({ message }) => 
                 charName={asText(meta.charName, '角色')}
                 charAvatar={asText(meta.charAvatar)}
                 wallpaper={asText(meta.phonePeekWallpaper)}
+                apps={[appDef]}
+                spotlightApp={appDef}
                 activeAppId={clue.appId}
                 clue={clue}
             />

@@ -1294,6 +1294,25 @@ ${isInitialGeneration ? `
                                     <textarea value={formData.systemPrompt} onChange={(e) => handleChange('systemPrompt', e.target.value)} className="w-full h-40 bg-white rounded-3xl p-5 text-sm shadow-sm resize-none focus:ring-1 focus:ring-primary/20 transition-all" placeholder="设定..." />
                                 </div>
 
+                                <div className="bg-white rounded-3xl p-4 shadow-sm">
+                                    <button
+                                        type="button"
+                                        aria-pressed={formData.softDevotionChatMode === true}
+                                        className="w-full flex justify-between items-center gap-4 text-left"
+                                        onClick={() => handleChange('softDevotionChatMode', !formData.softDevotionChatMode)}
+                                    >
+                                        <div className="min-w-0">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block pointer-events-none">Soft Devotion Chat</span>
+                                            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                                                开启后，这个角色在聊天里会更偏爱、更耐心地接住你的敏感、撒娇和不安。
+                                            </p>
+                                        </div>
+                                        <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center shrink-0 ${formData.softDevotionChatMode ? 'bg-primary' : 'bg-slate-200'}`}>
+                                            <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${formData.softDevotionChatMode ? 'translate-x-4' : ''}`}></div>
+                                        </div>
+                                    </button>
+                                </div>
+
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">世界观 / 设定补充 (Worldview & Lore)</label>
                                     <textarea
