@@ -329,7 +329,14 @@ const ActiveAppContainer = memo(function ActiveAppContainer({
   onCloseApp: () => void;
 }) {
   return (
-    <div className="flex-1 relative overflow-hidden" style={{ contain: 'layout style paint' }}>
+    <div
+      data-testid="active-app-container"
+      className="flex-1 relative overflow-hidden"
+      style={{
+        contain: 'layout style paint',
+        paddingTop: activeApp !== AppID.Launcher ? 'var(--safe-top, env(safe-area-inset-top))' : 0,
+      }}
+    >
       <AppErrorBoundary onCloseApp={onCloseApp}>
         <Suspense fallback={<AppSplashScreen appId={activeApp} />}>
           {renderActiveApp(activeApp)}
@@ -546,7 +553,7 @@ const PhoneShell: React.FC = () => {
 
       <div className={`absolute inset-0 transition-all duration-500 ${activeApp === AppID.Launcher ? 'bg-transparent' : 'bg-white/50 backdrop-blur-3xl'}`} />
 
-      {/* Full-screen app container. Individual apps handle their own safe-area spacing. */}
+      {/* Full-screen app frame. ActiveAppContainer keeps app content inside the device safe area. */}
       <div
         className="absolute inset-0 z-10 w-full h-full overflow-hidden bg-transparent overscroll-none flex flex-col"
       >
