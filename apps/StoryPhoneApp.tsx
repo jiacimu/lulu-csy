@@ -85,12 +85,15 @@ async function createAppIconDataUrl(file: File): Promise<string> {
 
 function normalizeClue(value: any, app: PhoneAppDef): PhoneClue {
     const rawItems = Array.isArray(value?.items) ? value.items : [];
+    const itemLimit = app.id === 'wechat' ? 14 : 6;
+    const itemValueLimit = app.id === 'wechat' ? 520 : 260;
+    const itemDetailLimit = app.id === 'wechat' ? 520 : 320;
     const items = rawItems
-        .slice(0, 6)
+        .slice(0, itemLimit)
         .map((item: any): PhoneClueItem => ({
             label: String(item?.label || item?.title || '记录').slice(0, 40),
-            value: String(item?.value || item?.content || item?.text || '').slice(0, 260),
-            detail: item?.detail ? String(item.detail).slice(0, 320) : undefined,
+            value: String(item?.value || item?.content || item?.text || '').slice(0, itemValueLimit),
+            detail: item?.detail ? String(item.detail).slice(0, itemDetailLimit) : undefined,
         }))
         .filter((item: PhoneClueItem) => item.value.trim() || item.detail?.trim());
 
@@ -103,6 +106,7 @@ function normalizeClue(value: any, app: PhoneAppDef): PhoneClue {
         items: items.length > 0 ? items : [{ label: '线索', value: String(value?.evidenceText || '屏幕上有一条没来得及藏好的记录。').slice(0, 260) }],
         evidenceText: String(value?.evidenceText || value?.insertSummary || '').slice(0, 800),
         insertSummary: String(value?.insertSummary || value?.evidenceText || '').slice(0, 800),
+        wechatData: app.id === 'wechat' && value?.wechatData && typeof value.wechatData === 'object' ? value.wechatData : undefined,
     };
 }
 
@@ -242,6 +246,7 @@ const StoryPhoneApp: React.FC = () => {
     const [spotlightApp, setSpotlightApp] = useState<PhoneAppDef>(() => pickRandomPhoneApp(PHONE_APPS));
     const [activeAppId, setActiveAppId] = useState<StoryPhoneAppId | 'home'>('home');
     const [clue, setClue] = useState<PhoneClue | null>(null);
+    const [visibleClue, setVisibleClue] = useState<PhoneClue | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [inserted, setInserted] = useState(false);
     const [showInstallModal, setShowInstallModal] = useState(false);
@@ -257,6 +262,7 @@ const StoryPhoneApp: React.FC = () => {
         setSpotlightApp(pickRandomPhoneApp(installedApps));
         setActiveAppId('home');
         setClue(null);
+        setVisibleClue(null);
         setInserted(false);
     }, [char?.id]);
 
@@ -265,6 +271,7 @@ const StoryPhoneApp: React.FC = () => {
         if (activeAppId !== 'home' && !appStillInstalled) {
             setActiveAppId('home');
             setClue(null);
+            setVisibleClue(null);
             setInserted(false);
         }
         if (!installedApps.some(app => app.id === spotlightApp.id)) {
@@ -375,6 +382,7 @@ const StoryPhoneApp: React.FC = () => {
         setSpotlightApp(appDef);
         setActiveAppId(appDef.id);
         setClue(null);
+        setVisibleClue(null);
         setInserted(false);
         setShowInstallModal(false);
         resetInstallForm();
@@ -395,6 +403,7 @@ const StoryPhoneApp: React.FC = () => {
         if (activeAppId === app.id) {
             setActiveAppId('home');
             setClue(null);
+            setVisibleClue(null);
             setInserted(false);
         }
         if (spotlightApp.id === app.id) {
@@ -406,7 +415,64 @@ const StoryPhoneApp: React.FC = () => {
     const buildGenerationMessages = async (app: PhoneAppDef, config: APIConfig) => {
         if (!char) return null;
         const mirror = await getChatContextMirror(char.id);
-        const task = `### [Task: 剧情查手机]
+        const wechatTask = app.id === 'wechat' ? `
+### [Task: 剧情查手机 / 微信专属]
+你正在生成 ${char.name} 真正在使用的微信，而不是一张“微信风格线索卡”。
+
+核心原则：
+- 微信是 ${char.name} 长期使用的社交 App，有自己的联系人、群聊、聊天历史、朋友圈、收藏、账单和个人资料。
+- 所有内容都要从 ${char.name} 的人设、世界观、关系阶段、主聊天历史、近期事件、本轮可见回复和本轮 thinking 推导。
+- 不要写“示例联系人/示例群聊/占位数据”。不要复用截图里的固定名字。不要生成空壳入口。
+- 可以合理补全手机里本来会存在的普通社交数据，但必须和角色身份、城市、工作/生活圈、亲密关系、当前剧情一致。
+- 用户最终只会把当前打开页面放进剧情；因此 wechatData 可以丰富，但 insertSummary 只总结当前停留页。
+
+输出 JSON 对象，字段必须如下：
+{
+  "appName": "微信",
+  "title": "当前停留页标题，例如 微信 / 某个聊天 / 朋友圈 / 我",
+  "subtitle": "当前页状态，例如 未读、置顶、屏幕亮起中",
+  "timestamp": "当前屏幕时间",
+  "items": [{ "label": "当前停留页上可见的列表项或字段", "value": "当前页可见文字", "detail": "时间/状态/备注" }],
+  "evidenceText": "只说明当前停留页可见内容意味着什么",
+  "insertSummary": "用户如果点击放进剧情，只写当前停留页的一到两句影响摘要",
+  "wechatData": {
+    "profile": { "id": "owner", "nickname": "${char.name}", "wechatId": "角色自己的微信号，若人设无明确值则生成符合角色的短ID", "avatar": "可选头像URL", "statusText": "角色当前微信状态" },
+    "chats": [{ "id": "chat-id", "type": "private|group|system|fileHelper|official", "title": "会话名", "subtitle": "首页预览", "time": "时间", "unreadCount": 0, "pinned": false, "muted": false }],
+    "chatMessages": { "chat-id": { "id": "chat-id", "title": "会话名", "participants": [], "messages": [{ "id": "msg-id", "sender": "owner|other|system", "senderId": "可选", "senderName": "发送者", "type": "text|image|file|voice|redPacket|transfer|recall|system|location|link", "text": "微信里可见的原文", "fileName": "可选", "amount": "可选金额", "duration": "可选语音时长", "time": "可选时间", "status": "sent|read|withdrawn|failed" }], "inputHint": "只读输入栏提示" } },
+    "contacts": [{ "id": "contact-id", "name": "联系人昵称", "remark": "角色给对方的备注", "wechatId": "可选微信号", "groupKey": "首字母/分组", "tags": ["关系标签"], "source": "来源", "bio": "签名/简介", "relationshipHint": "和角色的关系暗示" }],
+    "groups": [{ "id": "group-id", "name": "群聊名", "memberCount": 0, "members": [] }],
+    "moments": { "cover": "可选封面URL", "posts": [{ "id": "post-id", "authorId": "联系人或owner id", "authorName": "发布者", "authorAvatar": "可选", "text": "朋友圈正文", "images": [], "location": "可选地点", "time": "时间", "likes": ["点赞者姓名"], "comments": [{ "id": "comment-id", "authorName": "评论者", "text": "评论内容" }] }] },
+    "favorites": [{ "id": "fav-id", "type": "text|image|link|file|voice|chatRecord", "title": "标题", "content": "内容", "fileName": "可选文件名", "time": "时间" }],
+    "services": { "groups": [{ "id": "service-group", "title": "分组名", "entries": [{ "id": "entry-id", "title": "入口名", "subtitle": "说明", "feature": "payments|services|favorites|moments|works|cards|stickers|settings" }] }] },
+    "payments": [{ "id": "payment-id", "title": "交易标题", "subtitle": "说明", "amount": "金额", "time": "时间", "status": "状态", "type": "income|expense|transfer|refund" }],
+    "works": [{ "id": "work-id", "title": "作品标题", "text": "说明", "time": "时间", "metrics": "播放/点赞等" }],
+    "cards": [{ "id": "card-id", "title": "卡券/小店订单", "subtitle": "说明", "time": "时间", "status": "状态" }],
+    "stickers": [{ "id": "sticker-id", "title": "表情包名", "usageHint": "常用语境" }],
+    "settings": { "groups": [{ "id": "setting-group", "entries": [{ "id": "setting-id", "title": "设置项", "subtitle": "可选状态" }] }] },
+    "enabledFeatures": ["services","favorites","moments","works","cards","stickers","settings","scan","search","nearby","miniPrograms","games"],
+    "desktopLoggedInText": "可选，例如 Windows 微信已登录"
+  }
+}
+
+微信内容数量目标：
+- chats: 8-14 个，至少包含私聊、群聊、服务通知/公众号、文件传输助手中的 3 类；每个 chat 都必须有 chatMessages。
+- chatMessages: 每个会话至少 3-8 条可见消息；私聊和群聊禁止只有 1 条或 2 条。服务通知/公众号/文件传输助手也至少 2 条。群聊要有不同 senderName；可以包含撤回、红包、转账、语音、文件、位置、链接。
+- 不要只给“和 user / 主聊天对象”的会话完整记录；${char.name} 的同事、好友、群聊、家人/客户等其他会话也必须有真实历史。禁止把 chat.subtitle 当作唯一消息就结束。
+- contacts: 12-30 个，必须能支撑 chats、groups、moments 里的姓名；每个联系人至少有 remark/name 与 relationshipHint 或 bio/source/tags。
+- groups: 2-6 个，和 chats 中的群聊对应。
+- moments.posts: 6-12 条，必须同时包含 ${char.name} 自己和好友/联系人发布的朋友圈；至少 4 条来自好友/联系人。每条尽量有 likes 或 comments，互动人名来自 contacts/chats。
+- 朋友圈不是证据摘要，也不是联系人资料页。禁止把联系人 bio、relationshipHint、聊天预览、手机线索说明原样塞成朋友圈。每条 post.text 都要像发布者本人会发在朋友圈的信息流原文：生活、工作、情绪、转发、位置、照片说明或日常片段。
+- post.text 绝不能写成人设/关系标签，例如“旧识，重点关注对象”“母亲，利益与家族纽带”“家族威严，人生导师”“同事，工作关系”“客户，利益相关”。这些只能出现在 contacts 的 relationshipHint/bio/tags，不能出现在朋友圈。
+- 好友朋友圈要像对方自己发的原话：可以是“刚开完会，楼下的灯还亮着”“转发文章：关于东南沿海自贸区产...”“下午回老宅吃饭，别等我”，而不是对这个人的档案摘要。
+- favorites/payments/works/cards/stickers/settings: 根据角色身份和剧情尽量给，不要全部空；没有依据的入口不要启用。
+- enabledFeatures 只启用有数据或微信常驻合理入口；如果启用某入口，对应页面必须有可显示内容或合理空状态原因。
+
+当前停留页规则：
+- title/items/evidenceText/insertSummary 描述“手机当前正打开的那一页”，可以是聊天首页、某个聊天、通讯录、朋友圈或我。
+- 不要把整个 wechatData 的隐藏内容塞进 items 或 insertSummary。
+- 只输出 JSON，不要 Markdown。` : '';
+
+        const genericTask = `### [Task: 剧情查手机]
 你正在生成 ${char.name} 手机里「${app.name}」App 的可见内容。
 
 App 生成方向：
@@ -432,6 +498,8 @@ ${app.prompt}
 - 这是手机屏幕里的证据，不是旁白；不要替用户或角色做出后续反应。
 - 如果这是用户安装的自定义 App，也要把它当作 ${char.name} 手机里真实存在的 App 来写。
 - 只输出 JSON，不要 Markdown。`;
+
+        const task = app.id === 'wechat' ? wechatTask : genericTask;
 
         if (mirror) {
             return [
@@ -481,6 +549,7 @@ ${task}`,
         setActiveAppId(app.id);
         setIsLoading(true);
         setInserted(false);
+        setVisibleClue(null);
         try {
             const messages = await buildGenerationMessages(app, config);
             if (!messages) return;
@@ -519,8 +588,9 @@ ${task}`,
 
     const handleInsertContext = async () => {
         if (!char || !clue || inserted) return;
-        const sourceApp = installedApps.find(app => app.id === clue.appId);
-        const fullContext = formatStoryPhoneContext(clue, char, userProfile.name);
+        const insertClue = visibleClue && visibleClue.appId === clue.appId ? visibleClue : clue;
+        const sourceApp = installedApps.find(app => app.id === insertClue.appId);
+        const fullContext = formatStoryPhoneContext(insertClue, char, userProfile.name);
         await DB.saveMessage({
             charId: char.id,
             role: 'system',
@@ -528,14 +598,14 @@ ${task}`,
             content: fullContext,
             metadata: {
                 source: 'story_phone',
-                phonePeekAppId: clue.appId,
-                phonePeekAppName: clue.appName,
-                phonePeekTitle: clue.title,
-                phonePeekSubtitle: clue.subtitle,
-                phonePeekTimestamp: clue.timestamp,
-                phonePeekItems: clue.items,
-                phonePeekEvidence: clue.evidenceText,
-                phonePeekInsertSummary: clue.insertSummary,
+                phonePeekAppId: insertClue.appId,
+                phonePeekAppName: insertClue.appName,
+                phonePeekTitle: insertClue.title,
+                phonePeekSubtitle: insertClue.subtitle,
+                phonePeekTimestamp: insertClue.timestamp,
+                phonePeekItems: insertClue.items,
+                phonePeekEvidence: insertClue.evidenceText,
+                phonePeekInsertSummary: insertClue.insertSummary,
                 phonePeekWallpaper: wallpaper,
                 phonePeekAppIcon: sourceApp?.icon,
                 phonePeekAppIconImage: sourceApp?.iconImage,
@@ -598,6 +668,7 @@ ${task}`,
                         onUninstallApp={handleUninstallApp}
                         onPeekOnly={() => setActiveAppId('home')}
                         onInsertContext={handleInsertContext}
+                        onVisibleContentChange={setVisibleClue}
                     />
                 </div>
             </div>

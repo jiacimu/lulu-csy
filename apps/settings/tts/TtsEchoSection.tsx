@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOS } from '../../../context/OSContext';
 import { getGuardedInputProps } from '../../../utils/inputGuards';
 import {
@@ -68,28 +68,54 @@ const TtsEchoSection: React.FC<Props> = ({ elevenLabsApiKey, elevenLabsModelId, 
     const [previews, setPreviews] = useState<PreviewWithUrl[]>([]);
     const [selectedPreviewId, setSelectedPreviewId] = useState('');
     const [playedPreviewIds, setPlayedPreviewIds] = useState<Set<string>>(() => new Set());
+    const [playingPreviewId, setPlayingPreviewId] = useState('');
     const [createdVoice, setCreatedVoice] = useState<EchoCreatedVoice | null>(null);
     const [isSuggesting, setIsSuggesting] = useState(false);
     const [isDesigning, setIsDesigning] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const previewListRef = useRef<HTMLDivElement | null>(null);
+    const previewsRef = useRef<PreviewWithUrl[]>([]);
+    const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+
+    const stopPreviewPlayback = useCallback((resetPlayingState = true) => {
+        if (previewAudioRef.current) {
+            previewAudioRef.current.pause();
+            previewAudioRef.current.onended = null;
+            previewAudioRef.current.onerror = null;
+            previewAudioRef.current = null;
+        }
+        if (resetPlayingState) setPlayingPreviewId('');
+    }, []);
 
     useEffect(() => () => {
-        previews.forEach(preview => {
+        stopPreviewPlayback(false);
+        previewsRef.current.forEach(preview => {
             if (preview.audioUrl) URL.revokeObjectURL(preview.audioUrl);
         });
-    }, [previews]);
+        previewsRef.current = [];
+    }, [stopPreviewPlayback]);
+
+    useEffect(() => {
+        if (previews.length === 0) return;
+        window.setTimeout(() => {
+            if (typeof previewListRef.current?.scrollIntoView === 'function') {
+                previewListRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }, 0);
+    }, [previews.length]);
 
     const replacePreviews = useCallback((next: EchoVoicePreview[]) => {
-        setPreviews(prev => {
-            prev.forEach(preview => {
-                if (preview.audioUrl) URL.revokeObjectURL(preview.audioUrl);
-            });
-            return buildPreviewUrls(next);
+        stopPreviewPlayback();
+        previewsRef.current.forEach(preview => {
+            if (preview.audioUrl) URL.revokeObjectURL(preview.audioUrl);
         });
+        const nextPreviews = buildPreviewUrls(next);
+        previewsRef.current = nextPreviews;
+        setPreviews(nextPreviews);
         setSelectedPreviewId('');
         setPlayedPreviewIds(new Set());
         setCreatedVoice(null);
-    }, []);
+    }, [stopPreviewPlayback]);
 
     const updateDraft = useCallback(<K extends keyof EchoVoiceDraft>(field: K, value: EchoVoiceDraft[K]) => {
         setDraft(prev => ({ ...prev, [field]: value }));
@@ -137,7 +163,12 @@ const TtsEchoSection: React.FC<Props> = ({ elevenLabsApiKey, elevenLabsModelId, 
             });
             replacePreviews(result.previews);
             updateDraft('previewText', result.text);
-            addToast('已生成 3 个回声预览', 'success');
+            addToast(
+                result.safetyAdjusted
+                    ? '已用中性试听文本生成 3 个回声预览'
+                    : '已生成 3 个回声预览',
+                'success',
+            );
         } catch (error) {
             const message = error instanceof Error ? error.message : 'ElevenLabs 音色预览生成失败';
             addToast(message, 'error');
@@ -205,6 +236,42 @@ const TtsEchoSection: React.FC<Props> = ({ elevenLabsApiKey, elevenLabsModelId, 
         updateCharacter(activeCharacter.id, { elevenLabsVoiceId: createdVoice.voiceId });
         addToast(`已绑定给 ${activeCharacter.name}`, 'success');
     }, [activeCharacter, addToast, createdVoice, updateCharacter]);
+
+    const handlePlayPreview = useCallback(async (preview: PreviewWithUrl) => {
+        if (!preview.audioUrl) {
+            addToast('这个回声预览没有返回音频', 'error');
+            return;
+        }
+
+        if (previewAudioRef.current) {
+            previewAudioRef.current.pause();
+            previewAudioRef.current.onended = null;
+            previewAudioRef.current.onerror = null;
+            previewAudioRef.current = null;
+        }
+
+        const audio = new Audio(preview.audioUrl);
+        previewAudioRef.current = audio;
+        setPlayingPreviewId(preview.generatedVoiceId);
+        setPlayedPreviewIds(prev => new Set(prev).add(preview.generatedVoiceId));
+        audio.onended = () => {
+            if (previewAudioRef.current === audio) previewAudioRef.current = null;
+            setPlayingPreviewId('');
+        };
+        audio.onerror = () => {
+            if (previewAudioRef.current === audio) previewAudioRef.current = null;
+            setPlayingPreviewId('');
+            addToast('回声预览播放失败', 'error');
+        };
+
+        try {
+            await audio.play();
+        } catch {
+            if (previewAudioRef.current === audio) previewAudioRef.current = null;
+            setPlayingPreviewId('');
+            addToast('浏览器暂时没能播放这条回声，请再点一次试听', 'error');
+        }
+    }, [addToast]);
 
     const previewTextLength = draft.previewText.trim().length;
     const descriptionLength = draft.voiceDescription.trim().length;
@@ -342,39 +409,69 @@ const TtsEchoSection: React.FC<Props> = ({ elevenLabsApiKey, elevenLabsModelId, 
                     </button>
 
                     {previews.length > 0 && (
-                        <div className="space-y-2">
-                            {previews.map((preview, index) => (
-                                <label
-                                    key={preview.generatedVoiceId}
-                                    className={`block rounded-2xl border px-3 py-3 transition-colors ${selectedPreviewId === preview.generatedVoiceId ? 'bg-[#edf6ff] border-[#8ba4c4]' : 'bg-white/50 border-[#d4e4f7]/50'}`}
-                                >
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <input
-                                            type="radio"
-                                            name="echo-preview"
-                                            checked={selectedPreviewId === preview.generatedVoiceId}
-                                            onChange={() => setSelectedPreviewId(preview.generatedVoiceId)}
-                                            className="accent-[#8ba4c4]"
-                                        />
-                                        <span className="text-xs font-bold text-[#6f8dad]">回声 {index + 1}</span>
-                                        <span className="ml-auto text-[9px] font-mono text-[#8ba4c4]/70 truncate max-w-[140px]">
-                                            {preview.generatedVoiceId}
-                                        </span>
+                        <div ref={previewListRef} className="space-y-3 rounded-3xl border border-[#d4e4f7]/60 bg-white/45 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <div className="text-xs font-bold text-[#6f8dad]">已生成 3 条回声预览</div>
+                                    <div className="text-[10px] text-[#8ba4c4]/80">点播放试听，再选择最像的一条保存。</div>
+                                </div>
+                                <span className="shrink-0 rounded-full bg-[#edf6ff] px-2 py-1 text-[9px] font-bold text-[#6f8dad]">
+                                    {selectedPreviewId ? '已选择' : '待选择'}
+                                </span>
+                            </div>
+
+                            {previews.map((preview, index) => {
+                                const isSelected = selectedPreviewId === preview.generatedVoiceId;
+                                const isPlaying = playingPreviewId === preview.generatedVoiceId;
+                                const previewInputId = `echo-preview-${preview.generatedVoiceId}`;
+
+                                return (
+                                    <div
+                                        key={preview.generatedVoiceId}
+                                        className={`rounded-2xl border px-3 py-3 transition-colors ${isSelected ? 'bg-[#edf6ff] border-[#8ba4c4]' : 'bg-white/60 border-[#d4e4f7]/50'}`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                id={previewInputId}
+                                                type="radio"
+                                                name="echo-preview"
+                                                checked={isSelected}
+                                                onChange={() => setSelectedPreviewId(preview.generatedVoiceId)}
+                                                className="accent-[#8ba4c4]"
+                                            />
+                                            <label htmlFor={previewInputId} className="text-xs font-bold text-[#6f8dad]">
+                                                回声 {index + 1}
+                                            </label>
+                                            <span className="ml-auto max-w-[120px] truncate text-[9px] font-mono text-[#8ba4c4]/70">
+                                                {preview.generatedVoiceId}
+                                            </span>
+                                        </div>
+
+                                        <div className="mt-3 grid grid-cols-2 gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => handlePlayPreview(preview)}
+                                                disabled={!preview.audioUrl}
+                                                aria-label={`播放回声 ${index + 1} 试听`}
+                                                className="rounded-xl bg-[#6f8dad] px-3 py-2 text-[11px] font-bold text-white disabled:opacity-45 active:scale-95 transition-transform"
+                                            >
+                                                {isPlaying ? '重新播放' : '播放试听'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setSelectedPreviewId(preview.generatedVoiceId)}
+                                                className={`rounded-xl border px-3 py-2 text-[11px] font-bold active:scale-95 transition-transform ${isSelected ? 'border-[#8ba4c4] bg-white text-[#6f8dad]' : 'border-[#d4e4f7]/70 bg-white/70 text-[#8ba4c4]'}`}
+                                            >
+                                                {isSelected ? '已选中' : '选择这条'}
+                                            </button>
+                                        </div>
+
+                                        {!preview.audioUrl && (
+                                            <div className="mt-2 text-[10px] text-amber-600">这个预览没有返回音频。</div>
+                                        )}
                                     </div>
-                                    {preview.audioUrl ? (
-                                        <audio
-                                            controls
-                                            src={preview.audioUrl}
-                                            onPlay={() => {
-                                                setPlayedPreviewIds(prev => new Set(prev).add(preview.generatedVoiceId));
-                                            }}
-                                            className="w-full h-9"
-                                        />
-                                    ) : (
-                                        <div className="text-[10px] text-amber-600">这个预览没有返回音频。</div>
-                                    )}
-                                </label>
-                            ))}
+                                );
+                            })}
 
                             <button
                                 type="button"

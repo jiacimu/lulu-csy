@@ -16,6 +16,7 @@ import {
     buildDateDiaryMemoryPrompt,
     parseDateDiaryMemoryResponse,
     renderDateDiaryMemoryTemplate,
+    toDateDiaryMemoryTemplate,
     type DateDiaryMemoryDraft,
 } from '../utils/dateDiaryMemory';
 import { getSecondaryApiConfig } from '../utils/runtimeConfig';
@@ -1095,7 +1096,7 @@ ${exitPromptContent}
             >
                 <div className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs leading-relaxed text-slate-400">这些碎片会单独向量化。正文保留字面量 <span className="font-mono text-slate-500">{'{userName}'}</span> / <span className="font-mono text-slate-500">{'{charName}'}</span>，召回注入时再替换成当前名字。</p>
+                        <p className="text-xs leading-relaxed text-slate-400">这些碎片会单独向量化。预览里显示当前名字，写入时会保留可替换的名字锚点。</p>
                         <button
                             type="button"
                             disabled={isDiaryMemorySaving}
@@ -1142,17 +1143,17 @@ ${exitPromptContent}
                                     />
                                 </div>
                                 <textarea
-                                    value={entry.content}
+                                    value={renderDateDiaryMemoryTemplate(entry.content, char.name, userProfile.name)}
                                     disabled={isDiaryMemorySaving}
-                                    onChange={e => updateDiaryMemoryPreviewEntry(entry.id, { content: e.target.value })}
+                                    onChange={e => updateDiaryMemoryPreviewEntry(entry.id, { content: toDateDiaryMemoryTemplate(e.target.value, char.name, userProfile.name) })}
                                     rows={5}
-                                    placeholder="我记得 {userName} ..."
+                                    placeholder={`我记得 ${userProfile.name} ...`}
                                     className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white p-3 text-sm leading-relaxed text-slate-700 outline-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60"
                                 />
                                 <input
-                                    value={entry.emotionalJourney || ''}
+                                    value={entry.emotionalJourney ? renderDateDiaryMemoryTemplate(entry.emotionalJourney, char.name, userProfile.name) : ''}
                                     disabled={isDiaryMemorySaving}
-                                    onChange={e => updateDiaryMemoryPreviewEntry(entry.id, { emotionalJourney: e.target.value })}
+                                    onChange={e => updateDiaryMemoryPreviewEntry(entry.id, { emotionalJourney: toDateDiaryMemoryTemplate(e.target.value, char.name, userProfile.name) })}
                                     placeholder="当时的感受，例如：舍不得、克制、心动"
                                     className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 outline-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60"
                                 />

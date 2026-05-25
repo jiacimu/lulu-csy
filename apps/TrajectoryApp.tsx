@@ -18,6 +18,7 @@ import { DB } from '../utils/db';
 import { MinimaxTts } from '../utils/minimaxTts';
 import { getTtsConfig } from '../utils/runtimeConfig';
 import { withCharacterTtsVoice } from '../utils/characterTts';
+import TrajectoryCollapseTransition from '../components/trajectory/TrajectoryCollapseTransition';
 import '../styles/trajectory.css';
 
 type View = 'select' | 'timeline' | 'monologue';
@@ -36,7 +37,8 @@ const TrajectoryApp: React.FC = () => {
     const [, setWhisperResp] = useState('');
     const [isWhisperGen, setIsWhisperGen] = useState(false);
     const [showWhisper, setShowWhisper] = useState(false);
-    const [showTurbulence, setShowTurbulence] = useState(false);
+    const [isCollapsePending, setIsCollapsePending] = useState(false);
+    const [showCollapseTransition, setShowCollapseTransition] = useState(false);
     const [showAddModal, setShowAddModal] = useState(false);
     const [addTitle, setAddTitle] = useState('');
     const [addKeywords, setAddKeywords] = useState('');
@@ -46,9 +48,17 @@ const TrajectoryApp: React.FC = () => {
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const audioUrlRef = useRef<string | null>(null);
     const abortRef = useRef<AbortController | null>(null);
+    const collapseStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const api = apiConfig?.baseUrl && apiConfig?.apiKey && apiConfig?.model
         ? { baseUrl: apiConfig.baseUrl, apiKey: apiConfig.apiKey, model: apiConfig.model } : null;
+
+    const clearCollapseStartTimer = useCallback(() => {
+        if (collapseStartTimerRef.current) {
+            clearTimeout(collapseStartTimerRef.current);
+            collapseStartTimerRef.current = null;
+        }
+    }, []);
 
     // ── Character Selection ──
     const handleSelectChar = useCallback(async (c: CharacterProfile) => {
@@ -79,9 +89,12 @@ const TrajectoryApp: React.FC = () => {
     // ── Open Node ──
     const handleOpenNode = useCallback(async (node: TrajectoryNode) => {
         if (!char || !api) return;
+        clearCollapseStartTimer();
         setActiveNode(node);
         setView('monologue');
         setShowWhisper(false);
+        setIsCollapsePending(false);
+        setShowCollapseTransition(false);
         setWhisperResp('');
         setWhisperInput('');
 
@@ -103,7 +116,7 @@ const TrajectoryApp: React.FC = () => {
         } finally {
             setIsMonoGen(false);
         }
-    }, [char, api, userProfile]);
+    }, [char, api, userProfile, clearCollapseStartTimer]);
 
     // ── Whisper ──
     const handleWhisper = useCallback(async () => {
@@ -136,33 +149,35 @@ const TrajectoryApp: React.FC = () => {
 
             // Trigger time-space turbulence at round 10
             if (isLastRound) {
+                setIsCollapsePending(true);
+                clearCollapseStartTimer();
                 // Short delay to let user read the last response
-                setTimeout(async () => {
-                    setShowTurbulence(true);
+                collapseStartTimerRef.current = setTimeout(() => {
+                    collapseStartTimerRef.current = null;
+                    setIsCollapsePending(false);
+                    setShowCollapseTransition(true);
+
                     // Generate dream echo and save to main chat
-                    try {
-                        const dreamText = await generateDreamEcho(char, updated, api, userProfile.name);
-                        await DB.saveMessage({
-                            charId: char.id,
-                            role: 'assistant',
-                            type: 'text',
-                            content: dreamText,
-                            metadata: {
-                                source: 'trajectory_dream',
-                                nodeId: updated.id,
-                                nodeTitle: updated.title,
-                                nodeAge: updated.age,
-                                nodeEra: updated.era,
-                            },
-                        });
-                    } catch (e) {
-                        console.warn('[Trajectory] Dream echo generation failed:', e);
-                    }
-                    // Auto-dismiss turbulence after animation
-                    setTimeout(() => {
-                        setShowTurbulence(false);
-                        setShowWhisper(false);
-                    }, 3000);
+                    void (async () => {
+                        try {
+                            const dreamText = await generateDreamEcho(char, updated, api, userProfile.name);
+                            await DB.saveMessage({
+                                charId: char.id,
+                                role: 'assistant',
+                                type: 'text',
+                                content: dreamText,
+                                metadata: {
+                                    source: 'trajectory_dream',
+                                    nodeId: updated.id,
+                                    nodeTitle: updated.title,
+                                    nodeAge: updated.age,
+                                    nodeEra: updated.era,
+                                },
+                            });
+                        } catch (e) {
+                            console.warn('[Trajectory] Dream echo generation failed:', e);
+                        }
+                    })();
                 }, 1500);
             }
         } catch (e: any) {
@@ -170,7 +185,7 @@ const TrajectoryApp: React.FC = () => {
         } finally {
             setIsWhisperGen(false);
         }
-    }, [char, api, activeNode, whisperInput, addToast, userProfile]);
+    }, [char, api, activeNode, whisperInput, addToast, userProfile, clearCollapseStartTimer]);
 
     // ── Regenerate Nodes ──
     const handleRegen = useCallback(async () => {
@@ -250,7 +265,24 @@ const TrajectoryApp: React.FC = () => {
         }
     }, [char, monoText, isTtsPlaying, stopTts, addToast]);
 
-    useEffect(() => () => { stopTts(); }, []);
+    useEffect(() => () => {
+        clearCollapseStartTimer();
+        stopTts();
+    }, [clearCollapseStartTimer, stopTts]);
+
+    const handleCollapseComplete = useCallback(() => {
+        clearCollapseStartTimer();
+        setShowCollapseTransition(false);
+        setIsCollapsePending(false);
+        setShowWhisper(false);
+        setWhisperResp('');
+        setWhisperInput('');
+        setShowDeleteConfirm(false);
+        stopTts();
+        setView('timeline');
+        setActiveNode(null);
+        setMonoText('');
+    }, [clearCollapseStartTimer, stopTts]);
 
     // ── Regenerate Monologue ──
     const handleRegenMonologue = useCallback(async () => {
@@ -273,14 +305,17 @@ const TrajectoryApp: React.FC = () => {
     // ── Delete Node ──
     const handleDeleteNode = useCallback(() => {
         if (!activeNode || !char) return;
+        clearCollapseStartTimer();
         deleteTrajectoryNode(char.id, activeNode.id);
         setNodes(prev => prev.filter(n => n.id !== activeNode.id));
         setView('timeline');
         setActiveNode(null);
         setMonoText('');
+        setShowCollapseTransition(false);
+        setIsCollapsePending(false);
         setShowDeleteConfirm(false);
         addToast('节点已删除', 'info');
-    }, [activeNode, char, addToast]);
+    }, [activeNode, char, addToast, clearCollapseStartTimer]);
 
     // ── Helpers ──
     /** Capitalize first letter for decorative display */
@@ -729,7 +764,7 @@ const TrajectoryApp: React.FC = () => {
                 <div className="traj-mono-bg" />
                 {activeNode && <div className="traj-mono-watermark">{moodLabel(activeNode.mood)}</div>}
                 <div className="traj-header" style={{ background: 'transparent', borderBottom: 'none' }}>
-                    <button className="traj-header-back" onClick={() => { stopTts(); setView('timeline'); setActiveNode(null); setMonoText(''); setShowWhisper(false); setWhisperResp(''); }}>
+                    <button className="traj-header-back" onClick={() => { clearCollapseStartTimer(); stopTts(); setView('timeline'); setActiveNode(null); setMonoText(''); setShowWhisper(false); setIsCollapsePending(false); setShowCollapseTransition(false); setWhisperResp(''); }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>
                     </button>
                 </div>
@@ -790,6 +825,9 @@ const TrajectoryApp: React.FC = () => {
 
                             {/* Sealed state */}
                             {activeNode?.whisperSealed ? (
+                                isCollapsePending ? (
+                                    <div className="traj-whisper-collapse-pending">信号正在坍塌</div>
+                                ) : (
                                 <div className="traj-whisper-sealed">
                                     <div className="traj-whisper-sealed-icon">
                                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -801,6 +839,7 @@ const TrajectoryApp: React.FC = () => {
                                     <div className="traj-whisper-sealed-sub">这段跨时空的对话已被封存。但有些痕迹，会以梦的形式留下来。</div>
                                     <div className="traj-whisper-close" onClick={() => { setShowWhisper(false); setWhisperResp(''); setWhisperInput(''); }}>quietly leave</div>
                                 </div>
+                                )
                             ) : (
                                 /* Input area */
                                 <>
@@ -819,18 +858,11 @@ const TrajectoryApp: React.FC = () => {
                         </div>
                     )}
 
-                    {/* Time-space turbulence overlay */}
-                    {showTurbulence && (
-                        <div className="traj-turbulence-overlay">
-                            <div className="traj-turbulence-crack" />
-                            <div className="traj-turbulence-text">
-                                <div className="traj-turbulence-title">时空乱流</div>
-                                <div className="traj-turbulence-sub">连接已断开</div>
-                            </div>
-                        </div>
+                    {showCollapseTransition && (
+                        <TrajectoryCollapseTransition onComplete={handleCollapseComplete} />
                     )}
                 </div>
-                    {!isMonoGen && monoText && !showWhisper && !showTurbulence && (
+                    {!isMonoGen && monoText && !showWhisper && !showCollapseTransition && (
                         <div className="traj-mono-bar">
                             {activeNode?.era === 'after_meeting' && (
                                 <button className={`traj-mono-btn ${isTtsPlaying ? 'traj-mono-btn--playing' : ''}`} onClick={handleTts}>

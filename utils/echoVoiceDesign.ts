@@ -24,6 +24,13 @@ export interface EchoCreatedVoice {
     description?: string | null;
 }
 
+export interface EchoVoiceDesignResult {
+    previews: EchoVoicePreview[];
+    text: string;
+    safetyAdjusted: boolean;
+    enhanceDisabled: boolean;
+}
+
 interface DesignVoiceOptions {
     apiKey: string;
     voiceDescription: string;
@@ -49,9 +56,32 @@ const DESCRIPTION_MAX_LENGTH = 1000;
 const PREVIEW_TEXT_MIN_LENGTH = 100;
 const PREVIEW_TEXT_MAX_LENGTH = 1000;
 
+const ELEVENLABS_SAFETY_BLOCK_MESSAGE =
+    'ElevenLabs 安全审核拦截了这组回声提示。已尝试使用中性试听文本重试，仍未通过；请把提示词和试听文本改成更日常、中性的描述后再试。';
+
+const SAFE_PREVIEW_TEXT_ZH =
+    '今天我在测试这段声音的自然程度。请用平稳清晰的语气读出这段话，保留适当停顿和呼吸感，让语速不要太快，也不要太慢。窗边有一杯温热的茶，桌上放着一本翻开的书，外面的光线很安静。我会把每个词说得柔和、稳定、容易听清，像一条普通而真诚的日常留言。';
+
+const SAFE_PREVIEW_TEXT_EN =
+    'Today I am testing how this voice sounds in a calm, natural message. Please speak clearly, with steady pacing, soft pauses, and a warm conversational tone. There is a cup of tea on the desk, an open notebook by the window, and quiet light in the room. I will keep this sample simple, balanced, and easy to understand.';
+
 function clip(value: string | undefined, maxLength: number): string {
     const normalized = (value || '').trim();
     return normalized.length > maxLength ? normalized.slice(0, maxLength) : normalized;
+}
+
+function countMatches(value: string, pattern: RegExp): number {
+    return value.match(pattern)?.length || 0;
+}
+
+function chooseSafePreviewText(original: string): string {
+    const latinChars = countMatches(original, /[A-Za-z]/g);
+    const cjkChars = countMatches(original, /[\u3400-\u9fff]/g);
+    return latinChars > cjkChars ? SAFE_PREVIEW_TEXT_EN : SAFE_PREVIEW_TEXT_ZH;
+}
+
+function isElevenLabsSafetyError(message: string): boolean {
+    return /safety|guidelines|policy|blocked|potentially doesn't follow|content\s+(policy|guideline)|not allowed|violat/i.test(message);
 }
 
 function sanitizeJsonString(value: unknown, fallback = ''): string {
@@ -70,7 +100,7 @@ function normalizeDescription(value: string, char: CharacterProfile): string {
     const fallbackParts = [
         `A natural character voice for ${char.name}.`,
         char.description ? `Personality: ${clip(char.description, 160)}` : '',
-        'Warm, expressive, intimate, and suitable for conversational roleplay.',
+        'Warm, expressive, close, and suitable for conversational roleplay.',
     ].filter(Boolean);
 
     return clip(fallbackParts.join(' '), DESCRIPTION_MAX_LENGTH);
@@ -99,13 +129,13 @@ function buildEchoPrompt(char: CharacterProfile, user: UserProfile): string {
 - 用户名：${user.name}
 - 用户简介：${clip(user.bio, 300) || '未填写'}
 
-请让角色先用第一人称向用户描述“我觉得自己的声音应该是什么样”，然后把它整理成 ElevenLabs 可用的 Voice Design 提示词。
+请让角色先用第一人称向用户描述“我觉得自己的声音应该是什么样”，然后把它整理成 ElevenLabs 可用的 Voice Design 提示词。试听台词保持日常、中性，不写暧昧、身体照护、控制感或容易被安全审核误判的情节。
 
 严格输出 JSON，不要加 Markdown，不要加解释：
 {
   "characterNote": "中文，第一人称，像角色本人在给用户提声线建议，60-160字",
-  "voiceDescription": "英文，20-1000字符，描述年龄感、音色、语速、情绪、亲密距离、口音/语言倾向。不要模仿名人或真实人物，不要写 copyrighted character。",
-  "previewText": "试听台词，100-1000字符，用角色本人的说话方式，可以中文或中英混合，不要解释功能，不要提 ElevenLabs。",
+  "voiceDescription": "英文，20-1000字符，描述成年声线、音色、语速、情绪、自然说话距离、口音/语言倾向。不要模仿名人或真实人物，不要写 copyrighted character。",
+  "previewText": "试听台词，100-1000字符，用角色本人的说话方式，可以中文或中英混合，内容保持日常、中性，不要解释功能，不要提 ElevenLabs。",
   "voiceName": "简短音色名，优先包含角色名"
 }`;
 }
@@ -224,14 +254,14 @@ function normalizePreview(raw: any): EchoVoicePreview {
     };
 }
 
-export async function designElevenLabsVoice(options: DesignVoiceOptions): Promise<{ previews: EchoVoicePreview[]; text: string }> {
-    const apiKey = options.apiKey.trim();
-    if (!apiKey) throw new Error('请先配置 ElevenLabs API Key');
-
-    const voiceDescription = ensureDescriptionLength(options.voiceDescription);
-    const previewText = ensurePreviewTextLength(options.previewText);
-
-    const response = await fetch(ECHO_VOICE_DESIGN_ENDPOINT, {
+async function requestVoiceDesign(
+    apiKey: string,
+    voiceDescription: string,
+    previewText: string,
+    options: DesignVoiceOptions,
+    shouldEnhance: boolean,
+): Promise<Response> {
+    return fetch(ECHO_VOICE_DESIGN_ENDPOINT, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -242,12 +272,47 @@ export async function designElevenLabsVoice(options: DesignVoiceOptions): Promis
             model_id: options.modelId,
             text: previewText,
             guidance_scale: options.guidanceScale ?? 5,
-            should_enhance: options.shouldEnhance ?? true,
+            should_enhance: shouldEnhance,
         }),
     });
+}
+
+export async function designElevenLabsVoice(options: DesignVoiceOptions): Promise<EchoVoiceDesignResult> {
+    const apiKey = options.apiKey.trim();
+    if (!apiKey) throw new Error('请先配置 ElevenLabs API Key');
+
+    const voiceDescription = ensureDescriptionLength(options.voiceDescription);
+    const previewText = ensurePreviewTextLength(options.previewText);
+    const requestedShouldEnhance = options.shouldEnhance ?? true;
+
+    let response = await requestVoiceDesign(apiKey, voiceDescription, previewText, options, requestedShouldEnhance);
+    let textUsed = previewText;
+    let safetyAdjusted = false;
+    let enhanceDisabled = false;
 
     if (!response.ok) {
-        throw new Error(await readElevenLabsError(response));
+        const firstError = await readElevenLabsError(response);
+        if (!isElevenLabsSafetyError(firstError)) {
+            throw new Error(firstError);
+        }
+
+        textUsed = chooseSafePreviewText(previewText);
+        safetyAdjusted = true;
+        response = await requestVoiceDesign(apiKey, voiceDescription, textUsed, options, requestedShouldEnhance);
+
+        if (!response.ok) {
+            const retryError = await readElevenLabsError(response);
+            if (!isElevenLabsSafetyError(retryError) || !requestedShouldEnhance) {
+                throw new Error(isElevenLabsSafetyError(retryError) ? ELEVENLABS_SAFETY_BLOCK_MESSAGE : retryError);
+            }
+
+            enhanceDisabled = true;
+            response = await requestVoiceDesign(apiKey, voiceDescription, textUsed, options, false);
+            if (!response.ok) {
+                const finalError = await readElevenLabsError(response);
+                throw new Error(isElevenLabsSafetyError(finalError) ? ELEVENLABS_SAFETY_BLOCK_MESSAGE : finalError);
+            }
+        }
     }
 
     const data = await response.json();
@@ -260,7 +325,9 @@ export async function designElevenLabsVoice(options: DesignVoiceOptions): Promis
 
     return {
         previews,
-        text: typeof data?.text === 'string' ? data.text : previewText,
+        text: typeof data?.text === 'string' ? data.text : textUsed,
+        safetyAdjusted,
+        enhanceDisabled,
     };
 }
 

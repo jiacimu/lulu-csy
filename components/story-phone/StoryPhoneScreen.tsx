@@ -67,6 +67,8 @@ import {
     Wallet,
     WifiHigh,
 } from '@phosphor-icons/react';
+import WeChatApp, { buildWeChatDataFromClue, type WeChatVisibleContent } from './WeChatApp';
+import type { WeChatData } from './wechatTypes';
 
 export type StoryPhoneAppId = string;
 
@@ -95,6 +97,7 @@ export interface PhoneClue {
     items: PhoneClueItem[];
     evidenceText: string;
     insertSummary: string;
+    wechatData?: WeChatData;
 }
 
 export interface StoryPhoneHomeSurface {
@@ -105,6 +108,8 @@ export interface StoryPhoneHomeSurface {
 }
 
 export const PHONE_APPS: PhoneAppDef[] = [
+    { id: 'wechat', name: '微信', icon: '微', color: '#18b35f', prompt: '生成角色真实在使用的微信数据，而不是一页线索卡。必须输出丰富 wechatData：角色自己的微信资料、聊天列表、联系人、群聊、朋友圈、收藏、服务/账单、作品/视频号、小店与卡包、表情、设置等。内容要从当前角色人设、世界观、关系、主聊天历史和本轮状态推导；允许有隐私痕迹、未读、置顶、撤回、转账、红包、工作群、好友互动。每个私聊/群聊都要有多条 chatMessages，不要只有和 user 的聊天完整；朋友圈要有角色本人和好友/联系人发布的多条动态与点赞评论，post.text 必须像本人发的朋友圈原话，禁止写成“旧识/重点关注对象/家族纽带/人生导师”这类人设关系摘要。top-level items 只作为当前停留页摘要，完整内容放进 wechatData。' },
+    { id: 'qq', name: 'QQ', icon: 'Q', color: '#2d7df0', prompt: '精做 QQ 界面。生成 4-6 个可点开的 QQ 线索：消息列表、群聊、空间动态、相册、文件、收藏、匿名/旧关系、等级/签名、聊天记录。items 的 label 写好友/群/功能名，value 写屏幕上可见原文或列表项，detail 写时间、群身份、空间权限、文件名、相册名或旧记录痕迹。' },
     { id: 'messages', name: '信息', icon: '💬', color: 'from-emerald-400 to-green-600', prompt: '生成一段手机聊天/未发送消息/置顶会话线索。' },
     { id: 'notes', name: '备忘录', icon: '📝', color: 'from-amber-200 to-yellow-500', prompt: '生成一条备忘录、清单或私密随手记。' },
     { id: 'photos', name: '相册', icon: '🖼️', color: 'from-fuchsia-300 to-sky-400', prompt: '生成几张相册缩略图的文字描述，像用户翻到了相册最近项目。' },
@@ -149,6 +154,8 @@ type StoryPhoneIcon = React.ComponentType<{
 }>;
 
 const APP_ICON_MAP: Record<string, StoryPhoneIcon> = {
+    wechat: ChatCircleText,
+    qq: UsersThree,
     messages: ChatCircleText,
     notes: NotePencil,
     photos: ImageSquare,
@@ -180,7 +187,7 @@ const APP_ICON_MAP: Record<string, StoryPhoneIcon> = {
     puzzle: PuzzlePiece,
 };
 
-const DOCK_APP_IDS = ['messages', 'mail', 'maps', 'settings'];
+const DOCK_APP_IDS = ['wechat', 'messages', 'mail', 'settings'];
 
 function isImageIconSource(value?: string): value is string {
     return !!value && /^(data:image\/|blob:|https?:\/\/)/i.test(value);
@@ -236,6 +243,24 @@ interface AppTheme {
 }
 
 const APP_THEMES: Record<string, AppTheme> = {
+    wechat: {
+        screen: 'bg-[#ededed] text-[#111111]',
+        header: 'bg-[#f7f7f7]/96 text-[#111111]',
+        border: 'border-black/8',
+        muted: 'text-[#8a8a8a]',
+        accent: 'text-[#07c160]',
+        accentSoft: 'bg-[#07c160]/10',
+        accentHex: '#07c160',
+    },
+    qq: {
+        screen: 'bg-[#eef6ff] text-[#1d304a]',
+        header: 'bg-[#f8fbff]/94 text-[#1d304a]',
+        border: 'border-blue-950/10',
+        muted: 'text-[#60738c]',
+        accent: 'text-[#2474d8]',
+        accentSoft: 'bg-blue-500/12',
+        accentHex: '#2d7df0',
+    },
     messages: {
         screen: 'bg-[#eef7f1] text-[#1d3028]',
         header: 'bg-[#f8fffb]/92 text-[#1d3028]',
@@ -521,6 +546,8 @@ const SYSTEM_APP_THEME = {
 };
 
 const SYSTEM_APP_ACCENTS: Record<string, string> = {
+    wechat: '#5f796b',
+    qq: '#60758d',
     messages: '#5e796b',
     notes: '#887957',
     photos: '#7b7286',
@@ -628,6 +655,128 @@ function parseConversationLines(clue: PhoneClue, charName: string) {
     });
 }
 
+type StoryPhoneNestedRouteName = 'home' | 'thread' | 'moments' | 'wallet' | 'contacts' | 'search' | 'space' | 'files' | 'profile';
+
+interface StoryPhoneNestedRoute {
+    name: StoryPhoneNestedRouteName;
+    itemIndex?: number;
+}
+
+const DEFAULT_NESTED_ROUTE: StoryPhoneNestedRoute = { name: 'home' };
+
+function routeTitle(routeName: StoryPhoneNestedRouteName, fallback: string): string {
+    const labels: Record<StoryPhoneNestedRouteName, string> = {
+        home: fallback,
+        thread: fallback,
+        moments: '朋友圈',
+        wallet: '支付',
+        contacts: '通讯录',
+        search: '搜索',
+        space: 'QQ空间',
+        files: '文件',
+        profile: '资料',
+    };
+    return labels[routeName] || fallback;
+}
+
+function getRouteItem(items: PhoneClueItem[], index?: number): PhoneClueItem {
+    return items[Math.max(0, Math.min(index ?? 0, items.length - 1))] || items[0] || { label: '线索', value: '这里还没有可读取的内容。' };
+}
+
+function parseThreadItemLines(item: PhoneClueItem, charName: string, otherName: string) {
+    const rawLines = itemText(item)
+        .split(/\n+/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .slice(0, 9);
+    const lines = rawLines.length > 0 ? rawLines : [item.value || item.detail || '消息还停在屏幕上。'];
+
+    return lines.map((raw, index) => {
+        const match = raw.match(/^([^:：]{1,14})[:：]\s*(.+)$/);
+        const speaker = match?.[1] || (index % 2 === 0 ? otherName : charName);
+        const text = match?.[2] || raw;
+        const mine = speaker === '我' || speaker === charName || /^(me|i|mine|self)$/i.test(speaker);
+        return { speaker, text, mine };
+    });
+}
+
+function getItemPreview(item: PhoneClueItem, max = 70): string {
+    return previewText(itemText(item) || item.value || item.detail || item.label, max);
+}
+
+const RouteBackButton: React.FC<{
+    compact: boolean;
+    theme: AppTheme;
+    title: string;
+    onBack?: () => void;
+}> = ({ compact, theme, title, onBack }) => (
+    <div className={`mb-3 flex items-center gap-2 rounded-[1.2rem] border ${theme.border} bg-white/72 p-2.5 shadow-sm`}>
+        <button
+            type="button"
+            onClick={onBack}
+            className={`flex ${compact ? 'h-7 w-7' : 'h-8 w-8'} shrink-0 items-center justify-center rounded-full ${theme.accentSoft} ${theme.accent} active:scale-95 disabled:opacity-50`}
+            disabled={!onBack}
+            aria-label="返回上一层"
+        >
+            <CaretLeft weight="bold" className="h-4 w-4" />
+        </button>
+        <div className="min-w-0 flex-1">
+            <div className={`${compact ? 'text-[11px]' : 'text-sm'} truncate font-bold`}>{title}</div>
+            <div className={`${compact ? 'text-[8px]' : 'text-[10px]'} ${theme.muted}`}>屏幕内页</div>
+        </div>
+    </div>
+);
+
+const PhoneThreadDetail: React.FC<{
+    item: PhoneClueItem;
+    charName: string;
+    charAvatar?: string;
+    compact: boolean;
+    theme: AppTheme;
+    platform: 'wechat' | 'qq';
+    onBack?: () => void;
+}> = ({ item, charName, charAvatar, compact, theme, platform, onBack }) => {
+    const lines = parseThreadItemLines(item, charName, item.label || '对方');
+    const mineBubble = platform === 'wechat' ? 'bg-[#95ec69] text-[#132015]' : 'bg-[#2d7df0] text-white';
+    const otherBubble = platform === 'wechat' ? 'bg-white text-[#1f2d25]' : 'bg-white text-[#1d304a]';
+
+    return (
+        <div>
+            <RouteBackButton compact={compact} theme={theme} title={item.label || routeTitle('thread', '聊天')} onBack={onBack} />
+            <div className={`rounded-[1.35rem] border ${theme.border} bg-white/42 p-3`}>
+                <div className={`mb-3 flex items-center justify-center gap-2 ${compact ? 'text-[9px]' : 'text-[11px]'} ${theme.muted}`}>
+                    <LockKey className="h-3.5 w-3.5" />
+                    <span>{item.detail || '聊天记录仍停在这里'}</span>
+                </div>
+                <div className={`${compact ? 'space-y-2' : 'space-y-2.5'}`}>
+                    {lines.map((line, index) => (
+                        <div key={`${line.speaker}-${index}`} className={`flex items-end gap-2 ${line.mine ? 'justify-end' : 'justify-start'}`}>
+                            {!line.mine && (
+                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/80 text-[10px] font-bold text-slate-500 shadow-sm">
+                                    {(line.speaker || item.label || '?').slice(0, 1)}
+                                </span>
+                            )}
+                            <div className={`max-w-[78%] rounded-2xl px-3 py-2 shadow-sm ${line.mine ? mineBubble : otherBubble}`}>
+                                {!line.mine && <div className={`${compact ? 'text-[8px]' : 'text-[9px]'} mb-0.5 font-semibold ${platform === 'wechat' ? 'text-[#14915a]' : 'text-[#2474d8]'}`}>{line.speaker}</div>}
+                                <div className={`${compact ? 'text-[10px]' : 'text-xs'} whitespace-pre-wrap leading-relaxed`}>{line.text}</div>
+                            </div>
+                            {line.mine && (
+                                <span className="h-7 w-7 shrink-0 overflow-hidden rounded-lg bg-slate-200 shadow-sm">
+                                    {charAvatar ? <img src={charAvatar} alt={charName} className="h-full w-full object-cover" /> : <UserCircle className="h-full w-full p-1 text-slate-500" />}
+                                </span>
+                            )}
+                        </div>
+                    ))}
+                </div>
+                <div className={`mt-3 flex items-center gap-2 rounded-full border ${theme.border} bg-white/72 px-3 py-2 ${theme.muted}`}>
+                    <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} min-w-0 flex-1 truncate`}>草稿、语音和撤回记录还在输入栏附近</span>
+                    <PaperPlaneTilt weight="fill" className={`h-4 w-4 ${theme.accent}`} />
+                </div>
+            </div>
+        </div>
+    );
+};
+
 interface AppContentProps {
     app: PhoneAppDef;
     clue: PhoneClue;
@@ -635,10 +784,173 @@ interface AppContentProps {
     charAvatar?: string;
     compact: boolean;
     theme: AppTheme;
+    nestedRoute?: StoryPhoneNestedRoute;
+    onNavigate?: (route: StoryPhoneNestedRoute) => void;
+    onVisibleContentChange?: (clue: PhoneClue | null) => void;
 }
 
-const StoryPhoneAppContent: React.FC<AppContentProps> = ({ app, clue, charName, charAvatar, compact, theme }) => {
+const WeChatScreen: React.FC<AppContentProps> = ({ clue, charName, charAvatar, compact, onVisibleContentChange }) => {
+    const wechatData = React.useMemo(
+        () => buildWeChatDataFromClue(clue, charName, charAvatar),
+        [charAvatar, charName, clue],
+    );
+
+    const handleVisibleContentChange = React.useCallback((visible: WeChatVisibleContent) => {
+        onVisibleContentChange?.({
+            ...clue,
+            title: visible.title,
+            subtitle: visible.pageType,
+            items: visible.items,
+            evidenceText: visible.content,
+            insertSummary: visible.summary,
+            wechatData: undefined,
+        });
+    }, [clue, onVisibleContentChange]);
+
+    return <WeChatApp data={wechatData} compact={compact} onVisibleContentChange={handleVisibleContentChange} />;
+};
+const QQScreen: React.FC<AppContentProps> = ({ clue, charName, charAvatar, compact, theme, nestedRoute = DEFAULT_NESTED_ROUTE, onNavigate }) => {
+    const items = getClueItems(clue).slice(0, compact ? 4 : 6);
+    const selectedItem = getRouteItem(items, nestedRoute.itemIndex);
+    const goHome = onNavigate ? () => onNavigate(DEFAULT_NESTED_ROUTE) : undefined;
+
+    if (nestedRoute.name === 'thread') {
+        return <PhoneThreadDetail item={selectedItem} charName={charName} charAvatar={charAvatar} compact={compact} theme={theme} platform="qq" onBack={goHome} />;
+    }
+
+    if (nestedRoute.name === 'space') {
+        return (
+            <div>
+                <RouteBackButton compact={compact} theme={theme} title="QQ空间" onBack={goHome} />
+                <div className="space-y-3">
+                    <div className="rounded-[1.45rem] bg-gradient-to-br from-[#2d7df0] via-[#55b6ff] to-[#bce9ff] p-4 text-white shadow-[0_16px_32px_rgba(45,125,240,0.2)]">
+                        <div className="flex items-center justify-between">
+                            <Star weight="fill" className="h-6 w-6" />
+                            <span className="rounded-full bg-white/18 px-2 py-1 text-[10px] font-semibold">空间动态</span>
+                        </div>
+                        <div className={`${compact ? 'mt-5 text-xl' : 'mt-7 text-2xl'} font-bold`}>{selectedItem.label || '最近动态'}</div>
+                        <div className={`${compact ? 'mt-1 text-[10px]' : 'mt-2 text-xs'} line-clamp-3 text-white/78`}>{getItemPreview(selectedItem, 96)}</div>
+                    </div>
+                    <div className={`overflow-hidden rounded-[1.25rem] border ${theme.border} bg-white/76`}>
+                        {items.map((item, index) => (
+                            <button
+                                key={`${item.label}-space-${index}`}
+                                type="button"
+                                onClick={() => onNavigate?.({ name: 'thread', itemIndex: index })}
+                                disabled={!onNavigate}
+                                className="flex w-full gap-3 border-b border-blue-900/8 p-3 text-left last:border-b-0 active:bg-blue-50/70 disabled:active:bg-transparent"
+                            >
+                                <ImageSquare className={`mt-1 h-4 w-4 shrink-0 ${theme.accent}`} />
+                                <span className="min-w-0 flex-1">
+                                    <span className={`${compact ? 'text-[11px]' : 'text-sm'} block font-semibold`}>{item.label}</span>
+                                    <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} mt-1 line-clamp-2 block ${theme.muted}`}>{getItemPreview(item, 84)}</span>
+                                    <span className={`${compact ? 'text-[8px]' : 'text-[10px]'} mt-1 block text-blue-400`}>{item.detail || '仅好友可见'}</span>
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (nestedRoute.name === 'files' || nestedRoute.name === 'profile') {
+        const title = nestedRoute.name === 'files' ? '群文件' : '个人资料';
+        return (
+            <div>
+                <RouteBackButton compact={compact} theme={theme} title={title} onBack={goHome} />
+                <div className={`overflow-hidden rounded-[1.25rem] border ${theme.border} bg-white/76`}>
+                    {items.map((item, index) => (
+                        <button
+                            key={`${item.label}-qq-file-${index}`}
+                            type="button"
+                            onClick={() => onNavigate?.({ name: 'thread', itemIndex: index })}
+                            disabled={!onNavigate}
+                            className="flex w-full items-center gap-3 border-b border-blue-900/8 p-3 text-left last:border-b-0 active:bg-blue-50/70 disabled:active:bg-transparent"
+                        >
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+                                {nestedRoute.name === 'files' ? <Folder className="h-4 w-4" /> : <UserCircle className="h-4 w-4" />}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                                <span className={`${compact ? 'text-[11px]' : 'text-sm'} block truncate font-semibold`}>{item.label}</span>
+                                <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} block truncate ${theme.muted}`}>{item.detail || getItemPreview(item, 58)}</span>
+                            </span>
+                            <CaretRight className={`h-4 w-4 ${theme.muted}`} />
+                        </button>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-3">
+            <div className={`relative overflow-hidden rounded-[1.45rem] border ${theme.border} bg-white/78 p-3 shadow-sm`}>
+                <div className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-blue-300/24" />
+                <div className="relative flex items-center gap-3">
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#2d7df0] text-2xl font-black text-white shadow-sm">Q</span>
+                    <span className="min-w-0 flex-1">
+                        <span className={`${compact ? 'text-sm' : 'text-base'} block truncate font-bold`}>QQ</span>
+                        <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} block truncate ${theme.muted}`}>{clue.subtitle || '旧关系、群聊、空间和文件还在同步'}</span>
+                    </span>
+                    <span className={`rounded-full ${theme.accentSoft} px-2 py-1 text-[10px] font-semibold ${theme.accent}`}>在线</span>
+                </div>
+                <div className="relative mt-3 grid grid-cols-4 gap-2">
+                    {[
+                        { name: '空间', route: 'space' as const, icon: Star },
+                        { name: '群文件', route: 'files' as const, icon: Folder },
+                        { name: '资料', route: 'profile' as const, icon: UserCircle },
+                        { name: '搜索', route: 'files' as const, icon: MagnifyingGlass },
+                    ].map(action => {
+                        const Icon = action.icon;
+                        return (
+                            <button
+                                key={action.name}
+                                type="button"
+                                onClick={() => onNavigate?.({ name: action.route })}
+                                disabled={!onNavigate}
+                                className={`rounded-2xl border ${theme.border} bg-white/64 px-2 py-2 text-center active:scale-95 disabled:active:scale-100`}
+                            >
+                                <Icon className={`mx-auto h-4 w-4 ${theme.accent}`} />
+                                <span className={`${compact ? 'text-[8px]' : 'text-[9px]'} mt-1 block font-semibold ${theme.muted}`}>{action.name}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+            <div className={`overflow-hidden rounded-[1.25rem] border ${theme.border} bg-white/76`}>
+                {items.map((item, index) => (
+                    <button
+                        key={`${item.label}-qq-${index}`}
+                        type="button"
+                        onClick={() => onNavigate?.({ name: 'thread', itemIndex: index })}
+                        disabled={!onNavigate}
+                        className="flex w-full items-center gap-3 border-b border-blue-900/8 p-3 text-left last:border-b-0 active:bg-blue-50/70 disabled:active:bg-transparent"
+                    >
+                        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#49a6ff] to-[#1d62d5] text-sm font-bold text-white shadow-sm">
+                            {item.label.slice(0, 1) || 'Q'}
+                            {index === 0 && <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-red-500" />}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                            <span className="flex items-baseline justify-between gap-2">
+                                <span className={`${compact ? 'text-[11px]' : 'text-sm'} truncate font-semibold`}>{item.label}</span>
+                                <span className={`${compact ? 'text-[8px]' : 'text-[10px]'} shrink-0 ${theme.muted}`}>{clue.timestamp || '刚刚'}</span>
+                            </span>
+                            <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} mt-0.5 block truncate ${theme.muted}`}>{getItemPreview(item, 58)}</span>
+                        </span>
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+const StoryPhoneAppContent: React.FC<AppContentProps> = ({ app, clue, charName, charAvatar, compact, theme, nestedRoute, onNavigate, onVisibleContentChange }) => {
     switch (app.id) {
+        case 'wechat':
+            return <WeChatScreen app={app} clue={clue} charName={charName} charAvatar={charAvatar} compact={compact} theme={theme} nestedRoute={nestedRoute} onNavigate={onNavigate} onVisibleContentChange={onVisibleContentChange} />;
+        case 'qq':
+            return <QQScreen app={app} clue={clue} charName={charName} charAvatar={charAvatar} compact={compact} theme={theme} nestedRoute={nestedRoute} onNavigate={onNavigate} />;
         case 'messages':
             return <MessagesScreen clue={clue} charName={charName} charAvatar={charAvatar} compact={compact} theme={theme} />;
         case 'notes':
@@ -1813,6 +2125,7 @@ interface StoryPhoneScreenProps {
     onUninstallApp?: (app: PhoneAppDef) => void;
     onPeekOnly?: () => void;
     onInsertContext?: () => void;
+    onVisibleContentChange?: (clue: PhoneClue | null) => void;
 }
 
 const StoryPhoneScreen: React.FC<StoryPhoneScreenProps> = ({
@@ -1835,9 +2148,11 @@ const StoryPhoneScreen: React.FC<StoryPhoneScreenProps> = ({
     onUninstallApp,
     onPeekOnly,
     onInsertContext,
+    onVisibleContentChange,
 }) => {
     const phoneApps = apps.length > 0 ? apps : PHONE_APPS;
     const currentApp = activeAppId === 'home' ? undefined : getStoryPhoneAppById(activeAppId, phoneApps);
+    const [nestedRoute, setNestedRoute] = React.useState<StoryPhoneNestedRoute>(DEFAULT_NESTED_ROUTE);
     const timeLabel = currentTime || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const hasActions = Boolean(clue && clue.appId === activeAppId && !isLoading && (onPeekOnly || onInsertContext));
     const dockApps = DOCK_APP_IDS.map(appId => getStoryPhoneAppById(appId, phoneApps)).filter((app): app is PhoneAppDef => Boolean(app)).slice(0, 4);
@@ -1869,6 +2184,23 @@ const StoryPhoneScreen: React.FC<StoryPhoneScreenProps> = ({
         spotlightDetail: homeSurface?.spotlightDetail || (clue ? previewText(clue.evidenceText || clue.insertSummary || clue.title, 44) : `${spotlightApp.name} 里有一页等待读取。`),
         spotlightFooter: homeSurface?.spotlightFooter || (clue?.timestamp ? `${clue.appName} · ${clue.timestamp}` : '等待读取'),
     };
+    const useNativeAppChrome = activeAppId === 'wechat';
+    const nestedNavigationEnabled = !compact && (activeAppId === 'wechat' || activeAppId === 'qq');
+
+    React.useEffect(() => {
+        setNestedRoute(DEFAULT_NESTED_ROUTE);
+    }, [activeAppId, clue?.appId, clue?.title, clue?.timestamp]);
+
+    React.useEffect(() => {
+        if (!onVisibleContentChange) return;
+        if (!clue || clue.appId !== activeAppId) {
+            onVisibleContentChange(null);
+            return;
+        }
+        if (activeAppId !== 'wechat') {
+            onVisibleContentChange(clue);
+        }
+    }, [activeAppId, clue, onVisibleContentChange]);
 
     return (
         <div className={frameClass}>
@@ -2023,36 +2355,38 @@ const StoryPhoneScreen: React.FC<StoryPhoneScreenProps> = ({
                         </div>
                     ) : (
                         <div className={`story-phone-system-ui relative flex min-h-0 flex-1 flex-col ${appTheme.screen}`} style={getAppSystemStyle(appTheme)}>
-                            <div className={`flex items-center justify-between border-b ${appTheme.border} ${appTheme.header} ${compact ? 'h-10 px-3' : 'h-12 px-4 py-2'}`}>
-                                {onBackHome ? (
-                                    <button onClick={onBackHome} className={`${compact ? 'h-7 w-7' : 'h-8 w-8'} flex shrink-0 items-center justify-center rounded-full ${appTheme.muted} active:scale-95`} aria-label="返回桌面">
-                                        <CaretLeft weight="bold" className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
-                                    </button>
-                                ) : (
-                                    <span className={compact ? 'w-4' : 'w-8'} />
-                                )}
-                                <div className="mx-2 flex min-w-0 flex-1 items-center justify-center gap-2">
-                                    {displayApp && (
-                                        <span className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-xl ${compact ? 'h-6 w-6' : 'h-8 w-8'}`} style={getAppIconStyle(displayApp, appTheme)}>
-                                            {renderAppGlyph(displayApp, compact ? 'story-phone-force-white h-3.5 w-3.5 text-white' : 'story-phone-force-white h-4 w-4 text-white', 'absolute inset-0 h-full w-full object-cover')}
-                                        </span>
+                            {!useNativeAppChrome && (
+                                <div className={`flex items-center justify-between border-b ${appTheme.border} ${appTheme.header} ${compact ? 'h-10 px-3' : 'h-12 px-4 py-2'}`}>
+                                    {onBackHome ? (
+                                        <button onClick={onBackHome} className={`${compact ? 'h-7 w-7' : 'h-8 w-8'} flex shrink-0 items-center justify-center rounded-full ${appTheme.muted} active:scale-95`} aria-label="返回桌面">
+                                            <CaretLeft weight="bold" className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
+                                        </button>
+                                    ) : (
+                                        <span className={compact ? 'w-4' : 'w-8'} />
                                     )}
-                                    <span className="min-w-0 text-center">
-                                        <span className={`${compact ? 'text-xs' : 'text-sm'} block truncate font-bold`}>{displayApp?.name || clue?.appName || 'App'}</span>
-                                        {!compact && <span className={`${appTheme.muted} block truncate text-[10px]`}>{clue?.timestamp || charName}</span>}
-                                    </span>
+                                    <div className="mx-2 flex min-w-0 flex-1 items-center justify-center gap-2">
+                                        {displayApp && (
+                                            <span className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-xl ${compact ? 'h-6 w-6' : 'h-8 w-8'}`} style={getAppIconStyle(displayApp, appTheme)}>
+                                                {renderAppGlyph(displayApp, compact ? 'story-phone-force-white h-3.5 w-3.5 text-white' : 'story-phone-force-white h-4 w-4 text-white', 'absolute inset-0 h-full w-full object-cover')}
+                                            </span>
+                                        )}
+                                        <span className="min-w-0 text-center">
+                                            <span className={`${compact ? 'text-xs' : 'text-sm'} block truncate font-bold`}>{displayApp?.name || clue?.appName || 'App'}</span>
+                                            {!compact && <span className={`${appTheme.muted} block truncate text-[10px]`}>{clue?.timestamp || charName}</span>}
+                                        </span>
+                                    </div>
+                                    {onGenerateApp && currentApp ? (
+                                        <button
+                                            onClick={() => onGenerateApp(currentApp)}
+                                            className={`${compact ? 'h-7 px-2 text-[9px]' : 'h-8 px-3 text-[11px]'} shrink-0 rounded-full font-bold active:scale-95 ${appTheme.accentSoft} ${appTheme.accent}`}
+                                        >
+                                            刷新
+                                        </button>
+                                    ) : (
+                                        <span className={compact ? 'w-7' : 'w-12'} />
+                                    )}
                                 </div>
-                                {onGenerateApp && currentApp ? (
-                                    <button
-                                        onClick={() => onGenerateApp(currentApp)}
-                                        className={`${compact ? 'h-7 px-2 text-[9px]' : 'h-8 px-3 text-[11px]'} shrink-0 rounded-full font-bold active:scale-95 ${appTheme.accentSoft} ${appTheme.accent}`}
-                                    >
-                                        刷新
-                                    </button>
-                                ) : (
-                                    <span className={compact ? 'w-7' : 'w-12'} />
-                                )}
-                            </div>
+                            )}
 
                             <div className={`story-phone-scroll min-h-0 flex-1 overflow-y-auto ${compact ? 'px-3 py-3' : 'px-4 py-4'}`}>
                                 {isLoading ? (
@@ -2068,6 +2402,9 @@ const StoryPhoneScreen: React.FC<StoryPhoneScreenProps> = ({
                                         charAvatar={charAvatar}
                                         compact={compact}
                                         theme={appTheme}
+                                        nestedRoute={nestedRoute}
+                                        onNavigate={nestedNavigationEnabled ? setNestedRoute : undefined}
+                                        onVisibleContentChange={onVisibleContentChange}
                                     />
                                 ) : (
                                     <div className={`flex h-full flex-col items-center justify-center gap-3 text-center ${appTheme.muted}`}>

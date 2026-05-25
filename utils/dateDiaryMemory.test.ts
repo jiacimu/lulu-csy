@@ -3,6 +3,7 @@ import {
     buildDateDiaryMemoryPrompt,
     parseDateDiaryMemoryResponse,
     renderDateDiaryMemoryTemplate,
+    toDateDiaryMemoryTemplate,
 } from './dateDiaryMemory';
 
 describe('dateDiaryMemory', () => {
@@ -43,5 +44,21 @@ describe('dateDiaryMemory', () => {
             'Sully',
             '初时雨',
         )).toBe('我记得 初时雨 没有松开手，Sully 也没有后退。');
+    });
+
+    it('converts displayed names back to placeholders before saving', () => {
+        expect(toDateDiaryMemoryTemplate(
+            '我记得 初时雨 没有松开手，Sully 也没有后退。',
+            'Sully',
+            '初时雨',
+        )).toBe('我记得 {userName} 没有松开手，{charName} 也没有后退。');
+    });
+
+    it('normalizes loose placeholder casing while rendering', () => {
+        expect(renderDateDiaryMemoryTemplate(
+            '我记得 ｛ username ｝ 递来的花。',
+            'Sully',
+            '初时雨',
+        )).toBe('我记得 初时雨 递来的花。');
     });
 });

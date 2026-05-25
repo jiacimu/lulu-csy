@@ -158,7 +158,7 @@ const WidgetsPage = React.memo(({ contentColor, openApp, anniversaries, characte
                 </div>
 
                 <div className="grid grid-cols-7 gap-y-3 gap-x-1 text-center mb-2">
-                    {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => <div key={d} className="text-[10px] font-bold opacity-40" style={{ color: contentColor }}>{d}</div>)}
+                    {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, index) => <div key={`${d}-${index}`} className="text-[10px] font-bold opacity-40" style={{ color: contentColor }}>{d}</div>)}
                 </div>
 
                 <div className="grid grid-cols-7 gap-y-2 gap-x-1 text-center">

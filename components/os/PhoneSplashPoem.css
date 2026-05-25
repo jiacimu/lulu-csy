@@ -1,0 +1,338 @@
+.phone-splash-poem-shell {
+  position: absolute;
+  inset: 0;
+  z-index: 999;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  background:
+    radial-gradient(circle at 50% 26%, rgba(255, 255, 255, 0.12), transparent 34%),
+    radial-gradient(circle at 46% 66%, rgba(206, 210, 218, 0.08), transparent 42%),
+    linear-gradient(180deg, #111318 0%, #090a0e 54%, #050506 100%);
+}
+
+.phone-splash-poem-shell::before,
+.phone-splash-poem-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.phone-splash-poem-shell::before {
+  background:
+    linear-gradient(115deg, transparent 0%, rgba(255, 255, 255, 0.045) 42%, transparent 68%),
+    radial-gradient(ellipse at 50% 84%, rgba(238, 242, 255, 0.08), transparent 44%);
+  filter: blur(10px);
+  opacity: 0.82;
+}
+
+.phone-splash-poem-shell::after {
+  background:
+    radial-gradient(ellipse at 50% 60%, transparent 0%, rgba(2, 4, 9, 0.16) 78%, rgba(0, 0, 0, 0.34) 100%);
+  opacity: 0.74;
+}
+
+.phone-splash-poem {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  pointer-events: none;
+  isolation: isolate;
+  color: rgba(248, 251, 255, 0.9);
+  background: transparent;
+  font-family: "明朝汇文体", "HuiwenMingchao", "Source Han Serif SC", "Noto Serif SC", "Songti SC", serif;
+  font-synthesis-weight: none;
+  text-rendering: geometricPrecision;
+}
+
+.phone-splash-poem__body {
+  position: absolute;
+  left: 50%;
+  top: 39%;
+  z-index: 2;
+  width: min(92vw, 30rem);
+  max-inline-size: 30rem;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.phone-splash-poem__body::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: -1;
+  width: min(116%, 31rem);
+  height: min(184%, 11rem);
+  border-radius: 999px;
+  background:
+    radial-gradient(
+      ellipse at center,
+      rgba(244, 248, 255, 0.14) 0%,
+      rgba(166, 171, 184, 0.12) 40%,
+      rgba(22, 26, 39, 0.18) 68%,
+      transparent 100%
+    );
+  opacity: 0.52;
+  filter: blur(25px);
+  transform: translate(-50%, -50%);
+}
+
+.phone-splash-poem__line {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  width: 100%;
+  white-space: nowrap;
+  letter-spacing: 0;
+  line-height: 1.26;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow:
+    0 1px 1px rgba(80, 82, 100, 0.28),
+    0 0 8px rgba(255, 255, 255, 0.42),
+    0 0 18px rgba(235, 238, 255, 0.28);
+}
+
+.phone-splash-poem__line--first {
+  font-size: clamp(0.94rem, 3.75vw, 1.22rem);
+  transform: scaleX(0.99);
+  transform-origin: center;
+}
+
+.phone-splash-poem__line--main {
+  margin-top: clamp(0.72rem, 1.6svh, 0.98rem);
+  font-size: clamp(1.76rem, 8vw, 2.6rem);
+  line-height: 1.18;
+}
+
+.phone-splash-poem__line--closing {
+  margin-top: clamp(0.62rem, 1.36svh, 0.88rem);
+  font-size: clamp(1.14rem, 5vw, 1.68rem);
+  transform: translateX(0.06em);
+}
+
+.phone-splash-poem__char {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  margin-inline: var(--phone-splash-poem-space);
+  opacity: 0;
+  color: rgba(248, 251, 255, var(--phone-splash-poem-alpha));
+  font-weight: 400;
+  line-height: 1;
+  transform: translate3d(0, calc(var(--phone-splash-poem-shift-y) + 0.5rem), 0) scale(0.98);
+  transform-origin: 50% 62%;
+  text-shadow:
+    0 1px 1px rgba(38, 41, 54, 0.44),
+    0 0 8px rgba(255, 255, 255, 0.38),
+    0 0 18px rgba(235, 238, 255, 0.24);
+  -webkit-text-stroke: 0.18px rgba(116, 121, 146, 0.28);
+  filter: blur(0.08px);
+  animation: phone-splash-poem-char-in 1050ms cubic-bezier(0.18, 0.72, 0.22, 1) forwards;
+  animation-delay: var(--phone-splash-poem-delay);
+  will-change: opacity, transform, filter;
+}
+
+.phone-splash-poem__char--plain {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(220, 227, 236, 0.9));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.phone-splash-poem__char--rose {
+  background: linear-gradient(180deg, #ffffff 0%, #dfe5ef 45%, #f7fbff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 0.25px rgba(95, 98, 120, 0.35);
+  text-shadow:
+    0 1px 1px rgba(80, 82, 100, 0.28),
+    0 0 10px rgba(255, 255, 255, 0.52),
+    0 0 20px rgba(235, 238, 255, 0.32);
+}
+
+.phone-splash-poem__char--motion {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(205, 214, 226, 0.86));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow:
+    0 1px 1px rgba(80, 82, 100, 0.28),
+    0 0 8px rgba(255, 255, 255, 0.38),
+    0 0 16px rgba(235, 238, 255, 0.22);
+}
+
+.phone-splash-poem__char--cloud {
+  --phone-splash-poem-final-blur: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(228, 234, 242, 0.78));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow:
+    0 1px 1px rgba(80, 82, 100, 0.3),
+    0 0 11px rgba(255, 255, 255, 0.54),
+    0 0 20px rgba(235, 238, 255, 0.3);
+}
+
+.phone-splash-poem__char--sea {
+  background: linear-gradient(180deg, #ffffff 0%, #dce6ee 54%, #f9fbff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 0.25px rgba(95, 98, 120, 0.35);
+  text-shadow:
+    0 1px 1px rgba(80, 82, 100, 0.32),
+    0 0 13px rgba(255, 255, 255, 0.58),
+    0 0 24px rgba(235, 238, 255, 0.34);
+}
+
+.phone-splash-poem__char--forget {
+  --phone-splash-poem-final-blur: 0;
+  color: rgba(250, 252, 255, 1);
+  font-weight: 300;
+  -webkit-text-stroke: 0.25px rgba(95, 98, 120, 0.35);
+  text-shadow:
+    0 1px 1px rgba(80, 82, 100, 0.3),
+    0 0 10px rgba(255, 255, 255, 0.5),
+    0 0 20px rgba(235, 238, 255, 0.28);
+}
+
+.phone-splash-poem__char--loss {
+  color: rgba(246, 249, 254, 0.9);
+  -webkit-text-stroke: 0.25px rgba(95, 98, 120, 0.35);
+}
+
+.phone-splash-poem__char--every {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(218, 226, 236, 0.9));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.phone-splash-poem__char--self {
+  background: linear-gradient(180deg, #ffffff 0%, #e1e8f0 48%, #ffffff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 0.25px rgba(95, 98, 120, 0.35);
+  text-shadow:
+    0 1px 1px rgba(80, 82, 100, 0.3),
+    0 0 10px rgba(255, 255, 255, 0.54),
+    0 0 20px rgba(235, 238, 255, 0.3);
+}
+
+.phone-splash-poem__char--punctuation {
+  color: rgba(249, 251, 255, 0.88);
+  font-size: 0.82em;
+  text-shadow:
+    0 1px 1px rgba(80, 82, 100, 0.22),
+    0 0 6px rgba(255, 255, 255, 0.24);
+}
+
+.phone-splash-poem__char--cloud::after,
+.phone-splash-poem__char--sea::after,
+.phone-splash-poem__char--forget::after,
+.phone-splash-poem__char--self::after {
+  content: attr(data-char);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: rgba(255, 255, 255, 0.26);
+  transform: translateY(0.2em);
+  filter: blur(0.4px);
+  opacity: 0.12;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 38%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 38%, #000 100%);
+}
+
+.phone-splash-poem__char--rose::before,
+.phone-splash-poem__char--loss::before {
+  content: attr(data-char);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: rgba(255, 255, 255, 0.14);
+  transform: translate(0.08em, 0.1em);
+  filter: blur(0.35px);
+  opacity: 0.18;
+}
+
+.phone-splash-poem__decorations {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.phone-splash-poem__decoration-image {
+  position: absolute;
+  display: block;
+  height: auto;
+  max-width: none;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+@keyframes phone-splash-poem-char-in {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, calc(var(--phone-splash-poem-shift-y) + 0.5rem), 0) scale(0.98);
+    filter: blur(1.2px);
+  }
+
+  55% {
+    opacity: 0.72;
+  }
+
+  100% {
+    opacity: var(--phone-splash-poem-alpha);
+    transform: translate3d(0, var(--phone-splash-poem-shift-y), 0) scale(var(--phone-splash-poem-scale));
+    filter: blur(var(--phone-splash-poem-final-blur, 0));
+  }
+}
+
+@media (max-height: 620px) {
+  .phone-splash-poem__body {
+    top: 39%;
+    transform: translate(-50%, -50%);
+  }
+
+  .phone-splash-poem__line--first {
+    font-size: 0.88rem;
+  }
+
+  .phone-splash-poem__line--main {
+    margin-top: 0.58rem;
+    font-size: 1.58rem;
+  }
+
+  .phone-splash-poem__line--closing {
+    margin-top: 0.54rem;
+    font-size: 1.06rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phone-splash-poem__char {
+    animation: none;
+  }
+
+  .phone-splash-poem__char {
+    opacity: var(--phone-splash-poem-alpha);
+    transform: translate3d(0, var(--phone-splash-poem-shift-y), 0) scale(var(--phone-splash-poem-scale));
+    filter: none;
+  }
+}

@@ -60,6 +60,7 @@ function buildClueFromMessage(message: Message): PhoneClue {
         items: items.length > 0 ? items : [{ label: '线索', value: evidenceText || insertSummary || message.content }],
         evidenceText,
         insertSummary,
+        wechatData: meta.phonePeekWeChatData && typeof meta.phonePeekWeChatData === 'object' ? meta.phonePeekWeChatData : undefined,
     };
 }
 

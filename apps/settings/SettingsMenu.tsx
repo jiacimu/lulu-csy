@@ -204,7 +204,7 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
                     </div>
                     <div>
                         <div className="text-sm font-semibold text-slate-700">沉浸全屏</div>
-                        <div className="text-[10px] text-slate-400">隐藏系统状态栏与导航栏</div>
+                        <div className="text-[10px] text-slate-400">支持时隐藏；iOS 自动避开状态栏</div>
                     </div>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
