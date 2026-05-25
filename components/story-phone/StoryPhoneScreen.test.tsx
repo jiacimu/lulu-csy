@@ -23,13 +23,19 @@ describe('StoryPhoneScreen home UI', () => {
         );
 
         expect(screen.getByText('刚才的对话还没暗下去。')).toBeInTheDocument();
-        expect(screen.getByText('「她把伞留在玄关」')).toBeInTheDocument();
+        const stickyNote = screen.getByText('「她把伞留在玄关」');
+        expect(stickyNote).toBeInTheDocument();
+        expect(stickyNote.className).toContain('line-clamp-3');
+        expect(stickyNote.className).toContain('break-words');
         expect(screen.getByText('音乐会贴着刚才那一幕生成。')).toBeInTheDocument();
         expect(screen.getByText('最近对话 · 11:50')).toBeInTheDocument();
         expect(screen.queryByText('记得按时吃饭。')).not.toBeInTheDocument();
         expect(container.innerHTML).not.toContain('d8d2c6');
         expect(container.innerHTML).not.toContain('ded8cb');
-        expect(container.innerHTML).not.toContain('-right-0.5 -top-0.5');
-        expect(container.innerHTML).toContain('right-0 top-0');
+        const unreadDots = container.querySelectorAll('.story-phone-unread-dot');
+        expect(unreadDots.length).toBeGreaterThan(0);
+        unreadDots.forEach(dot => {
+            expect(dot.parentElement?.className).not.toContain('overflow-hidden');
+        });
     });
 });

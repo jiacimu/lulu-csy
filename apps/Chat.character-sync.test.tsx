@@ -145,8 +145,6 @@ vi.mock('../utils/autonomousAgent', () => ({
         refreshCharacterContext: vi.fn(() => Promise.resolve()),
     },
     AGENT_MESSAGE_SAVED_EVENT_NAME: 'agent-message-saved',
-    getLifeStreamVisibleInChat: vi.fn(() => false),
-    LIFE_STREAM_VISIBILITY_EVENT_NAME: 'life-stream-visibility-change',
 }));
 
 vi.mock('../utils/agentBackendClient', () => ({
@@ -348,6 +346,43 @@ describe('Chat active character fallback', () => {
             expect(screen.getByTestId('message-item-30')).toHaveTextContent('chat-30');
         });
         expect(screen.queryByText('date-1')).not.toBeInTheDocument();
+    });
+
+    it('keeps life stream fragments hidden from the main chat', async () => {
+        localStorage.setItem('agent_lifestream_visibility_char-1', 'true');
+        const messages: Message[] = [
+            {
+                id: 1,
+                charId: 'char-1',
+                role: 'assistant',
+                type: 'lifestream' as any,
+                content: '午后的草坪生活碎片',
+                timestamp: 1000,
+            },
+            {
+                id: 2,
+                charId: 'char-1',
+                role: 'assistant',
+                type: 'text',
+                content: '正常聊天消息',
+                timestamp: 2000,
+            },
+        ];
+        mockedUseOS.mockReturnValue(buildOsContext({
+            characters: [{ id: 'char-1', name: 'Sully', avatar: 'sully.png' }],
+            activeCharacterId: 'char-1',
+        }));
+        mockedDB.getRecentMessageWindow.mockResolvedValue({
+            messages,
+            hasMore: false,
+        });
+
+        render(<Chat />);
+
+        await waitFor(() => {
+            expect(screen.getByTestId('message-item-2')).toHaveTextContent('正常聊天消息');
+        });
+        expect(screen.queryByText('午后的草坪生活碎片')).not.toBeInTheDocument();
     });
 
     it('ignores a stale imported history breakpoint so new chat messages stay visible', async () => {

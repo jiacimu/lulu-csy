@@ -30,8 +30,6 @@ import {
   BackendAgentManager,
   AGENT_MESSAGE_SAVED_EVENT_NAME,
   type AgentMessageSavedEventDetail,
-  getLifeStreamVisibleInChat,
-  LIFE_STREAM_VISIBILITY_EVENT_NAME,
 } from '../utils/autonomousAgent';
 import {
   ensureAgentTodayLife,
@@ -83,14 +81,13 @@ function getDisplayableMainChatMessages(
     options: {
         hideBeforeMessageId?: number;
         hideSystemLogs?: boolean;
-        lifeStreamVisibleInChat: boolean;
     },
 ): Message[] {
     const historyStartMessageId = getEffectiveHistoryStartMessageId(messages, options.hideBeforeMessageId);
     return messages
         .filter(isMainChatVisibleMessage)
         .filter(m => (m.type as string) !== 'health_signal')
-        .filter(m => options.lifeStreamVisibleInChat || (m.type as string) !== 'lifestream')
+        .filter(m => (m.type as string) !== 'lifestream')
         .filter(m => isAfterHistoryStart(m, historyStartMessageId))
         .filter(m => {
             if (m.metadata?.source === 'story_phone') return true;
@@ -127,9 +124,6 @@ const Chat: React.FC = () => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [hasMoreHistory, setHasMoreHistory] = useState(false);
     const [isHistoryLoading, setIsHistoryLoading] = useState(false);
-    const [lifeStreamVisibleInChat, setLifeStreamVisibleInChat] = useState(() => (
-        activeCharacterId ? getLifeStreamVisibleInChat(activeCharacterId) : false
-    ));
     const [todayLifeSyncText, setTodayLifeSyncText] = useState('');
     const [todayLifeSyncTone, setTodayLifeSyncTone] = useState<'soft' | 'ready'>('soft');
     const [todaySchedule, setTodaySchedule] = useState<ScopedAgentTodayScheduleState | null>(null);
@@ -174,7 +168,6 @@ const Chat: React.FC = () => {
     const visibleCountRef = useRef(30);
     const activeCharIdRef = useRef(activeCharacterId);
     const currentChatCharIdRef = useRef<string | undefined>(activeCharacterId || undefined);
-    const lifeStreamVisibleRef = useRef(lifeStreamVisibleInChat);
     const consumedTargetRef = useRef('');
     const pendingTargetScrollRef = useRef(false);
     const messagesRef = useRef<Message[]>(messages);
@@ -271,24 +264,6 @@ const Chat: React.FC = () => {
             addToast(voiceRecorder.error, 'error');
         }
     }, [voiceRecorder.error]);
-
-    useEffect(() => {
-        lifeStreamVisibleRef.current = lifeStreamVisibleInChat;
-    }, [lifeStreamVisibleInChat]);
-
-    useEffect(() => {
-        const refreshVisibility = () => {
-            setLifeStreamVisibleInChat(
-                activeCharacterId ? getLifeStreamVisibleInChat(activeCharacterId) : false,
-            );
-        };
-
-        refreshVisibility();
-        window.addEventListener(LIFE_STREAM_VISIBILITY_EVENT_NAME, refreshVisibility);
-        return () => {
-            window.removeEventListener(LIFE_STREAM_VISIBILITY_EVENT_NAME, refreshVisibility);
-        };
-    }, [activeCharacterId]);
 
     const matchedChar = activeCharacterId
         ? characters.find(c => c.id === activeCharacterId)
@@ -901,7 +876,6 @@ const Chat: React.FC = () => {
             let visibleCandidateCount = getDisplayableMainChatMessages(recentWindow.messages, {
                 hideBeforeMessageId: char?.hideBeforeMessageId,
                 hideSystemLogs: char?.hideSystemLogs,
-                lifeStreamVisibleInChat,
             }).length;
 
             while (
@@ -914,7 +888,6 @@ const Chat: React.FC = () => {
                 visibleCandidateCount = getDisplayableMainChatMessages(recentWindow.messages, {
                     hideBeforeMessageId: char?.hideBeforeMessageId,
                     hideSystemLogs: char?.hideSystemLogs,
-                    lifeStreamVisibleInChat,
                 }).length;
             }
 
@@ -941,7 +914,7 @@ const Chat: React.FC = () => {
                 setIsHistoryLoading(false);
             }
         }
-    }, [activeCharacterId, char?.hideBeforeMessageId, char?.hideSystemLogs, lifeStreamVisibleInChat]);
+    }, [activeCharacterId, char?.hideBeforeMessageId, char?.hideSystemLogs]);
 
     useEffect(() => {
         const rawTargetMessageId = appParams?.targetMessageId;
@@ -1112,7 +1085,7 @@ const Chat: React.FC = () => {
 
             reloadMessages(visibleCountRef.current);
         }
-    }, [lifeStreamVisibleInChat, activeCharacterId, appParams?.targetCharId, appParams?.targetMessageId, appParams?.targetRequestId, reloadMessages]);
+    }, [activeCharacterId, appParams?.targetCharId, appParams?.targetMessageId, appParams?.targetRequestId, reloadMessages]);
 
     // Load all messages when history-manager modal opens
     useEffect(() => {
@@ -1121,12 +1094,12 @@ const Chat: React.FC = () => {
                 const filtered = allMsgs
                     .filter(isMainChatVisibleMessage)
                     .filter(m => (m.type as string) !== 'health_signal')
-                    .filter(m => !(char?.hideSystemLogs && m.role === 'system'))
-                    .filter(m => lifeStreamVisibleInChat || (m.type as string) !== 'lifestream');
+                    .filter(m => (m.type as string) !== 'lifestream')
+                    .filter(m => !(char?.hideSystemLogs && m.role === 'system'));
                 setAllHistoryMessages(filtered);
             });
         }
-    }, [modalType, activeCharacterId, char?.hideSystemLogs, lifeStreamVisibleInChat]);
+    }, [modalType, activeCharacterId, char?.hideSystemLogs]);
 
     useEffect(() => {
         const savedPrompts = localStorage.getItem('chat_archive_prompts');
@@ -2111,9 +2084,8 @@ const Chat: React.FC = () => {
         return getDisplayableMainChatMessages(messages, {
             hideBeforeMessageId: char?.hideBeforeMessageId,
             hideSystemLogs: char?.hideSystemLogs,
-            lifeStreamVisibleInChat,
         }).slice(-visibleCount);
-    }, [messages, char?.hideBeforeMessageId, char?.hideSystemLogs, lifeStreamVisibleInChat, visibleCount]);
+    }, [messages, char?.hideBeforeMessageId, char?.hideSystemLogs, visibleCount]);
 
     useEffect(() => {
         if (!highlightedMessageId) return;

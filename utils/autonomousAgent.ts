@@ -331,8 +331,9 @@ export function saveAgentConfig(config: Partial<AgentConfig>): void {
     safeLocalStorageSet(AUTONOMOUS_DEBUG_STORAGE_KEY, String(merged.debugMode));
 }
 
-export function getLifeStreamVisibleInChat(charId: string): boolean {
-    return safeLocalStorageGet(`${LIFE_STREAM_VISIBILITY_STORAGE_PREFIX}${charId}`) === 'true';
+export function getLifeStreamVisibleInChat(_charId: string): boolean {
+    // LifeStream fragments are hidden context only; they should not surface in the chat UI.
+    return false;
 }
 
 function setLifeStreamVisibleInChat(charId: string, visibleInChat: boolean): void {

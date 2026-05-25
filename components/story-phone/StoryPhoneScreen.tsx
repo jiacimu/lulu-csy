@@ -205,6 +205,12 @@ function renderAppGlyph(app: PhoneAppDef, className: string, imageClassName?: st
     return <span className={`${className} flex items-center justify-center leading-none ${emojiSizeClass}`}>{app.icon}</span>;
 }
 
+const unreadDotClass = 'story-phone-unread-dot pointer-events-none absolute -right-1 -top-1 z-30 h-3 w-3 rounded-full border-2 border-white/85 bg-[#a76666] shadow-[0_2px_6px_rgba(83,45,45,0.24)]';
+
+function StoryPhoneUnreadDot() {
+    return <span aria-hidden="true" className={unreadDotClass} />;
+}
+
 function getWallpaperStyle(wallpaper?: string): React.CSSProperties {
     const fallback = 'linear-gradient(145deg, #f7f8f5 0%, #eef0ef 48%, #dfe3e1 100%)';
     const value = wallpaper || fallback;
@@ -1912,8 +1918,8 @@ const StoryPhoneScreen: React.FC<StoryPhoneScreenProps> = ({
                                         )}
                                     </div>
                                     {!compact && (
-                                        <div className="absolute bottom-0 left-1 max-w-[8.5rem] -rotate-3 border border-[rgba(120,120,120,0.12)] bg-[#f8f6f1]/90 px-2.5 py-1 text-[9px] font-medium leading-snug text-[#3e4245]/62 shadow-sm">
-                                            <span className="line-clamp-2">{homeSurfaceCopy.stickyNote}</span>
+                                        <div className="absolute bottom-0 left-1 max-w-[8.75rem] -rotate-3 border border-[rgba(120,120,120,0.12)] bg-[#f8f6f1]/90 px-2.5 py-1 text-[9px] font-medium leading-snug text-[#3e4245]/62 shadow-sm">
+                                            <span className="line-clamp-3 break-words">{homeSurfaceCopy.stickyNote}</span>
                                         </div>
                                     )}
                                 </div>
@@ -1927,9 +1933,11 @@ const StoryPhoneScreen: React.FC<StoryPhoneScreenProps> = ({
                                         最后停留
                                     </div>
                                     <div className="mt-2.5 flex items-center gap-3">
-                                        <span className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#8b8f91]/22 bg-[#f3f4f2] text-[#62676b] shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] ${compact ? 'h-10 w-10' : 'h-12 w-12'}`}>
-                                            {renderAppGlyph(spotlightApp, compact ? 'h-5 w-5 text-[#62676b]' : 'h-6 w-6 text-[#62676b]', 'absolute inset-0 h-full w-full object-cover')}
-                                            <span className="absolute right-0 top-0 z-20 h-2.5 w-2.5 rounded-full bg-[#a76666] shadow-[0_0_0_2px_rgba(255,255,255,0.8)]" />
+                                        <span className="relative flex shrink-0">
+                                            <span className={`flex items-center justify-center overflow-hidden rounded-full border border-[#8b8f91]/22 bg-[#f3f4f2] text-[#62676b] shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] ${compact ? 'h-10 w-10' : 'h-12 w-12'}`}>
+                                                {renderAppGlyph(spotlightApp, compact ? 'h-5 w-5 text-[#62676b]' : 'h-6 w-6 text-[#62676b]', 'absolute inset-0 h-full w-full object-cover')}
+                                            </span>
+                                            <StoryPhoneUnreadDot />
                                         </span>
                                         <span className="min-w-0 flex-1">
                                             <span className={compact ? 'block truncate text-[11px] font-semibold' : 'block truncate text-[13px] font-semibold'}>{spotlightApp.name} · {timeLabel}</span>
@@ -1956,11 +1964,13 @@ const StoryPhoneScreen: React.FC<StoryPhoneScreenProps> = ({
                                                     className="group flex min-w-0 flex-col items-center gap-1.5 active:scale-95"
                                                     aria-label={active ? `读取 ${app.name}` : `打开 ${app.name}`}
                                                 >
-                                                    <span
-                                                        className={`relative flex ${compact ? 'h-10 w-10 rounded-xl' : 'h-12 w-12 rounded-[1.05rem]'} items-center justify-center overflow-hidden border border-[rgba(120,120,120,0.15)] bg-white/76 text-[#62676b] shadow-[0_8px_18px_rgba(64,69,71,0.08),inset_0_1px_0_rgba(255,255,255,0.9)]`}
-                                                    >
-                                                        {renderAppGlyph(app, compact ? 'relative z-10 h-5 w-5 text-[#62676b]' : 'relative z-10 h-6 w-6 text-[#62676b]', 'absolute inset-0 h-full w-full object-cover')}
-                                                        {active && <span className="absolute right-0 top-0 z-20 h-2.5 w-2.5 rounded-full bg-[#a76666] shadow-[0_0_0_2px_rgba(255,255,255,0.82)]" />}
+                                                    <span className="relative flex shrink-0">
+                                                        <span
+                                                            className={`flex ${compact ? 'h-10 w-10 rounded-xl' : 'h-12 w-12 rounded-[1.05rem]'} items-center justify-center overflow-hidden border border-[rgba(120,120,120,0.15)] bg-white/76 text-[#62676b] shadow-[0_8px_18px_rgba(64,69,71,0.08),inset_0_1px_0_rgba(255,255,255,0.9)]`}
+                                                        >
+                                                            {renderAppGlyph(app, compact ? 'relative z-10 h-5 w-5 text-[#62676b]' : 'relative z-10 h-6 w-6 text-[#62676b]', 'absolute inset-0 h-full w-full object-cover')}
+                                                        </span>
+                                                        {active && <StoryPhoneUnreadDot />}
                                                     </span>
                                                     <span className={`${compact ? 'max-w-[3rem] text-[8px]' : 'max-w-[4rem] text-[10px]'} truncate font-medium text-[#3e4245]/70`}>{app.name}</span>
                                                 </button>
@@ -1997,11 +2007,13 @@ const StoryPhoneScreen: React.FC<StoryPhoneScreenProps> = ({
                                                 className="group flex items-center justify-center active:scale-95"
                                                 aria-label={`打开 ${app.name}`}
                                             >
-                                                <span
-                                                    className="relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-[1.05rem] border border-[rgba(120,120,120,0.14)] bg-white/76 text-[#62676b] shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]"
-                                                >
-                                                    {renderAppGlyph(app, 'relative z-10 h-5 w-5 text-[#62676b]', 'absolute inset-0 h-full w-full object-cover')}
-                                                    {app.id === spotlightApp.id && <span className="absolute right-0 top-0 z-20 h-2.5 w-2.5 rounded-full bg-[#a76666] shadow-[0_0_0_2px_rgba(255,255,255,0.82)]" />}
+                                                <span className="relative flex shrink-0">
+                                                    <span
+                                                        className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-[1.05rem] border border-[rgba(120,120,120,0.14)] bg-white/76 text-[#62676b] shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]"
+                                                    >
+                                                        {renderAppGlyph(app, 'relative z-10 h-5 w-5 text-[#62676b]', 'absolute inset-0 h-full w-full object-cover')}
+                                                    </span>
+                                                    {app.id === spotlightApp.id && <StoryPhoneUnreadDot />}
                                                 </span>
                                             </button>
                                         ))}
