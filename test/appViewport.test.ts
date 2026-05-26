@@ -21,7 +21,8 @@ describe('app viewport css metrics', () => {
 
     expect(metrics.width).toBe(430);
     expect(metrics.height).toBe(801);
-    expect(metrics.safeTopFallback).toBe(12);
+    expect(metrics.offsetTop).toBe(12);
+    expect(metrics.safeTopFallback).toBe(0);
     expect(metrics.safeBottomFallback).toBe(0);
   });
 
@@ -61,6 +62,32 @@ describe('app viewport css metrics', () => {
       displayModeFullscreen: false,
     });
 
+    expect(metrics.safeTopFallback).toBe(0);
+    expect(metrics.safeBottomFallback).toBe(0);
+  });
+
+  it('keeps keyboard viewport panning separate from safe-area fallback', () => {
+    const metrics = getViewportCssMetrics({
+      innerWidth: 440,
+      innerHeight: 956,
+      visualViewport: {
+        width: 440,
+        height: 420,
+        offsetTop: 292,
+        offsetLeft: 0,
+      },
+      screenHeight: 956,
+      screenAvailHeight: 956,
+      platform: 'iPhone',
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+      maxTouchPoints: 5,
+      standalone: false,
+      displayModeStandalone: false,
+      displayModeFullscreen: false,
+    });
+
+    expect(metrics.height).toBe(420);
+    expect(metrics.offsetTop).toBe(292);
     expect(metrics.safeTopFallback).toBe(0);
     expect(metrics.safeBottomFallback).toBe(0);
   });

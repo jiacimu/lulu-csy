@@ -578,10 +578,18 @@ body,
 }
 
 .sully-os-viewport {
+  position: fixed;
+  top: var(--viewport-offset-top);
+  left: var(--viewport-offset-left);
   width: var(--app-width);
   height: var(--app-height);
   min-width: var(--app-width);
   min-height: var(--app-height);
+  overflow: hidden;
+}
+
+.sully-phone-shell-root {
+  overflow: clip;
 }
 
 /* Global scroll behavior fix */

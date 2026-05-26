@@ -68,9 +68,7 @@ export function getViewportCssMetrics(env: ViewportEnvironment): ViewportCssMetr
     height,
     offsetTop,
     offsetLeft,
-    safeTopFallback: shouldUseIOSFallback
-      ? Math.max(offsetTop, IOS_SAFE_TOP_FALLBACK_PX)
-      : offsetTop,
+    safeTopFallback: shouldUseIOSFallback ? IOS_SAFE_TOP_FALLBACK_PX : 0,
     safeBottomFallback: shouldUseIOSFallback ? IOS_SAFE_BOTTOM_FALLBACK_PX : 0,
   };
 }
