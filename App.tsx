@@ -7,6 +7,7 @@ import FeaturePreviewPage from './components/FeaturePreviewPage';
 import { startKeepAlive,startBackendHeartbeat } from './utils/keepAlive';
 import { installGlobalAutofillSuppression } from './utils/autofillSuppression';
 import { isFullscreenEnabled,requestSystemFullscreen } from './utils/systemFullscreen';
+import { isIOSStandaloneWebApp } from './utils/iosStandalone';
 
 const EDITABLE_SELECTION_SELECTOR = 'input:not([readonly]), textarea:not([readonly]), select, [contenteditable="true"], [data-allow-text-selection="true"]';
 
@@ -38,6 +39,8 @@ function isFeaturePreviewRoute(): boolean {
 }
 
 const SullyOSApp: React.FC = () => {
+  const useAbsoluteShell = typeof window !== 'undefined' && isIOSStandaloneWebApp();
+
   useEffect(() => {
     startKeepAlive();
     startBackendHeartbeat();
@@ -76,9 +79,12 @@ const SullyOSApp: React.FC = () => {
   }, []);
 
   return (
-    <div className="w-full bg-black overflow-hidden" style={{ height: '100dvh', minHeight: '-webkit-fill-available' }}>
+    <div
+      className={`${useAbsoluteShell ? 'fixed inset-0 h-full' : 'relative'} w-full bg-black overflow-hidden`}
+      style={{ height: 'var(--app-height, 100lvh)', minHeight: 'var(--app-height, 100lvh)' }}
+    >
       <div
-        className="fixed inset-0 w-full h-full z-0 bg-black"
+        className={`${useAbsoluteShell ? 'absolute' : 'fixed'} inset-0 w-full h-full z-0 bg-black`}
         style={{ transform: 'translateZ(0)' }}
       >
         <VirtualTimeProvider>

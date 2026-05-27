@@ -3,6 +3,7 @@ import React,{ useRef,useEffect,useState,useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useOS } from '../../../context/OSContext';
 import { CloudStt } from '../../../utils/cloudStt';
+import { isIOSStandaloneWebApp } from '../../../utils/iosStandalone';
 import WaveformCanvas from '../WaveformCanvas';
 
 // ===== WeChat SVG Icons =====
@@ -85,6 +86,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
 }) => {
     const { sttConfig, addToast } = useOS();
     const wxTextareaRef = useRef<HTMLTextAreaElement>(null);
+    const useIOSStandaloneInputFix = isIOSStandaloneWebApp();
 
     const [isVoiceMode, setIsVoiceMode] = useState(false);
     const [gestureZone, setGestureZone] = useState<GestureZone>('send');
@@ -231,6 +233,23 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
     };
     const handleToggleVoiceMode = useCallback(() => setIsVoiceMode(prev => !prev), []);
+    const handleTextareaFocus = useCallback(() => {
+        if (!useIOSStandaloneInputFix) return;
+        setShowPanel('none');
+        const textarea = wxTextareaRef.current;
+        if (!textarea) return;
+
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+                if (document.activeElement !== textarea) return;
+                try {
+                    textarea.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                } catch {
+                    // Older iOS builds can throw on unsupported scroll options.
+                }
+            });
+        });
+    }, [setShowPanel, useIOSStandaloneInputFix]);
     const handleOpenPanel = useCallback((panel: 'emojis' | 'actions') => {
         setIsVoiceMode(false);
         setShowPanel(showPanel === panel ? 'none' : panel);
@@ -467,6 +486,11 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
                         ref={wxTextareaRef} rows={1}
                         value={input} onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
+                        onFocus={handleTextareaFocus}
+                        inputMode="text"
+                        enterKeyHint="send"
+                        autoCorrect="on"
+                        autoCapitalize="sentences"
                         style={{
                             flex: 1, minWidth: 0, background: 'transparent',
                             fontSize: '16px', color: '#333',

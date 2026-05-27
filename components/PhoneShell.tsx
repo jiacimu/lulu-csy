@@ -14,6 +14,7 @@ import { StatusBar as CapStatusBar,Style as StatusBarStyle,Animation as StatusBa
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
 import { requestSystemFullscreen } from '../utils/systemFullscreen';
+import { isIOSStandaloneWebApp } from '../utils/iosStandalone';
 
 // --- Lazy-loaded Apps (only downloaded when user opens them) ---
 const Settings = React.lazy(() => import('../apps/Settings'));
@@ -324,12 +325,17 @@ function renderActiveApp(activeApp: AppID) {
 const ActiveAppContainer = memo(function ActiveAppContainer({
   activeApp,
   onCloseApp,
+  useIOSStandaloneLayout,
 }: {
   activeApp: AppID;
   onCloseApp: () => void;
+  useIOSStandaloneLayout: boolean;
 }) {
   return (
-    <div className="flex-1 relative overflow-hidden" style={{ contain: 'layout style paint' }}>
+    <div
+      className="flex-1 relative overflow-hidden"
+      style={{ contain: useIOSStandaloneLayout ? undefined : 'layout style paint' }}
+    >
       <AppErrorBoundary onCloseApp={onCloseApp}>
         <Suspense fallback={<AppSplashScreen appId={activeApp} />}>
           {renderActiveApp(activeApp)}
@@ -341,6 +347,7 @@ const ActiveAppContainer = memo(function ActiveAppContainer({
 
 const PhoneShell: React.FC = () => {
   const { theme, isLocked, unlock, activeApp, closeApp, isDataLoaded, toasts, unreadMessages, characters, handleBack } = useOS();
+  const useIOSStandaloneLayout = isIOSStandaloneWebApp();
 
   // Use a ref so that the popstate / backButton handlers always see the latest values
   // without needing to be re-registered every time state changes.
@@ -488,6 +495,24 @@ const PhoneShell: React.FC = () => {
     window.scrollTo(0, 0);
   }, [activeApp]);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const wallpaper = theme.wallpaper;
+    const backgroundValue = !wallpaper
+      ? '#0f1115'
+      : (wallpaper.startsWith('http') || wallpaper.startsWith('data:') || wallpaper.startsWith('blob:'))
+        ? `url(${wallpaper})`
+        : wallpaper;
+
+    [document.documentElement, document.body].forEach(element => {
+      element.style.background = backgroundValue;
+      element.style.backgroundPosition = 'center';
+      element.style.backgroundSize = 'cover';
+      element.style.backgroundRepeat = 'no-repeat';
+    });
+  }, [theme.wallpaper]);
+
   // Idle prefetch: warm the Zhaixinglou chunk and critical assets after unlock
   // This runs once when the user enters the Launcher, so the chunk is already
   // in browser cache by the time they tap the Zhaixinglou icon.
@@ -540,7 +565,7 @@ const PhoneShell: React.FC = () => {
           filter: activeApp !== AppID.Launcher ? 'blur(10px)' : 'none',
           opacity: activeApp !== AppID.Launcher ? 0.6 : 1,
           backfaceVisibility: 'hidden',
-          contain: 'strict'
+          contain: useIOSStandaloneLayout ? undefined : 'strict'
         }}
       />
 
@@ -549,8 +574,16 @@ const PhoneShell: React.FC = () => {
       {/* Full-screen app container. Individual apps handle their own safe-area spacing. */}
       <div
         className="absolute inset-0 z-10 w-full h-full overflow-hidden bg-transparent overscroll-none flex flex-col"
+        style={{
+          paddingTop: activeApp !== AppID.Launcher ? 'var(--safe-top, env(safe-area-inset-top))' : 0,
+          paddingBottom: activeApp !== AppID.Launcher ? 'var(--safe-bottom, env(safe-area-inset-bottom))' : 0
+        }}
       >
-        <ActiveAppContainer activeApp={activeApp} onCloseApp={handleCloseActiveApp} />
+        <ActiveAppContainer
+          activeApp={activeApp}
+          onCloseApp={handleCloseActiveApp}
+          useIOSStandaloneLayout={useIOSStandaloneLayout}
+        />
 
         {/* Overlays: Status Bar (Top) */}
         {!theme.hideStatusBar && <StatusBar />}

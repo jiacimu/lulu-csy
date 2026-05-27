@@ -5,6 +5,7 @@ import { CharacterProfile,ChatTheme,EmojiCategory,Emoji } from '../../types';
 import { PRESET_THEMES } from './ChatConstants';
 import { THEME_PLUGINS } from './ThemeRegistry';
 import VoiceRecordButton from './VoiceRecordButton';
+import { isIOSStandaloneWebApp } from '../../utils/iosStandalone';
 
 // WeChat-specific icons and input bar are now in ./plugins/WeChatInputBar.tsx
 // Loaded via ThemeRegistry at runtime.
@@ -70,9 +71,11 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     isSpeaking = false,
 }) => {
     const chatImageInputRef = useRef<HTMLInputElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const startPos = useRef({ x: 0, y: 0 });
     const isLongPressTriggered = useRef(false); // Track if long press action fired
+    const useIOSStandaloneInputFix = isIOSStandaloneWebApp();
     // WeChat auto-expand ref & useEffect moved to plugins/WeChatInputBar.tsx
 
     // Resolve plugin theme ID: custom themes should use default (non-plugin) UI
@@ -127,6 +130,24 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     const handleSuggestClick = (emoji: Emoji) => {
         onPanelAction('send-emoji', emoji);
         setInput('');
+    };
+
+    const handleInputFocus = () => {
+        if (!useIOSStandaloneInputFix) return;
+        setShowPanel('none');
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+                if (document.activeElement !== textarea) return;
+                try {
+                    textarea.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                } catch {
+                    // Older iOS builds can throw on unsupported scroll options.
+                }
+            });
+        });
     };
 
     // --- Unified Touch/Long-Press Logic ---
@@ -286,11 +307,17 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                         </button>
                         <div className="flex-1 min-w-0 bg-slate-100 rounded-[24px] flex items-center px-1 border border-transparent focus-within:bg-white focus-within:border-primary/30 transition-all overflow-hidden">
                             <textarea
+                                ref={textareaRef}
                                 rows={1}
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 onKeyDown={handleKeyDown}
-                                className="flex-1 min-w-0 bg-transparent px-4 py-3 text-[15px] resize-none max-h-24 no-scrollbar"
+                                onFocus={handleInputFocus}
+                                inputMode="text"
+                                enterKeyHint="send"
+                                autoCorrect="on"
+                                autoCapitalize="sentences"
+                                className={`flex-1 min-w-0 bg-transparent px-4 py-3 ${useIOSStandaloneInputFix ? 'text-[16px]' : 'text-[15px]'} resize-none max-h-24 no-scrollbar`}
                                 placeholder="Message..."
                                 style={{ height: 'auto' }}
                             />

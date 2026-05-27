@@ -513,7 +513,9 @@
   --primary-sat: 25%;
   --primary-lightness: 65%;
   --safe-area-bottom: env(safe-area-inset-bottom);
-  --app-height: 100%;
+  --app-height: 100lvh;
+  --keyboard-inset: 0px;
+  --standalone-safe-area-bottom: 0px;
   /* Default fallback */
   --app-font: 'Quicksand', sans-serif;
 
@@ -537,7 +539,7 @@
 
   /* Smart Safe Area Variables */
   --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--standalone-safe-area-bottom, 0px));
 }
 
 /* When the app is in native HTML5 Fullscreen mode, ignore safe areas 
@@ -548,9 +550,11 @@
 }
 
 html,
+body,
 #root {
-  height: 100%;
-  min-height: 100%;
+  width: 100%;
+  height: var(--app-height, 100lvh);
+  min-height: var(--app-height, 100lvh);
   background-color: #0f1115;
 }
 
@@ -564,20 +568,16 @@ body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-  height: 100vh;
-  height: 100dvh;
+  height: var(--app-height, 100lvh);
+  min-height: var(--app-height, 100lvh);
   /* iOS Fix */
   width: 100vw;
   font-family: var(--app-font);
 }
 
-@supports (height: 100dvh) {
-  html,
-  body,
-  #root {
-    height: 100dvh;
-    min-height: 100dvh;
-  }
+body.ios-standalone {
+  overscroll-behavior-y: auto;
+  overscroll-behavior-x: none;
 }
 
 /* Global scroll behavior fix */
@@ -639,5 +639,5 @@ select:focus {
 
 /* Utility for Safe Area */
 .pb-safe {
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--safe-bottom, env(safe-area-inset-bottom));
 }
