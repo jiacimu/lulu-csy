@@ -329,14 +329,7 @@ const ActiveAppContainer = memo(function ActiveAppContainer({
   onCloseApp: () => void;
 }) {
   return (
-    <div
-      data-testid="active-app-container"
-      className="flex-1 relative overflow-hidden"
-      style={{
-        contain: 'layout style paint',
-        paddingTop: activeApp !== AppID.Launcher ? 'var(--safe-top, env(safe-area-inset-top))' : 0,
-      }}
-    >
+    <div className="flex-1 relative overflow-hidden" style={{ contain: 'layout style paint' }}>
       <AppErrorBoundary onCloseApp={onCloseApp}>
         <Suspense fallback={<AppSplashScreen appId={activeApp} />}>
           {renderActiveApp(activeApp)}
@@ -537,7 +530,7 @@ const PhoneShell: React.FC = () => {
   }
 
   return (
-    <div className="sully-phone-shell-root relative w-full h-full overflow-hidden bg-gradient-to-br from-pink-200 via-purple-200 to-indigo-200 text-slate-900 font-sans select-none overscroll-none">
+    <div className="relative w-full h-full overflow-hidden bg-gradient-to-br from-pink-200 via-purple-200 to-indigo-200 text-slate-900 font-sans select-none overscroll-none">
       {/* Optimized Background Layer */}
       <div
         className="absolute inset-0 bg-cover bg-center transition-all duration-700 ease-[cubic-bezier(0.25,0.1,0.25,1)]"
@@ -553,13 +546,9 @@ const PhoneShell: React.FC = () => {
 
       <div className={`absolute inset-0 transition-all duration-500 ${activeApp === AppID.Launcher ? 'bg-transparent' : 'bg-white/50 backdrop-blur-3xl'}`} />
 
-      {/* Full-screen app frame. ActiveAppContainer keeps app content inside the device safe area. */}
+      {/* Full-screen app container. Individual apps handle their own safe-area spacing. */}
       <div
-        data-testid="app-frame"
         className="absolute inset-0 z-10 w-full h-full overflow-hidden bg-transparent overscroll-none flex flex-col"
-        style={{
-          paddingBottom: activeApp !== AppID.Launcher ? 'var(--safe-bottom, env(safe-area-inset-bottom))' : 0
-        }}
       >
         <ActiveAppContainer activeApp={activeApp} onCloseApp={handleCloseActiveApp} />
 

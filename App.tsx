@@ -1,12 +1,11 @@
 
-import React,{ useCallback,useEffect,useLayoutEffect,useState } from 'react';
+import React,{ useCallback,useEffect,useState } from 'react';
 import { VirtualTimeProvider } from './context/VirtualTimeContext';
 import { OSProvider } from './context/OSContext';
 import PhoneShell from './components/PhoneShell';
 import FeaturePreviewPage from './components/FeaturePreviewPage';
 import { startKeepAlive,startBackendHeartbeat } from './utils/keepAlive';
 import { installGlobalAutofillSuppression } from './utils/autofillSuppression';
-import { installAppViewportCssVars } from './utils/appViewport';
 import { isFullscreenEnabled,requestSystemFullscreen } from './utils/systemFullscreen';
 
 const EDITABLE_SELECTION_SELECTOR = 'input:not([readonly]), textarea:not([readonly]), select, [contenteditable="true"], [data-allow-text-selection="true"]';
@@ -39,8 +38,6 @@ function isFeaturePreviewRoute(): boolean {
 }
 
 const SullyOSApp: React.FC = () => {
-  useLayoutEffect(() => installAppViewportCssVars(), []);
-
   useEffect(() => {
     startKeepAlive();
     startBackendHeartbeat();
@@ -79,9 +76,9 @@ const SullyOSApp: React.FC = () => {
   }, []);
 
   return (
-    <div className="sully-os-viewport relative bg-black overflow-hidden">
+    <div className="w-full bg-black overflow-hidden" style={{ height: '100dvh', minHeight: '-webkit-fill-available' }}>
       <div
-        className="absolute inset-0 w-full h-full z-0 bg-black"
+        className="fixed inset-0 w-full h-full z-0 bg-black"
         style={{ transform: 'translateZ(0)' }}
       >
         <VirtualTimeProvider>

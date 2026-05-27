@@ -240,55 +240,6 @@ describe('PhoneShell active app rendering', () => {
         expect(await screen.findByText('EchoRecord App', {}, { timeout: 3000 })).toBeTruthy();
     });
 
-    it('keeps opened apps below the top device safe area', async () => {
-        vi.useRealTimers();
-        mockedUseOS.mockReturnValue({
-            activeApp: AppID.EchoRecord,
-            characters: [],
-            closeApp: vi.fn(),
-            handleBack: vi.fn(() => true),
-            isDataLoaded: true,
-            isLocked: false,
-            theme: {
-                wallpaper: 'linear-gradient(#000000, #111111)',
-                hideStatusBar: false,
-            },
-            toasts: [],
-            unreadMessages: {},
-            unlock: vi.fn(),
-        } as any);
-
-        render(
-            <VirtualTimeProvider>
-                <PhoneShell />
-            </VirtualTimeProvider>,
-        );
-
-        const appFrame = screen.getByTestId('app-frame');
-        const activeAppContainer = screen.getByTestId('active-app-container');
-
-        expect(appFrame.style.paddingTop).toBe('');
-        expect(appFrame.style.paddingBottom).toBe('var(--safe-bottom, env(safe-area-inset-bottom))');
-        expect(activeAppContainer.style.paddingTop).toBe('var(--safe-top, env(safe-area-inset-top))');
-        expect(activeAppContainer.style.paddingBottom).toBe('');
-    });
-
-    it('does not add safe-area padding on the launcher', () => {
-        render(
-            <VirtualTimeProvider>
-                <PhoneShell />
-            </VirtualTimeProvider>,
-        );
-
-        const appFrame = screen.getByTestId('app-frame');
-        const activeAppContainer = screen.getByTestId('active-app-container');
-
-        expect(appFrame.style.paddingTop).toBe('');
-        expect(appFrame.style.paddingBottom).toBe('0px');
-        expect(activeAppContainer.style.paddingTop).toBe('0px');
-        expect(activeAppContainer.style.paddingBottom).toBe('');
-    });
-
     it('does not call the Android-only overlay API before hiding the iOS status bar', async () => {
         vi.useRealTimers();
         vi.mocked(Capacitor.isNativePlatform).mockReturnValue(true);

@@ -513,12 +513,7 @@
   --primary-sat: 25%;
   --primary-lightness: 65%;
   --safe-area-bottom: env(safe-area-inset-bottom);
-  --app-width: 100vw;
-  --app-height: 100dvh;
-  --viewport-offset-top: 0px;
-  --viewport-offset-left: 0px;
-  --safe-top-fallback: 0px;
-  --safe-bottom-fallback: 0px;
+  --app-height: 100%;
   /* Default fallback */
   --app-font: 'Quicksand', sans-serif;
 
@@ -541,8 +536,8 @@
   --pill-text: #64748b;
 
   /* Smart Safe Area Variables */
-  --safe-top: max(env(safe-area-inset-top, 0px), var(--safe-top-fallback));
-  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-bottom-fallback));
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* When the app is in native HTML5 Fullscreen mode, ignore safe areas 
@@ -550,6 +545,13 @@
 :fullscreen {
   --safe-top: 0px !important;
   --safe-bottom: 0px !important;
+}
+
+html,
+#root {
+  height: 100%;
+  min-height: 100%;
+  background-color: #0f1115;
 }
 
 body {
@@ -562,34 +564,20 @@ body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-  height: var(--app-height);
-  width: var(--app-width);
+  height: 100vh;
+  height: 100dvh;
+  /* iOS Fix */
+  width: 100vw;
   font-family: var(--app-font);
 }
 
-html,
-body,
-#root {
-  min-width: 100%;
-  width: 100%;
-  min-height: var(--app-height);
-  height: var(--app-height);
-  overflow: hidden;
-}
-
-.sully-os-viewport {
-  position: fixed;
-  top: var(--viewport-offset-top);
-  left: var(--viewport-offset-left);
-  width: var(--app-width);
-  height: var(--app-height);
-  min-width: var(--app-width);
-  min-height: var(--app-height);
-  overflow: hidden;
-}
-
-.sully-phone-shell-root {
-  overflow: clip;
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
 }
 
 /* Global scroll behavior fix */
@@ -651,5 +639,5 @@ select:focus {
 
 /* Utility for Safe Area */
 .pb-safe {
-  padding-bottom: var(--safe-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
 }
