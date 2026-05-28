@@ -10,7 +10,7 @@
 
 .phone-splash-poem,
 .splash-moon-mist {
-  --font-minghui: "HuiwenMingchao";
+  --font-minghui: "HuiwenSplashPoem", "HuiwenMingchao";
   position: absolute;
   inset: 0;
   width: 100%;
@@ -41,47 +41,25 @@
 
 .splash-copy {
   left: 50%;
-  top: 43.5%;
+  top: 44%;
   right: auto;
   bottom: auto;
   z-index: 2;
-  display: flex;
-  width: min(76vw, 360px);
-  max-width: min(76vw, 360px);
+  display: block;
+  width: min(82vw, 390px);
+  max-width: min(82vw, 390px);
+  height: clamp(300px, 54svh, 410px);
   transform: translate(-50%, -50%);
-  flex-direction: column;
-  align-items: center;
   text-align: center;
   isolation: isolate;
   animation: breathGlow 5.2s ease-in-out 3.3s infinite;
 }
 
-.splash-copy::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: -1;
-  width: min(78vw, 390px);
-  height: min(48vh, 360px);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  background:
-    radial-gradient(
-      ellipse at center,
-      rgba(30, 38, 54, 0.24) 0%,
-      rgba(70, 82, 104, 0.14) 38%,
-      rgba(255, 255, 255, 0.05) 62%,
-      transparent 78%
-    );
-  filter: blur(16px);
-  opacity: 0.92;
-}
-
 .splash-line {
-  position: relative;
+  position: absolute;
   display: flex;
-  width: 100%;
+  width: max-content;
+  max-width: 100%;
   align-items: baseline;
   justify-content: center;
   color: transparent;
@@ -91,54 +69,56 @@
 }
 
 .splash-line--wake {
-  justify-content: flex-start;
+  left: 8%;
+  top: 8%;
   font-size: clamp(24px, 7.4vw, 36px);
-  opacity: 0.9;
-  transform: translateX(-6%);
+  opacity: 1;
+  transform: translateX(-3%) rotate(-1.2deg);
 }
 
 .splash-line--reason {
-  justify-content: flex-end;
-  margin-top: clamp(-4px, -1vw, -2px);
+  right: 8%;
+  top: 16%;
   font-size: clamp(18px, 5.6vw, 27px);
-  opacity: 0.76;
-  transform: translateX(8%) translateY(-2px);
+  opacity: 1;
+  transform: translateX(2%) rotate(1.1deg);
 }
 
 .splash-line--heart {
-  justify-content: flex-start;
-  margin-top: clamp(8px, 2.8vw, 16px);
+  left: 4%;
+  top: 32%;
   font-size: clamp(20px, 6.2vw, 30px);
-  letter-spacing: -0.02em;
-  opacity: 0.86;
-  transform: translateX(-3%);
+  opacity: 1;
+  transform: translateX(-2%) rotate(-0.7deg);
 }
 
 .splash-line--birds {
-  margin-top: clamp(4px, 1.8vw, 12px);
-  font-size: clamp(54px, 17vw, 82px);
+  left: 50%;
+  top: 49%;
+  font-size: clamp(42px, 13.2vw, 62px);
   line-height: 1.08;
-  letter-spacing: -0.09em;
   padding-bottom: 0.04em;
-  transform: translateX(0);
+  transform: translate(-50%, -50%) rotate(-0.4deg);
 }
 
 .splash-line--migrate {
-  justify-content: flex-end;
-  margin-top: clamp(10px, 3vw, 18px);
+  right: 7%;
+  top: 74%;
   font-size: clamp(21px, 6.4vw, 31px);
-  transform: translateX(6%);
+  transform: rotate(1deg);
 }
 
 .splash-line--escape {
-  justify-content: flex-start;
-  margin-top: clamp(0px, 0.7vw, 6px);
+  left: 7%;
+  top: 65%;
   font-size: clamp(21px, 6.4vw, 31px);
-  transform: translateX(-5%);
+  transform: translateX(-3%) rotate(-1.1deg);
 }
 
 .splash-char {
-  --char-extra-filter: drop-shadow(0 0 0 rgba(255, 255, 255, 0));
+  --char-extra-filter:
+    drop-shadow(0 0 4px rgba(255, 255, 255, 0.46))
+    drop-shadow(0 0 14px rgba(214, 230, 255, 0.32));
   --drift-start-x: 0px;
   position: relative;
   display: inline-block;
@@ -146,22 +126,17 @@
   color: transparent;
   font-weight: 400;
   line-height: 1;
-  background:
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.98) 0%,
-      rgba(238, 242, 246, 0.9) 42%,
-      rgba(190, 202, 214, 0.68) 76%,
-      rgba(255, 255, 255, 0.38) 100%
-    );
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: border-box;
+  -webkit-text-fill-color: rgba(250, 253, 255, 0.88);
   opacity: 0;
   text-shadow:
-    0 1px 2px rgba(28, 36, 52, 0.32),
-    0 0 4px rgba(255, 255, 255, 0.42),
-    0 0 10px rgba(190, 210, 226, 0.24);
+    0 0 1px rgba(255, 255, 255, 0.98),
+    0 0 8px rgba(255, 255, 255, 0.82),
+    0 0 18px rgba(222, 235, 255, 0.58),
+    0 1px 8px rgba(54, 66, 88, 0.34);
+  -webkit-text-stroke: 0.08px rgba(255, 255, 255, 0.5);
   filter: blur(8px) var(--char-extra-filter);
   transform:
     translate3d(
@@ -179,139 +154,56 @@
 
 .splash-char--soft {
   text-shadow:
-    0 1px 2px rgba(28, 36, 52, 0.28),
-    0 0 4px rgba(255, 255, 255, 0.34),
-    0 0 9px rgba(190, 210, 226, 0.18);
+    0 0 1px rgba(255, 255, 255, 0.88),
+    0 0 8px rgba(255, 255, 255, 0.58),
+    0 0 18px rgba(222, 235, 255, 0.44),
+    0 1px 8px rgba(60, 74, 96, 0.26);
 }
 
 .splash-char--bright {
-  background:
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 1) 0%,
-      rgba(246, 249, 252, 0.96) 36%,
-      rgba(198, 211, 225, 0.82) 72%,
-      rgba(255, 255, 255, 0.5) 100%
-    );
-  -webkit-background-clip: text;
-  background-clip: text;
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.96);
   text-shadow:
-    0 1px 2px rgba(28, 36, 52, 0.34),
-    0 0 5px rgba(255, 255, 255, 0.46),
-    0 0 12px rgba(190, 210, 226, 0.28);
+    0 0 1px rgba(255, 255, 255, 0.98),
+    0 0 9px rgba(255, 255, 255, 0.78),
+    0 0 21px rgba(222, 235, 255, 0.58),
+    0 1px 9px rgba(60, 74, 96, 0.3);
 }
 
 .splash-char--key,
 .splash-char--bright,
 .splash-char--hollow {
-  -webkit-text-stroke: 0.45px rgba(58, 68, 88, 0.34);
+  -webkit-text-stroke: 0.22px rgba(255, 255, 255, 0.8);
 }
 
 .splash-char--hollow {
   background: none;
   -webkit-background-clip: initial;
   background-clip: border-box;
-  -webkit-text-fill-color: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.08);
-  -webkit-text-stroke: 0.75px rgba(255, 255, 255, 0.9);
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.16);
+  -webkit-text-stroke: 0.5px rgba(255, 255, 255, 0.82);
   text-shadow:
-    0 1px 2px rgba(28, 36, 52, 0.36),
-    0 0 5px rgba(255, 255, 255, 0.44),
-    0 0 11px rgba(190, 210, 226, 0.22);
+    0 0 2px rgba(255, 255, 255, 0.96),
+    0 0 11px rgba(238, 246, 255, 0.82),
+    0 0 24px rgba(206, 224, 248, 0.48);
 }
 
 .splash-char--moon {
-  --char-extra-filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.28));
+  --char-extra-filter: none;
 }
 
 .splash-char--flock {
-  --char-extra-filter:
-    drop-shadow(0 1px 1px rgba(28, 36, 52, 0.28))
-    drop-shadow(0 0 8px rgba(255, 255, 255, 0.32));
-  background:
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.98) 0%,
-      rgba(239, 246, 252, 0.88) 42%,
-      rgba(142, 160, 184, 0.42) 74%,
-      rgba(255, 255, 255, 0.24) 100%
-    );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  -webkit-text-stroke: 0.92px rgba(252, 254, 255, 0.96);
+  --char-extra-filter: none;
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: border-box;
+  color: rgba(255, 255, 255, 0.16);
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.16);
+  -webkit-text-stroke: 0.5px rgba(252, 254, 255, 0.86);
   text-shadow:
-    0 1px 2px rgba(25, 34, 52, 0.44),
-    0 0 4px rgba(255, 255, 255, 0.58),
-    0 0 12px rgba(160, 184, 204, 0.34);
-}
-
-.splash-char--flock::before,
-.splash-char--flock::after {
-  content: "";
-  position: absolute;
-  width: 0.34em;
-  height: 0.2em;
-  pointer-events: none;
-  background:
-    linear-gradient(28deg, transparent 42%, rgba(255, 255, 255, 0.86) 46%, rgba(255, 255, 255, 0.86) 54%, transparent 58%) 0 50% / 50% 100% no-repeat,
-    linear-gradient(-28deg, transparent 42%, rgba(255, 255, 255, 0.86) 46%, rgba(255, 255, 255, 0.86) 54%, transparent 58%) 100% 50% / 50% 100% no-repeat;
-  filter: drop-shadow(0 1px 1px rgba(40, 48, 64, 0.24)) drop-shadow(0 0 4px rgba(255, 255, 255, 0.42));
-}
-
-.splash-char--flock::before {
-  right: -0.08em;
-  top: 0.15em;
-  opacity: 0.86;
-  transform: rotate(-14deg) scale(0.92);
-}
-
-.splash-char--flock::after {
-  right: 0.05em;
-  bottom: 0.11em;
-  opacity: 0.56;
-  transform: rotate(13deg) scale(0.72);
-}
-
-.splash-line--birds .splash-char {
-  -webkit-mask-image:
-    linear-gradient(
-      180deg,
-      #000 0%,
-      #000 68%,
-      rgba(0, 0, 0, 0.78) 82%,
-      rgba(0, 0, 0, 0.32) 94%,
-      transparent 100%
-    );
-  mask-image:
-    linear-gradient(
-      180deg,
-      #000 0%,
-      #000 68%,
-      rgba(0, 0, 0, 0.78) 82%,
-      rgba(0, 0, 0, 0.32) 94%,
-      transparent 100%
-    );
-}
-
-.splash-line--birds .splash-char--flock {
-  -webkit-mask-image:
-    linear-gradient(
-      180deg,
-      #000 0%,
-      #000 90%,
-      rgba(0, 0, 0, 0.92) 97%,
-      rgba(0, 0, 0, 0.82) 100%
-    );
-  mask-image:
-    linear-gradient(
-      180deg,
-      #000 0%,
-      #000 90%,
-      rgba(0, 0, 0, 0.92) 97%,
-      rgba(0, 0, 0, 0.82) 100%
-    );
+    0 0 2px rgba(255, 255, 255, 0.96),
+    0 0 12px rgba(238, 246, 255, 0.84),
+    0 0 26px rgba(206, 224, 248, 0.5);
 }
 
 .splash-char--small {
@@ -324,9 +216,9 @@
   font-size: 0.9em;
   opacity: 0;
   text-shadow:
-    0 1px 2px rgba(35, 42, 56, 0.18),
-    0 0 6px rgba(255, 255, 255, 0.24),
-    0 0 12px rgba(210, 225, 235, 0.1);
+    0 0 1px rgba(255, 255, 255, 0.82),
+    0 0 6px rgba(230, 238, 255, 0.42),
+    0 1px 8px rgba(72, 88, 112, 0.26);
 }
 
 .splash-char--space {
@@ -340,15 +232,7 @@
 
 .splash-char--drift {
   --drift-start-x: 8px;
-  background:
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.98) 0%,
-      rgba(234, 241, 248, 0.88) 46%,
-      rgba(185, 201, 216, 0.72) 100%
-    );
-  -webkit-background-clip: text;
-  background-clip: text;
+  -webkit-text-fill-color: rgba(250, 253, 255, 0.9);
 }
 
 .splash-char--drift::after {
@@ -364,19 +248,11 @@
 }
 
 .splash-char--fade-edge {
-  background:
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.9) 0%,
-      rgba(226, 234, 242, 0.76) 48%,
-      rgba(171, 188, 204, 0.48) 100%
-    );
-  -webkit-background-clip: text;
-  background-clip: text;
+  -webkit-text-fill-color: rgba(250, 253, 255, 0.86);
   text-shadow:
-    0 1px 2px rgba(35, 42, 56, 0.2),
-    0 0 6px rgba(255, 255, 255, 0.22),
-    0 0 15px rgba(210, 225, 235, 0.1);
+    0 0 1px rgba(255, 255, 255, 0.82),
+    0 0 7px rgba(230, 238, 255, 0.42),
+    0 1px 8px rgba(72, 88, 112, 0.28);
   -webkit-mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.72), #000 44%, rgba(0, 0, 0, 0.64));
   mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.72), #000 44%, rgba(0, 0, 0, 0.64));
 }
@@ -390,8 +266,8 @@
   opacity: 0;
   clip-path: inset(0 100% 0 0);
   filter:
-    drop-shadow(0 0 5px rgba(78, 94, 120, 0.26))
-    drop-shadow(0 0 12px rgba(255, 255, 255, 0.22));
+    drop-shadow(0 0 6px rgba(78, 94, 120, 0.34))
+    drop-shadow(0 0 14px rgba(255, 255, 255, 0.34));
   transform: translate(-50%, -50%) rotate(var(--orbit-rotate));
   animation: orbitReveal var(--orbit-duration, 1.6s) ease forwards;
   animation-delay: var(--orbit-delay, 0.15s);
@@ -401,13 +277,13 @@
   --orbit-rotate: -18deg;
   --orbit-delay: 0.15s;
   --orbit-duration: 1.6s;
-  --orbit-opacity: 0.46;
+  --orbit-opacity: 0.62;
   left: 59%;
   top: 40%;
   width: clamp(190px, 58vw, 310px);
   height: clamp(190px, 58vw, 310px);
-  border: 1.2px solid rgba(255, 255, 255, 0.38);
-  border-left-color: rgba(255, 255, 255, 0.08);
+  border: 1.2px solid rgba(255, 255, 255, 0.54);
+  border-left-color: rgba(255, 255, 255, 0.16);
   border-bottom-color: transparent;
 }
 
@@ -415,13 +291,13 @@
   --orbit-rotate: 12deg;
   --orbit-delay: 0.4s;
   --orbit-duration: 2.2s;
-  --orbit-opacity: 0.28;
+  --orbit-opacity: 0.38;
   left: 47%;
   top: 47%;
   width: clamp(250px, 76vw, 430px);
   height: clamp(250px, 76vw, 430px);
-  border: 1px solid rgba(235, 244, 255, 0.24);
-  border-right-color: rgba(235, 244, 255, 0.06);
+  border: 1px solid rgba(235, 244, 255, 0.34);
+  border-right-color: rgba(235, 244, 255, 0.1);
   border-bottom-color: transparent;
 }
 
@@ -429,12 +305,12 @@
   --orbit-rotate: -42deg;
   --orbit-delay: 1.14s;
   --orbit-duration: 1.9s;
-  --orbit-opacity: 0.32;
+  --orbit-opacity: 0.42;
   left: 53%;
   top: 49%;
   width: clamp(120px, 36vw, 190px);
   height: clamp(120px, 36vw, 190px);
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.38);
   border-top-color: transparent;
   border-left-color: rgba(255, 255, 255, 0.06);
 }
@@ -469,8 +345,8 @@
   background:
     radial-gradient(
       ellipse at center,
-      rgba(255, 255, 255, 0.18) 0%,
-      rgba(210, 225, 235, 0.09) 42%,
+      rgba(255, 255, 255, 0.12) 0%,
+      rgba(245, 248, 255, 0.05) 42%,
       transparent 72%
     );
   filter: blur(14px);
@@ -526,14 +402,14 @@
   width: min(74vw, 340px);
   color: rgba(255, 255, 255, 0.18);
   font-family: "Bickham Script Pro", "Snell Roundhand", "Cormorant Garamond", cursive;
-  font-size: clamp(14px, 4vw, 22px);
+  font-size: clamp(12px, 3.5vw, 18px);
   font-weight: 400;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   line-height: 1;
   text-align: left;
-  filter: blur(0.2px);
+  filter: blur(0.35px);
   opacity: 0;
-  transform: translateX(-38%) translateY(6px);
+  transform: translateX(-50%) translateY(6px);
   animation: scriptIn 1.2s ease forwards;
   animation-delay: 2.85s;
 }
@@ -604,7 +480,7 @@
   }
 
   100% {
-    opacity: 0.48;
+    opacity: 0.32;
     transform: translateX(-50%) translateY(0) scale(1);
   }
 }
@@ -641,46 +517,50 @@
 @keyframes scriptIn {
   0% {
     opacity: 0;
-    transform: translateX(-38%) translateY(6px);
+    transform: translateX(-50%) translateY(6px);
   }
 
   100% {
-    opacity: 1;
-    transform: translateX(-38%) translateY(0);
+    opacity: 0.36;
+    transform: translateX(-50%) translateY(0);
   }
 }
 
 @media (max-width: 380px) {
   .splash-copy {
-    top: 42.5%;
-    width: min(78vw, 360px);
-    max-width: min(78vw, 360px);
+    top: 43%;
+    width: min(86vw, 360px);
+    max-width: min(86vw, 360px);
+    height: clamp(286px, 53svh, 380px);
   }
 
   .splash-line--migrate {
-    transform: translateX(5%);
+    right: 4%;
+    transform: rotate(1deg);
   }
 
   .splash-line--escape {
-    transform: translateX(-5%);
+    left: 5%;
+    transform: translateX(-2%) rotate(-1.1deg);
   }
 
   .splash-script {
-    transform: translateX(-42%) translateY(6px);
+    transform: translateX(-50%) translateY(6px);
   }
 }
 
 @media (max-height: 660px) {
   .splash-copy {
     top: 42%;
+    height: clamp(276px, 54svh, 340px);
   }
 
   .splash-line--heart {
-    margin-top: clamp(8px, 2.4vw, 13px);
+    top: 31%;
   }
 
   .splash-line--migrate {
-    margin-top: clamp(9px, 2.8vw, 16px);
+    top: 73%;
   }
 
   .splash-orbit-line {
@@ -733,7 +613,7 @@
   }
 
   .silver-mist {
-    opacity: 0.42;
+    opacity: 0.28;
     transform: translateX(-50%) translateY(0) scale(1);
   }
 
@@ -744,6 +624,6 @@
 
   .splash-script {
     opacity: 0.16;
-    transform: translateX(-38%) translateY(0);
+    transform: translateX(-50%) translateY(0);
   }
 }

@@ -6,6 +6,7 @@ import {
     buildPhotoContextSummary,
     buildPhotoPromptFromDirector,
     buildManualPhotoPrompt,
+    createPhotoMeta,
     extractGeneratedImage,
     extractPhotoDecision,
     extractPhotoHint,
@@ -101,6 +102,20 @@ const naiMeta: PhotoMeta = {
     scale: 5,
     sampler: 'k_euler',
     noiseSchedule: 'native',
+    seed: 1,
+};
+
+const openAICompatibleMeta: PhotoMeta = {
+    source: 'manual',
+    providerType: 'openai-compatible',
+    stylePresetId: 'compat',
+    model: 'image2',
+    positivePrompt: 'prompt',
+    negativePrompt: 'bad',
+    finalPrompt: 'prompt\n避免出现：bad',
+    width: 1024,
+    height: 1024,
+    size: '1024x1024',
     seed: 1,
 };
 
@@ -282,6 +297,62 @@ describe('photoGeneration helpers', () => {
         expect(config.openaiCompatible.size).toBe('1024x1024');
     });
 
+    it('normalizes NovelAI sampler and schedule aliases', () => {
+        localStorage.setItem(IMAGE_GENERATION_CONFIG_KEY, JSON.stringify({
+            novelai: {
+                sampler: 'k_dpm++ 2m',
+                noiseSchedule: 'Poly Exponential',
+            },
+        }));
+
+        const config = getImageGenerationConfig();
+
+        expect(config.novelai.sampler).toBe('k_dpmpp_2m');
+        expect(config.novelai.noiseSchedule).toBe('polyexponential');
+    });
+
+    it('keeps OpenAI-compatible advanced image params and snake_case aliases', () => {
+        localStorage.setItem(IMAGE_GENERATION_CONFIG_KEY, JSON.stringify({
+            activeProvider: 'openai-compatible',
+            openaiCompatible: {
+                baseUrl: 'https://imagegen.example/v1',
+                apiKey: 'key',
+                model: 'gpt-image-1',
+                size: 'auto',
+                response_format: 'url',
+                n: 2,
+                quality: 'high',
+                style: 'natural',
+                background: 'transparent',
+                output_format: 'webp',
+                output_compression: 72,
+                moderation: 'low',
+                user: 'user-1',
+                stream: true,
+                partial_images: 2,
+                extraRequestBody: '{"seed":1234}',
+            },
+        }));
+
+        const config = getImageGenerationConfig();
+
+        expect(config.openaiCompatible).toMatchObject({
+            size: 'auto',
+            responseFormat: 'url',
+            n: 2,
+            quality: 'high',
+            style: 'natural',
+            background: 'transparent',
+            outputFormat: 'webp',
+            outputCompression: 72,
+            moderation: 'low',
+            user: 'user-1',
+            stream: true,
+            partialImages: 2,
+            extraRequestBody: '{"seed":1234}',
+        });
+    });
+
     it('defaults legacy style presets to NovelAI scope', () => {
         localStorage.setItem(PHOTO_STYLE_PRESETS_KEY, JSON.stringify([
             { id: 'legacy-style', name: 'Legacy', positivePrompt: 'tag prompt', negativePrompt: 'bad' },
@@ -290,6 +361,50 @@ describe('photoGeneration helpers', () => {
         expect(getPhotoStylePresets()[0]).toMatchObject({
             id: 'legacy-style',
             providerScope: 'novelai',
+        });
+    });
+
+    it('normalizes provider params stored on style presets', () => {
+        localStorage.setItem(PHOTO_STYLE_PRESETS_KEY, JSON.stringify([
+            {
+                id: 'param-style',
+                name: 'Params',
+                providerScope: 'openai-compatible',
+                positivePrompt: 'cinematic',
+                negativePrompt: '',
+                size: 'auto',
+                response_format: 'url',
+                n: 2,
+                quality: 'high',
+                style: 'natural',
+                background: 'transparent',
+                output_format: 'webp',
+                output_compression: 72,
+                moderation: 'low',
+                stream: true,
+                partial_images: 2,
+                extraRequestBody: '{"seed":42}',
+                sampler: 'DPM++ 2M',
+                noiseSchedule: 'Poly Exponential',
+            },
+        ]));
+
+        expect(getPhotoStylePresets()[0]).toMatchObject({
+            id: 'param-style',
+            size: 'auto',
+            responseFormat: 'url',
+            n: 2,
+            quality: 'high',
+            openAIStyle: 'natural',
+            background: 'transparent',
+            outputFormat: 'webp',
+            outputCompression: 72,
+            moderation: 'low',
+            stream: true,
+            partialImages: 2,
+            extraRequestBody: '{"seed":42}',
+            sampler: 'k_dpmpp_2m',
+            noiseSchedule: 'polyexponential',
         });
     });
 
@@ -569,7 +684,14 @@ describe('photoGeneration helpers', () => {
             width: 1024,
             height: 1024,
             cfg: 6,
-            sampler: 'k_euler_ancestral',
+            sampler: 'k_dpm++ 2m',
+            noiseSchedule: 'poly exponential',
+            size: 'auto',
+            response_format: 'url',
+            quality: 'high',
+            style: 'natural',
+            output_format: 'webp',
+            output_compression: 80,
         }), 'novelai');
 
         expect(preset).toMatchObject({
@@ -580,7 +702,14 @@ describe('photoGeneration helpers', () => {
             width: 1024,
             height: 1024,
             scale: 6,
-            sampler: 'k_euler_ancestral',
+            sampler: 'k_dpmpp_2m',
+            noiseSchedule: 'polyexponential',
+            size: 'auto',
+            responseFormat: 'url',
+            quality: 'high',
+            openAIStyle: 'natural',
+            outputFormat: 'webp',
+            outputCompression: 80,
         });
     });
 
@@ -589,7 +718,11 @@ describe('photoGeneration helpers', () => {
             'positive prompt: cinematic portrait, window light',
             'negative prompt: lowres, bad anatomy',
             'steps: 24',
-            'sampler: k_euler',
+            'sampler: DPM++ 2M',
+            'schedule: karras',
+            'quality: high',
+            'style: natural',
+            'output_format: webp',
             'cfg scale: 5.5',
             'size: 832x1216',
         ].join('\n'), 'openai-compatible');
@@ -598,7 +731,11 @@ describe('photoGeneration helpers', () => {
         expect(preset.positivePrompt).toBe('cinematic portrait, window light');
         expect(preset.negativePrompt).toBe('lowres, bad anatomy');
         expect(preset.steps).toBe(24);
-        expect(preset.sampler).toBe('k_euler');
+        expect(preset.sampler).toBe('k_dpmpp_2m');
+        expect(preset.noiseSchedule).toBe('karras');
+        expect(preset.quality).toBe('high');
+        expect(preset.openAIStyle).toBe('natural');
+        expect(preset.outputFormat).toBe('webp');
         expect(preset.scale).toBe(5.5);
         expect(preset.width).toBe(832);
         expect(preset.height).toBe(1216);
@@ -739,36 +876,196 @@ describe('photoGeneration helpers', () => {
                     value: originalTimeout,
                 });
             } else {
-                delete (AbortSignal as typeof AbortSignal & { timeout?: typeof AbortSignal.timeout }).timeout;
+                Reflect.deleteProperty(AbortSignal, 'timeout');
             }
         }
     });
 
-    it('reads OpenAI-compatible b64_json image responses as data URLs', async () => {
-        const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
-        const meta: PhotoMeta = {
-            source: 'manual',
+    it('reports HTML Photo Director responses with a clear endpoint hint', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('<!doctype html><html><title>Fallback</title></html>', {
+            status: 200,
+            headers: { 'Content-Type': 'text/html' },
+        }));
+
+        await expect(runPhotoDirector({
+            apiConfig: directorApiConfig,
+            char: directorChar,
+            userProfile: directorUser,
+            currentMsgs: [],
+            aiReply: '等我一下，给你看看。',
+            hint: {
+                type: 'photo_hint',
+                strength: 0.95,
+                anchor_text: '等我一下，给你看看。',
+                share_intent: '用户想看照片',
+                must_keep: [],
+                must_avoid: [],
+            },
+            stylePresets: [style],
+            recentPhotoMetas: [],
             providerType: 'openai-compatible',
-            stylePresetId: 'compat',
-            model: 'image2',
-            positivePrompt: 'prompt',
-            negativePrompt: 'bad',
-            finalPrompt: 'prompt\n避免出现：bad',
-            width: 1024,
-            height: 1024,
-            size: '1024x1024',
-            seed: 1,
-        };
+        })).rejects.toThrow('接口返回 HTML 页面');
+    });
+
+    it('reads OpenAI-compatible b64_json image responses and omits auto response_format', async () => {
+        const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
         vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
             data: [{ b64_json: 'aGVsbG8=' }],
         }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
-        const result = await generatePhotoImage(config, meta);
+        const result = await generatePhotoImage(config, openAICompatibleMeta);
 
         expect(result.dataUrl).toBe('data:image/png;base64,aGVsbG8=');
         expect(fetch).toHaveBeenCalledWith('https://imagegen.example/v1/images/generations', expect.objectContaining({
             method: 'POST',
         }));
+        const [, init] = (fetch as any).mock.calls[0];
+        const body = JSON.parse(init.body);
+        expect(body).toMatchObject({
+            model: 'image2',
+            prompt: 'prompt\n避免出现：bad',
+            size: '1024x1024',
+        });
+        expect(body).not.toHaveProperty('response_format');
+    });
+
+    it('reports HTML OpenAI-compatible image responses before image parsing', async () => {
+        const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('<!doctype html><html><title>Pages fallback</title></html>', {
+            status: 200,
+            headers: { 'Content-Type': 'text/html' },
+        }));
+
+        await expect(generatePhotoImage(config, openAICompatibleMeta)).rejects.toThrow('接口返回 HTML 页面');
+    });
+
+    it('sends the real OpenAI-compatible model id when a display label was stored', async () => {
+        const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
+        const meta: PhotoMeta = { ...openAICompatibleMeta, model: '【0.08】米/gpt-image-2' };
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+            data: [{ b64_json: 'aGVsbG8=' }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+        await generatePhotoImage(config, meta);
+
+        const [, init] = (fetch as any).mock.calls[0];
+        expect(JSON.parse(init.body).model).toBe('gpt-image-2');
+    });
+
+    it('passes OpenAI-compatible optional request params and extra JSON overrides', async () => {
+        const config: ImageGenerationConfig = {
+            ...baseConfig,
+            activeProvider: 'openai-compatible',
+            openaiCompatible: {
+                ...baseConfig.openaiCompatible,
+                size: 'auto',
+                responseFormat: 'url',
+                n: 2,
+                quality: 'high',
+                style: 'natural',
+                background: 'transparent',
+                outputFormat: 'webp',
+                outputCompression: 80,
+                moderation: 'low',
+                user: 'user-1',
+                stream: true,
+                partialImages: 2,
+                extraRequestBody: '{"seed":1234,"response_format":"b64_json","custom_param":"x"}',
+            },
+        };
+        const meta: PhotoMeta = { ...openAICompatibleMeta, size: 'auto' };
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+            data: [{ b64_json: 'aGVsbG8=' }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+        await generatePhotoImage(config, meta);
+
+        const [, init] = (fetch as any).mock.calls[0];
+        expect(JSON.parse(init.body)).toMatchObject({
+            model: 'image2',
+            prompt: 'prompt\n避免出现：bad',
+            size: 'auto',
+            response_format: 'b64_json',
+            n: 2,
+            quality: 'high',
+            style: 'natural',
+            background: 'transparent',
+            output_format: 'webp',
+            output_compression: 80,
+            moderation: 'low',
+            user: 'user-1',
+            stream: true,
+            partial_images: 2,
+            seed: 1234,
+            custom_param: 'x',
+        });
+    });
+
+    it('lets OpenAI-compatible style presets override image request params', async () => {
+        const config: ImageGenerationConfig = {
+            ...baseConfig,
+            activeProvider: 'openai-compatible',
+            openaiCompatible: {
+                ...baseConfig.openaiCompatible,
+                model: 'global-image',
+                size: '1024x1024',
+                responseFormat: 'auto',
+                quality: 'medium',
+                extraRequestBody: '{"seed":1,"global_param":"kept"}',
+            },
+        };
+        const compatStyle: PhotoStylePreset = {
+            ...style,
+            providerScope: 'openai-compatible',
+            model: 'style-image',
+            size: 'auto',
+            responseFormat: 'url',
+            n: 2,
+            quality: 'high',
+            openAIStyle: 'natural',
+            background: 'transparent',
+            outputFormat: 'webp',
+            outputCompression: 80,
+            moderation: 'low',
+            user: 'style-user',
+            stream: true,
+            partialImages: 2,
+            extraRequestBody: '{"seed":2,"style_param":"x"}',
+        };
+        const prompts = buildManualPhotoPrompt('窗边自拍', compatStyle, config);
+        const meta = createPhotoMeta('manual', config, compatStyle, prompts, 123);
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+            data: [{ b64_json: 'aGVsbG8=' }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+        await generatePhotoImage(config, meta);
+
+        const [, init] = (fetch as any).mock.calls[0];
+        expect(meta).toMatchObject({
+            model: 'style-image',
+            size: 'auto',
+            responseFormat: 'url',
+            quality: 'high',
+            openAIStyle: 'natural',
+        });
+        expect(JSON.parse(init.body)).toMatchObject({
+            model: 'style-image',
+            size: 'auto',
+            response_format: 'url',
+            n: 2,
+            quality: 'high',
+            style: 'natural',
+            background: 'transparent',
+            output_format: 'webp',
+            output_compression: 80,
+            moderation: 'low',
+            user: 'style-user',
+            stream: true,
+            partial_images: 2,
+            seed: 2,
+            global_param: 'kept',
+            style_param: 'x',
+        });
     });
 
     it('extracts generated images from URL, markdown, image_url, data URL, and pure base64 shapes', () => {
@@ -1044,27 +1341,50 @@ describe('photoGeneration helpers', () => {
 
     it('reads OpenAI Responses-style image generation results', async () => {
         const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
-        const meta: PhotoMeta = {
-            source: 'manual',
-            providerType: 'openai-compatible',
-            stylePresetId: 'compat',
-            model: 'image2',
-            positivePrompt: 'prompt',
-            negativePrompt: 'bad',
-            finalPrompt: 'prompt\n避免出现：bad',
-            width: 1024,
-            height: 1024,
-            size: '1024x1024',
-            seed: 1,
-        };
         const b64 = btoa('fake-image-binary'.repeat(24));
         vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
             output: [{ type: 'image_generation_call', result: b64 }],
         }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
-        const result = await generatePhotoImage(config, meta);
+        const result = await generatePhotoImage(config, openAICompatibleMeta);
 
         expect(result.dataUrl).toBe(`data:image/png;base64,${b64}`);
+    });
+
+    it('reads the final image from OpenAI-compatible text/event-stream responses', async () => {
+        const config: ImageGenerationConfig = {
+            ...baseConfig,
+            activeProvider: 'openai-compatible',
+            openaiCompatible: { ...baseConfig.openaiCompatible, stream: true, partialImages: 1 },
+        };
+        const partial = btoa('partial-image-binary'.repeat(24));
+        const final = btoa('final-image-binary'.repeat(24));
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(
+            [
+                `data: ${JSON.stringify({ type: 'image_generation.partial_image', partial_image_b64: partial })}`,
+                '',
+                `data: ${JSON.stringify({ type: 'image_generation.completed', b64_json: final })}`,
+                '',
+                'data: [DONE]',
+            ].join('\n'),
+            { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+        ));
+
+        const result = await generatePhotoImage(config, openAICompatibleMeta);
+
+        expect(result.dataUrl).toBe(`data:image/png;base64,${final}`);
+    });
+
+    it('reports invalid OpenAI-compatible extra request JSON before sending', async () => {
+        const config: ImageGenerationConfig = {
+            ...baseConfig,
+            activeProvider: 'openai-compatible',
+            openaiCompatible: { ...baseConfig.openaiCompatible, extraRequestBody: '{"seed":' },
+        };
+        vi.spyOn(globalThis, 'fetch');
+
+        await expect(generatePhotoImage(config, openAICompatibleMeta)).rejects.toThrow('额外请求参数不是合法 JSON');
+        expect(fetch).not.toHaveBeenCalled();
     });
 
     it('keeps the NovelAI generate-image body unchanged when no Vibe references are selected', async () => {
@@ -1080,6 +1400,88 @@ describe('photoGeneration helpers', () => {
         expect(body.parameters.reference_image_multiple).toBeUndefined();
         expect(body.parameters.reference_strength_multiple).toBeUndefined();
         expect(body.parameters.reference_information_extracted_multiple).toBeUndefined();
+    });
+
+    it('uses customized NovelAI config params in photo meta and generate-image body', async () => {
+        const config: ImageGenerationConfig = {
+            ...baseConfig,
+            novelai: {
+                ...baseConfig.novelai,
+                width: 896,
+                height: 1152,
+                steps: 35,
+                scale: 6.5,
+                sampler: 'DPM++ 2M',
+                noiseSchedule: 'Poly Exponential',
+                qualityTags: 'custom quality',
+                negativePrompt: 'custom negative',
+            },
+        };
+        const prompts = buildManualPhotoPrompt('portrait', style, config);
+        const meta = createPhotoMeta('manual', config, style, prompts, 123);
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(await createNaiZipResponse());
+
+        await generatePhotoImage(config, meta);
+
+        const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+        expect(meta).toMatchObject({
+            width: 896,
+            height: 1152,
+            steps: 35,
+            scale: 6.5,
+            sampler: 'k_dpmpp_2m',
+            noiseSchedule: 'polyexponential',
+        });
+        expect(body.parameters).toMatchObject({
+            width: 896,
+            height: 1152,
+            steps: 35,
+            scale: 6.5,
+            sampler: 'k_dpmpp_2m',
+            noise_schedule: 'polyexponential',
+            prompt: expect.stringContaining('custom quality'),
+            negative_prompt: expect.stringContaining('custom negative'),
+        });
+    });
+
+    it('lets NovelAI style presets override sampler and generation params', async () => {
+        const paramStyle: PhotoStylePreset = {
+            ...style,
+            model: 'nai-diffusion-4-5-full',
+            width: 768,
+            height: 1024,
+            steps: 24,
+            scale: 6,
+            sampler: 'DPM++ 2M',
+            noiseSchedule: 'Poly Exponential',
+        };
+        const prompts = buildManualPhotoPrompt('portrait', paramStyle, baseConfig);
+        const meta = createPhotoMeta('manual', baseConfig, paramStyle, prompts, 321);
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(await createNaiZipResponse());
+
+        await generatePhotoImage(baseConfig, meta);
+
+        const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+        expect(meta).toMatchObject({
+            model: 'nai-diffusion-4-5-full',
+            width: 768,
+            height: 1024,
+            steps: 24,
+            scale: 6,
+            sampler: 'k_dpmpp_2m',
+            noiseSchedule: 'polyexponential',
+        });
+        expect(body).toMatchObject({
+            model: 'nai-diffusion-4-5-full',
+            parameters: {
+                width: 768,
+                height: 1024,
+                steps: 24,
+                scale: 6,
+                sampler: 'k_dpmpp_2m',
+                noise_schedule: 'polyexponential',
+            },
+        });
     });
 
     it('encodes ordinary Vibe images before passing them to NovelAI generate-image', async () => {
@@ -1179,15 +1581,19 @@ describe('photoGeneration helpers', () => {
     it('fetches OpenAI-compatible model ids from /models', async () => {
         vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
             data: [
-                { id: 'image2' },
-                { id: 'nano-banana' },
+                { id: 'image2', name: 'Image 2' },
+                { name: '【0.08】米/gpt-image-2' },
             ],
         }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
         const result = await testOpenAICompatibleImageConnection(baseConfig.openaiCompatible);
 
         expect(result.ok).toBe(true);
-        expect(result.models).toEqual(['image2', 'nano-banana']);
+        expect(result.models).toEqual(['image2', 'gpt-image-2']);
+        expect(result.modelOptions).toEqual([
+            { id: 'image2', name: 'Image 2', displayName: 'Image 2 / image2' },
+            { id: 'gpt-image-2', name: '【0.08】米/gpt-image-2', displayName: '【0.08】米/gpt-image-2 / gpt-image-2' },
+        ]);
         expect(fetch).toHaveBeenCalledWith('https://imagegen.example/v1/models', expect.objectContaining({
             method: 'GET',
         }));

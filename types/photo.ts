@@ -5,6 +5,11 @@ import type { UserProfile } from './core';
 export type ImageProviderType = 'novelai' | 'openai-compatible';
 export type PhotoStyleProviderScope = 'all' | ImageProviderType;
 export type OpenAIImageResponseFormat = 'auto' | 'b64_json' | 'url';
+export type OpenAIImageQuality = '' | 'auto' | 'low' | 'medium' | 'high' | 'standard' | 'hd';
+export type OpenAIImageStyle = '' | 'vivid' | 'natural';
+export type OpenAIImageBackground = '' | 'auto' | 'transparent' | 'opaque';
+export type OpenAIImageOutputFormat = '' | 'png' | 'jpeg' | 'webp';
+export type OpenAIImageModeration = '' | 'auto' | 'low';
 export type ManualPhotoMode = 'direct' | 'story';
 
 export type NaiImageModel =
@@ -35,6 +40,17 @@ export interface OpenAICompatibleImageProviderConfig {
     model: string;
     size: string;
     responseFormat: OpenAIImageResponseFormat;
+    n?: number | null;
+    quality?: OpenAIImageQuality;
+    style?: OpenAIImageStyle;
+    background?: OpenAIImageBackground;
+    outputFormat?: OpenAIImageOutputFormat;
+    outputCompression?: number | null;
+    moderation?: OpenAIImageModeration;
+    user?: string;
+    stream?: boolean;
+    partialImages?: number | null;
+    extraRequestBody?: string;
     qualityTags: string;
     negativePrompt: string;
 }
@@ -66,6 +82,19 @@ export interface PhotoStylePreset {
     scale?: number;
     sampler?: string;
     noiseSchedule?: string;
+    size?: string;
+    responseFormat?: OpenAIImageResponseFormat;
+    n?: number | null;
+    quality?: OpenAIImageQuality;
+    openAIStyle?: OpenAIImageStyle;
+    background?: OpenAIImageBackground;
+    outputFormat?: OpenAIImageOutputFormat;
+    outputCompression?: number | null;
+    moderation?: OpenAIImageModeration;
+    user?: string;
+    stream?: boolean;
+    partialImages?: number | null;
+    extraRequestBody?: string;
 }
 
 export interface PhotoHint {
@@ -130,6 +159,18 @@ export interface PhotoMeta {
     scale?: number;
     sampler?: string;
     noiseSchedule?: string;
+    responseFormat?: OpenAIImageResponseFormat;
+    n?: number | null;
+    quality?: OpenAIImageQuality;
+    openAIStyle?: OpenAIImageStyle;
+    background?: OpenAIImageBackground;
+    outputFormat?: OpenAIImageOutputFormat;
+    outputCompression?: number | null;
+    moderation?: OpenAIImageModeration;
+    user?: string;
+    stream?: boolean;
+    partialImages?: number | null;
+    extraRequestBody?: string;
     seed: number;
     continuity_summary?: string;
 }

@@ -46,9 +46,9 @@ const SPLASH_LINES: SplashLineConfig[] = [
     baseDelay: 0.45,
     finalOpacity: 0.85,
     chars: [
-      { char: '我', className: 'splash-char--soft', x: '-1px', y: '1px', r: '-1deg', s: 0.98, finalOpacity: 0.85 },
-      { char: '醒', className: 'splash-char--bright', x: '0px', y: '-2px', r: '0.6deg', s: 1.06, finalOpacity: 0.92, delayOffset: 0.02 },
-      { char: '来', className: 'splash-char--soft', x: '-1px', y: '1px', r: '-0.4deg', s: 1, finalOpacity: 0.85 },
+      { char: '我', className: 'splash-char--soft', x: '-1px', y: '1px', r: '-1deg', s: 0.98, finalOpacity: 0.9 },
+      { char: '醒', className: 'splash-char--bright', x: '0px', y: '-2px', r: '0.6deg', s: 1.06, finalOpacity: 0.95, delayOffset: 0.02 },
+      { char: '来', className: 'splash-char--soft', x: '-1px', y: '1px', r: '-0.4deg', s: 1, finalOpacity: 0.9 },
     ],
   },
   {
@@ -56,14 +56,14 @@ const SPLASH_LINES: SplashLineConfig[] = [
     text: '是因为',
     className: 'splash-line splash-line--reason',
     baseDelay: 0.75,
-    finalOpacity: 0.78,
+    finalOpacity: 0.9,
   },
   {
     id: 'heart',
     text: '睡在你心上的',
     className: 'splash-line splash-line--heart',
     baseDelay: 1.05,
-    finalOpacity: 0.88,
+    finalOpacity: 0.9,
   },
   {
     id: 'birds',
@@ -72,8 +72,8 @@ const SPLASH_LINES: SplashLineConfig[] = [
     baseDelay: 1.42,
     finalOpacity: 1,
     chars: [
-      { char: '鸟', className: 'splash-char--hollow splash-char--moon splash-char--key', x: '-3px', y: '-5px', r: '-2deg', s: 1.02, finalOpacity: 1 },
-      { char: '群', className: 'splash-char--hollow splash-char--moon splash-char--flock splash-char--key', x: '-9px', y: '4px', r: '1.4deg', s: 1.08, finalOpacity: 1, delayOffset: 0.05 },
+      { char: '鸟', className: 'splash-char--hollow splash-char--moon splash-char--key', x: '-2px', y: '-3px', r: '-1.6deg', s: 1, finalOpacity: 0.96 },
+      { char: '群', className: 'splash-char--hollow splash-char--moon splash-char--flock splash-char--key', x: '-6px', y: '3px', r: '1deg', s: 1.02, finalOpacity: 0.96, delayOffset: 0.05 },
     ],
   },
   {
@@ -81,14 +81,14 @@ const SPLASH_LINES: SplashLineConfig[] = [
     text: '时时 要迁徙',
     className: 'splash-line splash-line--migrate',
     baseDelay: 1.95,
-    finalOpacity: 0.9,
+    finalOpacity: 0.92,
   },
   {
     id: 'escape',
     text: '时时 要逃避',
     className: 'splash-line splash-line--escape',
     baseDelay: 2.35,
-    finalOpacity: 0.86,
+    finalOpacity: 0.9,
   },
 ];
 

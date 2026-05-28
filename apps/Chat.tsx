@@ -1585,7 +1585,20 @@ const Chat: React.FC = () => {
             try {
                 await DB.updateMessage(pendingMessageId, imageStorage.displayUrl);
                 await DB.updateMessageMetadata(pendingMessageId, imageMetadata);
+                console.info('[Photo] insert image message success', {
+                    source: photoMeta.source,
+                    mode: 'update_pending',
+                    imageMessageId: pendingMessageId,
+                    imageId,
+                });
             } catch (error) {
+                console.warn('[Photo] insert image message failed', {
+                    source: photoMeta.source,
+                    mode: 'update_pending',
+                    pendingMessageId,
+                    imageId,
+                    error,
+                });
                 console.warn('[Photo] Failed to update pending image message, saving a new image message:', error);
                 replacedMessageId = pendingMessageId;
                 imageMessageId = 0;
@@ -1593,14 +1606,30 @@ const Chat: React.FC = () => {
         }
 
         if (!imageMessageId) {
-            imageMessageId = await DB.saveMessage({
-                charId: contentCharId,
-                role: 'assistant',
-                type: 'image',
-                content: imageStorage.displayUrl,
-                timestamp: messageTimestamp,
-                metadata: imageMetadata,
-            });
+            try {
+                imageMessageId = await DB.saveMessage({
+                    charId: contentCharId,
+                    role: 'assistant',
+                    type: 'image',
+                    content: imageStorage.displayUrl,
+                    timestamp: messageTimestamp,
+                    metadata: imageMetadata,
+                });
+                console.info('[Photo] insert image message success', {
+                    source: photoMeta.source,
+                    mode: 'new_message',
+                    imageMessageId,
+                    imageId,
+                });
+            } catch (error) {
+                console.warn('[Photo] insert image message failed', {
+                    source: photoMeta.source,
+                    mode: 'new_message',
+                    imageId,
+                    error,
+                });
+                throw error;
+            }
         }
 
         const activeCharForContext = characters.find(c => c.id === contentCharId) || char;
@@ -1610,18 +1639,33 @@ const Chat: React.FC = () => {
             return `${sender}: ${content}`;
         });
 
-        await DB.saveGalleryImage({
-            id: imageId,
-            charId: contentCharId,
-            url: imageStorage.displayUrl,
-            timestamp,
-            savedDate: new Date(timestamp).toISOString().split('T')[0],
-            chatContext: recentChat,
-            thumbnailUrl: imageStorage.thumbnailUrl,
-            originalAssetId: imageStorage.originalAssetId,
-            visualSummary,
-            photoMeta,
-        });
+        try {
+            await DB.saveGalleryImage({
+                id: imageId,
+                charId: contentCharId,
+                url: imageStorage.displayUrl,
+                timestamp,
+                savedDate: new Date(timestamp).toISOString().split('T')[0],
+                chatContext: recentChat,
+                thumbnailUrl: imageStorage.thumbnailUrl,
+                originalAssetId: imageStorage.originalAssetId,
+                visualSummary,
+                photoMeta,
+            });
+            console.info('[Photo] save to album success', {
+                source: photoMeta.source,
+                imageId,
+                charId: contentCharId,
+            });
+        } catch (error) {
+            console.warn('[Photo] save to album failed', {
+                source: photoMeta.source,
+                imageId,
+                charId: contentCharId,
+                error,
+            });
+            throw error;
+        }
 
         const activeContentCharId = activeCharacterId
             ? await DB.resolveCharacterContentId(activeCharacterId)
@@ -1643,6 +1687,17 @@ const Chat: React.FC = () => {
                 metadata: imageMetadata,
             };
             upsertGeneratedImageMessage(imageMessage, replacedMessageId);
+            console.info('[Photo] insert image message success', {
+                source: photoMeta.source,
+                mode: 'ui_upsert',
+                imageMessageId,
+                imageId,
+            });
+            console.info('[Photo] refresh chat list scheduled', {
+                source: photoMeta.source,
+                imageMessageId,
+                delaysMs: [0, 250, 1000],
+            });
             [0, 250, 1000].forEach(delay => {
                 window.setTimeout(() => {
                     void reloadMessages(visibleCountRef.current);
@@ -1696,14 +1751,31 @@ const Chat: React.FC = () => {
             photoMeta,
             photoHint: photoMeta.photoHint,
         };
-        const pendingMessageId = await DB.saveMessage({
-            charId: contentCharId,
-            role: 'assistant',
-            type: 'image',
-            content: '',
-            timestamp,
-            metadata: pendingMetadata,
-        });
+        let pendingMessageId: number;
+        try {
+            pendingMessageId = await DB.saveMessage({
+                charId: contentCharId,
+                role: 'assistant',
+                type: 'image',
+                content: '',
+                timestamp,
+                metadata: pendingMetadata,
+            });
+            console.info('[AutoPhoto] insert image message success', {
+                mode: 'pending',
+                pendingMessageId,
+                charId: contentCharId,
+                stylePresetId: photoMeta.stylePresetId,
+            });
+        } catch (error) {
+            console.warn('[AutoPhoto] insert image message failed', {
+                mode: 'pending',
+                charId: contentCharId,
+                stylePresetId: photoMeta.stylePresetId,
+                error,
+            });
+            throw error;
+        }
 
         const activeContentCharId = activeCharacterId
             ? await DB.resolveCharacterContentId(activeCharacterId)
@@ -1966,6 +2038,31 @@ const Chat: React.FC = () => {
             addToast('主动发照片已触发，但当前生图供应商还没有配置完整', 'error');
             return;
         }
+        const imageConfigForJob = effectiveImageGenerationConfig;
+        const photoStylePresetsForJob = effectivePhotoStylePresets;
+        const providerBaseUrl = imageConfigForJob.activeProvider === 'openai-compatible'
+            ? imageConfigForJob.openaiCompatible.baseUrl.replace(/\/+$/, '')
+            : (imageConfigForJob.novelai.apiUrl || '').replace(/\/+$/, '');
+        const providerEndpoint = imageConfigForJob.activeProvider === 'openai-compatible'
+            ? '/images/generations'
+            : '/ai/generate-image';
+        console.info('[AutoPhoto] start', {
+            charId: payload.char.id,
+            sourceMessageId: payload.sourceMessageId,
+            hint: payload.hint,
+        });
+        console.info('[AutoPhoto] selected provider', {
+            provider: imageConfigForJob.activeProvider,
+            finalBaseURL: providerBaseUrl,
+            finalEndpoint: providerEndpoint,
+            finalRequestURL: `${providerBaseUrl}${providerEndpoint}`,
+            model: imageConfigForJob.activeProvider === 'openai-compatible'
+                ? imageConfigForJob.openaiCompatible.model
+                : imageConfigForJob.novelai.model,
+            responseFormat: imageConfigForJob.activeProvider === 'openai-compatible'
+                ? imageConfigForJob.openaiCompatible.responseFormat
+                : undefined,
+        });
 
         const autoPhotoKey = [
             payload.char.id,
@@ -1995,7 +2092,7 @@ const Chat: React.FC = () => {
                         .map(item => item.photoMeta)
                         .filter((meta): meta is PhotoMeta => Boolean(meta))
                         .slice(-8);
-                    const isNaiProvider = effectiveImageGenerationConfig.activeProvider === 'novelai';
+                    const isNaiProvider = imageConfigForJob.activeProvider === 'novelai';
                     const hintIncludesUser = shouldIncludeUserAppearanceForPhoto(undefined, payload.aiReply, payload.hint);
 
                     const director = await runPhotoDirector({
@@ -2006,9 +2103,9 @@ const Chat: React.FC = () => {
                         aiReply: payload.aiReply,
                         thinking: payload.thinking,
                         hint: payload.hint,
-                        stylePresets: effectivePhotoStylePresets,
+                        stylePresets: photoStylePresetsForJob,
                         recentPhotoMetas,
-                        providerType: effectiveImageGenerationConfig.activeProvider,
+                        providerType: imageConfigForJob.activeProvider,
                         appearanceTags: isNaiProvider ? payload.char.naiAppearanceTags : '',
                         appearanceNegativeTags: isNaiProvider ? payload.char.naiAppearanceNegativeTags : '',
                         userAppearanceTags: isNaiProvider && hintIncludesUser ? payload.userProfile.naiAppearanceTags : '',
@@ -2020,9 +2117,16 @@ const Chat: React.FC = () => {
                     if (!director) {
                         throw new Error('Photo Director 没有返回可用导演结果，已停止生图');
                     }
-                    if (!director.shouldGeneratePhoto && payload.hint.strength < 0.85) return;
+                    if (!director.shouldGeneratePhoto && payload.hint.strength < 0.85) {
+                        console.info('[AutoPhoto] stopped before image request', {
+                            reason: 'director_declined',
+                            strength: payload.hint.strength,
+                            director,
+                        });
+                        return;
+                    }
 
-                    const hasDirectorScene = effectiveImageGenerationConfig.activeProvider === 'openai-compatible'
+                    const hasDirectorScene = imageConfigForJob.activeProvider === 'openai-compatible'
                         ? Boolean(director.scene_zh.trim())
                         : Boolean(
                             director.scene_zh.trim()
@@ -2040,10 +2144,16 @@ const Chat: React.FC = () => {
                         ...director,
                         shouldGeneratePhoto: true,
                     };
-                    const style = resolvePhotoStylePreset(finalDirector.stylePresetId, effectivePhotoStylePresets, payload.char, effectiveImageGenerationConfig.activeProvider);
+                    const style = resolvePhotoStylePreset(finalDirector.stylePresetId, photoStylePresetsForJob, payload.char, imageConfigForJob.activeProvider);
+                    console.info('[AutoPhoto] selected preset', {
+                        selectedPresetId: style.id,
+                        selectedPresetName: style.name,
+                        providerScope: style.providerScope,
+                        requestedPresetId: finalDirector.stylePresetId,
+                    });
                     const includeAppearance = true;
                     const includeUserAppearance = shouldIncludeUserAppearanceForPhoto(finalDirector, payload.aiReply, payload.hint);
-                    const prompts = buildPhotoPromptFromDirector(finalDirector, payload.hint, style, effectiveImageGenerationConfig, {
+                    const prompts = buildPhotoPromptFromDirector(finalDirector, payload.hint, style, imageConfigForJob, {
                         appearanceTags: isNaiProvider ? payload.char.naiAppearanceTags : '',
                         appearanceNegativeTags: isNaiProvider ? payload.char.naiAppearanceNegativeTags : '',
                         userAppearanceTags: isNaiProvider && includeUserAppearance ? payload.userProfile.naiAppearanceTags : '',
@@ -2054,9 +2164,13 @@ const Chat: React.FC = () => {
                         includeUserAppearance,
                     });
                     const seed = Math.floor(Math.random() * 9999999999);
-                    const meta = createPhotoMeta('chat_auto', effectiveImageGenerationConfig, style, prompts, seed, finalDirector, payload.hint);
+                    const meta = createPhotoMeta('chat_auto', imageConfigForJob, style, prompts, seed, finalDirector, payload.hint);
                     console.groupCollapsed('[AutoPhoto] generation payload');
-                    console.info('provider:', effectiveImageGenerationConfig.activeProvider);
+                    console.info('provider:', imageConfigForJob.activeProvider);
+                    console.info('finalBaseURL:', providerBaseUrl);
+                    console.info('finalEndpoint:', providerEndpoint);
+                    console.info('finalRequestURL:', `${providerBaseUrl}${providerEndpoint}`);
+                    console.info('model:', meta.model);
                     console.info('director:', finalDirector);
                     console.info('style:', style);
                     console.info('positivePrompt:', prompts.positivePrompt);
@@ -2066,7 +2180,7 @@ const Chat: React.FC = () => {
                     console.groupEnd();
                     const defaultVibes = buildDefaultVibeReferencesForChar(payload.char);
                     pendingImageMessageId = await createPendingGeneratedImageMessage(payload.char.id, meta, finalDirector.caption);
-                    const result = await generatePhotoImage(effectiveImageGenerationConfig, meta, {
+                    const result = await generatePhotoImage(imageConfigForJob, meta, {
                         vibeReferences: prepareVibeReferencesForGeneration(defaultVibes, meta),
                         onVibeReferenceEncoded: handleVibeReferenceEncoded,
                     });

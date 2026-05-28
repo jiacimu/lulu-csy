@@ -7,8 +7,13 @@ import {
     type ImageProviderType,
     type NaiImageModel,
     type NovelAIImageProviderConfig,
+    type OpenAIImageBackground,
+    type OpenAIImageModeration,
+    type OpenAIImageOutputFormat,
+    type OpenAIImageQuality,
     type OpenAICompatibleImageProviderConfig,
     type OpenAIImageResponseFormat,
+    type OpenAIImageStyle,
     type PhotoStylePreset,
     type PhotoStyleProviderScope,
     type SttConfig,
@@ -110,7 +115,35 @@ export const NAI_IMAGE_MODELS: NaiImageModel[] = [
 
 export const IMAGE_PROVIDER_TYPES: ImageProviderType[] = ['novelai', 'openai-compatible'];
 export const PHOTO_STYLE_PROVIDER_SCOPES: PhotoStyleProviderScope[] = ['all', 'novelai', 'openai-compatible'];
+type NaiImageOption = { value: string; label: string; aliases?: string[] };
+export const NAI_IMAGE_SAMPLER_OPTIONS: NaiImageOption[] = [
+    { value: 'k_euler', label: 'Euler', aliases: ['euler'] },
+    { value: 'k_euler_ancestral', label: 'Euler Ancestral', aliases: ['euler ancestral', 'euler a', 'k_euler_a'] },
+    { value: 'k_dpmpp_2m', label: 'DPM++ 2M', aliases: ['dpm++ 2m', 'dpmpp 2m', 'k_dpm++ 2m'] },
+    { value: 'k_dpmpp_2m_sde', label: 'DPM++ 2M SDE', aliases: ['dpm++ 2m sde', 'dpmpp 2m sde', 'k_dpm++ 2m sde'] },
+    { value: 'k_dpmpp_sde', label: 'DPM++ SDE', aliases: ['dpm++ sde', 'dpmpp sde', 'k_dpm++ sde'] },
+    { value: 'k_dpmpp_2s_ancestral', label: 'DPM++ 2S Ancestral', aliases: ['dpm++ 2s ancestral', 'dpmpp 2s ancestral', 'k_dpm++ 2s ancestral'] },
+    { value: 'k_dpm_2', label: 'DPM2', aliases: ['dpm2', 'dpm 2'] },
+    { value: 'k_dpm_2_ancestral', label: 'DPM2 Ancestral', aliases: ['dpm2 ancestral', 'dpm 2 ancestral'] },
+    { value: 'k_dpm_fast', label: 'DPM Fast', aliases: ['dpm fast'] },
+    { value: 'k_heun', label: 'Heun', aliases: ['heun'] },
+    { value: 'k_lms', label: 'LMS', aliases: ['lms'] },
+    { value: 'ddim', label: 'DDIM', aliases: ['ddim'] },
+    { value: 'ddim_v3', label: 'DDIM v3', aliases: ['ddim v3'] },
+    { value: 'plms', label: 'PLMS', aliases: ['plms'] },
+];
+export const NAI_IMAGE_NOISE_SCHEDULE_OPTIONS: NaiImageOption[] = [
+    { value: 'native', label: 'Native', aliases: ['default', 'normal'] },
+    { value: 'karras', label: 'Karras' },
+    { value: 'exponential', label: 'Exponential', aliases: ['exp'] },
+    { value: 'polyexponential', label: 'Polyexponential', aliases: ['poly exponential', 'poly-exponential', 'polyexp'] },
+];
 export const OPENAI_IMAGE_RESPONSE_FORMATS: OpenAIImageResponseFormat[] = ['auto', 'b64_json', 'url'];
+export const OPENAI_IMAGE_QUALITIES: OpenAIImageQuality[] = ['', 'auto', 'low', 'medium', 'high', 'standard', 'hd'];
+export const OPENAI_IMAGE_STYLES: OpenAIImageStyle[] = ['', 'vivid', 'natural'];
+export const OPENAI_IMAGE_BACKGROUNDS: OpenAIImageBackground[] = ['', 'auto', 'transparent', 'opaque'];
+export const OPENAI_IMAGE_OUTPUT_FORMATS: OpenAIImageOutputFormat[] = ['', 'png', 'jpeg', 'webp'];
+export const OPENAI_IMAGE_MODERATIONS: OpenAIImageModeration[] = ['', 'auto', 'low'];
 
 export const DEFAULT_NOVELAI_IMAGE_CONFIG: NovelAIImageProviderConfig = {
     apiUrl: 'https://image.novelai.net',
@@ -132,6 +165,17 @@ export const DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG: OpenAICompatibleImageProvid
     model: '',
     size: '1024x1024',
     responseFormat: 'auto',
+    n: null,
+    quality: '',
+    style: '',
+    background: '',
+    outputFormat: '',
+    outputCompression: null,
+    moderation: '',
+    user: '',
+    stream: false,
+    partialImages: null,
+    extraRequestBody: '',
     qualityTags: 'high quality, detailed, natural composition',
     negativePrompt: 'low quality, blurry, distorted hands, watermark, text, logo',
 };
@@ -558,9 +602,109 @@ function normalizeOpenAIImageResponseFormat(value: unknown): OpenAIImageResponse
     return OPENAI_IMAGE_RESPONSE_FORMATS.includes(format) ? format : DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.responseFormat;
 }
 
+function normalizeOpenAIImageQuality(value: unknown): OpenAIImageQuality {
+    const quality = normalizeString(value) as OpenAIImageQuality;
+    return OPENAI_IMAGE_QUALITIES.includes(quality) ? quality : DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.quality || '';
+}
+
+function normalizeOpenAIImageStyle(value: unknown): OpenAIImageStyle {
+    const style = normalizeString(value) as OpenAIImageStyle;
+    return OPENAI_IMAGE_STYLES.includes(style) ? style : DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.style || '';
+}
+
+function normalizeOpenAIImageBackground(value: unknown): OpenAIImageBackground {
+    const background = normalizeString(value) as OpenAIImageBackground;
+    return OPENAI_IMAGE_BACKGROUNDS.includes(background) ? background : DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.background || '';
+}
+
+function normalizeOpenAIImageOutputFormat(value: unknown): OpenAIImageOutputFormat {
+    const format = normalizeString(value) as OpenAIImageOutputFormat;
+    return OPENAI_IMAGE_OUTPUT_FORMATS.includes(format) ? format : DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.outputFormat || '';
+}
+
+function normalizeOpenAIImageModeration(value: unknown): OpenAIImageModeration {
+    const moderation = normalizeString(value) as OpenAIImageModeration;
+    return OPENAI_IMAGE_MODERATIONS.includes(moderation) ? moderation : DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.moderation || '';
+}
+
+export function normalizeOptionalOpenAIImageResponseFormat(value: unknown): OpenAIImageResponseFormat | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    return normalizeOpenAIImageResponseFormat(value);
+}
+
+export function normalizeOptionalOpenAIImageQuality(value: unknown): OpenAIImageQuality | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const quality = normalizeOpenAIImageQuality(value);
+    return quality || undefined;
+}
+
+export function normalizeOptionalOpenAIImageStyle(value: unknown): OpenAIImageStyle | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const style = normalizeOpenAIImageStyle(value);
+    return style || undefined;
+}
+
+export function normalizeOptionalOpenAIImageBackground(value: unknown): OpenAIImageBackground | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const background = normalizeOpenAIImageBackground(value);
+    return background || undefined;
+}
+
+export function normalizeOptionalOpenAIImageOutputFormat(value: unknown): OpenAIImageOutputFormat | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const format = normalizeOpenAIImageOutputFormat(value);
+    return format || undefined;
+}
+
+export function normalizeOptionalOpenAIImageModeration(value: unknown): OpenAIImageModeration | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const moderation = normalizeOpenAIImageModeration(value);
+    return moderation || undefined;
+}
+
 function normalizeNaiImageModel(value: unknown, fallback: NaiImageModel = DEFAULT_NOVELAI_IMAGE_CONFIG.model): NaiImageModel {
     const model = normalizeString(value) as NaiImageModel;
     return NAI_IMAGE_MODELS.includes(model) ? model : fallback;
+}
+
+function normalizeNaiOptionKey(value: string): string {
+    return value
+        .normalize('NFKC')
+        .trim()
+        .toLowerCase()
+        .replace(/\+\+/g, 'pp')
+        .replace(/[^a-z0-9]+/g, '');
+}
+
+function resolveNaiOptionAlias(value: unknown, options: NaiImageOption[]): string | undefined {
+    const raw = normalizeString(value);
+    if (!raw) return undefined;
+    const key = normalizeNaiOptionKey(raw);
+
+    for (const option of options) {
+        const candidateKeys = [option.value, option.label, ...(option.aliases || [])].map(normalizeNaiOptionKey);
+        if (candidateKeys.includes(key)) return option.value;
+    }
+
+    return undefined;
+}
+
+export function normalizeNaiSampler(value: unknown, fallback: string = DEFAULT_NOVELAI_IMAGE_CONFIG.sampler): string {
+    return resolveNaiOptionAlias(value, NAI_IMAGE_SAMPLER_OPTIONS) || fallback;
+}
+
+export function normalizeNaiNoiseSchedule(value: unknown, fallback: string = DEFAULT_NOVELAI_IMAGE_CONFIG.noiseSchedule): string {
+    return resolveNaiOptionAlias(value, NAI_IMAGE_NOISE_SCHEDULE_OPTIONS) || fallback;
+}
+
+export function normalizeOptionalNaiSampler(value: unknown): string | undefined {
+    const raw = normalizeString(value);
+    return raw ? resolveNaiOptionAlias(raw, NAI_IMAGE_SAMPLER_OPTIONS) : undefined;
+}
+
+export function normalizeOptionalNaiNoiseSchedule(value: unknown): string | undefined {
+    const raw = normalizeString(value);
+    return raw ? resolveNaiOptionAlias(raw, NAI_IMAGE_NOISE_SCHEDULE_OPTIONS) : undefined;
 }
 
 function normalizeImageNumber(value: unknown, fallback: number, min: number, max: number, step?: number): number {
@@ -572,13 +716,21 @@ function normalizeImageNumber(value: unknown, fallback: number, min: number, max
     return step ? Math.round(clamped / step) * step : clamped;
 }
 
-function normalizeOpenAIImageSize(value: unknown, fallback = DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.size): string {
-    const raw = normalizeString(value).toLowerCase().replace(/\s+/g, '');
-    const match = raw.match(/^(\d{2,4})x(\d{2,4})$/);
-    if (!match) return fallback;
-    const width = normalizeImageNumber(match[1], 1024, 64, 2048, 64);
-    const height = normalizeImageNumber(match[2], 1024, 64, 2048, 64);
-    return `${width}x${height}`;
+export function normalizeOpenAIImageSize(value: unknown, fallback = DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.size): string {
+    const raw = normalizeString(value).replace(/[×]/g, 'x').replace(/\s+/g, '');
+    if (!raw) return fallback;
+    const match = raw.match(/^(\d{2,5})x(\d{2,5})$/i);
+    if (!match) return raw.toLowerCase() === 'auto' ? 'auto' : raw;
+    return `${Number(match[1])}x${Number(match[2])}`;
+}
+
+function normalizeNullableInteger(value: unknown, fallback: number | null, min: number, max: number): number | null {
+    if (value === null || value === undefined || value === '') return fallback;
+    const numeric = typeof value === 'number'
+        ? value
+        : (typeof value === 'string' && value.trim() ? Number(value) : NaN);
+    if (!Number.isFinite(numeric)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(numeric)));
 }
 
 function normalizeNovelAIImageConfig(value: Partial<NovelAIImageProviderConfig> | null | undefined): NovelAIImageProviderConfig {
@@ -592,24 +744,36 @@ function normalizeNovelAIImageConfig(value: Partial<NovelAIImageProviderConfig> 
         height: normalizeImageNumber(value?.height, DEFAULT_NOVELAI_IMAGE_CONFIG.height, 64, 1600, 64),
         steps: normalizeImageNumber(value?.steps, DEFAULT_NOVELAI_IMAGE_CONFIG.steps, 1, 50),
         scale: normalizeImageNumber(value?.scale, DEFAULT_NOVELAI_IMAGE_CONFIG.scale, 0, 10),
-        sampler: normalizeString(value?.sampler) || DEFAULT_NOVELAI_IMAGE_CONFIG.sampler,
-        noiseSchedule: normalizeString(value?.noiseSchedule) || DEFAULT_NOVELAI_IMAGE_CONFIG.noiseSchedule,
+        sampler: normalizeNaiSampler(value?.sampler),
+        noiseSchedule: normalizeNaiNoiseSchedule(value?.noiseSchedule),
         qualityTags: normalizeString(value?.qualityTags) || DEFAULT_NOVELAI_IMAGE_CONFIG.qualityTags,
         negativePrompt: normalizeString(value?.negativePrompt) || DEFAULT_NOVELAI_IMAGE_CONFIG.negativePrompt,
     };
 }
 
 function normalizeOpenAICompatibleImageConfig(value: Partial<OpenAICompatibleImageProviderConfig> | null | undefined): OpenAICompatibleImageProviderConfig {
+    const raw = (value || {}) as Partial<OpenAICompatibleImageProviderConfig> & Record<string, unknown>;
     return {
         ...DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG,
-        ...(value || {}),
-        baseUrl: normalizeUrl(value?.baseUrl),
-        apiKey: normalizeString(value?.apiKey),
-        model: normalizeString(value?.model),
-        size: normalizeOpenAIImageSize(value?.size),
-        responseFormat: normalizeOpenAIImageResponseFormat(value?.responseFormat),
-        qualityTags: normalizeString(value?.qualityTags) || DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.qualityTags,
-        negativePrompt: normalizeString(value?.negativePrompt) || DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.negativePrompt,
+        ...raw,
+        baseUrl: normalizeUrl(raw.baseUrl),
+        apiKey: normalizeString(raw.apiKey),
+        model: normalizeString(raw.model),
+        size: normalizeOpenAIImageSize(raw.size),
+        responseFormat: normalizeOpenAIImageResponseFormat(raw.responseFormat ?? raw.response_format),
+        n: normalizeNullableInteger(raw.n, DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.n || null, 1, 10),
+        quality: normalizeOpenAIImageQuality(raw.quality),
+        style: normalizeOpenAIImageStyle(raw.style),
+        background: normalizeOpenAIImageBackground(raw.background),
+        outputFormat: normalizeOpenAIImageOutputFormat(raw.outputFormat ?? raw.output_format),
+        outputCompression: normalizeNullableInteger(raw.outputCompression ?? raw.output_compression, DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.outputCompression || null, 0, 100),
+        moderation: normalizeOpenAIImageModeration(raw.moderation),
+        user: normalizeString(raw.user),
+        stream: raw.stream === true,
+        partialImages: normalizeNullableInteger(raw.partialImages ?? raw.partial_images, DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.partialImages || null, 1, 3),
+        extraRequestBody: normalizeString(raw.extraRequestBody),
+        qualityTags: normalizeString(raw.qualityTags) || DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.qualityTags,
+        negativePrompt: normalizeString(raw.negativePrompt) || DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.negativePrompt,
     };
 }
 
@@ -649,9 +813,17 @@ function normalizeImageApiPresets(value: unknown): ImageApiPreset[] {
 
 function normalizePhotoStylePreset(value: unknown, index: number): PhotoStylePreset | null {
     if (!value || typeof value !== 'object') return null;
-    const parsed = value as Partial<PhotoStylePreset>;
+    const parsed = value as Partial<PhotoStylePreset> & Record<string, unknown>;
     const positivePrompt = normalizeString(parsed.positivePrompt);
     if (!positivePrompt) return null;
+    const n = parsed.n === undefined ? undefined : normalizeNullableInteger(parsed.n, null, 1, 10);
+    const outputCompression = parsed.outputCompression === undefined && parsed.output_compression === undefined
+        ? undefined
+        : normalizeNullableInteger(parsed.outputCompression ?? parsed.output_compression, null, 0, 100);
+    const partialImages = parsed.partialImages === undefined && parsed.partial_images === undefined
+        ? undefined
+        : normalizeNullableInteger(parsed.partialImages ?? parsed.partial_images, null, 1, 3);
+    const rawStream = parsed.stream;
 
     return {
         id: normalizeString(parsed.id) || `style-${index + 1}`,
@@ -664,8 +836,21 @@ function normalizePhotoStylePreset(value: unknown, index: number): PhotoStylePre
         height: parsed.height === undefined ? undefined : normalizeImageNumber(parsed.height, DEFAULT_NOVELAI_IMAGE_CONFIG.height, 64, 1600, 64),
         steps: parsed.steps === undefined ? undefined : normalizeImageNumber(parsed.steps, DEFAULT_NOVELAI_IMAGE_CONFIG.steps, 1, 50),
         scale: parsed.scale === undefined ? undefined : normalizeImageNumber(parsed.scale, DEFAULT_NOVELAI_IMAGE_CONFIG.scale, 0, 10),
-        sampler: normalizeString(parsed.sampler) || undefined,
-        noiseSchedule: normalizeString(parsed.noiseSchedule) || undefined,
+        sampler: normalizeOptionalNaiSampler(parsed.sampler),
+        noiseSchedule: normalizeOptionalNaiNoiseSchedule(parsed.noiseSchedule),
+        size: parsed.size === undefined ? undefined : normalizeOpenAIImageSize(parsed.size),
+        responseFormat: normalizeOptionalOpenAIImageResponseFormat(parsed.responseFormat ?? parsed.response_format),
+        n,
+        quality: normalizeOptionalOpenAIImageQuality(parsed.quality),
+        openAIStyle: normalizeOptionalOpenAIImageStyle(parsed.openAIStyle ?? parsed.openaiStyle ?? parsed.openai_style ?? parsed.style),
+        background: normalizeOptionalOpenAIImageBackground(parsed.background),
+        outputFormat: normalizeOptionalOpenAIImageOutputFormat(parsed.outputFormat ?? parsed.output_format),
+        outputCompression,
+        moderation: normalizeOptionalOpenAIImageModeration(parsed.moderation),
+        user: parsed.user === undefined ? undefined : normalizeString(parsed.user),
+        stream: typeof rawStream === 'boolean' ? rawStream : undefined,
+        partialImages,
+        extraRequestBody: parsed.extraRequestBody === undefined ? undefined : normalizeString(parsed.extraRequestBody),
     };
 }
 

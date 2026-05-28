@@ -5,18 +5,30 @@ import type {
     ImageGenerationConfig,
     ImageProviderType,
     NaiImageModel,
+    OpenAIImageBackground,
+    OpenAIImageModeration,
+    OpenAIImageOutputFormat,
+    OpenAIImageQuality,
     OpenAIImageResponseFormat,
+    OpenAIImageStyle,
     PhotoStylePreset,
 } from '../../types';
 import {
     NAI_IMAGE_MODELS,
+    NAI_IMAGE_NOISE_SCHEDULE_OPTIONS,
+    NAI_IMAGE_SAMPLER_OPTIONS,
+    OPENAI_IMAGE_BACKGROUNDS,
+    OPENAI_IMAGE_MODERATIONS,
+    OPENAI_IMAGE_OUTPUT_FORMATS,
+    OPENAI_IMAGE_QUALITIES,
     OPENAI_IMAGE_RESPONSE_FORMATS,
+    OPENAI_IMAGE_STYLES,
     clearImageGenerationDraftConfig,
     getImageGenerationDraftConfig,
     setImageGenerationDraftConfig,
 } from '../../utils/runtimeConfig';
 import { getGuardedInputProps } from '../../utils/inputGuards';
-import { getImageProviderLabel,testOpenAICompatibleImageConnection } from '../../utils/photoGeneration';
+import { getImageProviderLabel,testOpenAICompatibleImageConnection,type OpenAICompatibleModelOption } from '../../utils/photoGeneration';
 
 const providerOptions: Array<{ id: ImageProviderType; label: string; hint: string }> = [
     { id: 'novelai', label: 'NovelAI', hint: 'Persistent API Token' },
@@ -39,6 +51,80 @@ const providerScopeLabels: Record<PhotoStylePreset['providerScope'], string> = {
     all: '旧版通用',
     novelai: 'NovelAI',
     'openai-compatible': 'OpenAI 兼容',
+};
+
+const optionalParamLabel = (value: string) => value || '不发送';
+const naiParamLabel = (option: { value: string; label: string }) => `${option.label} / ${option.value}`;
+const hasNaiParamValue = (options: Array<{ value: string }>, value: string) => options.some(option => option.value === value);
+
+const qualityLabel = (value: OpenAIImageQuality) => {
+    if (!value) return '不发送';
+    if (value === 'standard') return 'standard / DALL-E';
+    if (value === 'hd') return 'hd / DALL-E';
+    return value;
+};
+
+const responseFormatLabel = (value: OpenAIImageResponseFormat) => (
+    value === 'auto' ? 'auto / 不发送' : value
+);
+
+const buildPresetParamSummary = (preset: PhotoStylePreset): string => {
+    const params = [
+        preset.model ? `model ${preset.model}` : '',
+        preset.size ? `size ${preset.size}` : (preset.width && preset.height ? `${preset.width}x${preset.height}` : ''),
+        preset.steps ? `steps ${preset.steps}` : '',
+        preset.scale ? `scale ${preset.scale}` : '',
+        preset.sampler ? `sampler ${preset.sampler}` : '',
+        preset.noiseSchedule ? `schedule ${preset.noiseSchedule}` : '',
+        preset.responseFormat ? `response ${preset.responseFormat}` : '',
+        preset.n ? `n ${preset.n}` : '',
+        preset.quality ? `quality ${preset.quality}` : '',
+        preset.openAIStyle ? `style ${preset.openAIStyle}` : '',
+        preset.background ? `bg ${preset.background}` : '',
+        preset.outputFormat ? `output ${preset.outputFormat}` : '',
+        preset.outputCompression !== undefined && preset.outputCompression !== null ? `compression ${preset.outputCompression}` : '',
+        preset.moderation ? `moderation ${preset.moderation}` : '',
+        preset.stream !== undefined ? `stream ${preset.stream ? 'on' : 'off'}` : '',
+        preset.partialImages ? `partial ${preset.partialImages}` : '',
+        preset.extraRequestBody ? 'extra JSON' : '',
+    ].filter(Boolean);
+    return params.join(' · ');
+};
+
+const buildCurrentPresetParams = (
+    provider: ImageProviderType,
+    config: ImageGenerationConfig,
+): Partial<PhotoStylePreset> => {
+    if (provider === 'novelai') {
+        const nai = config.novelai;
+        return {
+            model: nai.model,
+            width: nai.width,
+            height: nai.height,
+            steps: nai.steps,
+            scale: nai.scale,
+            sampler: nai.sampler,
+            noiseSchedule: nai.noiseSchedule,
+        };
+    }
+
+    const openai = config.openaiCompatible;
+    return {
+        model: openai.model || undefined,
+        size: openai.size,
+        responseFormat: openai.responseFormat,
+        n: openai.n,
+        quality: openai.quality,
+        openAIStyle: openai.style,
+        background: openai.background,
+        outputFormat: openai.outputFormat,
+        outputCompression: openai.outputCompression,
+        moderation: openai.moderation,
+        user: openai.user || undefined,
+        stream: openai.stream,
+        partialImages: openai.partialImages,
+        extraRequestBody: openai.extraRequestBody || undefined,
+    };
 };
 
 interface PhotoStylePresetListProps {
@@ -70,6 +156,10 @@ const PhotoStylePresetList: React.FC<PhotoStylePresetListProps> = ({
         <div className="max-w-full space-y-3">
             {presets.map(preset => (
                 <div key={preset.id} className="max-w-full overflow-hidden rounded-2xl bg-slate-50/80 border border-slate-100 p-3">
+                    {(() => {
+                        const paramSummary = buildPresetParamSummary(preset);
+                        return (
+                            <>
                     <div className="flex items-start justify-between gap-3 min-w-0">
                         <div className="min-w-0">
                             <div className="text-sm font-bold text-slate-700 truncate">{preset.name}</div>
@@ -86,6 +176,12 @@ const PhotoStylePresetList: React.FC<PhotoStylePresetListProps> = ({
                             <p className="line-clamp-2 break-words"><span className="font-bold text-slate-400">{negativeLabel}：</span>{preset.negativePrompt}</p>
                         )}
                     </div>
+                    {paramSummary && (
+                        <p className="mt-2 truncate rounded-lg bg-white/70 px-2.5 py-1.5 text-[10px] font-mono text-slate-400">{paramSummary}</p>
+                    )}
+                            </>
+                        );
+                    })()}
                 </div>
             ))}
         </div>
@@ -107,7 +203,7 @@ const ImageGenerationSettings: React.FC = () => {
     const [apiPresetName, setApiPresetName] = useState('');
     const [naiPresetDraft, setNaiPresetDraft] = useState<StylePresetDraft>(createEmptyStylePresetDraft);
     const [openAIPresetDraft, setOpenAIPresetDraft] = useState<StylePresetDraft>(createEmptyStylePresetDraft);
-    const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+    const [fetchedModels, setFetchedModels] = useState<OpenAICompatibleModelOption[]>([]);
     const [isFetchingModels, setIsFetchingModels] = useState(false);
 
     useEffect(() => {
@@ -196,6 +292,7 @@ const ImageGenerationSettings: React.FC = () => {
             providerScope: provider,
             positivePrompt,
             negativePrompt: draft.negativePrompt.trim(),
+            ...buildCurrentPresetParams(provider, localConfig),
         };
         savePhotoStylePresets([...photoStylePresets, preset]);
         resetDraft();
@@ -225,9 +322,12 @@ const ImageGenerationSettings: React.FC = () => {
         setIsFetchingModels(true);
         try {
             const result = await testOpenAICompatibleImageConnection(localConfig.openaiCompatible);
-            setFetchedModels(result.models);
-            if (result.models.length > 0 && !localConfig.openaiCompatible.model.trim()) {
-                updateOpenAICompatible('model', result.models[0]);
+            const modelOptions = result.modelOptions.length > 0
+                ? result.modelOptions
+                : result.models.map(id => ({ id, name: id, displayName: id }));
+            setFetchedModels(modelOptions);
+            if (modelOptions.length > 0 && !localConfig.openaiCompatible.model.trim()) {
+                updateOpenAICompatible('model', modelOptions[0].id);
             }
             addToast(result.message, result.ok ? 'success' : 'error');
         } catch (error: any) {
@@ -371,11 +471,25 @@ const ImageGenerationSettings: React.FC = () => {
                         <div className="grid grid-cols-2 gap-3 min-w-0">
                             <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                                 Sampler
-                                <input value={localConfig.novelai.sampler} onChange={e => updateNovelAI('sampler', e.target.value)} className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono" />
+                                <select value={localConfig.novelai.sampler} onChange={e => updateNovelAI('sampler', e.target.value)} className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono">
+                                    {!hasNaiParamValue(NAI_IMAGE_SAMPLER_OPTIONS, localConfig.novelai.sampler) && (
+                                        <option value={localConfig.novelai.sampler}>当前值 / {localConfig.novelai.sampler}</option>
+                                    )}
+                                    {NAI_IMAGE_SAMPLER_OPTIONS.map(option => (
+                                        <option key={option.value} value={option.value}>{naiParamLabel(option)}</option>
+                                    ))}
+                                </select>
                             </label>
                             <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                                 Schedule
-                                <input value={localConfig.novelai.noiseSchedule} onChange={e => updateNovelAI('noiseSchedule', e.target.value)} className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono" />
+                                <select value={localConfig.novelai.noiseSchedule} onChange={e => updateNovelAI('noiseSchedule', e.target.value)} className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono">
+                                    {!hasNaiParamValue(NAI_IMAGE_NOISE_SCHEDULE_OPTIONS, localConfig.novelai.noiseSchedule) && (
+                                        <option value={localConfig.novelai.noiseSchedule}>当前值 / {localConfig.novelai.noiseSchedule}</option>
+                                    )}
+                                    {NAI_IMAGE_NOISE_SCHEDULE_OPTIONS.map(option => (
+                                        <option key={option.value} value={option.value}>{naiParamLabel(option)}</option>
+                                    ))}
+                                </select>
                             </label>
                         </div>
 
@@ -439,7 +553,7 @@ const ImageGenerationSettings: React.FC = () => {
                                     onChange={e => updateOpenAICompatible('model', e.target.value)}
                                     className="mt-2 w-full bg-slate-50 border border-slate-200/60 rounded-xl px-3 py-2 text-xs font-mono"
                                 >
-                                    {fetchedModels.map(model => <option key={model} value={model}>{model}</option>)}
+                                    {fetchedModels.map(model => <option key={model.id} value={model.id}>{model.displayName}</option>)}
                                 </select>
                             )}
                         </div>
@@ -447,13 +561,98 @@ const ImageGenerationSettings: React.FC = () => {
                         <div className="grid grid-cols-2 gap-3 min-w-0">
                             <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                                 Size
-                                <input value={localConfig.openaiCompatible.size} onChange={e => updateOpenAICompatible('size', e.target.value)} placeholder="1024x1024" className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono" />
+                                <input value={localConfig.openaiCompatible.size} onChange={e => updateOpenAICompatible('size', e.target.value)} placeholder="auto / 1024x1024" className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono" />
                             </label>
                             <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                                 Response
                                 <select value={localConfig.openaiCompatible.responseFormat} onChange={e => updateOpenAICompatible('responseFormat', e.target.value as OpenAIImageResponseFormat)} className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono">
-                                    {OPENAI_IMAGE_RESPONSE_FORMATS.map(format => <option key={format} value={format}>{format}</option>)}
+                                    {OPENAI_IMAGE_RESPONSE_FORMATS.map(format => <option key={format} value={format}>{responseFormatLabel(format)}</option>)}
                                 </select>
+                            </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 min-w-0">
+                            <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                N
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={10}
+                                    value={localConfig.openaiCompatible.n ?? ''}
+                                    onChange={e => updateOpenAICompatible('n', e.target.value.trim() ? Number(e.target.value) : null)}
+                                    placeholder="不发送"
+                                    className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono"
+                                />
+                            </label>
+                            <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                Quality
+                                <select value={localConfig.openaiCompatible.quality || ''} onChange={e => updateOpenAICompatible('quality', e.target.value as OpenAIImageQuality)} className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono">
+                                    {OPENAI_IMAGE_QUALITIES.map(value => <option key={value || 'unset'} value={value}>{qualityLabel(value)}</option>)}
+                                </select>
+                            </label>
+                            <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                Style
+                                <select value={localConfig.openaiCompatible.style || ''} onChange={e => updateOpenAICompatible('style', e.target.value as OpenAIImageStyle)} className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono">
+                                    {OPENAI_IMAGE_STYLES.map(value => <option key={value || 'unset'} value={value}>{optionalParamLabel(value)}</option>)}
+                                </select>
+                            </label>
+                            <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                Background
+                                <select value={localConfig.openaiCompatible.background || ''} onChange={e => updateOpenAICompatible('background', e.target.value as OpenAIImageBackground)} className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono">
+                                    {OPENAI_IMAGE_BACKGROUNDS.map(value => <option key={value || 'unset'} value={value}>{optionalParamLabel(value)}</option>)}
+                                </select>
+                            </label>
+                            <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                Output
+                                <select value={localConfig.openaiCompatible.outputFormat || ''} onChange={e => updateOpenAICompatible('outputFormat', e.target.value as OpenAIImageOutputFormat)} className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono">
+                                    {OPENAI_IMAGE_OUTPUT_FORMATS.map(value => <option key={value || 'unset'} value={value}>{optionalParamLabel(value)}</option>)}
+                                </select>
+                            </label>
+                            <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                Compression
+                                <input
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    value={localConfig.openaiCompatible.outputCompression ?? ''}
+                                    onChange={e => updateOpenAICompatible('outputCompression', e.target.value.trim() ? Number(e.target.value) : null)}
+                                    placeholder="不发送"
+                                    className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono"
+                                />
+                            </label>
+                            <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                Moderation
+                                <select value={localConfig.openaiCompatible.moderation || ''} onChange={e => updateOpenAICompatible('moderation', e.target.value as OpenAIImageModeration)} className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono">
+                                    {OPENAI_IMAGE_MODERATIONS.map(value => <option key={value || 'unset'} value={value}>{optionalParamLabel(value)}</option>)}
+                                </select>
+                            </label>
+                            <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                User
+                                <input value={localConfig.openaiCompatible.user || ''} onChange={e => updateOpenAICompatible('user', e.target.value)} placeholder="可选" className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono" />
+                            </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 min-w-0">
+                            <label className="flex min-w-0 items-center gap-2 rounded-xl border border-slate-200/60 bg-white/50 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                                <input
+                                    type="checkbox"
+                                    checked={Boolean(localConfig.openaiCompatible.stream)}
+                                    onChange={e => updateOpenAICompatible('stream', e.target.checked)}
+                                    className="accent-primary"
+                                />
+                                Stream
+                            </label>
+                            <label className="min-w-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                Partial Images
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={3}
+                                    value={localConfig.openaiCompatible.partialImages ?? ''}
+                                    onChange={e => updateOpenAICompatible('partialImages', e.target.value.trim() ? Number(e.target.value) : null)}
+                                    placeholder="Stream 时可用"
+                                    className="mt-1.5 w-full bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm font-mono"
+                                />
                             </label>
                         </div>
 
@@ -465,6 +664,16 @@ const ImageGenerationSettings: React.FC = () => {
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
                             全局避免内容
                             <textarea value={localConfig.openaiCompatible.negativePrompt} onChange={e => updateOpenAICompatible('negativePrompt', e.target.value)} className="mt-1.5 w-full h-24 bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-xs font-mono resize-none" />
+                        </label>
+
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                            额外请求参数 JSON
+                            <textarea
+                                value={localConfig.openaiCompatible.extraRequestBody || ''}
+                                onChange={e => updateOpenAICompatible('extraRequestBody', e.target.value)}
+                                placeholder={'{\n  "seed": 1234,\n  "custom_param": "value"\n}'}
+                                className="mt-1.5 w-full h-28 bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-xs font-mono resize-none"
+                            />
                         </label>
                     </div>
                 )}

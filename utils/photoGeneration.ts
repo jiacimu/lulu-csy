@@ -28,6 +28,17 @@ import {
     NAI_IMAGE_MODELS,
     markSecondaryApiConfigFailure,
     markSecondaryApiConfigSuccess,
+    normalizeNaiNoiseSchedule,
+    normalizeNaiSampler,
+    normalizeOpenAIImageSize,
+    normalizeOptionalOpenAIImageBackground,
+    normalizeOptionalOpenAIImageModeration,
+    normalizeOptionalOpenAIImageOutputFormat,
+    normalizeOptionalOpenAIImageQuality,
+    normalizeOptionalOpenAIImageResponseFormat,
+    normalizeOptionalOpenAIImageStyle,
+    normalizeOptionalNaiNoiseSchedule,
+    normalizeOptionalNaiSampler,
 } from './runtimeConfig';
 import { trackedApiRequest } from './apiRequestLedger';
 import { safeTimeoutSignal } from './safeTimeout';
@@ -43,6 +54,12 @@ export interface GeneratedPhotoImage {
     blob?: Blob;
     dataUrl: string;
     remoteUrl?: string;
+}
+
+export interface OpenAICompatibleModelOption {
+    id: string;
+    name: string;
+    displayName: string;
 }
 
 export const PHOTO_HINT_TAG_RE = /\[\[\s*PHOTO_HINT\s*:\s*([\s\S]*?)\s*\]\]+/gi;
@@ -766,8 +783,18 @@ export function buildManualPhotoPrompt(
 }
 
 function parseImageSize(size: string, fallbackWidth = 1024, fallbackHeight = 1024): { width: number; height: number; size: string } {
-    const match = String(size || '').match(/^(\d{2,4})x(\d{2,4})$/i);
-    if (!match) return { width: fallbackWidth, height: fallbackHeight, size: `${fallbackWidth}x${fallbackHeight}` };
+    const normalized = String(size || '')
+        .trim()
+        .replace(/[×]/g, 'x')
+        .replace(/\s+/g, '');
+    const match = normalized.match(/^(\d{2,5})x(\d{2,5})$/i);
+    if (!match) {
+        return {
+            width: fallbackWidth,
+            height: fallbackHeight,
+            size: normalized || `${fallbackWidth}x${fallbackHeight}`,
+        };
+    }
     const width = Number(match[1]);
     const height = Number(match[2]);
     return {
@@ -787,20 +814,33 @@ export function createPhotoMeta(
     photoHint?: PhotoHint,
 ): PhotoMeta {
     if (config.activeProvider === 'openai-compatible') {
-        const parsedSize = parseImageSize(config.openaiCompatible.size);
+        const openai = config.openaiCompatible;
+        const parsedSize = parseImageSize(style.size || openai.size);
         return {
             source,
             providerType: 'openai-compatible',
             photoHint,
             directorResult,
             stylePresetId: style.id,
-            model: config.openaiCompatible.model,
+            model: normalizeOpenAICompatibleModelId(style.model || openai.model),
             positivePrompt: prompts.positivePrompt,
             negativePrompt: prompts.negativePrompt,
             finalPrompt: prompts.finalPrompt,
             width: parsedSize.width,
             height: parsedSize.height,
             size: parsedSize.size,
+            responseFormat: style.responseFormat === undefined ? openai.responseFormat : style.responseFormat,
+            n: style.n === undefined ? openai.n : style.n,
+            quality: style.quality === undefined ? openai.quality : style.quality,
+            openAIStyle: style.openAIStyle === undefined ? openai.style : style.openAIStyle,
+            background: style.background === undefined ? openai.background : style.background,
+            outputFormat: style.outputFormat === undefined ? openai.outputFormat : style.outputFormat,
+            outputCompression: style.outputCompression === undefined ? openai.outputCompression : style.outputCompression,
+            moderation: style.moderation === undefined ? openai.moderation : style.moderation,
+            user: style.user === undefined ? openai.user : style.user,
+            stream: style.stream === undefined ? openai.stream : style.stream,
+            partialImages: style.partialImages === undefined ? openai.partialImages : style.partialImages,
+            extraRequestBody: style.extraRequestBody,
             seed,
             continuity_summary: directorResult?.continuity_summary,
         };
@@ -822,8 +862,8 @@ export function createPhotoMeta(
         height: style.height || config.novelai.height,
         steps: style.steps || config.novelai.steps,
         scale: style.scale || config.novelai.scale,
-        sampler: style.sampler || config.novelai.sampler,
-        noiseSchedule: style.noiseSchedule || config.novelai.noiseSchedule,
+        sampler: normalizeNaiSampler(style.sampler || config.novelai.sampler, config.novelai.sampler),
+        noiseSchedule: normalizeNaiNoiseSchedule(style.noiseSchedule || config.novelai.noiseSchedule, config.novelai.noiseSchedule),
         seed,
         continuity_summary: directorResult?.continuity_summary,
     };
@@ -880,6 +920,101 @@ function normalizeBase64Payload(base64: string): string {
     return normalized + padding;
 }
 
+function responseContentType(response: Response): string {
+    return response.headers.get('Content-Type') || response.headers.get('content-type') || '';
+}
+
+function responsePreview(text: string, limit = 500): string {
+    return String(text || '').replace(/\s+/g, ' ').trim().slice(0, limit);
+}
+
+function looksLikeHtmlResponse(text: string, contentType = ''): boolean {
+    const trimmed = String(text || '').trimStart();
+    return /text\/html/i.test(contentType)
+        || /^<!doctype\b/i.test(trimmed)
+        || /^<html\b/i.test(trimmed);
+}
+
+function buildHtmlResponseError(label: string, response: Response, text: string, contentType = responseContentType(response)): Error {
+    return new Error(
+        `${label}接口返回 HTML 页面，疑似请求 URL 错误、路由 fallback、服务商错误页或前端页面地址被当成 API。`
+        + `（HTTP ${response.status}，Content-Type: ${contentType || 'unknown'}，响应开头：${responsePreview(text, 180) || '空'}）`,
+    );
+}
+
+async function readResponseText(response: Response): Promise<{ text: string; contentType: string }> {
+    const contentType = responseContentType(response);
+    const text = await response.text().catch(() => '');
+    return { text, contentType };
+}
+
+function parseJsonResponsePayload(label: string, response: Response, text: string, contentType = responseContentType(response)): any {
+    const trimmed = String(text || '').trim();
+    if (looksLikeHtmlResponse(trimmed, contentType)) {
+        throw buildHtmlResponseError(label, response, text, contentType);
+    }
+    if (!trimmed) {
+        throw new Error(`${label}返回空响应（HTTP ${response.status}）`);
+    }
+    if (!/application\/json/i.test(contentType) && !trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+        throw new Error(`${label}返回的不是 JSON（HTTP ${response.status}，Content-Type: ${contentType || 'unknown'}）：${responsePreview(text, 200)}`);
+    }
+    try {
+        return JSON.parse(trimmed);
+    } catch (error: any) {
+        throw new Error(`${label}返回无效 JSON（HTTP ${response.status}）：${responsePreview(text, 200) || error?.message || '解析失败'}`);
+    }
+}
+
+async function readJsonResponsePayload(label: string, response: Response): Promise<{ payload: any; text: string; contentType: string }> {
+    const { text, contentType } = await readResponseText(response);
+    return {
+        payload: parseJsonResponsePayload(label, response, text, contentType),
+        text,
+        contentType,
+    };
+}
+
+function logPhotoResponse(label: string, response: Response, text: string, contentType = responseContentType(response)): void {
+    console.info(`[${label}] response`, {
+        status: response.status,
+        ok: response.ok,
+        contentType: contentType || 'unknown',
+        responseTextPreview: responsePreview(text, 500),
+    });
+}
+
+function normalizeOpenAICompatibleModelId(value: unknown): string {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const slashIndex = raw.lastIndexOf('/');
+    if (slashIndex > 0 && slashIndex < raw.length - 1) {
+        const prefix = raw.slice(0, slashIndex);
+        const suffix = raw.slice(slashIndex + 1).trim();
+        const prefixLooksLikeDisplay = /[\u4e00-\u9fff【】￥¥$]|\[[^\]]+\]|\([^)]+\)|价格|元|米/.test(prefix);
+        if (prefixLooksLikeDisplay && suffix) return suffix;
+    }
+    return raw;
+}
+
+function normalizeOpenAICompatibleModelOption(item: any): OpenAICompatibleModelOption | null {
+    const rawId = item && typeof item === 'object'
+        ? (item.id ?? item.model ?? item.value ?? '')
+        : item;
+    const rawName = item && typeof item === 'object'
+        ? (item.name ?? item.display_name ?? item.displayName ?? item.label ?? '')
+        : '';
+    const sourceId = String(rawId || rawName || '').trim();
+    const id = normalizeOpenAICompatibleModelId(sourceId);
+    if (!id) return null;
+    const name = String(rawName || sourceId).trim();
+    return {
+        id,
+        name,
+        displayName: name && name !== id ? `${name} / ${id}` : id,
+    };
+}
+
 function base64ToBlob(base64: string, mimeType = 'image/png'): Blob {
     const cleanBase64 = normalizeBase64Payload(base64);
     const binary = atob(cleanBase64);
@@ -913,20 +1048,20 @@ function pickEncodedReferenceFromPayload(payload: any): string {
 }
 
 async function readEncodedVibeResponse(response: Response): Promise<string> {
-    const contentType = response.headers.get('Content-Type') || response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-        const payload = await response.json();
-        const encoded = pickEncodedReferenceFromPayload(payload);
-        if (encoded) return encoded;
-        throw new Error('encode-vibe 没有返回可识别的编码');
-    }
-    if (contentType.includes('text/')) {
-        const text = (await response.text()).trim();
-        if (text.startsWith('{')) {
-            const encoded = pickEncodedReferenceFromPayload(JSON.parse(text));
-            if (encoded) return encoded;
+    const contentType = responseContentType(response);
+    if (contentType.includes('application/json') || contentType.includes('text/')) {
+        const { text } = await readResponseText(response);
+        if (looksLikeHtmlResponse(text, contentType)) {
+            throw buildHtmlResponseError('NAI Vibe 编码', response, text, contentType);
         }
-        if (text.length > 0) return text;
+        if (contentType.includes('application/json') || text.trim().startsWith('{')) {
+            const payload = parseJsonResponsePayload('NAI Vibe 编码', response, text, contentType);
+            const encoded = pickEncodedReferenceFromPayload(payload);
+            if (encoded) return encoded;
+            throw new Error('encode-vibe 没有返回可识别的编码');
+        }
+        const trimmed = text.trim();
+        if (trimmed.length > 0) return trimmed;
     }
     const buffer = await response.arrayBuffer();
     if (buffer.byteLength <= 0) throw new Error('encode-vibe 返回空内容');
@@ -1023,7 +1158,7 @@ function buildNaiRequestBody(
         width: meta.width,
         height: meta.height,
         scale: meta.scale ?? config.novelai.scale,
-        sampler: meta.sampler || config.novelai.sampler,
+        sampler: normalizeNaiSampler(meta.sampler || config.novelai.sampler, config.novelai.sampler),
         steps: meta.steps ?? config.novelai.steps,
         seed: meta.seed,
         n_samples: 1,
@@ -1037,7 +1172,7 @@ function buildNaiRequestBody(
         legacy_v3_extend: false,
         add_original_image: false,
         cfg_rescale: 0,
-        noise_schedule: meta.noiseSchedule || config.novelai.noiseSchedule,
+        noise_schedule: normalizeNaiNoiseSchedule(meta.noiseSchedule || config.novelai.noiseSchedule, config.novelai.noiseSchedule),
         prompt: meta.positivePrompt,
         negative_prompt: meta.negativePrompt,
         extra_noise_seed: meta.seed,
@@ -1123,6 +1258,33 @@ function maybeParseJsonText(value: string): any | null {
     } catch {
         return null;
     }
+}
+
+function parseEventStreamPayloads(value: string): any[] {
+    const payloads: any[] = [];
+    for (const line of value.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const data = trimmed.slice(5).trim();
+        if (!data || data === '[DONE]') continue;
+        payloads.push(maybeParseJsonText(data) || data);
+    }
+    return payloads;
+}
+
+function parseOpenAICompatibleResponsePayload(responseText: string): any {
+    const json = maybeParseJsonText(responseText);
+    if (json) return json;
+
+    const eventStreamPayloads = parseEventStreamPayloads(responseText);
+    if (eventStreamPayloads.length > 0) {
+        return {
+            eventStream: eventStreamPayloads.reverse(),
+            raw: responseText,
+        };
+    }
+
+    return responseText;
 }
 
 function stripUrlTail(value: string): string {
@@ -1227,9 +1389,13 @@ function summarizePayloadShape(value: any, depth = 0): string {
 }
 
 export function extractGeneratedImage(payload: any): ExtractedImage | null {
-    const candidates = collectImagePayloadCandidates(payload);
+    const rawCandidates = collectImagePayloadCandidates(payload);
+    const candidates = [
+        ...rawCandidates.filter(candidate => !/partial/i.test(candidate.path)),
+        ...rawCandidates.filter(candidate => /partial/i.test(candidate.path)),
+    ];
     const explicitBase64Path = /\.(?:b64_json|b64|base64|image_base64|base64_image|imageBase64)$/i;
-    const likelyImagePath = /(?:image|img|url|result|artifact|output|data|content|file|media)/i;
+    const likelyImagePath = /(?:image|img|url|result|artifact|output|data|content|file|media|b64_json|b64|base64)/i;
 
     for (const candidate of candidates) {
         const imageUrl = extractImageFromText(candidate.value);
@@ -1291,6 +1457,74 @@ async function extractedImageToGeneratedPhoto(image: ExtractedImage): Promise<Ge
     return { blob, dataUrl };
 }
 
+function parseOpenAICompatibleExtraRequestBody(raw: string | undefined): Record<string, unknown> {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed) return {};
+
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(trimmed);
+    } catch (error: any) {
+        throw new Error(`OpenAI 兼容额外请求参数不是合法 JSON：${error?.message || '解析失败'}`);
+    }
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('OpenAI 兼容额外请求参数必须是 JSON 对象');
+    }
+
+    return parsed as Record<string, unknown>;
+}
+
+function setOptionalStringParam(target: Record<string, unknown>, key: string, value: unknown): void {
+    const normalized = typeof value === 'string' ? value.trim() : '';
+    if (normalized) target[key] = normalized;
+}
+
+function setOptionalNumberParam(target: Record<string, unknown>, key: string, value: unknown): void {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        target[key] = value;
+    }
+}
+
+function presetValue<T>(value: T | undefined, fallback: T): T {
+    return value === undefined ? fallback : value;
+}
+
+function buildOpenAICompatibleImageRequestBody(
+    provider: OpenAICompatibleImageProviderConfig,
+    meta: PhotoMeta,
+): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+        model: normalizeOpenAICompatibleModelId(meta.model || provider.model),
+        prompt: meta.finalPrompt || meta.positivePrompt,
+    };
+    const size = String(meta.size || provider.size || '').trim();
+    if (size) body.size = size;
+    const responseFormat = presetValue(meta.responseFormat, provider.responseFormat);
+    if (responseFormat && responseFormat !== 'auto') {
+        body.response_format = responseFormat;
+    }
+
+    setOptionalNumberParam(body, 'n', presetValue(meta.n, provider.n));
+    setOptionalStringParam(body, 'quality', presetValue(meta.quality, provider.quality));
+    setOptionalStringParam(body, 'style', presetValue(meta.openAIStyle, provider.style));
+    setOptionalStringParam(body, 'background', presetValue(meta.background, provider.background));
+    setOptionalStringParam(body, 'output_format', presetValue(meta.outputFormat, provider.outputFormat));
+    setOptionalNumberParam(body, 'output_compression', presetValue(meta.outputCompression, provider.outputCompression));
+    setOptionalStringParam(body, 'moderation', presetValue(meta.moderation, provider.moderation));
+    setOptionalStringParam(body, 'user', presetValue(meta.user, provider.user));
+    if (presetValue(meta.stream, provider.stream)) {
+        body.stream = true;
+        setOptionalNumberParam(body, 'partial_images', presetValue(meta.partialImages, provider.partialImages));
+    }
+
+    return {
+        ...body,
+        ...parseOpenAICompatibleExtraRequestBody(provider.extraRequestBody),
+        ...parseOpenAICompatibleExtraRequestBody(meta.extraRequestBody),
+    };
+}
+
 async function generateOpenAICompatibleImage(
     config: ImageGenerationConfig,
     meta: PhotoMeta,
@@ -1301,33 +1535,49 @@ async function generateOpenAICompatibleImage(
     if (!provider.model.trim()) throw new Error('请先填写 OpenAI 兼容生图模型名');
 
     const baseUrl = provider.baseUrl.replace(/\/+$/, '');
-    const responseFormat = provider.responseFormat === 'url' ? 'url' : 'b64_json';
+    const requestUrl = `${baseUrl}/images/generations`;
+    const requestBody = buildOpenAICompatibleImageRequestBody(provider, meta);
+    console.info('[OpenAICompatibleImage] request', {
+        source: meta.source,
+        provider: 'openai-compatible',
+        baseUrl,
+        endpoint: '/images/generations',
+        requestUrl,
+        model: requestBody.model,
+        responseFormat: requestBody.response_format || 'auto',
+        size: requestBody.size,
+    });
     return trackedApiRequest({
         feature: 'image',
         reason: meta.source === 'manual' ? '手动生图' : '角色主动发照片',
-        model: meta.model,
+        model: String(requestBody.model || meta.model || ''),
         userInitiated: meta.source === 'manual',
-        url: `${baseUrl}/images/generations`,
+        url: requestUrl,
     }, async () => {
-        const response = await fetch(`${baseUrl}/images/generations`, {
+        const response = await fetch(requestUrl, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${provider.apiKey.trim()}`,
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                model: meta.model,
-                prompt: meta.finalPrompt || meta.positivePrompt,
-                size: meta.size || provider.size,
-                response_format: responseFormat,
-            }),
+            body: JSON.stringify(requestBody),
         });
 
-        const responseText = await response.text().catch(() => '');
+        const { text: responseText, contentType } = await readResponseText(response);
+        logPhotoResponse('OpenAICompatibleImage', response, responseText, contentType);
+        if (looksLikeHtmlResponse(responseText, contentType)) {
+            console.warn('[OpenAICompatibleImage] image result parse failed', {
+                reason: 'html_response',
+                requestUrl,
+                status: response.status,
+                contentType: contentType || 'unknown',
+            });
+            throw buildHtmlResponseError('OpenAI 兼容生图', response, responseText, contentType);
+        }
         if (!responseText.trim()) {
             throw new Error('OpenAI 兼容接口返回空响应，请检查 endpoint、model、key、CORS 或代理日志。');
         }
-        const payload = maybeParseJsonText(responseText) || responseText;
+        const payload = parseOpenAICompatibleResponsePayload(responseText);
         const image = extractGeneratedImage(payload);
         if (!response.ok && !image) {
             const detail = readOpenAICompatibleErrorMessage(payload, responseText);
@@ -1342,8 +1592,19 @@ async function generateOpenAICompatibleImage(
             console.warn('[OpenAICompatibleImage] non-OK response contained a usable image payload:', response.status);
         }
         if (image) {
+            console.info('[OpenAICompatibleImage] image result parse success', {
+                requestUrl,
+                kind: image.kind,
+                status: response.status,
+            });
             return extractedImageToGeneratedPhoto(image);
         }
+        console.warn('[OpenAICompatibleImage] image result parse failed', {
+            requestUrl,
+            status: response.status,
+            payloadShape: summarizePayloadShape(payload),
+            responseTextPreview: responsePreview(responseText, 500),
+        });
         throw new Error(`OpenAI 兼容接口没有返回可识别的图片（返回结构：${summarizePayloadShape(payload)}${buildOpenAICompatiblePayloadPreview(payload, responseText)}）`);
     });
 }
@@ -1528,7 +1789,7 @@ export async function runPhotoDirector(args: {
         ];
 
     try {
-        const response = await trackedApiRequest({
+        const data = await trackedApiRequest({
             feature: 'image',
             reason: 'Photo Director 判定',
             model: apiConfig.model,
@@ -1537,7 +1798,7 @@ export async function runPhotoDirector(args: {
         }, async () => {
             const signal = safeTimeoutSignal(PHOTO_DIRECTOR_TIMEOUT_MS);
             try {
-                return await fetch(`${baseUrl}/chat/completions`, {
+                const response = await fetch(`${baseUrl}/chat/completions`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1551,6 +1812,15 @@ export async function runPhotoDirector(args: {
                     }),
                     signal,
                 });
+                const { text, contentType } = await readResponseText(response);
+                logPhotoResponse('PhotoDirector', response, text, contentType);
+                if (!response.ok) {
+                    if (looksLikeHtmlResponse(text, contentType)) {
+                        throw buildHtmlResponseError('Photo Director', response, text, contentType);
+                    }
+                    throw new Error(`Photo Director 请求失败 (${response.status})${text ? `: ${responsePreview(text, 180)}` : ''}`);
+                }
+                return parseJsonResponsePayload('Photo Director', response, text, contentType);
             } catch (error) {
                 if (signal.aborted) {
                     throw new Error(`Photo Director 请求超时（${Math.round(PHOTO_DIRECTOR_TIMEOUT_MS / 1000)} 秒），已停止生图`);
@@ -1558,13 +1828,6 @@ export async function runPhotoDirector(args: {
                 throw error;
             }
         });
-
-        if (!response.ok) {
-            const text = await response.text().catch(() => '');
-            throw new Error(`Photo Director 请求失败 (${response.status})${text ? `: ${text.slice(0, 180)}` : ''}`);
-        }
-
-        const data = await response.json();
         markSecondaryApiConfigSuccess(apiConfig);
         const rawDirectorOutput = data.choices?.[0]?.message?.content || '';
         const parsedDirectorJson = extractJson(rawDirectorOutput, { logFailure: false });
@@ -1718,7 +1981,7 @@ export async function runManualPhotoDirector(args: {
         ];
 
     try {
-        const response = await trackedApiRequest({
+        const data = await trackedApiRequest({
             feature: 'image',
             reason: '手动生图剧情模式',
             model: apiConfig.model,
@@ -1727,7 +1990,7 @@ export async function runManualPhotoDirector(args: {
         }, async () => {
             const signal = safeTimeoutSignal(PHOTO_DIRECTOR_TIMEOUT_MS);
             try {
-                return await fetch(`${baseUrl}/chat/completions`, {
+                const response = await fetch(`${baseUrl}/chat/completions`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1741,6 +2004,15 @@ export async function runManualPhotoDirector(args: {
                     }),
                     signal,
                 });
+                const { text, contentType } = await readResponseText(response);
+                logPhotoResponse('ManualPhotoDirector', response, text, contentType);
+                if (!response.ok) {
+                    if (looksLikeHtmlResponse(text, contentType)) {
+                        throw buildHtmlResponseError('手动生图剧情模式', response, text, contentType);
+                    }
+                    throw new Error(`手动生图剧情模式请求失败 (${response.status})${text ? `: ${responsePreview(text, 180)}` : ''}`);
+                }
+                return parseJsonResponsePayload('手动生图剧情模式', response, text, contentType);
             } catch (error) {
                 if (signal.aborted) {
                     throw new Error(`手动生图剧情模式请求超时（${Math.round(PHOTO_DIRECTOR_TIMEOUT_MS / 1000)} 秒），已停止生图`);
@@ -1748,13 +2020,6 @@ export async function runManualPhotoDirector(args: {
                 throw error;
             }
         });
-
-        if (!response.ok) {
-            const text = await response.text().catch(() => '');
-            throw new Error(`手动生图剧情模式请求失败 (${response.status})${text ? `: ${text.slice(0, 180)}` : ''}`);
-        }
-
-        const data = await response.json();
         markSecondaryApiConfigSuccess(apiConfig);
         const rawDirectorOutput = data.choices?.[0]?.message?.content || '';
         const parsedDirectorJson = extractJson(rawDirectorOutput, { logFailure: false });
@@ -1781,6 +2046,21 @@ function normalizeProviderScope(value: unknown, fallback: PhotoStyleProviderScop
         : fallback;
 }
 
+function normalizeOptionalIntegerParam(value: unknown, min: number, max: number): number | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null || value === '') return null;
+    const numeric = typeof value === 'number'
+        ? value
+        : (typeof value === 'string' && value.trim() ? Number(value) : NaN);
+    if (!Number.isFinite(numeric)) return undefined;
+    return Math.min(max, Math.max(min, Math.round(numeric)));
+}
+
+function parseTextParam(text: string, names: string[]): string | undefined {
+    const escaped = names.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    return text.match(new RegExp(`(?:${escaped})\\s*[:：]\\s*([^\\n,]+)`, 'i'))?.[1]?.trim();
+}
+
 export function parsePhotoStylePaste(text: string, defaultScope: PhotoStyleProviderScope = 'novelai'): PhotoStylePreset {
     const trimmed = text.trim();
     if (!trimmed) throw new Error('请先粘贴风格内容');
@@ -1799,8 +2079,21 @@ export function parsePhotoStylePaste(text: string, defaultScope: PhotoStyleProvi
                 height: Number(parsed.height) || undefined,
                 steps: Number(parsed.steps) || undefined,
                 scale: Number(parsed.scale || parsed.cfg || parsed.cfgScale) || undefined,
-                sampler: parsed.sampler ? String(parsed.sampler) : undefined,
-                noiseSchedule: parsed.noiseSchedule ? String(parsed.noiseSchedule) : undefined,
+                sampler: normalizeOptionalNaiSampler(parsed.sampler),
+                noiseSchedule: normalizeOptionalNaiNoiseSchedule(parsed.noiseSchedule),
+                size: parsed.size ? normalizeOpenAIImageSize(parsed.size) : undefined,
+                responseFormat: normalizeOptionalOpenAIImageResponseFormat(parsed.responseFormat || parsed.response_format),
+                n: normalizeOptionalIntegerParam(parsed.n, 1, 10),
+                quality: normalizeOptionalOpenAIImageQuality(parsed.quality),
+                openAIStyle: normalizeOptionalOpenAIImageStyle(parsed.openAIStyle || parsed.openaiStyle || parsed.openai_style || parsed.style),
+                background: normalizeOptionalOpenAIImageBackground(parsed.background),
+                outputFormat: normalizeOptionalOpenAIImageOutputFormat(parsed.outputFormat || parsed.output_format),
+                outputCompression: normalizeOptionalIntegerParam(parsed.outputCompression ?? parsed.output_compression, 0, 100),
+                moderation: normalizeOptionalOpenAIImageModeration(parsed.moderation),
+                user: parsed.user ? String(parsed.user).trim() : undefined,
+                stream: typeof parsed.stream === 'boolean' ? parsed.stream : undefined,
+                partialImages: normalizeOptionalIntegerParam(parsed.partialImages ?? parsed.partial_images, 1, 3),
+                extraRequestBody: parsed.extraRequestBody ? String(parsed.extraRequestBody).trim() : undefined,
             };
         }
     } catch {
@@ -1811,11 +2104,13 @@ export function parsePhotoStylePaste(text: string, defaultScope: PhotoStyleProvi
     const positiveText = negativeMatch
         ? trimmed.slice(0, negativeMatch.index).replace(/^(?:positive prompt|positive|正面提示词|正面|prompt)\s*[:：]\s*/i, '').trim()
         : trimmed.replace(/^(?:positive prompt|positive|正面提示词|正面|prompt)\s*[:：]\s*/i, '').trim();
-    const negativeText = negativeMatch ? negativeMatch[1].split(/\n(?:steps|sampler|cfg|size)\s*[:：]/i)[0].trim() : '';
+    const negativeText = negativeMatch ? negativeMatch[1].split(/\n(?:model|steps|sampler|noise schedule|schedule|cfg|size|response format|quality|style|background|output format|compression|moderation|user|stream|partial images|extra request body)\s*[:：]/i)[0].trim() : '';
     const steps = Number(trimmed.match(/steps\s*[:：]\s*(\d+)/i)?.[1] || '');
-    const sampler = trimmed.match(/sampler\s*[:：]\s*([^\n,]+)/i)?.[1]?.trim();
+    const sampler = normalizeOptionalNaiSampler(trimmed.match(/sampler\s*[:：]\s*([^\n,]+)/i)?.[1]?.trim());
+    const noiseSchedule = normalizeOptionalNaiNoiseSchedule(trimmed.match(/(?:noise schedule|schedule|调度)\s*[:：]\s*([^\n,]+)/i)?.[1]?.trim());
     const scale = Number(trimmed.match(/(?:cfg scale|cfg)\s*[:：]\s*([0-9.]+)/i)?.[1] || '');
     const sizeMatch = trimmed.match(/(?:size|尺寸)\s*[:：]\s*(\d{2,4})\s*[x×]\s*(\d{2,4})/i);
+    const size = sizeMatch ? `${Number(sizeMatch[1])}x${Number(sizeMatch[2])}` : parseTextParam(trimmed, ['size', '尺寸']);
 
     return {
         id: randomId('style'),
@@ -1823,11 +2118,25 @@ export function parsePhotoStylePaste(text: string, defaultScope: PhotoStyleProvi
         providerScope: defaultScope,
         positivePrompt: positiveText,
         negativePrompt: negativeText,
+        model: parseTextParam(trimmed, ['model', '模型']),
         steps: Number.isFinite(steps) && steps > 0 ? steps : undefined,
         sampler,
+        noiseSchedule,
         scale: Number.isFinite(scale) && scale > 0 ? scale : undefined,
         width: sizeMatch ? Number(sizeMatch[1]) : undefined,
         height: sizeMatch ? Number(sizeMatch[2]) : undefined,
+        size: size ? normalizeOpenAIImageSize(size) : undefined,
+        responseFormat: normalizeOptionalOpenAIImageResponseFormat(parseTextParam(trimmed, ['response format', 'response_format'])),
+        n: normalizeOptionalIntegerParam(parseTextParam(trimmed, ['n', 'count']), 1, 10),
+        quality: normalizeOptionalOpenAIImageQuality(parseTextParam(trimmed, ['quality'])),
+        openAIStyle: normalizeOptionalOpenAIImageStyle(parseTextParam(trimmed, ['style', 'openai style', 'openai_style'])),
+        background: normalizeOptionalOpenAIImageBackground(parseTextParam(trimmed, ['background'])),
+        outputFormat: normalizeOptionalOpenAIImageOutputFormat(parseTextParam(trimmed, ['output format', 'output_format'])),
+        outputCompression: normalizeOptionalIntegerParam(parseTextParam(trimmed, ['compression', 'output compression', 'output_compression']), 0, 100),
+        moderation: normalizeOptionalOpenAIImageModeration(parseTextParam(trimmed, ['moderation'])),
+        user: parseTextParam(trimmed, ['user']),
+        stream: parseTextParam(trimmed, ['stream']) === undefined ? undefined : /^true|1|yes|on$/i.test(parseTextParam(trimmed, ['stream']) || ''),
+        partialImages: normalizeOptionalIntegerParam(parseTextParam(trimmed, ['partial images', 'partial_images']), 1, 3),
     };
 }
 
@@ -1836,6 +2145,7 @@ export async function testOpenAICompatibleImageConnection(config: OpenAICompatib
     status: number;
     message: string;
     models: string[];
+    modelOptions: OpenAICompatibleModelOption[];
 }> {
     if (!config.baseUrl.trim()) throw new Error('请先填写 Base URL');
     if (!config.apiKey.trim()) throw new Error('请先填写 API Key');
@@ -1848,20 +2158,26 @@ export async function testOpenAICompatibleImageConnection(config: OpenAICompatib
         },
     });
     if (response.status === 401 || response.status === 403) {
-        return { ok: false, status: response.status, message: '鉴权失败，请检查 API Key', models: [] };
+        return { ok: false, status: response.status, message: '鉴权失败，请检查 API Key', models: [], modelOptions: [] };
     }
     if (!response.ok) {
-        return { ok: false, status: response.status, message: `连接失败：${response.status}`, models: [] };
+        const text = await response.text().catch(() => '');
+        if (looksLikeHtmlResponse(text, responseContentType(response))) {
+            throw buildHtmlResponseError('OpenAI 兼容模型列表', response, text);
+        }
+        return { ok: false, status: response.status, message: `连接失败：${response.status}${text ? `：${responsePreview(text, 120)}` : ''}`, models: [], modelOptions: [] };
     }
 
-    const payload = await response.json().catch(() => ({}));
-    const models = Array.isArray(payload?.data)
-        ? payload.data.map((item: any) => String(item?.id || item?.name || '')).filter(Boolean)
+    const { payload } = await readJsonResponsePayload('OpenAI 兼容模型列表', response);
+    const modelOptions: OpenAICompatibleModelOption[] = Array.isArray(payload?.data)
+        ? payload.data.map(normalizeOpenAICompatibleModelOption).filter((item: OpenAICompatibleModelOption | null): item is OpenAICompatibleModelOption => Boolean(item))
         : [];
+    const models = modelOptions.map(item => item.id);
     return {
         ok: true,
         status: response.status,
         message: models.length > 0 ? `连接成功，发现 ${models.length} 个模型` : '连接成功，但接口没有返回模型列表',
         models,
+        modelOptions,
     };
 }

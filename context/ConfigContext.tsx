@@ -172,7 +172,7 @@ export const ConfigProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 openaiCompatible: { ...prev.openaiCompatible, ...(updates.openaiCompatible || {}) },
             };
             setImageGenerationConfig(newConfig);
-            return newConfig;
+            return getImageGenerationConfig();
         });
     };
 

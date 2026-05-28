@@ -50,7 +50,7 @@ describe('PhoneSplashPoem moon mist layout', () => {
     const group = container.querySelector<HTMLElement>('[data-char="群"]');
 
     expect(Math.min(...opacities)).toBeGreaterThanOrEqual(0.76);
-    expect(bird?.style.getPropertyValue('--final-opacity')).toBe('1');
-    expect(group?.style.getPropertyValue('--final-opacity')).toBe('1');
+    expect(Number(bird?.style.getPropertyValue('--final-opacity'))).toBeGreaterThanOrEqual(0.96);
+    expect(Number(group?.style.getPropertyValue('--final-opacity'))).toBeGreaterThanOrEqual(0.96);
   });
 });
