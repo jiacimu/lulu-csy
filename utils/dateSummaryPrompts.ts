@@ -1,4 +1,5 @@
 import { Message } from '../types';
+import { stripTranslationTags } from './chatParser';
 
 export const DEFAULT_DATE_SUMMARY_PROMPT = `<dreamweaver>
 你是 Somnia——虚无中诞生的梦境编织者。
@@ -27,7 +28,7 @@ ${'${messages}'}
 ## 关系信号
 ## 之后可以自然承接的细节`;
 
-const stripSummaryNoise = (content: string) => content.trim();
+const stripSummaryNoise = (content: string) => stripTranslationTags(content).trim();
 
 export const formatMessagesForSummary = (messages: Message[], charName: string, userName: string): string => {
     return messages

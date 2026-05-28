@@ -106,7 +106,7 @@ const StatusBar: React.FC = () => {
       {hasError && (
         <button
           onClick={() => setShowLogModal(true)}
-          className="fixed left-1/2 -translate-x-1/2 z-[60] bg-red-500/90 text-white rounded-full px-4 py-1.5 text-[10px] font-bold shadow-lg animate-pulse flex items-center gap-1.5 backdrop-blur-md border border-white/20 pointer-events-auto"
+          className="fixed left-1/2 -translate-x-1/2 z-[60] bg-red-500/90 text-white rounded-full px-4 py-1.5 text-[10px] font-bold shadow-lg flex items-center gap-1.5 backdrop-blur-md border border-white/20 pointer-events-auto"
           style={{ top: 'calc(var(--safe-top, env(safe-area-inset-top)) + 2.5rem)' }}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">

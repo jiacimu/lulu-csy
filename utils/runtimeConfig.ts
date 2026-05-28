@@ -2,6 +2,15 @@ import {
     type APIConfig,
     type ApiPreset,
     type RealtimeConfig,
+    type ImageGenerationConfig,
+    type ImageApiPreset,
+    type ImageProviderType,
+    type NaiImageModel,
+    type NovelAIImageProviderConfig,
+    type OpenAICompatibleImageProviderConfig,
+    type OpenAIImageResponseFormat,
+    type PhotoStylePreset,
+    type PhotoStyleProviderScope,
     type SttConfig,
     type TtsConfig,
     DEFAULT_STT_CONFIG,
@@ -36,6 +45,10 @@ export const SECONDARY_API_POOL_CURSOR_KEY = 'os_sub_api_pool_cursor';
 export const REALTIME_CONFIG_KEY = 'os_realtime_config';
 export const TTS_CONFIG_KEY = 'os_tts_config';
 export const STT_CONFIG_KEY = 'os_stt_config';
+export const IMAGE_GENERATION_CONFIG_KEY = 'os_image_generation_config';
+export const IMAGE_GENERATION_DRAFT_CONFIG_KEY = 'os_image_generation_config_draft';
+export const IMAGE_API_PRESETS_KEY = 'os_image_api_presets';
+export const PHOTO_STYLE_PRESETS_KEY = 'os_photo_style_presets';
 
 export const LEGACY_SUB_API_KEY = 'sub_api_key';
 export const LEGACY_SUB_API_BASE_URL_KEY = 'sub_api_base_url';
@@ -85,6 +98,131 @@ export const DEFAULT_RUNTIME_API_CONFIG: APIConfig = {
     model: 'gpt-4o-mini',
     temperature: DEFAULT_CHAT_TEMPERATURE,
 };
+
+export const NAI_IMAGE_MODELS: NaiImageModel[] = [
+    'nai-diffusion-4-5-full',
+    'nai-diffusion-4-5-curated',
+    'nai-diffusion-4-full',
+    'nai-diffusion-4-curated-preview',
+    'nai-diffusion-3',
+    'nai-diffusion-furry-3',
+];
+
+export const IMAGE_PROVIDER_TYPES: ImageProviderType[] = ['novelai', 'openai-compatible'];
+export const PHOTO_STYLE_PROVIDER_SCOPES: PhotoStyleProviderScope[] = ['all', 'novelai', 'openai-compatible'];
+export const OPENAI_IMAGE_RESPONSE_FORMATS: OpenAIImageResponseFormat[] = ['auto', 'b64_json', 'url'];
+
+export const DEFAULT_NOVELAI_IMAGE_CONFIG: NovelAIImageProviderConfig = {
+    apiUrl: 'https://image.novelai.net',
+    apiToken: '',
+    model: 'nai-diffusion-4-5-full',
+    width: 832,
+    height: 1216,
+    steps: 28,
+    scale: 5,
+    sampler: 'k_euler',
+    noiseSchedule: 'native',
+    qualityTags: 'best quality, amazing quality, very aesthetic, absurdres',
+    negativePrompt: 'lowres, blurry, bad anatomy, bad hands, extra fingers, missing fingers, watermark, text, logo, jpeg artifacts',
+};
+
+export const DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG: OpenAICompatibleImageProviderConfig = {
+    baseUrl: '',
+    apiKey: '',
+    model: '',
+    size: '1024x1024',
+    responseFormat: 'auto',
+    qualityTags: 'high quality, detailed, natural composition',
+    negativePrompt: 'low quality, blurry, distorted hands, watermark, text, logo',
+};
+
+export const DEFAULT_IMAGE_GENERATION_CONFIG: ImageGenerationConfig = {
+    activeProvider: 'novelai',
+    novelai: DEFAULT_NOVELAI_IMAGE_CONFIG,
+    openaiCompatible: DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG,
+};
+
+export const DEFAULT_IMAGE_API_PRESETS: ImageApiPreset[] = [];
+
+export const DEFAULT_PHOTO_STYLE_PRESETS: PhotoStylePreset[] = [
+    {
+        id: 'soft-polaroid-compatible',
+        name: '柔光拍立得 / 兼容接口',
+        providerScope: 'openai-compatible',
+        positivePrompt: '一张柔和胶片质感的随手拍，暖色室内光，轻微颗粒，构图自然亲密，像刚刚用手机拍下来发给对方。',
+        negativePrompt: '过曝，欠曝，强闪光，廉价影楼感，过度修图',
+    },
+    {
+        id: 'clean-anime-snapshot-compatible',
+        name: '清透动画随拍 / 兼容接口',
+        providerScope: 'openai-compatible',
+        positivePrompt: '清透细腻的动画插画风格，线条干净，色彩柔和，背景有生活感，画面像自然抓拍而不是摆拍。',
+        negativePrompt: '线条混乱，背景空洞，光照扁平，肢体结构错误',
+    },
+    {
+        id: 'style-openai-compatible-1779814872010',
+        name: '少年漫',
+        providerScope: 'openai-compatible',
+        positivePrompt: '偏精修的少年漫画彩图风格，线条明确，结构清晰，光影利落，人物有张力和完成度，但整体仍保持干净、美型和现代感。',
+        negativePrompt: '避免肌肉刻画夸张、表情太凶、画面过硬、动作别扭、背景粗糙。',
+    },
+    {
+        id: 'style-openai-compatible-1779814906957',
+        name: '居家',
+        providerScope: 'openai-compatible',
+        positivePrompt: '温暖舒适的居家照片风格，柔和室内光线，色调偏暖，氛围安静亲密，画面有生活气息但不凌乱，整体给人轻松陪伴的感觉。',
+        negativePrompt: '',
+    },
+    {
+        id: 'style-openai-compatible-1779815156168',
+        name: '胶片风景',
+        providerScope: 'openai-compatible',
+        positivePrompt: '柔和胶片质感的环境摄影风格，带轻微颗粒，色彩自然偏暖，明暗过渡柔和，画面有旧照片般的温度和真实感。',
+        negativePrompt: '避免颗粒过重、故意做旧过头、画质脏乱、偏色严重、复古滤镜太假。',
+    },
+    {
+        id: 'style-openai-compatible-1779815270533',
+        name: '静物',
+        providerScope: 'openai-compatible',
+        positivePrompt: '低饱和、安静克制的环境摄影风格，色彩柔和偏灰，画面简洁，注重空间里的物件、光线和留白，整体有平静、成熟、日常的质感',
+        negativePrompt: '',
+    },
+    {
+        id: 'style-openai-compatible-1779848616830',
+        name: '成男',
+        providerScope: 'openai-compatible',
+        positivePrompt: '氛围感，容貌极度英俊，眼睛绝美，五官立体度高，面部高折叠度，国漫风，手机壁纸尺寸',
+        negativePrompt: '',
+    },
+    {
+        id: 'style-openai-compatible-mature-male-couple',
+        name: '合照',
+        providerScope: 'openai-compatible',
+        positivePrompt: '双人同框合照，画面中有两位清晰绝美主体，人物之间有自然亲密的互动和明确站位，不像拼贴。一位主角为成熟英俊男性，氛围感，容貌极度英俊，眼睛绝美，五官立体度高，面部高折叠度，气质沉稳克制。另一位绝美人物与他自然同框，脸部清晰自然，比例协调。两人距离较近但姿态真实，适合情侣合照、生活照、手机壁纸。国漫风，精致恋爱向插画，高级柔和光影，清透色彩，电影感构图，手机壁纸尺寸',
+        negativePrompt: '单人照，只有一个人，裁掉其中一人，人物融合，脸部融合，重复人物，额外人物，陌生第三人，错位构图，拼贴感，低质量，畸形手，脸崩',
+    },
+    {
+        id: 'style-openai-compatible-mature-male-selfie-couple',
+        name: '恋爱合照',
+        providerScope: 'openai-compatible',
+        positivePrompt: '双人合照，近距离同框，画面中有两位清晰绝美主体，像角色亲手拍下的照片。其中一位主角为成熟英俊男性，氛围感，容貌极度英俊，眼睛绝美，五官立体度高，面部高折叠度，气质沉稳温柔。两人靠得很近，互动自然亲密，有真实生活感和恋爱氛围，不像摆拍。脸部清晰，五官精致，比例协调，柔和室内光或夜景光，国漫风，精致恋爱向插画，手机壁纸尺寸',
+        negativePrompt: '单人照，只有一个人，裁掉其中一人，人物融合，脸部融合，重复人物，额外人物，陌生第三人，距离太远，拼贴感，低质量，畸形手，脸崩',
+    },
+    {
+        id: 'style-openai-compatible-mature-male-real-couple',
+        name: '真人合照',
+        providerScope: 'openai-compatible',
+        positivePrompt: '双人同框真人感合照，画面中有两位清晰主体，像真实拍摄的人物照片，成熟英俊男性，五官立体，眼睛深邃好看，气质沉稳温柔，高颜值但自然不过分夸张。另一位人物与他自然同框，互动亲密自然，像情侣或暧昧对象的日常合照。整体为三次元真实摄影风格，皮肤质感自然，轻微肤纹，真实光影，生活感，高级氛围感，构图干净，电影感，手机壁纸尺寸',
+        negativePrompt: '二次元，国漫风，动漫插画，Q版，卡通，3D建模感，假脸，塑料皮肤，过度磨皮，网红滤镜，单人照，只有一个人，人物融合，脸部融合，重复人物，第三人，肢体畸形，手部异常，裁掉其中一人，模糊脸，低清晰度',
+    },
+];
+
+const RETIRED_DEFAULT_PHOTO_STYLE_PRESET_IDS = new Set([
+    'soft-polaroid',
+    'clean-anime-snapshot',
+]);
+const PHOTO_STYLE_PRESETS_MIGRATION_KEY = 'os_photo_style_presets_migration';
+const PHOTO_STYLE_PRESETS_MIGRATION_VERSION = 'openai-compatible-defaults-2026-05-28';
 
 export const EMBEDDING_ENGINES: Record<
     EmbeddingEngineId,
@@ -151,8 +289,13 @@ export interface RuntimeConfigSnapshot {
     };
     realtime: RealtimeConfig;
     tts: TtsConfig;
-    stt: SttConfig;
-    embedding: EmbeddingRuntimeConfig;
+        stt: SttConfig;
+        imageGeneration: {
+            config: ImageGenerationConfig;
+            apiPresets: ImageApiPreset[];
+            stylePresets: PhotoStylePreset[];
+        };
+        embedding: EmbeddingRuntimeConfig;
 }
 
 export interface CharacterRefinePromptConfig {
@@ -398,6 +541,154 @@ function normalizeStringArray(value: unknown): string[] {
     return value
         .map((item) => normalizeString(item))
         .filter(Boolean);
+}
+
+function normalizeImageProviderType(value: unknown): ImageProviderType {
+    const provider = normalizeString(value) as ImageProviderType;
+    return IMAGE_PROVIDER_TYPES.includes(provider) ? provider : DEFAULT_IMAGE_GENERATION_CONFIG.activeProvider;
+}
+
+function normalizePhotoStyleProviderScope(value: unknown, fallback: PhotoStyleProviderScope = 'novelai'): PhotoStyleProviderScope {
+    const scope = normalizeString(value) as PhotoStyleProviderScope;
+    return PHOTO_STYLE_PROVIDER_SCOPES.includes(scope) ? scope : fallback;
+}
+
+function normalizeOpenAIImageResponseFormat(value: unknown): OpenAIImageResponseFormat {
+    const format = normalizeString(value) as OpenAIImageResponseFormat;
+    return OPENAI_IMAGE_RESPONSE_FORMATS.includes(format) ? format : DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.responseFormat;
+}
+
+function normalizeNaiImageModel(value: unknown, fallback: NaiImageModel = DEFAULT_NOVELAI_IMAGE_CONFIG.model): NaiImageModel {
+    const model = normalizeString(value) as NaiImageModel;
+    return NAI_IMAGE_MODELS.includes(model) ? model : fallback;
+}
+
+function normalizeImageNumber(value: unknown, fallback: number, min: number, max: number, step?: number): number {
+    const numeric = typeof value === 'number'
+        ? value
+        : (typeof value === 'string' && value.trim() ? Number(value) : NaN);
+    if (!Number.isFinite(numeric)) return fallback;
+    const clamped = Math.min(max, Math.max(min, numeric));
+    return step ? Math.round(clamped / step) * step : clamped;
+}
+
+function normalizeOpenAIImageSize(value: unknown, fallback = DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.size): string {
+    const raw = normalizeString(value).toLowerCase().replace(/\s+/g, '');
+    const match = raw.match(/^(\d{2,4})x(\d{2,4})$/);
+    if (!match) return fallback;
+    const width = normalizeImageNumber(match[1], 1024, 64, 2048, 64);
+    const height = normalizeImageNumber(match[2], 1024, 64, 2048, 64);
+    return `${width}x${height}`;
+}
+
+function normalizeNovelAIImageConfig(value: Partial<NovelAIImageProviderConfig> | null | undefined): NovelAIImageProviderConfig {
+    return {
+        ...DEFAULT_NOVELAI_IMAGE_CONFIG,
+        ...(value || {}),
+        apiUrl: normalizeUrl(value?.apiUrl) || DEFAULT_NOVELAI_IMAGE_CONFIG.apiUrl,
+        apiToken: normalizeString(value?.apiToken),
+        model: normalizeNaiImageModel(value?.model),
+        width: normalizeImageNumber(value?.width, DEFAULT_NOVELAI_IMAGE_CONFIG.width, 64, 1600, 64),
+        height: normalizeImageNumber(value?.height, DEFAULT_NOVELAI_IMAGE_CONFIG.height, 64, 1600, 64),
+        steps: normalizeImageNumber(value?.steps, DEFAULT_NOVELAI_IMAGE_CONFIG.steps, 1, 50),
+        scale: normalizeImageNumber(value?.scale, DEFAULT_NOVELAI_IMAGE_CONFIG.scale, 0, 10),
+        sampler: normalizeString(value?.sampler) || DEFAULT_NOVELAI_IMAGE_CONFIG.sampler,
+        noiseSchedule: normalizeString(value?.noiseSchedule) || DEFAULT_NOVELAI_IMAGE_CONFIG.noiseSchedule,
+        qualityTags: normalizeString(value?.qualityTags) || DEFAULT_NOVELAI_IMAGE_CONFIG.qualityTags,
+        negativePrompt: normalizeString(value?.negativePrompt) || DEFAULT_NOVELAI_IMAGE_CONFIG.negativePrompt,
+    };
+}
+
+function normalizeOpenAICompatibleImageConfig(value: Partial<OpenAICompatibleImageProviderConfig> | null | undefined): OpenAICompatibleImageProviderConfig {
+    return {
+        ...DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG,
+        ...(value || {}),
+        baseUrl: normalizeUrl(value?.baseUrl),
+        apiKey: normalizeString(value?.apiKey),
+        model: normalizeString(value?.model),
+        size: normalizeOpenAIImageSize(value?.size),
+        responseFormat: normalizeOpenAIImageResponseFormat(value?.responseFormat),
+        qualityTags: normalizeString(value?.qualityTags) || DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.qualityTags,
+        negativePrompt: normalizeString(value?.negativePrompt) || DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.negativePrompt,
+    };
+}
+
+function normalizeImageGenerationConfig(value: Partial<ImageGenerationConfig> | Partial<NovelAIImageProviderConfig> | null | undefined): ImageGenerationConfig {
+    const raw = value && typeof value === 'object' ? value as any : {};
+    const looksLikeLegacyNai = raw.apiUrl !== undefined || raw.apiToken !== undefined || raw.noiseSchedule !== undefined;
+
+    return {
+        activeProvider: normalizeImageProviderType(raw.activeProvider),
+        novelai: normalizeNovelAIImageConfig(looksLikeLegacyNai ? raw : raw.novelai),
+        openaiCompatible: normalizeOpenAICompatibleImageConfig(raw.openaiCompatible),
+    };
+}
+
+function normalizeImageApiPreset(value: unknown, index: number): ImageApiPreset | null {
+    if (!value || typeof value !== 'object') return null;
+    const parsed = value as Partial<ImageApiPreset>;
+    const config = normalizeImageGenerationConfig(parsed.config);
+    const id = normalizeString(parsed.id) || `image-api-preset-${index + 1}`;
+    const now = Date.now();
+
+    return {
+        id,
+        name: normalizeString(parsed.name) || `生图 API 预设 ${index + 1}`,
+        config,
+        createdAt: typeof parsed.createdAt === 'number' && Number.isFinite(parsed.createdAt) ? parsed.createdAt : now,
+        updatedAt: typeof parsed.updatedAt === 'number' && Number.isFinite(parsed.updatedAt) ? parsed.updatedAt : now,
+    };
+}
+
+function normalizeImageApiPresets(value: unknown): ImageApiPreset[] {
+    if (!Array.isArray(value)) return DEFAULT_IMAGE_API_PRESETS;
+    return value
+        .map(normalizeImageApiPreset)
+        .filter((preset): preset is ImageApiPreset => Boolean(preset));
+}
+
+function normalizePhotoStylePreset(value: unknown, index: number): PhotoStylePreset | null {
+    if (!value || typeof value !== 'object') return null;
+    const parsed = value as Partial<PhotoStylePreset>;
+    const positivePrompt = normalizeString(parsed.positivePrompt);
+    if (!positivePrompt) return null;
+
+    return {
+        id: normalizeString(parsed.id) || `style-${index + 1}`,
+        name: normalizeString(parsed.name) || `风格 ${index + 1}`,
+        providerScope: normalizePhotoStyleProviderScope(parsed.providerScope),
+        positivePrompt,
+        negativePrompt: normalizeString(parsed.negativePrompt),
+        model: normalizeString(parsed.model) || undefined,
+        width: parsed.width === undefined ? undefined : normalizeImageNumber(parsed.width, DEFAULT_NOVELAI_IMAGE_CONFIG.width, 64, 1600, 64),
+        height: parsed.height === undefined ? undefined : normalizeImageNumber(parsed.height, DEFAULT_NOVELAI_IMAGE_CONFIG.height, 64, 1600, 64),
+        steps: parsed.steps === undefined ? undefined : normalizeImageNumber(parsed.steps, DEFAULT_NOVELAI_IMAGE_CONFIG.steps, 1, 50),
+        scale: parsed.scale === undefined ? undefined : normalizeImageNumber(parsed.scale, DEFAULT_NOVELAI_IMAGE_CONFIG.scale, 0, 10),
+        sampler: normalizeString(parsed.sampler) || undefined,
+        noiseSchedule: normalizeString(parsed.noiseSchedule) || undefined,
+    };
+}
+
+function normalizePhotoStylePresets(value: unknown): PhotoStylePreset[] {
+    if (!Array.isArray(value)) return DEFAULT_PHOTO_STYLE_PRESETS;
+    const normalized = value
+        .map(normalizePhotoStylePreset)
+        .filter((preset): preset is PhotoStylePreset => Boolean(preset));
+    return normalized.length > 0 ? normalized : DEFAULT_PHOTO_STYLE_PRESETS;
+}
+
+function migratePhotoStylePresetsWithBuiltIns(presets: PhotoStylePreset[]): PhotoStylePreset[] {
+    const migrated = presets.filter(preset => !RETIRED_DEFAULT_PHOTO_STYLE_PRESET_IDS.has(preset.id));
+    const existingIds = new Set(migrated.map(preset => preset.id));
+
+    for (const preset of DEFAULT_PHOTO_STYLE_PRESETS) {
+        if (!existingIds.has(preset.id)) {
+            migrated.push(preset);
+            existingIds.add(preset.id);
+        }
+    }
+
+    return migrated;
 }
 
 function normalizeApiPresets(value: unknown): ApiPreset[] {
@@ -728,6 +1019,55 @@ export function setSttConfig(config: SttConfig): void {
     safeLocalStorageSet(STT_CONFIG_KEY, JSON.stringify(normalizeSttConfig(config)));
 }
 
+export function getImageGenerationConfig(): ImageGenerationConfig {
+    return normalizeImageGenerationConfig(readJsonValue<Partial<ImageGenerationConfig>>(IMAGE_GENERATION_CONFIG_KEY));
+}
+
+export function setImageGenerationConfig(config: ImageGenerationConfig): void {
+    safeLocalStorageSet(IMAGE_GENERATION_CONFIG_KEY, JSON.stringify(normalizeImageGenerationConfig(config)));
+}
+
+export function getImageGenerationDraftConfig(): ImageGenerationConfig | null {
+    const raw = readJsonValue<Partial<ImageGenerationConfig>>(IMAGE_GENERATION_DRAFT_CONFIG_KEY);
+    return raw ? normalizeImageGenerationConfig(raw) : null;
+}
+
+export function setImageGenerationDraftConfig(config: ImageGenerationConfig): void {
+    safeLocalStorageSet(IMAGE_GENERATION_DRAFT_CONFIG_KEY, JSON.stringify(normalizeImageGenerationConfig(config)));
+}
+
+export function clearImageGenerationDraftConfig(): void {
+    safeLocalStorageRemove(IMAGE_GENERATION_DRAFT_CONFIG_KEY);
+}
+
+export function getImageApiPresets(): ImageApiPreset[] {
+    return normalizeImageApiPresets(readJsonValue<unknown>(IMAGE_API_PRESETS_KEY));
+}
+
+export function setImageApiPresets(presets: ImageApiPreset[]): void {
+    safeLocalStorageSet(IMAGE_API_PRESETS_KEY, JSON.stringify(normalizeImageApiPresets(presets)));
+}
+
+export function getPhotoStylePresets(): PhotoStylePreset[] {
+    const raw = readJsonValue<unknown>(PHOTO_STYLE_PRESETS_KEY);
+    const normalized = normalizePhotoStylePresets(raw);
+    if (
+        !Array.isArray(raw)
+        || safeLocalStorageGet(PHOTO_STYLE_PRESETS_MIGRATION_KEY) === PHOTO_STYLE_PRESETS_MIGRATION_VERSION
+    ) {
+        return normalized;
+    }
+
+    const migrated = migratePhotoStylePresetsWithBuiltIns(normalized);
+    safeLocalStorageSet(PHOTO_STYLE_PRESETS_KEY, JSON.stringify(migrated));
+    safeLocalStorageSet(PHOTO_STYLE_PRESETS_MIGRATION_KEY, PHOTO_STYLE_PRESETS_MIGRATION_VERSION);
+    return migrated;
+}
+
+export function setPhotoStylePresets(presets: PhotoStylePreset[]): void {
+    safeLocalStorageSet(PHOTO_STYLE_PRESETS_KEY, JSON.stringify(normalizePhotoStylePresets(presets)));
+}
+
 export function getEmbeddingConfig(): EmbeddingRuntimeConfig {
     return normalizeEmbeddingConfig({
         provider: (safeLocalStorageGet(EMBEDDING_PROVIDER_KEY) as EmbeddingProvider | null) ?? undefined,
@@ -799,6 +1139,11 @@ export function getRuntimeConfigSnapshot(): RuntimeConfigSnapshot {
         realtime: getRealtimeConfig(),
         tts: getTtsConfig(),
         stt: getSttConfig(),
+        imageGeneration: {
+            config: getImageGenerationConfig(),
+            apiPresets: getImageApiPresets(),
+            stylePresets: getPhotoStylePresets(),
+        },
         embedding: getEmbeddingConfig(),
     };
 }

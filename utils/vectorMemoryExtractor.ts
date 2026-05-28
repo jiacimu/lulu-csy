@@ -159,6 +159,7 @@ export const VectorMemoryExtractor = {
 
         acquireExtractionLock(charId);
         console.log(`🧠 [VectorExtract] Starting auto-extract for ${charSnapshot.name} (${newMsgs.length} new)`);
+        const emojis = await DB.getEmojis().catch(() => []);
 
         // ========== Backend-First Extraction ==========
         try {
@@ -166,6 +167,7 @@ export const VectorMemoryExtractor = {
                 const content = formatMessageForContext(m, {
                     surface: 'memoryExtraction',
                     charName: charSnapshot.name,
+                    emojis,
                     compact: true,
                     maxContentChars: 300,
                 }) || m.content;
@@ -216,7 +218,7 @@ export const VectorMemoryExtractor = {
                 const windowMsgs = newMsgs.slice(i, i + WINDOW_SIZE);
                 const allHeaders = await DB.getVectorMemoryHeaders(charId);
                 const existingHeaders = selectExtractionMemoryHeaders(allHeaders);
-                const formattedMsgs = formatMessages(windowMsgs, charSnapshot.name);
+                const formattedMsgs = formatMessages(windowMsgs, charSnapshot.name, emojis);
                 const prompt = buildExtractionPrompt(charSnapshot.name, existingHeaders, formattedMsgs);
                 const results = await callLLM(prompt, apiConfig, undefined, {
                     reason: '自动记忆提取',
@@ -392,6 +394,7 @@ export const VectorMemoryExtractor = {
         const allMems = await DB.getAllVectorMemories(charId);
         const vectorCache = new Map<string, number[]>(allMems.map(m => [m.id, m.vector]));
         console.log(`🧠 [VectorExtract] Batch: loaded vector cache: ${vectorCache.size} memories`);
+        const emojis = await DB.getEmojis().catch(() => []);
 
         let totalCreated = resumeCheckpoint?.totalCreated ?? 0;
         let totalUpdated = resumeCheckpoint?.totalUpdated ?? 0;
@@ -410,7 +413,7 @@ export const VectorMemoryExtractor = {
             // Refresh headers each window so LLM sees previously created memories
             const allHeaders = await DB.getVectorMemoryHeaders(charId);
             const existingHeaders = selectExtractionMemoryHeaders(allHeaders);
-            const formattedMsgs = formatMessages(window.messages, charName);
+            const formattedMsgs = formatMessages(window.messages, charName, emojis);
             const prompt = buildExtractionPrompt(charName, existingHeaders, formattedMsgs);
 
             try {

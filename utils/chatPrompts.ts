@@ -1084,7 +1084,13 @@ Step 5 — 最后检查
                     timestampFormatter: ChatPrompts.formatDate,
                 }) || '';
 
-                if (m.type === 'image') {
+                const shouldAttachImageUrl = m.type === 'image'
+                    && m.role === 'user'
+                    && index === historySlice.length - 1
+                    && typeof m.content === 'string'
+                    && (/^data:image\//i.test(m.content) || /^https?:\/\//i.test(m.content));
+
+                if (shouldAttachImageUrl) {
                     let textPart = content;
                     if (index === historySlice.length - 1 && timeGapHint && m.role === 'user') textPart += `\n\n${timeGapHint}`;
                     return { role: m.role, content: [{ type: "text", text: textPart }, { type: "image_url", image_url: { url: m.content } }] };

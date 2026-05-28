@@ -317,11 +317,12 @@ export async function runBackendDiagnostics(): Promise<BackendRuntimeDebugSnapsh
             { headers: { 'Authorization': `Bearer ${token}` } },
             { maxAttempts: 2, timeoutMs: BACKEND_HEALTH_TIMEOUT_MS, baseDelayMs: 500 },
         );
-        const alive = resp.ok;
+        const health = await classifyBackendHealthResponse(resp);
+        const alive = health.alive;
         setBackendHealthCache(alive);
         return publishBackendRuntimeDebug({
             healthStatus: alive ? 'ok' : 'error',
-            healthDetail: `HTTP ${resp.status}`,
+            healthDetail: health.detail,
             healthCheckedAt: Date.now(),
         });
     } catch (err: any) {
@@ -332,6 +333,41 @@ export async function runBackendDiagnostics(): Promise<BackendRuntimeDebugSnapsh
             healthCheckedAt: Date.now(),
         });
     }
+}
+
+async function classifyBackendHealthResponse(resp: Response): Promise<{ alive: boolean; detail: string }> {
+    const contentType = resp.headers.get('content-type') || '';
+    const baseDetail = `HTTP ${resp.status}`;
+
+    if (!resp.ok) {
+        return { alive: false, detail: baseDetail };
+    }
+
+    if (/text\/html/i.test(contentType)) {
+        return {
+            alive: false,
+            detail: `${baseDetail}; received HTML instead of backend health response`,
+        };
+    }
+
+    if (/application\/json/i.test(contentType)) {
+        try {
+            const data = await resp.clone().json() as { ok?: unknown; status?: unknown };
+            if (data?.ok === false || data?.status === 'error') {
+                return {
+                    alive: false,
+                    detail: `${baseDetail}; backend health returned an unhealthy payload`,
+                };
+            }
+        } catch {
+            return {
+                alive: false,
+                detail: `${baseDetail}; invalid backend health JSON`,
+            };
+        }
+    }
+
+    return { alive: true, detail: baseDetail };
 }
 
 /**
@@ -377,11 +413,12 @@ export async function isBackendAlive(): Promise<boolean> {
             { headers: { 'Authorization': `Bearer ${token}` } },
             { maxAttempts: 2, timeoutMs: BACKEND_HEALTH_TIMEOUT_MS, baseDelayMs: 500 },
         );
-        const alive = resp.ok;
+        const health = await classifyBackendHealthResponse(resp);
+        const alive = health.alive;
         setBackendHealthCache(alive);
         publishBackendRuntimeDebug({
             healthStatus: alive ? 'ok' : 'error',
-            healthDetail: `HTTP ${resp.status}`,
+            healthDetail: health.detail,
             healthCheckedAt: Date.now(),
         });
         return alive;

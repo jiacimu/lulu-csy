@@ -1,5 +1,5 @@
 import React,{ createContext,useContext,useEffect,useState } from 'react';
-import { APIConfig,ApiPreset,RealtimeConfig,TtsConfig,SttConfig } from '../types';
+import { APIConfig,ApiPreset,RealtimeConfig,TtsConfig,SttConfig,ImageApiPreset,ImageGenerationConfig,PhotoStylePreset } from '../types';
 import {
     DEFAULT_RUNTIME_API_CONFIG,
     DEFAULT_RUNTIME_REALTIME_CONFIG,
@@ -7,12 +7,18 @@ import {
     getAvailableModels,
     getPrimaryApiConfig,
     getRealtimeConfig,
+    getImageApiPresets,
+    getImageGenerationConfig,
+    getPhotoStylePresets,
     getSttConfig,
     getTtsConfig,
     setApiPresets,
     setAvailableModels,
     setPrimaryApiConfig,
     setRealtimeConfig,
+    setImageApiPresets,
+    setImageGenerationConfig,
+    setPhotoStylePresets,
     setSttConfig,
     setTtsConfig,
 } from '../utils/runtimeConfig';
@@ -36,6 +42,15 @@ export interface ConfigContextType {
 
     sttConfig: SttConfig;
     updateSttConfig: (updates: Partial<SttConfig>) => void;
+
+    imageGenerationConfig: ImageGenerationConfig;
+    updateImageGenerationConfig: (updates: Partial<ImageGenerationConfig>) => void;
+
+    imageApiPresets: ImageApiPreset[];
+    saveImageApiPresets: (presets: ImageApiPreset[]) => void;
+
+    photoStylePresets: PhotoStylePreset[];
+    savePhotoStylePresets: (presets: PhotoStylePreset[]) => void;
 }
 
 interface InternalConfigContextType extends ConfigContextType {
@@ -52,6 +67,9 @@ export const ConfigProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [realtimeConfig, setRealtimeConfigState] = useState<RealtimeConfig>(DEFAULT_RUNTIME_REALTIME_CONFIG);
     const [ttsConfig, setTtsConfigState] = useState<TtsConfig>(getTtsConfig());
     const [sttConfig, setSttConfigState] = useState<SttConfig>(getSttConfig());
+    const [imageGenerationConfig, setImageGenerationConfigState] = useState<ImageGenerationConfig>(getImageGenerationConfig());
+    const [imageApiPresets, setImageApiPresetsState] = useState<ImageApiPreset[]>(getImageApiPresets());
+    const [photoStylePresets, setPhotoStylePresetsState] = useState<PhotoStylePreset[]>(getPhotoStylePresets());
     const [isConfigLoaded, setIsConfigLoaded] = useState(false);
 
     useEffect(() => {
@@ -62,6 +80,9 @@ export const ConfigProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setRealtimeConfigState(getRealtimeConfig());
             setTtsConfigState(getTtsConfig());
             setSttConfigState(getSttConfig());
+            setImageGenerationConfigState(getImageGenerationConfig());
+            setImageApiPresetsState(getImageApiPresets());
+            setPhotoStylePresetsState(getPhotoStylePresets());
         } finally {
             setIsConfigLoaded(true);
         }
@@ -142,6 +163,29 @@ export const ConfigProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
     };
 
+    const updateImageGenerationConfig = (updates: Partial<ImageGenerationConfig>) => {
+        setImageGenerationConfigState(prev => {
+            const newConfig: ImageGenerationConfig = {
+                ...prev,
+                ...updates,
+                novelai: { ...prev.novelai, ...(updates.novelai || {}) },
+                openaiCompatible: { ...prev.openaiCompatible, ...(updates.openaiCompatible || {}) },
+            };
+            setImageGenerationConfig(newConfig);
+            return newConfig;
+        });
+    };
+
+    const saveImageApiPresets = (presets: ImageApiPreset[]) => {
+        setImageApiPresets(presets);
+        setImageApiPresetsState(getImageApiPresets());
+    };
+
+    const savePhotoStylePresets = (presets: PhotoStylePreset[]) => {
+        setPhotoStylePresets(presets);
+        setPhotoStylePresetsState(getPhotoStylePresets());
+    };
+
     const value: InternalConfigContextType = {
         apiConfig,
         updateApiConfig,
@@ -156,6 +200,12 @@ export const ConfigProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         updateTtsConfig,
         sttConfig,
         updateSttConfig,
+        imageGenerationConfig,
+        updateImageGenerationConfig,
+        imageApiPresets,
+        saveImageApiPresets,
+        photoStylePresets,
+        savePhotoStylePresets,
         isConfigLoaded,
         savePresets,
     };

@@ -4,7 +4,13 @@ import path from 'node:path';
 import JSZip from 'jszip';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { DB } from '../utils/db';
-import { DB_NAME_CONST, STORE_MEMORY_RECORD_AUDIO, STORE_VOICE_AUDIO } from '../utils/db/core';
+import {
+    DB_NAME_CONST,
+    STORE_MEMORY_RECORD_AUDIO,
+    STORE_VIBE_REFERENCES,
+    STORE_VOICE_AUDIO,
+    STORE_YESTERDAY_NEWSPAPERS,
+} from '../utils/db/core';
 import {
     exportSystemData,
     importSystemData,
@@ -16,6 +22,8 @@ import {
 } from '../utils/systemBackup';
 import {
     DEFAULT_RUNTIME_REALTIME_CONFIG,
+    DEFAULT_IMAGE_GENERATION_CONFIG,
+    DEFAULT_PHOTO_STYLE_PRESETS,
 } from '../utils/runtimeConfig';
 import {
     DEFAULT_STT_CONFIG,
@@ -34,6 +42,9 @@ const makeStateSnapshot = (): ExportStateSnapshot => ({
     realtimeConfig: DEFAULT_RUNTIME_REALTIME_CONFIG,
     ttsConfig: DEFAULT_TTS_CONFIG,
     sttConfig: DEFAULT_STT_CONFIG,
+    imageGenerationConfig: DEFAULT_IMAGE_GENERATION_CONFIG,
+    imageApiPresets: [],
+    photoStylePresets: DEFAULT_PHOTO_STYLE_PRESETS,
     theme: {
         hue: 245,
         saturation: 25,
@@ -275,6 +286,125 @@ describe('system backup coverage', () => {
         expect(localStorage.getItem('os_sub_api_config')).toBe('{"model":"flash"}');
         expect(localStorage.getItem('chat_auto_tts_char-a')).toBe('true');
         expect(localStorage.getItem('csyos_backend_alive')).toBeNull();
+    }, 15000);
+
+    it('roundtrips image generation settings, saved image references, newspapers, and HalfSugar data', async () => {
+        await DB.saveCharacter({
+            id: 'char-a',
+            name: 'Sully',
+            avatar: '',
+            description: '',
+            systemPrompt: '',
+            memories: [],
+        } as CharacterProfile);
+        await putExistingDbValue(DB_NAME_CONST, STORE_VIBE_REFERENCES, {
+            id: 'vibe-a',
+            name: '参考图',
+            imageDataUrl: 'data:image/png;base64,dmliZQ==',
+            defaultStrength: 0.6,
+            defaultInformationExtracted: 1,
+            encodings: {},
+            source: 'image',
+            createdAt: 1,
+            updatedAt: 1,
+        });
+        await putExistingDbValue(DB_NAME_CONST, STORE_YESTERDAY_NEWSPAPERS, {
+            id: 'paper-a',
+            ownerUserId: 'owner-a',
+            charId: 'char-a',
+            date: '2026-05-27',
+            createdAt: 1,
+            updatedAt: 1,
+            content: { title: '昨日小报' },
+        });
+        await putExternalValue('halfsugar-health', 'meals', {
+            id: 'meal-a',
+            date: '2026-05-28',
+            type: 'breakfast',
+            foods: [],
+            photoUrl: 'data:image/png;base64,bWVhbA==',
+            totalCalories: 100,
+            totalProtein: 10,
+            totalCarbs: 12,
+            totalFat: 3,
+            source: 'manual',
+            createdAt: 1,
+            updatedAt: 1,
+        }, undefined, { keyPath: 'id' });
+        localStorage.setItem('chat_today_schedule_enabled_char-a', 'true');
+        localStorage.setItem('date_translation_char-a', 'true');
+        localStorage.setItem('theater_custom_locations', '[{"id":"loc-a"}]');
+        localStorage.setItem('trajectory_nodes_char-a', '[{"id":"node-a"}]');
+        localStorage.setItem('crosstime_rooms', '[{"id":"room-a"}]');
+        localStorage.setItem('loveshow_season_index', '["season-a"]');
+
+        const state = makeStateSnapshot();
+        state.imageGenerationConfig = {
+            ...DEFAULT_IMAGE_GENERATION_CONFIG,
+            activeProvider: 'openai-compatible',
+            openaiCompatible: {
+                ...DEFAULT_IMAGE_GENERATION_CONFIG.openaiCompatible,
+                baseUrl: 'https://image.example/v1',
+                apiKey: 'image-key',
+                model: 'gpt-image-test',
+            },
+        };
+        state.imageGenerationDraftConfig = {
+            ...DEFAULT_IMAGE_GENERATION_CONFIG,
+            novelai: {
+                ...DEFAULT_IMAGE_GENERATION_CONFIG.novelai,
+                apiToken: 'draft-nai-token',
+            },
+        };
+        state.imageApiPresets = [{
+            id: 'image-api-a',
+            name: '测试生图接口',
+            config: state.imageGenerationConfig,
+            createdAt: 1,
+            updatedAt: 1,
+        }];
+        state.photoStylePresets = [{
+            id: 'style-a',
+            name: '测试风格',
+            providerScope: 'openai-compatible',
+            positivePrompt: 'soft light',
+            negativePrompt: '',
+        }];
+
+        const backupBlob = await exportSystemData('full', state, noopProgress);
+        const data = await readBackupData(backupBlob);
+
+        expect(data.imageGenerationConfig?.openaiCompatible.apiKey).toBe('image-key');
+        expect(data.imageGenerationDraftConfig?.novelai.apiToken).toBe('draft-nai-token');
+        expect(data.imageApiPresets?.[0].name).toBe('测试生图接口');
+        expect(data.photoStylePresets?.[0].id).toBe('style-a');
+        expect(data.vibeReferences?.[0].id).toBe('vibe-a');
+        expect(data.vibeReferences?.[0].imageDataUrl).toMatch(/^assets\/.*\.png$/);
+        expect(data.yesterdayNewspapers?.[0].id).toBe('paper-a');
+        expect(data.halfSugarData?.stores.meals?.[0].id).toBe('meal-a');
+        expect(data.halfSugarData?.stores.meals?.[0].photoUrl).toMatch(/^assets\/.*\.png$/);
+        expect(data.extraLocalStorageConfig?.['chat_today_schedule_enabled_char-a']).toBe('true');
+        expect(data.extraLocalStorageConfig?.theater_custom_locations).toContain('loc-a');
+        expect(data.extraLocalStorageConfig?.['trajectory_nodes_char-a']).toContain('node-a');
+        expect(data.extraLocalStorageConfig?.crosstime_rooms).toContain('room-a');
+        expect(data.extraLocalStorageConfig?.loveshow_season_index).toContain('season-a');
+
+        resetIndexedDb();
+        localStorage.clear();
+        await importWithoutReload(new File([backupBlob], 'backup.zip', { type: 'application/zip' }));
+
+        const restoredVibes = await DB.getRawStoreData(STORE_VIBE_REFERENCES);
+        const restoredPapers = await DB.getRawStoreData(STORE_YESTERDAY_NEWSPAPERS);
+        const restoredMeals = await getExternalValues('halfsugar-health', 'meals');
+        expect(JSON.parse(localStorage.getItem('os_image_generation_config') || '{}').openaiCompatible.apiKey).toBe('image-key');
+        expect(JSON.parse(localStorage.getItem('os_image_generation_config_draft') || '{}').novelai.apiToken).toBe('draft-nai-token');
+        expect(JSON.parse(localStorage.getItem('os_image_api_presets') || '[]')[0].name).toBe('测试生图接口');
+        expect(JSON.parse(localStorage.getItem('os_photo_style_presets') || '[]')[0].id).toBe('style-a');
+        expect(restoredVibes[0].imageDataUrl).toBe('data:image/png;base64,dmliZQ==');
+        expect(restoredPapers[0].id).toBe('paper-a');
+        expect(restoredMeals[0].photoUrl).toBe('data:image/png;base64,bWVhbA==');
+        expect(localStorage.getItem('chat_today_schedule_enabled_char-a')).toBe('true');
+        expect(localStorage.getItem('date_translation_char-a')).toBe('true');
     }, 15000);
 
     it('can export cloud-friendly memory record drafts without song audio', async () => {

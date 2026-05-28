@@ -126,6 +126,9 @@ export interface UserProfile {
     name: string;
     avatar: string;
     bio: string;
+    naiAppearanceTags?: string;
+    naiAppearanceNegativeTags?: string;
+    photoAppearancePrompt?: string;
     // HalfSugar health fields (persisted by updateUserProfile)
     healthGender?: 'male' | 'female';
     healthHeight?: number;
@@ -133,6 +136,7 @@ export interface UserProfile {
     healthBirthYear?: number;
     healthSetupDone?: boolean;
     healthShareBodyInfo?: boolean;
+    healthActivityLevel?: 'sedentary' | 'light' | 'moderate' | 'active';
 }
 
 export interface Toast {

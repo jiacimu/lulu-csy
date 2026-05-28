@@ -25,6 +25,8 @@ interface SummaryFloatingBallProps {
     onChangeWritingStyle: (style: string | undefined) => void;
     temperature?: number;
     onChangeTemperature: (temp: number | undefined) => void;
+    fontScale?: number;
+    onChangeFontScale: (scale: number | undefined) => void;
     translationEnabled?: boolean;
     translateSourceLang?: string;
     translateTargetLang?: string;
@@ -149,6 +151,7 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
     wordCount, writingStyle,
     onChangeWordCount, onChangeWritingStyle,
     temperature, onChangeTemperature,
+    fontScale, onChangeFontScale,
     translationEnabled, translateSourceLang, translateTargetLang,
     onToggleTranslation, onSetTranslateSourceLang, onSetTranslateTargetLang,
 }) => {
@@ -215,6 +218,14 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
     const autoEnabled = !!char.dateSummaryAutoEnabled;
     const autoHideEnabled = !!char.dateSummaryAutoHideEnabled;
     const handleThreshold = (v: string) => onChangeThreshold(clamp(parseInt(v || `${DEFAULT_THRESHOLD}`, 10), 4, 200));
+    const normalizedFontScale = clamp(fontScale ?? 1, 0.85, 1.3);
+    const fontPercent = Math.round(normalizedFontScale * 100);
+    const handleFontScale = (value: string) => {
+        const parsed = parseFloat(value);
+        if (!isFinite(parsed)) return;
+        const next = Math.round(clamp(parsed, 0.85, 1.3) * 100) / 100;
+        onChangeFontScale(Math.abs(next - 1) < 0.001 ? undefined : next);
+    };
 
     /* ── shared inline styles ── */
     const row: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between' };
@@ -401,9 +412,39 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
                         </div>
 
                         {/* ── Section 3: 辅助 ── */}
-                        <div style={{ ...row, background: C.card, borderRadius: 14, padding: '8px 10px', marginBottom: sectionGap, boxShadow: raisedSm }}>
-                            <span style={label}>翻译</span>
-                            <Toggle on={!!translationEnabled} onClick={() => onToggleTranslation?.(!translationEnabled)} />
+                        <div style={{ background: C.card, borderRadius: 14, padding: '8px 10px', marginBottom: sectionGap, boxShadow: raisedSm }}>
+                            <div style={{ ...row, marginBottom: 7 }}>
+                                <span style={label}>字号</span>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: C.accent }}>{fontPercent}%</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                                <input
+                                    type="range"
+                                    min={0.85}
+                                    max={1.3}
+                                    step={0.05}
+                                    value={normalizedFontScale}
+                                    onChange={e => handleFontScale(e.target.value)}
+                                    aria-label="见面字体大小"
+                                    style={{ flex: 1, accentColor: C.accent }}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => onChangeFontScale(undefined)}
+                                    style={{
+                                        border: 'none', borderRadius: 8, background: C.base, boxShadow: raisedSm,
+                                        color: C.textSec, cursor: 'pointer', fontSize: 9, fontWeight: 600,
+                                        padding: '3px 6px', flexShrink: 0,
+                                    }}
+                                >
+                                    默认
+                                </button>
+                            </div>
+                            <div style={{ height: 1, background: C.divider, margin: '8px 0' }} />
+                            <div style={row}>
+                                <span style={label}>翻译</span>
+                                <Toggle on={!!translationEnabled} onClick={() => onToggleTranslation?.(!translationEnabled)} />
+                            </div>
                         </div>
 
                         {/* Translation detail (conditional) */}

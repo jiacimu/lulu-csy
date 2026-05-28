@@ -5,14 +5,16 @@ import { INSTALLED_APPS,DOCK_APPS } from '../constants';
 import AppIcon from '../components/os/AppIcon';
 import { DB } from '../utils/db';
 import { CharacterProfile,Anniversary,AppID } from '../types';
+import { usePerformanceMode } from '../hooks/usePerformanceMode';
 
 // --- Isolated Components to prevent full re-renders ---
 
 // 1. Clock Component (Consumes virtualTime)
-const DesktopClock = React.memo(() => {
+const DesktopClock = React.memo(({ contentColor, isLite }: {
+    contentColor: string;
+    isLite: boolean;
+}) => {
     const virtualTime = useVirtualTime();
-    const { theme } = useOS();
-    const contentColor = theme.contentColor || '#ffffff';
 
     const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
     const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -24,7 +26,7 @@ const DesktopClock = React.memo(() => {
     return (
         <div className="flex flex-col mb-6 mt-6 relative animate-fade-in" style={{ color: contentColor }}>
             <div className="absolute -top-6 left-1 flex items-center gap-2">
-                <div className="bg-white/20 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-bold tracking-widest uppercase border border-white/10">
+                <div className={`${isLite ? 'bg-white/45 shadow-sm' : 'bg-white/20 backdrop-blur-md'} px-2 py-0.5 rounded text-[10px] font-bold tracking-widest uppercase border border-white/10`}>
                     System Ready
                 </div>
                 <div className="h-[1px] w-20 bg-gradient-to-r from-current to-transparent opacity-40"></div>
@@ -51,18 +53,24 @@ const CharacterWidget = React.memo(({
     unreadCount,
     lastMessage,
     onClick,
-    contentColor
+    contentColor,
+    isLite
 }: {
     char: CharacterProfile | null,
     unreadCount: number,
     lastMessage: string,
     onClick: () => void,
-    contentColor: string
+    contentColor: string,
+    isLite: boolean
 }) => {
     return (
         <div className="mb-4 group animate-fade-in">
             <div
-                className="relative h-28 w-full overflow-hidden rounded-[1.5rem] bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl transition-all duration-300 active:scale-[0.98] cursor-pointer"
+                className={`relative h-28 w-full overflow-hidden rounded-[1.5rem] border border-white/20 transition-all duration-300 active:scale-[0.98] cursor-pointer ${
+                    isLite
+                        ? 'bg-white/55 shadow-[0_6px_18px_rgba(0,0,0,0.12)]'
+                        : 'bg-white/10 backdrop-blur-xl shadow-2xl'
+                }`}
                 onClick={onClick}
             >
                 <div className="absolute top-0 right-0 w-32 h-full bg-gradient-to-l from-white/5 to-transparent skew-x-12 pointer-events-none"></div>
@@ -107,11 +115,19 @@ const CharacterWidget = React.memo(({
 const AppGridPage = React.memo(({
     apps,
     openApp,
-    onLongPressApp
+    onLongPressApp,
+    customIcons,
+    contentColor,
+    showCustomIconFrame,
+    isLite
 }: {
     apps: typeof INSTALLED_APPS,
     openApp: (id: AppID) => void,
-    onLongPressApp?: (app: typeof INSTALLED_APPS[0]) => void
+    onLongPressApp?: (app: typeof INSTALLED_APPS[0]) => void,
+    customIcons: Record<string, string>,
+    contentColor: string,
+    showCustomIconFrame: boolean,
+    isLite: boolean
 }) => {
     return (
         <div className="grid grid-cols-4 gap-y-6 gap-x-2 place-items-center animate-fade-in relative">
@@ -124,6 +140,10 @@ const AppGridPage = React.memo(({
                         app={app}
                         onClick={() => openApp(app.id)}
                         onLongPress={onLongPressApp ? () => onLongPressApp(app) : undefined}
+                        customIconUrl={customIcons[app.id]}
+                        contentColor={contentColor}
+                        showCustomIconFrame={showCustomIconFrame}
+                        isLite={isLite}
                     />
                 </div>
             ))}
@@ -132,7 +152,7 @@ const AppGridPage = React.memo(({
 });
 
 // 4. Widget Page Component (Calendar)
-const WidgetsPage = React.memo(({ contentColor, openApp, anniversaries, characters }: any) => {
+const WidgetsPage = React.memo(({ contentColor, openApp, anniversaries, characters, isLite }: any) => {
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
@@ -149,7 +169,7 @@ const WidgetsPage = React.memo(({ contentColor, openApp, anniversaries, characte
 
     return (
         <div className="w-full flex-shrink-0 snap-center snap-always flex flex-col px-6 pt-24 pb-8 space-y-6 h-full overflow-y-auto no-scrollbar">
-            <div className="bg-white/10 backdrop-blur-2xl rounded-3xl p-6 border border-white/20 shadow-2xl">
+            <div className={`${isLite ? 'bg-white/55 shadow-[0_6px_18px_rgba(0,0,0,0.12)]' : 'bg-white/10 backdrop-blur-2xl shadow-2xl'} rounded-3xl p-6 border border-white/20`}>
                 <div className="flex justify-between items-center mb-4" style={{ color: contentColor }}>
                     <h3 className="text-xl font-bold tracking-widest">{monthName} {currentYear}</h3>
                     <div onClick={() => openApp('schedule')} className="bg-white/20 p-2 rounded-full cursor-pointer hover:bg-white/40 transition-colors">
@@ -183,7 +203,7 @@ const WidgetsPage = React.memo(({ contentColor, openApp, anniversaries, characte
                 </div>
             </div>
 
-            <div className="bg-white/10 backdrop-blur-2xl rounded-3xl p-5 border border-white/20 shadow-2xl flex-1 min-h-[200px]">
+            <div className={`${isLite ? 'bg-white/55 shadow-[0_6px_18px_rgba(0,0,0,0.12)]' : 'bg-white/10 backdrop-blur-2xl shadow-2xl'} rounded-3xl p-5 border border-white/20 flex-1 min-h-[200px]`}>
                 <h3 className="text-xs font-bold opacity-60 uppercase tracking-widest mb-4 flex items-center gap-2" style={{ color: contentColor }}>
                     <span className="w-2 h-2 bg-purple-400 rounded-full"></span> Upcoming Events
                 </h3>
@@ -214,7 +234,8 @@ let _lastPageIndex = 0;
 // --- Main Launcher ---
 
 const Launcher: React.FC = () => {
-    const { openApp, characters, activeCharacterId, theme, lastMsgTimestamp, isDataLoaded, unreadMessages } = useOS();
+    const { openApp, characters, activeCharacterId, theme, lastMsgTimestamp, isDataLoaded, unreadMessages, customIcons } = useOS();
+    const { isLite } = usePerformanceMode();
 
     // Context menu state for long-press
     const [contextMenu, setContextMenu] = useState<{ app: typeof INSTALLED_APPS[0] } | null>(null);
@@ -283,7 +304,7 @@ const Launcher: React.FC = () => {
 
             try {
                 const [msgs, annis] = await Promise.all([
-                    DB.getMessagesByCharId(targetChar.id),
+                    DB.getRecentMessagesByCharId(targetChar.id, 20),
                     DB.getAllAnniversaries()
                 ]);
 
@@ -322,15 +343,17 @@ const Launcher: React.FC = () => {
         }
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const handleScroll = () => {
-        if (scrollContainerRef.current) {
-            const width = scrollContainerRef.current.clientWidth;
-            const scrollLeft = scrollContainerRef.current.scrollLeft;
-            const index = Math.round(scrollLeft / width);
-            setActivePageIndex(index);
-            _lastPageIndex = index; // Persist across remounts
-        }
-    };
+    const handleScroll = useCallback(() => {
+        const el = scrollContainerRef.current;
+        if (!el) return;
+
+        const width = el.clientWidth;
+        if (width <= 0) return;
+
+        const index = Math.round(el.scrollLeft / width);
+        _lastPageIndex = index; // Persist across remounts
+        setActivePageIndex(prev => prev === index ? prev : index);
+    }, []);
 
     // --- Mouse Drag Handlers ---
     const handleMouseDown = (e: React.MouseEvent) => {
@@ -378,6 +401,7 @@ const Launcher: React.FC = () => {
     };
 
     const contentColor = theme.contentColor || '#ffffff';
+    const showCustomIconFrame = theme.customIconFrame !== false;
 
     const totalUnread = Object.values(unreadMessages).reduce((a, b) => a + b, 0);
     const widgetUnread = widgetChar && unreadMessages[widgetChar.id] ? unreadMessages[widgetChar.id] : 0;
@@ -406,23 +430,28 @@ const Launcher: React.FC = () => {
             >
                 {/* Render App Pages */}
                 {appPages.map((pageApps, idx) => (
-                    <div key={idx} className="w-full flex-shrink-0 snap-center snap-always flex flex-col px-6 pt-12 pb-8 h-full" style={{ contentVisibility: 'auto' }}>
-                        {idx === 0 ? (
+                    <div key={idx} className="w-full flex-shrink-0 snap-center snap-always flex flex-col px-6 pt-12 pb-8 h-full" style={{ contain: 'layout style paint' }}>
+                        {(!isLite || Math.abs(activePageIndex - idx) <= 1) && (idx === 0 ? (
                             // Page 1: Clock + Widget + Apps
                             <>
-                                <DesktopClock />
+                                <DesktopClock contentColor={contentColor} isLite={isLite} />
                                 <CharacterWidget
                                     char={widgetChar}
                                     unreadCount={widgetUnread}
                                     lastMessage={lastMessage}
                                     onClick={() => openApp(AppID.Chat)}
                                     contentColor={contentColor}
+                                    isLite={isLite}
                                 />
                                 <div className="flex-1">
                                     <AppGridPage
                                         apps={pageApps}
                                         openApp={openApp}
                                         onLongPressApp={handleLongPressApp}
+                                        customIcons={customIcons}
+                                        contentColor={contentColor}
+                                        showCustomIconFrame={showCustomIconFrame}
+                                        isLite={isLite}
                                     />
                                 </div>
                             </>
@@ -485,20 +514,29 @@ const Launcher: React.FC = () => {
                                     apps={pageApps}
                                     openApp={openApp}
                                     onLongPressApp={handleLongPressApp}
+                                    customIcons={customIcons}
+                                    contentColor={contentColor}
+                                    showCustomIconFrame={showCustomIconFrame}
+                                    isLite={isLite}
                                 />
                                 <div className="flex-1"></div>
                             </div>
-                        )}
+                        ))}
                     </div>
                 ))}
 
                 {/* Final Page: Widgets */}
-                <WidgetsPage
-                    contentColor={contentColor}
-                    openApp={openApp}
-                    anniversaries={anniversaries}
-                    characters={characters}
-                />
+                <div className="w-full flex-shrink-0 snap-center snap-always h-full" style={{ contain: 'layout style paint' }}>
+                    {(!isLite || Math.abs(activePageIndex - appPages.length) <= 1) && (
+                        <WidgetsPage
+                            contentColor={contentColor}
+                            openApp={openApp}
+                            anniversaries={anniversaries}
+                            characters={characters}
+                            isLite={isLite}
+                        />
+                    )}
+                </div>
 
             </div>
 
@@ -515,10 +553,20 @@ const Launcher: React.FC = () => {
 
             {/* Floating Dock - Updated Margin and Safe Area handling */}
             <div className="mt-auto flex justify-center w-full px-4 mb-2 pb-[env(safe-area-inset-bottom)] relative z-30">
-                <div className="bg-white/20 backdrop-blur-2xl rounded-3xl border border-white/20 shadow-[0_10px_30px_rgba(0,0,0,0.2)] px-4 py-3 flex gap-3 sm:gap-6 items-center mx-auto max-w-full justify-between overflow-x-auto no-scrollbar transform-gpu">
+                <div className={`${isLite ? 'bg-white/55 shadow-[0_6px_18px_rgba(0,0,0,0.14)]' : 'bg-white/20 backdrop-blur-2xl shadow-[0_10px_30px_rgba(0,0,0,0.2)]'} rounded-3xl border border-white/20 px-4 py-3 flex gap-3 sm:gap-6 items-center mx-auto max-w-full justify-between overflow-x-auto no-scrollbar transform-gpu`}>
                     {dockAppsConfig.map(app => (
                         <div key={app.id} className="relative">
-                            <AppIcon app={app} onClick={() => openApp(app.id)} onLongPress={() => handleLongPressApp(app)} variant="dock" size="md" />
+                            <AppIcon
+                                app={app}
+                                onClick={() => openApp(app.id)}
+                                onLongPress={() => handleLongPressApp(app)}
+                                variant="dock"
+                                size="md"
+                                customIconUrl={customIcons[app.id]}
+                                contentColor={contentColor}
+                                showCustomIconFrame={showCustomIconFrame}
+                                isLite={isLite}
+                            />
                             {app.id === 'chat' && totalUnread > 0 && (
                                 <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-white text-[9px] flex items-center justify-center border-2 border-white/20 shadow-sm font-bold pointer-events-none animate-pop-in">
                                     {totalUnread > 9 ? '9+' : totalUnread}
@@ -534,15 +582,24 @@ const Launcher: React.FC = () => {
                 <div
                     className="absolute inset-0 z-[100] flex items-center justify-center animate-fade-in"
                     onClick={dismissContextMenu}
-                    style={{ backdropFilter: 'blur(20px)', backgroundColor: 'rgba(0,0,0,0.3)' }}
+                    style={{ backdropFilter: isLite ? 'none' : 'blur(20px)', backgroundColor: isLite ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.3)' }}
                 >
                     <div
-                        className="bg-white/95 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/30 p-5 min-w-[200px] max-w-[260px] animate-pop-in"
+                        className={`${isLite ? 'bg-white shadow-xl' : 'bg-white/95 backdrop-blur-2xl shadow-2xl'} rounded-3xl border border-white/30 p-5 min-w-[200px] max-w-[260px] animate-pop-in`}
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="flex flex-col items-center gap-3 mb-4">
                             <div className="w-16 h-16">
-                                <AppIcon app={contextMenu.app} onClick={() => { dismissContextMenu(); openApp(contextMenu.app.id); }} size="lg" hideLabel />
+                                <AppIcon
+                                    app={contextMenu.app}
+                                    onClick={() => { dismissContextMenu(); openApp(contextMenu.app.id); }}
+                                    size="lg"
+                                    hideLabel
+                                    customIconUrl={customIcons[contextMenu.app.id]}
+                                    contentColor={contentColor}
+                                    showCustomIconFrame={showCustomIconFrame}
+                                    isLite={isLite}
+                                />
                             </div>
                             <div className="text-center">
                                 <h3 className="text-base font-bold text-slate-800">{contextMenu.app.name}</h3>

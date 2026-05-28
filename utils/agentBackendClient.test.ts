@@ -77,6 +77,26 @@ describe('agentBackendClient', () => {
         expect(headers.get('X-Agent-Protocol')).toBeNull();
     });
 
+    it('does not retry missing agent start endpoints', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(new Response('', {
+            status: 404,
+            headers: { 'Content-Type': 'text/plain' },
+        }));
+
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(startAgentOnBackend({
+            charId: 'char-1',
+            apiConfig: {
+                baseUrl: 'https://llm.example.com',
+                apiKey: 'sub-key',
+                model: 'gpt-test',
+            },
+        })).rejects.toThrow('Agent API 404');
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('adds the protocol query param to the SSE URL', () => {
         const sseUrl = buildAgentSseUrl('char-1');
         expect(sseUrl).not.toBeNull();

@@ -14,6 +14,7 @@ import { BankFullState,BankTransaction,DollhouseState } from './bank';
 import { XhsActivityRecord,XhsStockImage } from './xhs';
 import { TtsConfig } from './tts';
 import { SttConfig } from './stt';
+import { ImageApiPreset, ImageGenerationConfig, PhotoStylePreset, SavedVibeReference } from './photo';
 
 export interface SerializedVoiceAudio {
     msgId: string | number;
@@ -41,6 +42,11 @@ export interface BackupGraphData {
     l1Memories?: any[];
 }
 
+export interface BackupExternalIndexedDbData {
+    version: number;
+    stores: Record<string, any[]>;
+}
+
 export interface FullBackupData {
     timestamp: number;
     version: number;
@@ -51,6 +57,10 @@ export interface FullBackupData {
     realtimeConfig?: RealtimeConfig;  // 实时感知配置（天气/新闻/Notion）
     ttsConfig?: TtsConfig;            // 语音合成配置
     sttConfig?: SttConfig;            // 语音识别配置
+    imageGenerationConfig?: ImageGenerationConfig;
+    imageGenerationDraftConfig?: ImageGenerationConfig;
+    imageApiPresets?: ImageApiPreset[];
+    photoStylePresets?: PhotoStylePreset[];
     memoryPalaceConfig?: any;         // Upstream SullyOS Memory Palace config
     customIcons?: Record<string, string>;
     appearancePresets?: AppearancePreset[];
@@ -107,7 +117,9 @@ export interface FullBackupData {
     memoryRecordAudio?: SerializedMemoryRecordAudio[];
     voiceAudio?: SerializedVoiceAudio[];
     yesterdayNewspapers?: YesterdayNewspaperRecord[];
+    vibeReferences?: SavedVibeReference[];
     musicAssets?: BackupMusicAssets;
+    halfSugarData?: BackupExternalIndexedDbData;
 
     // Upstream SullyOS Memory Palace / Pixel Home stores
     memoryNodes?: any[];

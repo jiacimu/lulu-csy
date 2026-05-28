@@ -4,6 +4,7 @@ import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
 import { GalleryImage } from '../types';
 import { safeResponseJson } from '../utils/safeApi';
+import { getGalleryImageDisplayUrl,resolveGalleryImageOriginalUrl } from '../utils/generatedImageStorage';
 import ConfirmDialog from '../components/os/ConfirmDialog';
 
 const Gallery: React.FC = () => {
@@ -12,6 +13,7 @@ const Gallery: React.FC = () => {
     const [activeCharId, setActiveCharId] = useState<string | null>(null);
     const [images, setImages] = useState<GalleryImage[]>([]);
     const [selectedImage, setSelectedImage] = useState<GalleryImage | null>(null);
+    const [selectedOriginalUrl, setSelectedOriginalUrl] = useState('');
     const [isReviewing, setIsReviewing] = useState(false);
     const [showChatContext, setShowChatContext] = useState(false);
 
@@ -43,6 +45,26 @@ const Gallery: React.FC = () => {
         }
     }, [activeCharId]);
 
+    useEffect(() => {
+        if (!selectedImage) {
+            setSelectedOriginalUrl('');
+            return;
+        }
+
+        let cancelled = false;
+        const displayUrl = getGalleryImageDisplayUrl(selectedImage);
+        setSelectedOriginalUrl(displayUrl);
+        resolveGalleryImageOriginalUrl(selectedImage).then(originalUrl => {
+            if (!cancelled) {
+                setSelectedOriginalUrl(originalUrl || displayUrl);
+            }
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedImage?.id, selectedImage?.originalAssetId, selectedImage?.thumbnailUrl, selectedImage?.url]);
+
     const handleCharClick = (id: string) => {
         setActiveCharId(id);
         setView('grid');
@@ -50,6 +72,7 @@ const Gallery: React.FC = () => {
 
     const handleImageClick = (img: GalleryImage) => {
         setSelectedImage(img);
+        setSelectedOriginalUrl(getGalleryImageDisplayUrl(img));
         setView('detail');
     };
 
@@ -118,6 +141,7 @@ const Gallery: React.FC = () => {
 
         setIsReviewing(true);
         try {
+            const originalImageUrl = await resolveGalleryImageOriginalUrl(selectedImage);
             // Build context-aware prompt
             const chatContextStr = selectedImage.chatContext?.length
                 ? `\n\nContext: This photo was shared during a conversation. Here's what was being discussed:\n${selectedImage.chatContext.join('\n')}\n\nIMPORTANT: Your comment should feel natural given the conversation context above. Do NOT say things that contradict or are completely unrelated to what was being talked about.`
@@ -143,7 +167,7 @@ CRITICAL: Stay in character. If there's conversation context, your comment shoul
                             {
                                 type: 'image_url',
                                 image_url: {
-                                    url: selectedImage.url
+                                    url: originalImageUrl
                                 }
                             }
                         ]
@@ -291,13 +315,16 @@ CRITICAL: Stay in character. If there's conversation context, your comment shoul
                 </div>
             ) : (
                 <div className="grid grid-cols-3 gap-1">
-                    {images.map(img => (
-                        <div key={img.id} onClick={() => handleImageClick(img)} className="aspect-square bg-slate-100 relative cursor-pointer overflow-hidden rounded-sm">
-                            <img src={img.url} className="w-full h-full object-cover hover:scale-105 transition-transform duration-300" loading="lazy" />
-                            {img.review && <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-primary rounded-full ring-2 ring-white shadow-sm"></div>}
-                            {img.savedDate && <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent px-1.5 pb-1 pt-3"><span className="text-[8px] text-white/80 font-mono">{img.savedDate}</span></div>}
-                        </div>
-                    ))}
+                    {images.map(img => {
+                        const displayUrl = getGalleryImageDisplayUrl(img);
+                        return (
+                            <div key={img.id} onClick={() => handleImageClick(img)} className="aspect-square bg-slate-100 relative cursor-pointer overflow-hidden rounded-sm">
+                                <img src={displayUrl} data-testid={`gallery-grid-image-${img.id}`} alt={img.visualSummary || '照片缩略图'} className="sully-gallery-grid-image w-full h-full object-cover hover:scale-105 transition-transform duration-300" loading="lazy" />
+                                {img.review && <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-primary rounded-full ring-2 ring-white shadow-sm"></div>}
+                                {img.savedDate && <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent px-1.5 pb-1 pt-3"><span className="text-[8px] text-white/80 font-mono">{img.savedDate}</span></div>}
+                            </div>
+                        );
+                    })}
                 </div>
             )}
         </div>
@@ -325,7 +352,8 @@ CRITICAL: Stay in character. If there's conversation context, your comment shoul
             {/* Main Image */}
             <div className="flex-1 min-h-0 w-full flex items-center justify-center bg-black relative overflow-hidden">
                 <img
-                    src={selectedImage.url}
+                    src={selectedOriginalUrl || getGalleryImageDisplayUrl(selectedImage)}
+                    data-testid="gallery-detail-image"
                     className="max-w-full max-h-full object-contain"
                     alt="Detail"
                 />

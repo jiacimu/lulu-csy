@@ -1,6 +1,6 @@
 
 import { useState,useRef,useCallback,type Dispatch,type SetStateAction } from 'react';
-import { CharacterProfile,UserProfile,Message,Emoji,EmojiCategory,GroupProfile,RealtimeConfig } from '../types';
+import { CharacterProfile,UserProfile,Message,Emoji,EmojiCategory,GroupProfile,RealtimeConfig,type PhotoHintTrigger } from '../types';
 import { DB } from '../utils/db';
 import { ChatPrompts } from '../utils/chatPrompts';
 import { ChatParser,BILINGUAL_MARKER } from '../utils/chatParser';
@@ -43,6 +43,12 @@ import {
     getPlayableLyricSnapshot,
     shouldInjectPlaybackLyricSnapshot,
 } from '../utils/playbackLyricsRuntime';
+import {
+    buildPhotoHintFromDecision,
+    extractPhotoDecision,
+    extractPhotoHint,
+    inferExplicitPhotoDecisionFromConversation,
+} from '../utils/photoGeneration';
 import { shouldInjectPlaybackContextFromState } from '../utils/playbackContextRuntime';
 import { showLocalNotification } from '../utils/localNotification';
 import { getChatBackgroundNotificationsEnabled } from '../utils/chatBackgroundNotifications';
@@ -65,6 +71,8 @@ interface UseChatAIProps {
     onIncomingCall?: (mode: string, callReason: string) => void; // AI 触发来电时的回调
     autoShareSong?: boolean; // 开启后向 AI 注入歌曲分享指引
     injectPlaybackContext?: boolean; // 开启后向 AI 注入当前播放歌曲上下文
+    autoPhoto?: boolean; // 开启后允许 AI 输出内部 photo_hint
+    onPhotoHint?: (payload: PhotoHintTrigger) => void;
     onMoodUpdate?: (charId: string, moodState: any, statusCardData?: any) => void; // MindSnapshot / CreativeCard 完成后回调
 }
 
@@ -218,6 +226,17 @@ function buildChatNotificationBody(content: string, fallback = '发来了一条�
     return (normalized || fallback).slice(0, 500);
 }
 
+function getPreviousAssistantThinking(messages: Message[], maxLength = 1200): string | undefined {
+    for (const message of [...messages].reverse()) {
+        if (message.role !== 'assistant') continue;
+        const thinking = message.metadata?.thinking;
+        if (typeof thinking !== 'string') continue;
+        const trimmed = thinking.trim();
+        if (trimmed) return trimmed.slice(0, maxLength);
+    }
+    return undefined;
+}
+
 export const useChatAI = ({
     char,
     userProfile,
@@ -235,6 +254,8 @@ export const useChatAI = ({
     onIncomingCall,
     autoShareSong,
     injectPlaybackContext,
+    autoPhoto,
+    onPhotoHint,
     onMoodUpdate
 }: UseChatAIProps) => {
 
@@ -435,6 +456,7 @@ export const useChatAI = ({
             // Await goals before starting parallel sense + prompt build
             const characterGoals = await goalsPromise;
             const goalListStr = formatGoalListStr(characterGoals);
+            const previousThinkingForSense = getPreviousAssistantThinking(promptContextMsgs);
 
             const [senseResult, systemPromptResult, playbackContext] = await Promise.all([
                 senseSecondaryConfig?.apiKey
@@ -442,6 +464,7 @@ export const useChatAI = ({
                         userProfile,
                         contextLimit: limit,
                         allowMirrorLookup: false,
+                        previousThinking: previousThinkingForSense,
                     })
                         .catch(e => { console.error('💭 [Sense] Parallel error:', e); return null; })
                     : Promise.resolve(null),
@@ -518,6 +541,22 @@ mode 可选值：
 
 示例：
 [[SHARE_SONG: 晴天 | 周杰伦 | 0]]`;
+            }
+
+            if (autoPhoto) {
+                systemPrompt += `\n\n[系统功能: 发照片]
+每一轮都在内部先判断：这一轮你是否准备发/应该发一张照片、图片、随手拍或视觉画面给${userProfile.name}。
+如果判断为“是”，只附加这个内部 sideEffect：
+[[PHOTO_DECISION:true]]
+
+规则：
+- 标签外继续正常聊天，用户不会看见这个标签
+- 不要展示你的判断过程；只输出普通聊天正文和必要的 PHOTO_DECISION 标签
+- 如果用户明确要求你生图、画一张、发照片、再发一次或给他看看画面，必须输出 PHOTO_DECISION:true，不要只文字答应
+- 照片是否真正送达由系统决定。不要在正文里说“发了”“看到了吗”“再发一次”“我已经发过了”等完成态；可以说“等我一下”“给你看看”这类进行态
+- 不发图时不要输出 false 标签，保持正常聊天即可
+- 不要输出 NAI prompt、英文 tag、尺寸、镜头参数、JSON 或完整 photo_request
+- 不要频繁使用，只在发图会让这一刻更自然时使用`;
             }
 
             if (injectPlaybackContext) {
@@ -836,6 +875,34 @@ mode 可选值：
             // Execute any parsed actions BEFORE side effect handlers like Search/Recall
             aiContent = await ChatParser.parseAndExecuteActions(aiContent, char.id, char.name, addToast);
 
+            const photoHintExtraction = extractPhotoHint(aiContent);
+            aiContent = photoHintExtraction.content;
+            const photoDecisionExtraction = extractPhotoDecision(aiContent);
+            aiContent = photoDecisionExtraction.content;
+            const latestUserText = [...promptContextMsgs]
+                .reverse()
+                .find(message => message.role === 'user')?.content || '';
+            const recentUserPhotoContext = promptContextMsgs
+                .filter(message => message.role === 'user')
+                .slice(-4)
+                .map(message => String(message.content || ''))
+                .join('\n');
+            const explicitPhotoDecision = autoPhoto
+                ? inferExplicitPhotoDecisionFromConversation(String(latestUserText || ''), aiContent, recentUserPhotoContext)
+                : false;
+            const shouldGeneratePhotoByDecision = photoDecisionExtraction.shouldGeneratePhoto === true || explicitPhotoDecision;
+            const decisionHint = autoPhoto && !photoHintExtraction.hint && shouldGeneratePhotoByDecision
+                ? buildPhotoHintFromDecision(
+                    String(latestUserText || ''),
+                    aiContent,
+                    explicitPhotoDecision ? '用户明确要求发送或生成一张图片' : '主模型判断本轮应该发送一张图片',
+                )
+                : null;
+            const photoHint = photoHintExtraction.hint || decisionHint;
+            if (decisionHint && photoDecisionExtraction.shouldGeneratePhoto !== true) {
+                console.warn('[AutoPhoto] Inferred PHOTO_DECISION:true from explicit user request because the main model did not emit one.');
+            }
+
             console.log(`🧠 [ThinkingDebug] final thinkingContent length=${thinkingContent.length}, preview:`, thinkingContent.substring(0, 200));
 
             const hadSecondPassFallbackTrigger = /\[\[(?:SEARCH|READ_DIARY|FS_READ_DIARY):/.test(aiContent);
@@ -971,13 +1038,14 @@ mode 可选值：
                 model: apiConfig.model,
             };
 
+            let firstSavedMsgId: number | null = null;
+
             if (aiContent) {
 
                 // Check for <翻译> XML tags (new bilingual format)
                 const hasTranslationTags = /<翻译>\s*<原文>[\s\S]*?<\/原文>\s*<译文>[\s\S]*?<\/译文>\s*<\/翻译>/.test(aiContent);
 
                 let globalMsgIndex = 0;
-                let firstSavedMsgId: number | null = null;
                 let notificationPlayed = false;
                 const showBrowserChatNotification = (
                     savedId: number,
@@ -1285,7 +1353,13 @@ mode 可选值：
                         const foundEmoji = emojis.find(e => e.name === emojiName);
                         if (foundEmoji) {
                             await new Promise(r => setTimeout(r, Math.random() * 500 + 300));
-                            const savedId = await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'emoji', content: foundEmoji.url });
+                            const savedId = await DB.saveMessage({
+                                charId: char.id,
+                                role: 'assistant',
+                                type: 'emoji',
+                                content: foundEmoji.url,
+                                metadata: { name: emojiName, categoryId: foundEmoji.categoryId },
+                            });
                             showBrowserChatNotification(savedId, `发来一个表情：${emojiName}`);
                             await refreshRecentMessages();
                             playFirstNotification();
@@ -1309,7 +1383,13 @@ mode 可选值：
                             const foundEmoji = emojis.find(e => e.name === part.content);
                             if (foundEmoji) {
                                 await new Promise(r => setTimeout(r, Math.random() * 500 + 300));
-                                const savedId = await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'emoji', content: foundEmoji.url });
+                                const savedId = await DB.saveMessage({
+                                    charId: char.id,
+                                    role: 'assistant',
+                                    type: 'emoji',
+                                    content: foundEmoji.url,
+                                    metadata: { name: part.content, categoryId: foundEmoji.categoryId },
+                                });
                                 showBrowserChatNotification(savedId, `发来一个表情：${part.content}`);
                                 await refreshRecentMessages();
                                 playFirstNotification();
@@ -1372,6 +1452,20 @@ mode 可选值：
             } else {
                 // If content was empty (e.g. only actions), just refresh
                 await refreshRecentMessages();
+            }
+
+            if (photoHint && autoPhoto && onPhotoHint) {
+                const payload: PhotoHintTrigger = {
+                    char: { ...char },
+                    userProfile,
+                    currentMsgs: promptContextMsgs,
+                    aiReply: aiContent,
+                    thinking: thinkingContent || undefined,
+                    hint: photoHint,
+                    sourceMessageId: firstSavedMsgId || undefined,
+                    contextOptions: secondaryFullContextOptions,
+                };
+                window.setTimeout(() => onPhotoHint(payload), 800);
             }
             void BackendAgentManager.refreshCharacterContext(char.id, char);
 

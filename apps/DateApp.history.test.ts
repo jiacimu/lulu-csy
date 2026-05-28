@@ -1,8 +1,24 @@
 // @vitest-environment jsdom
 
-import { describe,expect,it } from 'vitest';
-import { buildDateForkBridgeContent,buildDateForkOpeningText,buildHistorySessions } from './DateApp';
-import type { Message } from '../types';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
+
+vi.mock('../utils/eventExtractor', () => ({
+    EventExtractor: {
+        extract: vi.fn(() => Promise.resolve()),
+        hasTimeKeyword: vi.fn(() => true),
+    },
+}));
+
+import {
+    appendDateTemporalContext,
+    buildDateForkBridgeContent,
+    buildDateForkOpeningText,
+    buildDateSessionSystemPrompt,
+    buildHistorySessions,
+    maybeExtractDateTemporalEvent,
+} from './DateApp';
+import { EventExtractor } from '../utils/eventExtractor';
+import type { CharacterProfile,Message,UserProfile } from '../types';
 
 const makeMessage = (
     id: number,
@@ -17,6 +33,32 @@ const makeMessage = (
     content: `message-${id}`,
     timestamp,
     metadata,
+});
+
+const makeCharacter = (overrides: Partial<CharacterProfile> = {}): CharacterProfile => ({
+    id: 'char-1',
+    name: 'Sully',
+    avatar: '',
+    description: '',
+    systemPrompt: '你是 Sully。',
+    memories: [],
+    ...overrides,
+} as CharacterProfile);
+
+const makeUserProfile = (overrides: Partial<UserProfile> = {}): UserProfile => ({
+    name: '小米',
+    avatar: '',
+    bio: '',
+    ...overrides,
+});
+
+const mockedExtract = vi.mocked(EventExtractor.extract);
+const mockedHasTimeKeyword = vi.mocked(EventExtractor.hasTimeKeyword);
+
+beforeEach(() => {
+    mockedExtract.mockClear();
+    mockedHasTimeKeyword.mockReset();
+    mockedHasTimeKeyword.mockReturnValue(true);
 });
 
 describe('buildHistorySessions', () => {
@@ -120,5 +162,54 @@ describe('buildHistorySessions', () => {
         expect(bridge).toContain('已有总结 1');
         expect(bridge).toContain('Sully: message-1');
         expect(bridge).toContain('小米: message-2');
+    });
+});
+
+describe('date temporal awareness helpers', () => {
+    it('injects the current time block into the date session system prompt', () => {
+        const prompt = buildDateSessionSystemPrompt({
+            char: makeCharacter(),
+            userProfile: makeUserProfile(),
+            allMsgs: [],
+        });
+
+        expect(prompt).toContain('### 【当前时间】');
+        expect(prompt).toContain('读取上方系统提供的【当前时间】');
+    });
+
+    it('appends temporal context to the user prompt content', () => {
+        expect(appendDateTemporalContext('我到了', '\n[时间感知]\n现在 20:00 晚上'))
+            .toBe('我到了\n\n[时间感知]\n现在 20:00 晚上');
+        expect(appendDateTemporalContext('我到了', '')).toBe('我到了');
+    });
+
+    it('starts background event extraction only when secondary API is complete and text matches time keywords', () => {
+        maybeExtractDateTemporalEvent('char-1', '外卖半小时后到', {
+            baseUrl: 'https://example.test',
+            apiKey: 'key',
+            model: 'model',
+        });
+
+        expect(mockedExtract).toHaveBeenCalledWith('char-1', '外卖半小时后到', {
+            baseUrl: 'https://example.test',
+            apiKey: 'key',
+            model: 'model',
+        });
+
+        mockedExtract.mockClear();
+        maybeExtractDateTemporalEvent('char-1', '外卖半小时后到', {
+            baseUrl: 'https://example.test',
+            apiKey: '',
+            model: 'model',
+        });
+        expect(mockedExtract).not.toHaveBeenCalled();
+
+        mockedHasTimeKeyword.mockReturnValue(false);
+        maybeExtractDateTemporalEvent('char-1', '只是普通见面闲聊', {
+            baseUrl: 'https://example.test',
+            apiKey: 'key',
+            model: 'model',
+        });
+        expect(mockedExtract).not.toHaveBeenCalled();
     });
 });

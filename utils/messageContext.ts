@@ -115,14 +115,32 @@ export function isStatusEcosystemMessage(message: ContextMessage): boolean {
 export function shouldIncludeMessageInContext(message: ContextMessage): boolean {
     if (!message) return false;
     if (isStatusEcosystemMessage(message)) return false;
-    if (message.metadata?.hiddenFromUser && message.type !== 'soul_reflection') return false;
+    if (
+        message.metadata?.hiddenFromUser
+        && message.type !== 'soul_reflection'
+        && message.metadata?.source !== 'photo_continuity'
+        && message.metadata?.source !== 'photo_delivery_failed'
+    ) return false;
     return true;
+}
+
+const IMAGE_REPLY_CONTENT_RE = /^(?:data:image\/|blob:|https?:\/\/.+\.(?:png|jpe?g|gif|webp|avif|svg)(?:[?#]|$))/i;
+
+function looksLikeImageReplyContent(value: string | undefined): boolean {
+    return !!value && IMAGE_REPLY_CONTENT_RE.test(value.trim());
 }
 
 function formatReplyPrefix(message: ContextMessage): string {
     const reply = message.replyTo;
     if (!reply?.content) return '';
-    return `[回复 "${reply.content.substring(0, 50)}..."]: `;
+    const isImageReply = reply.type === 'image'
+        || !!reply.thumbnailUrl
+        || !!reply.imageUrl
+        || looksLikeImageReplyContent(reply.content);
+    const content = isImageReply
+        ? (reply.visualSummary || (looksLikeImageReplyContent(reply.content) ? '图片' : reply.content))
+        : reply.content;
+    return `[回复 "${content.substring(0, 50)}..."]: `;
 }
 
 function formatTransfer(message: ContextMessage, options: FormatMessageContextOptions): string {
@@ -230,6 +248,54 @@ function formatVoice(message: ContextMessage, options: FormatMessageContextOptio
     return text ? `[语音消息] ${clipText(text, options.maxContentChars)}` : `[语音消息（${duration}秒）]`;
 }
 
+function getImageContextSummary(message: ContextMessage, maxContentChars?: number): string {
+    const metadata = message.metadata || {};
+    const photoMeta = metadata.photoMeta || {};
+    const director = photoMeta.directorResult || {};
+    const summary = metadata.visualSummary
+        || metadata.photoSummary
+        || metadata.caption
+        || metadata.description
+        || metadata.ocrText
+        || photoMeta.continuity_summary
+        || director.continuity_summary
+        || director.scene_zh
+        || director.caption
+        || '';
+
+    return clipText(compactText(String(summary || '')), maxContentChars);
+}
+
+function getUrlFileLabel(value: string): string {
+    const text = value.trim();
+    if (!text || text.startsWith('data:')) return '';
+
+    try {
+        const url = /^https?:\/\//i.test(text) ? new URL(text) : null;
+        const pathname = url ? url.pathname : text.split(/[?#]/)[0];
+        const fileName = pathname.split('/').filter(Boolean).pop() || '';
+        return decodeURIComponent(fileName)
+            .replace(/\.(?:png|jpe?g|gif|webp|avif|svg)$/i, '')
+            .replace(/[-_]+/g, ' ')
+            .trim()
+            .slice(0, 80);
+    } catch {
+        return '';
+    }
+}
+
+function getEmojiContextName(message: ContextMessage, options: FormatMessageContextOptions): string {
+    const metadata = message.metadata || {};
+    const registryName = options.emojis?.find(e => e.url === message.content)?.name;
+    const fallbackName = registryName
+        || metadata.name
+        || metadata.emojiName
+        || metadata.label
+        || metadata.contentLabel
+        || getUrlFileLabel(message.content || '');
+    return compactText(String(fallbackName || '未命名表情包')).slice(0, 80);
+}
+
 function formatMessageBody(message: ContextMessage, options: FormatMessageContextOptions): string | null {
     const type = String(message.type || 'text');
     const maxContentChars = options.maxContentChars ?? (options.surface === 'chat' ? undefined : DEFAULT_CONTENT_LIMIT);
@@ -246,20 +312,20 @@ function formatMessageBody(message: ContextMessage, options: FormatMessageContex
         case 'voice':
             return formatVoice(message, { ...options, maxContentChars });
         case 'image': {
-            const caption = message.metadata?.caption || message.metadata?.description || message.metadata?.ocrText;
+            const summary = getImageContextSummary(message, maxContentChars);
             if (isGenerationSurface(options)) {
-                const label = isAssistantRole(message) ? '你上一条图片' : '用户发来的图片';
-                return caption
-                    ? `[${label}] ${clipText(String(caption), maxContentChars)}`
+                const label = isAssistantRole(message) ? '你发送过的图片' : '用户发来的图片';
+                return summary
+                    ? `[${label}] ${summary}`
                     : `[${label}]`;
             }
             const prefix = '发送了';
-            return caption
-                ? `[${prefix}一张图片] ${clipText(String(caption), maxContentChars)}`
+            return summary
+                ? `[${prefix}一张图片] ${summary}`
                 : `[${prefix}一张图片]`;
         }
         case 'emoji': {
-            const stickerName = options.emojis?.find(e => e.url === message.content)?.name || message.metadata?.name || '表情包';
+            const stickerName = getEmojiContextName(message, options);
             if (isGenerationSurface(options)) {
                 return isAssistantRole(message)
                     ? `[[SEND_EMOJI: ${stickerName}]]`

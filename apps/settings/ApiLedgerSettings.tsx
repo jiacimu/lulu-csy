@@ -13,6 +13,7 @@ const FEATURE_LABELS: Record<ApiTraceFeature, string> = {
     memory: '记忆',
     summary: '摘要',
     tts: 'TTS',
+    image: '生图',
     phone: '电话',
     loveshow: '摘星楼',
     date: '见面',

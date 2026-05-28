@@ -22,11 +22,13 @@ html, body {
 body {
     min-height: 0;
     display: inline-flex;
-    align-items: flex-start;
-    justify-content: flex-start;
+    align-items: center;
+    justify-content: center;
 }
 #root {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: max-content;
     max-width: none;
 }
@@ -299,7 +301,7 @@ body {
             sanitizeTree(parsed.body);
             styles.innerHTML = headNodes.join('');
             root.innerHTML = parsed.body && parsed.body.innerHTML ? parsed.body.innerHTML : html;
-            document.body.style.cssText = 'margin:0;background:transparent;overflow:hidden;min-height:0;display:inline-flex;align-items:flex-start;justify-content:flex-start;width:max-content;';
+            document.body.style.cssText = 'margin:0;background:transparent;overflow:hidden;min-height:0;display:inline-flex;align-items:center;justify-content:center;width:max-content;';
 
             if (parsed.body && parsed.body.getAttribute('style')) {
                 document.body.style.cssText += parsed.body.getAttribute('style');
@@ -310,7 +312,7 @@ body {
         } catch (error) {
             styles.innerHTML = '';
             root.textContent = html;
-            document.body.style.cssText = 'margin:0;background:transparent;overflow:hidden;min-height:0;display:inline-flex;align-items:flex-start;justify-content:flex-start;width:max-content;';
+            document.body.style.cssText = 'margin:0;background:transparent;overflow:hidden;min-height:0;display:inline-flex;align-items:center;justify-content:center;width:max-content;';
             reconnectObserver();
         }
 

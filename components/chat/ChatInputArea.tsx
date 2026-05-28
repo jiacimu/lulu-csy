@@ -1,6 +1,6 @@
 
 import React,{ useRef,useState,useMemo } from 'react';
-import { ShareNetwork,Trash,Plus,Smiley,PaperPlaneTilt,Money,BookOpenText,GearSix,Image,Lock,ArrowsClockwise } from '@phosphor-icons/react';
+import { ShareNetwork,Trash,Plus,Smiley,PaperPlaneTilt,Money,BookOpenText,GearSix,Image,Lock,ArrowsClockwise,Sparkle } from '@phosphor-icons/react';
 import { CharacterProfile,ChatTheme,EmojiCategory,Emoji } from '../../types';
 import { PRESET_THEMES } from './ChatConstants';
 import { THEME_PLUGINS } from './ThemeRegistry';
@@ -34,6 +34,7 @@ interface ChatInputAreaProps {
     activeThemeId: string;
     onPanelAction: (type: string, payload?: any) => void;
     onImageSelect: (file: File) => void;
+    manualPhotoEnabled?: boolean;
     isSummarizing: boolean;
     // Categories Support
     categories?: EmojiCategory[];
@@ -61,7 +62,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     showPanel, setShowPanel, onSend, onDeleteSelected, onForwardSelected, onSoulReflection, charName, selectedCount,
     emojis, allVisibleEmojis = [], characters, activeCharacterId, onCharSelect,
     customThemes, onUpdateTheme, onRemoveTheme, activeThemeId,
-    onPanelAction, onImageSelect, isSummarizing,
+    onPanelAction, onImageSelect, manualPhotoEnabled = false, isSummarizing,
     categories = [], activeCategory = 'default',
     onReroll, canReroll,
     onVoiceMessage, voiceRecorderState = 'idle', voiceRecordingDuration = 0,
@@ -429,6 +430,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                         isSummarizing,
                                         onReroll,
                                         canReroll,
+                                        manualPhotoEnabled,
                                         chatImageInputRef
                                     })
                                 ) : (
@@ -464,6 +466,15 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                             </div>
                                             <span className="text-xs font-bold">相册</span>
                                         </button>
+
+                                        {manualPhotoEnabled && (
+                                            <button onClick={() => onPanelAction('manual-photo')} className="flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
+                                                <div className="w-14 h-14 bg-fuchsia-50 rounded-2xl flex items-center justify-center shadow-sm text-fuchsia-400 border border-fuchsia-100">
+                                                    <Sparkle className="w-6 h-6" weight="bold" />
+                                                </div>
+                                                <span className="text-xs font-bold">生图</span>
+                                            </button>
+                                        )}
 
                                         {/* Regenerate Button */}
                                         <button onClick={onReroll} disabled={!canReroll} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${canReroll ? 'text-slate-600' : 'text-slate-300 opacity-50'}`}>

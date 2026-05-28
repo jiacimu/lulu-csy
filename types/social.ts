@@ -45,6 +45,10 @@ export interface GalleryImage {
     reviewTimestamp?: number;
     savedDate?: string; // YYYY-MM-DD format
     chatContext?: string[]; // Recent chat messages at time of save
+    thumbnailUrl?: string;
+    originalAssetId?: string;
+    visualSummary?: string;
+    photoMeta?: import('./photo').PhotoMeta;
 }
 
 export interface StickerData {

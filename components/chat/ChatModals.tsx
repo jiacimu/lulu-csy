@@ -1,9 +1,11 @@
 
-import React,{ useRef,useState } from 'react';
+import React,{ useEffect,useRef,useState } from 'react';
 import Modal from '../os/Modal';
 import { useOS } from '../../context/OSContext';
-import { AppID,CharacterProfile,Message,EmojiCategory,YesterdayNewspaperPeriodType } from '../../types';
+import { AppID,CharacterProfile,Message,EmojiCategory,YesterdayNewspaperPeriodType,PhotoStylePreset,ImageProviderType,SavedVibeReference,VibeReferenceInput,type ManualPhotoGenerationOptions,type ManualPhotoMode,type UserProfile } from '../../types';
 import { CustomStatusTemplate } from '../../types/statusCard';
+import VibeReferencePicker from './VibeReferencePicker';
+import { NO_PHOTO_STYLE_PRESET,NO_PHOTO_STYLE_PRESET_ID } from '../../utils/photoGeneration';
 
 type CustomTemplateSelection = CustomStatusTemplate & {
     _setActiveOnly?: boolean;
@@ -44,6 +46,7 @@ interface ChatModalsProps {
     selectedEmoji: { name: string, url: string } | null;
     selectedCategory: EmojiCategory | null;
     activeCharacter: CharacterProfile;
+    userProfile: UserProfile;
     messages: Message[];
     allHistoryMessages?: Message[];
 
@@ -114,6 +117,31 @@ interface ChatModalsProps {
     onGenerateNewspaperPeriod?: (periodType: YesterdayNewspaperPeriodType) => void;
     todayScheduleEnabled?: boolean;
     onToggleTodaySchedule?: () => void;
+    // Photo generation
+    photoStylePresets?: PhotoStylePreset[];
+    photoConfigReady?: boolean;
+    manualPhotoGenerating?: boolean;
+    imageProviderType?: ImageProviderType;
+    savedVibeReferences?: SavedVibeReference[];
+    onManualPhotoGenerate?: (prompt: string, stylePresetId?: string, vibeReferences?: VibeReferenceInput[], options?: ManualPhotoGenerationOptions) => void;
+    onSaveVibeReference?: (reference: VibeReferenceInput) => Promise<SavedVibeReference | undefined>;
+    onImportVibeFile?: (file: File) => Promise<SavedVibeReference | undefined>;
+    onRenameSavedVibe?: (id: string, name: string) => Promise<void>;
+    onDeleteSavedVibe?: (id: string) => Promise<void>;
+    onClearSavedVibeCache?: (id: string) => Promise<void>;
+    onToggleManualPhoto?: () => void;
+    onToggleAutoPhoto?: () => void;
+    onSetDefaultPhotoStyle?: (styleId: string) => void;
+    onToggleBoundPhotoStyle?: (styleId: string) => void;
+    onToggleDefaultVibeReference?: (vibeId: string) => void;
+    onSaveNaiAppearance?: (
+        tags: string,
+        negativeTags: string,
+        appearancePrompt?: string,
+        userTags?: string,
+        userNegativeTags?: string,
+        userAppearancePrompt?: string,
+    ) => void;
 }
 
 const ChatModals: React.FC<ChatModalsProps> = ({
@@ -127,7 +155,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     newCategoryName, setNewCategoryName, onAddCategory,
     archivePrompts, selectedPromptId, setSelectedPromptId,
     editingPrompt, setEditingPrompt, isSummarizing,
-    selectedMessage, selectedEmoji, selectedCategory, activeCharacter, 
+    selectedMessage, selectedEmoji, selectedCategory, activeCharacter, userProfile,
     allHistoryMessages = [],
     onTransfer, onImportEmoji, onSaveSettings,
     onBgUpload, onRemoveBg, onClearHistory,
@@ -146,12 +174,95 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     showThinking, onToggleShowThinking,
     newspaperEnabled, onToggleNewspaper, newspaperGenerating, onGenerateNewspaperPeriod,
     todayScheduleEnabled, onToggleTodaySchedule,
+    photoStylePresets = [],
+    photoConfigReady = false,
+    manualPhotoGenerating = false,
+    imageProviderType = 'novelai',
+    savedVibeReferences = [],
+    onManualPhotoGenerate,
+    onSaveVibeReference,
+    onImportVibeFile,
+    onRenameSavedVibe,
+    onDeleteSavedVibe,
+    onClearSavedVibeCache,
+    onToggleManualPhoto,
+    onToggleAutoPhoto,
+    onSetDefaultPhotoStyle,
+    onToggleBoundPhotoStyle,
+    onToggleDefaultVibeReference,
+    onSaveNaiAppearance,
 }) => {
-    const { openApp } = useOS();
+    const { openApp, addToast } = useOS();
     const bgInputRef = useRef<HTMLInputElement>(null);
     const [visibilitySelection, setVisibilitySelection] = useState<Set<string>>(new Set());
     const [historyPage, setHistoryPage] = useState(0);
+    const [manualPhotoPrompt, setManualPhotoPrompt] = useState('');
+    const [manualPhotoStyleId, setManualPhotoStyleId] = useState('');
+    const [manualPhotoVibes, setManualPhotoVibes] = useState<VibeReferenceInput[]>([]);
+    const [manualPhotoMode, setManualPhotoMode] = useState<ManualPhotoMode>('direct');
+    const [manualPhotoUseAppearance, setManualPhotoUseAppearance] = useState(true);
+    const [manualPhotoUseUserAppearance, setManualPhotoUseUserAppearance] = useState(false);
+    const [naiAppearanceTagsDraft, setNaiAppearanceTagsDraft] = useState(activeCharacter.naiAppearanceTags || '');
+    const [naiAppearanceNegativeDraft, setNaiAppearanceNegativeDraft] = useState(activeCharacter.naiAppearanceNegativeTags || '');
+    const [appearancePromptDraft, setAppearancePromptDraft] = useState(activeCharacter.photoAppearancePrompt || '');
+    const [userNaiAppearanceTagsDraft, setUserNaiAppearanceTagsDraft] = useState(userProfile.naiAppearanceTags || '');
+    const [userNaiAppearanceNegativeDraft, setUserNaiAppearanceNegativeDraft] = useState(userProfile.naiAppearanceNegativeTags || '');
+    const [userAppearancePromptDraft, setUserAppearancePromptDraft] = useState(userProfile.photoAppearancePrompt || '');
     const HISTORY_PAGE_SIZE = 50;
+    const realPhotoStylePresets = photoStylePresets.filter(style => style.id !== NO_PHOTO_STYLE_PRESET_ID);
+    const manualPhotoStyleOptions = [
+        photoStylePresets.find(style => style.id === NO_PHOTO_STYLE_PRESET_ID) || NO_PHOTO_STYLE_PRESET,
+        ...realPhotoStylePresets,
+    ];
+    const selectedManualPhotoStyleId = manualPhotoStyleOptions.some(style => style.id === manualPhotoStyleId)
+        ? manualPhotoStyleId
+        : '';
+    const boundManualPhotoStyleIds = activeCharacter.boundPhotoStylePresetIds && activeCharacter.boundPhotoStylePresetIds.length > 0
+        ? new Set(activeCharacter.boundPhotoStylePresetIds)
+        : null;
+    const defaultManualPhotoStyleOptions = boundManualPhotoStyleIds
+        ? manualPhotoStyleOptions.filter(style => boundManualPhotoStyleIds.has(style.id))
+        : manualPhotoStyleOptions;
+    const explicitDefaultManualPhotoStyleId = manualPhotoStyleOptions.some(style => style.id === activeCharacter.defaultPhotoStylePresetId)
+        ? activeCharacter.defaultPhotoStylePresetId
+        : '';
+    const defaultManualPhotoStyleId = explicitDefaultManualPhotoStyleId === NO_PHOTO_STYLE_PRESET_ID
+        ? NO_PHOTO_STYLE_PRESET_ID
+        : (
+            defaultManualPhotoStyleOptions.some(style => style.id === explicitDefaultManualPhotoStyleId)
+                ? explicitDefaultManualPhotoStyleId
+                : (
+                    defaultManualPhotoStyleOptions.find(style => style.id !== NO_PHOTO_STYLE_PRESET_ID)?.id
+                    || defaultManualPhotoStyleOptions[0]?.id
+                    || realPhotoStylePresets[0]?.id
+                    || NO_PHOTO_STYLE_PRESET_ID
+                )
+        );
+    const effectiveManualPhotoStyleId = selectedManualPhotoStyleId
+        || defaultManualPhotoStyleId
+        || NO_PHOTO_STYLE_PRESET_ID;
+    const hasNaiAppearanceBinding = Boolean(
+        (activeCharacter.naiAppearanceTags || '').trim()
+        || (activeCharacter.naiAppearanceNegativeTags || '').trim(),
+    );
+    const hasOpenAIAppearanceBinding = Boolean((activeCharacter.photoAppearancePrompt || '').trim());
+    const hasUserAppearanceBinding = Boolean(
+        (userProfile.naiAppearanceTags || '').trim()
+        || (userProfile.naiAppearanceNegativeTags || '').trim()
+        || (userProfile.photoAppearancePrompt || '').trim(),
+    );
+
+    useEffect(() => {
+        setNaiAppearanceTagsDraft(activeCharacter.naiAppearanceTags || '');
+        setNaiAppearanceNegativeDraft(activeCharacter.naiAppearanceNegativeTags || '');
+        setAppearancePromptDraft(activeCharacter.photoAppearancePrompt || '');
+    }, [activeCharacter.id, activeCharacter.naiAppearanceTags, activeCharacter.naiAppearanceNegativeTags, activeCharacter.photoAppearancePrompt]);
+
+    useEffect(() => {
+        setUserNaiAppearanceTagsDraft(userProfile.naiAppearanceTags || '');
+        setUserNaiAppearanceNegativeDraft(userProfile.naiAppearanceNegativeTags || '');
+        setUserAppearancePromptDraft(userProfile.photoAppearancePrompt || '');
+    }, [userProfile.naiAppearanceTags, userProfile.naiAppearanceNegativeTags, userProfile.photoAppearancePrompt]);
 
     const openVisibilityModal = () => {
         if (selectedCategory) {
@@ -225,6 +336,213 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                 <div className="space-y-3">
                     <p className="text-xs text-slate-400">表情将导入到你当前选中的分类。</p>
                     <textarea value={emojiImportText} onChange={e => setEmojiImportText(e.target.value)} placeholder="Name--URL (每行一个)" className="w-full h-40 bg-slate-100 rounded-2xl p-4 resize-none" />
+                </div>
+            </Modal>
+
+            <Modal
+                isOpen={modalType === 'manual-photo'} title="手动生图" onClose={() => setModalType('none')}
+                footer={
+                    <button
+                        onClick={() => onManualPhotoGenerate?.(
+                            manualPhotoPrompt,
+                            selectedManualPhotoStyleId || undefined,
+                            imageProviderType === 'novelai' ? manualPhotoVibes : [],
+                            {
+                                mode: manualPhotoMode,
+                                useAppearance: manualPhotoUseAppearance,
+                                useUserAppearance: manualPhotoUseUserAppearance,
+                                appearanceTags: imageProviderType === 'novelai' ? naiAppearanceTagsDraft : undefined,
+                                appearanceNegativeTags: imageProviderType === 'novelai' ? naiAppearanceNegativeDraft : undefined,
+                                userAppearanceTags: imageProviderType === 'novelai' ? userNaiAppearanceTagsDraft : undefined,
+                                userAppearanceNegativeTags: imageProviderType === 'novelai' ? userNaiAppearanceNegativeDraft : undefined,
+                                appearancePrompt: appearancePromptDraft,
+                                userAppearancePrompt: userAppearancePromptDraft,
+                            },
+                        )}
+                        disabled={!photoConfigReady || manualPhotoGenerating || !onManualPhotoGenerate}
+                        className={`w-full py-3 rounded-2xl font-bold ${photoConfigReady && !manualPhotoGenerating ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400'}`}
+                    >
+                        {manualPhotoGenerating ? '生成中...' : '生成并发送'}
+                    </button>
+                }
+            >
+                <div className="space-y-3">
+                    {!photoConfigReady && (
+                        <div className="rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-[11px] text-amber-700">
+                            请先在系统设置的「生图服务」里配置当前生图供应商。
+                        </div>
+                    )}
+                    <div className="rounded-2xl bg-slate-100 p-1 grid grid-cols-2 gap-1">
+                        {([
+                            ['direct', '手写模式'],
+                            ['story', '剧情模式'],
+                        ] as Array<[ManualPhotoMode, string]>).map(([mode, label]) => (
+                            <button
+                                key={mode}
+                                type="button"
+                                onClick={() => setManualPhotoMode(mode)}
+                                className={`rounded-xl py-2 text-xs font-bold transition-colors ${manualPhotoMode === mode ? 'bg-white text-primary shadow-sm' : 'text-slate-500'}`}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+                    <p className="text-[10px] leading-relaxed text-slate-400">
+                        {manualPhotoMode === 'story'
+                            ? '剧情模式会读取最近聊天和角色设定，用副 API 整理成适合生图的 tags。'
+                            : '手写模式会直接使用你输入的 prompt，不调用副 API。'}
+                    </p>
+                    <>
+                        <div
+                            className="flex items-center justify-between rounded-2xl bg-slate-50 border border-slate-100 px-3 py-2"
+                            onClick={() => setManualPhotoUseAppearance(prev => !prev)}
+                        >
+                            <div>
+                                <div className="text-xs font-bold text-slate-600">使用角色锁脸</div>
+                                <p className="text-[10px] text-slate-400 mt-0.5">
+                                    {imageProviderType === 'novelai'
+                                        ? (hasNaiAppearanceBinding ? '会把角色 NAI 外貌 tags 拼进 prompt。' : '可在下方填写角色 NAI tags。')
+                                        : (hasOpenAIAppearanceBinding ? '会把角色自然语言外貌描述拼进 prompt。' : '可在下方填写角色自然语言外貌。')}
+                                </p>
+                            </div>
+                            <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${manualPhotoUseAppearance ? 'bg-primary' : 'bg-slate-200'}`}>
+                                <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${manualPhotoUseAppearance ? 'translate-x-4' : ''}`}></div>
+                            </div>
+                        </div>
+                        {manualPhotoUseAppearance && (
+                            <div className="rounded-2xl bg-slate-50/80 border border-slate-100 p-3">
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                    <div>
+                                        <div className="text-[11px] font-bold text-slate-500">
+                                            {imageProviderType === 'novelai' ? '角色外貌 NAI tags' : '角色锁脸描述'}
+                                        </div>
+                                        <p className="text-[10px] leading-relaxed text-slate-400">
+                                            {imageProviderType === 'novelai' ? '当前弹窗填写的 tags 会直接参与这次生成。' : 'OpenAI 兼容生图使用自然语言，不需要英文 tag。'}
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => onSaveNaiAppearance?.(naiAppearanceTagsDraft, naiAppearanceNegativeDraft, appearancePromptDraft, userNaiAppearanceTagsDraft, userNaiAppearanceNegativeDraft, userAppearancePromptDraft)}
+                                        disabled={!onSaveNaiAppearance}
+                                        className="shrink-0 rounded-lg bg-white px-2.5 py-1.5 text-[10px] font-bold text-primary border border-slate-100 disabled:text-slate-300"
+                                    >
+                                        保存
+                                    </button>
+                                </div>
+                                {imageProviderType === 'novelai' ? (
+                                    <>
+                                        <textarea
+                                            value={naiAppearanceTagsDraft}
+                                            onChange={e => setNaiAppearanceTagsDraft(e.target.value)}
+                                            placeholder="例：1girl, solo, long black hair, blue eyes"
+                                            className="mb-2 h-20 w-full resize-none rounded-xl bg-white border border-slate-100 px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                        />
+                                        <textarea
+                                            value={naiAppearanceNegativeDraft}
+                                            onChange={e => setNaiAppearanceNegativeDraft(e.target.value)}
+                                            placeholder="外貌相关 negative tags，可留空"
+                                            className="h-14 w-full resize-none rounded-xl bg-white border border-slate-100 px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                        />
+                                    </>
+                                ) : (
+                                    <textarea
+                                        value={appearancePromptDraft}
+                                        onChange={e => setAppearancePromptDraft(e.target.value)}
+                                        placeholder="例：黑色长发，蓝灰色眼睛，清瘦，常穿深色衬衫，气质冷淡"
+                                        className="h-24 w-full resize-none rounded-xl bg-white border border-slate-100 px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                    />
+                                )}
+                            </div>
+                        )}
+                        <div
+                            className="flex items-center justify-between rounded-2xl bg-slate-50 border border-slate-100 px-3 py-2"
+                            onClick={() => setManualPhotoUseUserAppearance(prev => !prev)}
+                        >
+                            <div>
+                                <div className="text-xs font-bold text-slate-600">使用我的锁脸</div>
+                                <p className="text-[10px] text-slate-400 mt-0.5">
+                                    {hasUserAppearanceBinding ? '合照或画面包含你时打开。' : '可先填写你的锁脸，合照时使用。'}
+                                </p>
+                            </div>
+                            <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${manualPhotoUseUserAppearance ? 'bg-primary' : 'bg-slate-200'}`}>
+                                <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${manualPhotoUseUserAppearance ? 'translate-x-4' : ''}`}></div>
+                            </div>
+                        </div>
+                        {manualPhotoUseUserAppearance && (
+                            <div className="rounded-2xl bg-slate-50/80 border border-slate-100 p-3">
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                    <div>
+                                        <div className="text-[11px] font-bold text-slate-500">
+                                            {imageProviderType === 'novelai' ? '我的外貌 NAI tags' : '我的锁脸描述'}
+                                        </div>
+                                        <p className="text-[10px] leading-relaxed text-slate-400">默认不参与单人照，合照时再打开更稳。</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => onSaveNaiAppearance?.(naiAppearanceTagsDraft, naiAppearanceNegativeDraft, appearancePromptDraft, userNaiAppearanceTagsDraft, userNaiAppearanceNegativeDraft, userAppearancePromptDraft)}
+                                        disabled={!onSaveNaiAppearance}
+                                        className="shrink-0 rounded-lg bg-white px-2.5 py-1.5 text-[10px] font-bold text-primary border border-slate-100 disabled:text-slate-300"
+                                    >
+                                        保存
+                                    </button>
+                                </div>
+                                {imageProviderType === 'novelai' ? (
+                                    <>
+                                        <textarea
+                                            value={userNaiAppearanceTagsDraft}
+                                            onChange={e => setUserNaiAppearanceTagsDraft(e.target.value)}
+                                            placeholder="合照用 tags，建议不要写 solo"
+                                            className="mb-2 h-20 w-full resize-none rounded-xl bg-white border border-slate-100 px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                        />
+                                        <textarea
+                                            value={userNaiAppearanceNegativeDraft}
+                                            onChange={e => setUserNaiAppearanceNegativeDraft(e.target.value)}
+                                            placeholder="我的外貌 negative tags，可留空"
+                                            className="h-14 w-full resize-none rounded-xl bg-white border border-slate-100 px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                        />
+                                    </>
+                                ) : (
+                                    <textarea
+                                        value={userAppearancePromptDraft}
+                                        onChange={e => setUserAppearancePromptDraft(e.target.value)}
+                                        placeholder="例：年轻女性，黑色中长发，圆眼，日常穿浅色针织衫，神情温柔"
+                                        className="h-24 w-full resize-none rounded-xl bg-white border border-slate-100 px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                    />
+                                )}
+                            </div>
+                        )}
+                    </>
+                    <textarea
+                        value={manualPhotoPrompt}
+                        onChange={e => setManualPhotoPrompt(e.target.value)}
+                        placeholder={manualPhotoMode === 'story' ? '想让这张图更偏向什么情节、动作或氛围...' : '直接输入 NAI prompt 或画面描述...'}
+                        className="w-full h-36 bg-slate-100 rounded-2xl p-4 resize-none text-sm"
+                    />
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block">风格预设</label>
+                        <select
+                            value={effectiveManualPhotoStyleId}
+                            onChange={e => setManualPhotoStyleId(e.target.value)}
+                            className="w-full bg-slate-100 rounded-xl px-3 py-2.5 text-sm"
+                        >
+                            {manualPhotoStyleOptions.map(style => (
+                                <option key={style.id} value={style.id}>{style.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <VibeReferencePicker
+                        enabled={imageProviderType === 'novelai'}
+                        value={manualPhotoVibes}
+                        savedVibes={savedVibeReferences}
+                        disabled={manualPhotoGenerating}
+                        onChange={setManualPhotoVibes}
+                        onSaveReference={onSaveVibeReference}
+                        onImportVibeFile={onImportVibeFile}
+                        onRenameSavedVibe={onRenameSavedVibe}
+                        onDeleteSavedVibe={onDeleteSavedVibe}
+                        onClearSavedVibeCache={onClearSavedVibeCache}
+                        addToast={addToast}
+                    />
                 </div>
             </Modal>
 
@@ -534,6 +852,165 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
                             开启后，对方会在合适的时机主动给你拨打语音电话。
                         </p>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100">
+                        <label className="text-xs font-bold text-slate-400 uppercase mb-3 block">生图 / 发照片</label>
+                        <div className="space-y-3">
+                            <div className={`flex justify-between items-center ${onToggleManualPhoto ? 'cursor-pointer' : 'opacity-60'}`} onClick={onToggleManualPhoto}>
+                                <div>
+                                    <div className="text-xs font-bold text-slate-500">手动生图入口</div>
+                                    <p className="text-[10px] text-slate-400 mt-1">打开后，聊天 + 面板显示“生图”。</p>
+                                </div>
+                                <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${activeCharacter.manualPhotoEnabled ? 'bg-primary' : 'bg-slate-200'}`}>
+                                    <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${activeCharacter.manualPhotoEnabled ? 'translate-x-4' : ''}`}></div>
+                                </div>
+                            </div>
+                            <div className={`flex justify-between items-center ${onToggleAutoPhoto ? 'cursor-pointer' : 'opacity-60'}`} onClick={onToggleAutoPhoto}>
+                                <div>
+                                    <div className="text-xs font-bold text-slate-500">角色主动发照片</div>
+                                    <p className="text-[10px] text-slate-400 mt-1">主模型只给 photo_hint，副模型决定是否真的发图。</p>
+                                </div>
+                                <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${activeCharacter.autoPhotoEnabled ? 'bg-primary' : 'bg-slate-200'}`}>
+                                    <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${activeCharacter.autoPhotoEnabled ? 'translate-x-4' : ''}`}></div>
+                                </div>
+                            </div>
+                            <div className="rounded-2xl bg-slate-50/80 border border-slate-100 p-3">
+                                <div className="text-[11px] font-bold text-slate-500 mb-1">
+                                    {imageProviderType === 'novelai' ? '角色外貌 NAI tags' : '角色锁脸描述'}
+                                </div>
+                                <p className="mb-2 text-[10px] leading-relaxed text-slate-400">
+                                    {imageProviderType === 'novelai' ? '用于 NAI 生图。这里不做中文转 tags。' : '用于 OpenAI 兼容生图，用自然语言写外貌即可。'}
+                                </p>
+                                {imageProviderType === 'novelai' ? (
+                                    <>
+                                        <textarea
+                                            value={naiAppearanceTagsDraft}
+                                            onChange={e => setNaiAppearanceTagsDraft(e.target.value)}
+                                            placeholder="例：1girl, solo, long black hair, blue eyes"
+                                            className="mb-2 h-20 w-full resize-none rounded-xl bg-white border border-slate-100 px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                        />
+                                        <textarea
+                                            value={naiAppearanceNegativeDraft}
+                                            onChange={e => setNaiAppearanceNegativeDraft(e.target.value)}
+                                            placeholder="外貌相关 negative tags，可留空"
+                                            className="mb-2 h-16 w-full resize-none rounded-xl bg-white border border-slate-100 px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                        />
+                                    </>
+                                ) : (
+                                    <textarea
+                                        value={appearancePromptDraft}
+                                        onChange={e => setAppearancePromptDraft(e.target.value)}
+                                        placeholder="例：黑色长发，蓝灰色眼睛，清瘦，常穿深色衬衫，气质冷淡"
+                                        className="mb-2 h-24 w-full resize-none rounded-xl bg-white border border-slate-100 px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                    />
+                                )}
+                                <div className="mt-3 border-t border-slate-100 pt-3">
+                                    <div className="text-[11px] font-bold text-slate-500 mb-1">
+                                        {imageProviderType === 'novelai' ? '我的外貌 NAI tags' : '我的锁脸描述'}
+                                    </div>
+                                    <p className="mb-2 text-[10px] leading-relaxed text-slate-400">合照或画面包含你时使用；自动发图只会在双人语境里带上。</p>
+                                    {imageProviderType === 'novelai' ? (
+                                        <>
+                                            <textarea
+                                                value={userNaiAppearanceTagsDraft}
+                                                onChange={e => setUserNaiAppearanceTagsDraft(e.target.value)}
+                                                placeholder="合照用 tags，建议不要写 solo"
+                                                className="mb-2 h-20 w-full resize-none rounded-xl bg-white border border-slate-100 px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                            />
+                                            <textarea
+                                                value={userNaiAppearanceNegativeDraft}
+                                                onChange={e => setUserNaiAppearanceNegativeDraft(e.target.value)}
+                                                placeholder="我的外貌 negative tags，可留空"
+                                                className="mb-2 h-16 w-full resize-none rounded-xl bg-white border border-slate-100 px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                            />
+                                        </>
+                                    ) : (
+                                        <textarea
+                                            value={userAppearancePromptDraft}
+                                            onChange={e => setUserAppearancePromptDraft(e.target.value)}
+                                            placeholder="例：年轻女性，黑色中长发，圆眼，日常穿浅色针织衫"
+                                            className="mb-2 h-24 w-full resize-none rounded-xl bg-white border border-slate-100 px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                        />
+                                    )}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => onSaveNaiAppearance?.(naiAppearanceTagsDraft, naiAppearanceNegativeDraft, appearancePromptDraft, userNaiAppearanceTagsDraft, userNaiAppearanceNegativeDraft, userAppearancePromptDraft)}
+                                    className="w-full rounded-xl bg-primary px-3 py-2 text-xs font-bold text-white"
+                                >
+                                    保存锁脸设定
+                                </button>
+                            </div>
+                        </div>
+
+                        {photoStylePresets.length > 0 && (
+                            <div className="mt-4 rounded-2xl bg-slate-50/80 border border-slate-100 p-3">
+                                <div className="text-[11px] font-bold text-slate-500 mb-2">角色风格预设</div>
+                                <div className="space-y-2">
+                                    {photoStylePresets.map(style => {
+                                        const boundIds = activeCharacter.boundPhotoStylePresetIds;
+                                        const isBound = !boundIds || boundIds.length === 0 || boundIds.includes(style.id);
+                                        const isDefault = activeCharacter.defaultPhotoStylePresetId === style.id
+                                            || (!activeCharacter.defaultPhotoStylePresetId && style.id === realPhotoStylePresets[0]?.id);
+                                        return (
+                                            <div key={style.id} className="flex items-center gap-2 rounded-xl bg-white border border-slate-100 px-3 py-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onToggleBoundPhotoStyle?.(style.id)}
+                                                    className={`w-5 h-5 rounded-md border flex items-center justify-center ${isBound ? 'bg-primary border-primary text-white' : 'bg-white border-slate-200 text-transparent'}`}
+                                                >
+                                                    ✓
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onSetDefaultPhotoStyle?.(style.id)}
+                                                    className="min-w-0 flex-1 text-left"
+                                                >
+                                                    <div className={`text-xs font-bold truncate ${isDefault ? 'text-primary' : 'text-slate-600'}`}>{style.name}</div>
+                                                    <div className="text-[9px] text-slate-400 truncate">{style.id}</div>
+                                                </button>
+                                                {isDefault && <span className="rounded-full bg-primary/10 px-2 py-1 text-[9px] font-bold text-primary">默认</span>}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {imageProviderType === 'novelai' && savedVibeReferences.length > 0 && (
+                            <div className="mt-4 rounded-2xl bg-slate-50/80 border border-slate-100 p-3">
+                                <div className="text-[11px] font-bold text-slate-500 mb-1">角色默认 Vibe</div>
+                                <p className="mb-2 text-[10px] leading-relaxed text-slate-400">最多选择 3 个；角色主动发照片时会自动使用。</p>
+                                <div className="space-y-2">
+                                    {savedVibeReferences.map(vibe => {
+                                        const selectedIds = activeCharacter.defaultVibeReferenceIds || [];
+                                        const isSelected = selectedIds.includes(vibe.id);
+                                        return (
+                                            <button
+                                                key={vibe.id}
+                                                type="button"
+                                                onClick={() => onToggleDefaultVibeReference?.(vibe.id)}
+                                                className="flex w-full items-center gap-2 rounded-xl bg-white border border-slate-100 px-3 py-2 text-left"
+                                            >
+                                                <div className={`w-5 h-5 rounded-md border flex shrink-0 items-center justify-center ${isSelected ? 'bg-primary border-primary text-white' : 'bg-white border-slate-200 text-transparent'}`}>
+                                                    ✓
+                                                </div>
+                                                {vibe.previewUrl ? (
+                                                    <img src={vibe.previewUrl} alt={vibe.name} className="h-8 w-8 rounded-lg object-cover" />
+                                                ) : (
+                                                    <div className="h-8 w-8 rounded-lg bg-slate-100" />
+                                                )}
+                                                <div className="min-w-0 flex-1">
+                                                    <div className={`truncate text-xs font-bold ${isSelected ? 'text-primary' : 'text-slate-600'}`}>{vibe.name}</div>
+                                                    <div className="truncate text-[9px] text-slate-400">{Object.keys(vibe.encodings || {}).length} 个编码缓存</div>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="pt-2 border-t border-slate-100">

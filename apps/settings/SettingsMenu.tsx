@@ -4,8 +4,10 @@ import { haptic } from '../../utils/haptics';
 import { requestSystemFullscreen,exitSystemFullscreen } from '../../utils/systemFullscreen';
 import { getRuntimeConfigSnapshot,inferEmbeddingEngineId } from '../../utils/runtimeConfig';
 import { safeLocalStorageGet,safeLocalStorageSet } from '../../utils/storage';
+import { usePerformanceMode } from '../../hooks/usePerformanceMode';
+import type { PerformanceModePreference } from '../../utils/performanceMode';
 
-export type SettingsPanel = 'menu' | 'data' | 'api' | 'subapi' | 'realtime' | 'tts' | 'stt' | 'embedding' | 'agent' | 'debug';
+export type SettingsPanel = 'menu' | 'data' | 'api' | 'subapi' | 'realtime' | 'tts' | 'stt' | 'image' | 'embedding' | 'agent' | 'debug';
 
 interface Props {
     onNavigate: (panel: SettingsPanel) => void;
@@ -53,6 +55,11 @@ const MENU_ITEMS: MenuItem[] = [
         title: '语音识别', desc: 'Groq / 硅基流动 STT',
     },
     {
+        id: 'image', iconBg: 'bg-fuchsia-100/50 text-fuchsia-600',
+        icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" /></svg>,
+        title: '生图服务', desc: 'NAI / OpenAI · 分离风格',
+    },
+    {
         id: 'embedding', iconBg: 'bg-green-100/50 text-green-600',
         icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" /></svg>,
         title: '向量记忆引擎', desc: '标准版 / 增强版',
@@ -71,6 +78,11 @@ const MENU_ITEMS: MenuItem[] = [
 
 const HAPTICS_ENABLED_KEY = 'os_haptics_enabled';
 const FULLSCREEN_ENABLED_KEY = 'os_fullscreen_enabled';
+const PERFORMANCE_MODE_OPTIONS: Array<{ id: PerformanceModePreference; label: string }> = [
+    { id: 'auto', label: '自动' },
+    { id: 'on', label: '开启' },
+    { id: 'off', label: '关闭' },
+];
 
 // ─── Status reading from runtime snapshot (no context subscription!) ─────
 
@@ -104,12 +116,21 @@ function readStatuses(): Record<string, string | undefined> {
         const embDesc = embeddingEngineId === 'enhanced'
             ? 'Qwen3-Embedding-8B'
             : 'bge-m3';
+        const imageConfig = snapshot.imageGeneration.config;
+        const imageStatus = imageConfig.activeProvider === 'openai-compatible'
+            ? (imageConfig.openaiCompatible.apiKey && imageConfig.openaiCompatible.model
+                ? imageConfig.openaiCompatible.model
+                : '未配置')
+            : (imageConfig.novelai.apiToken
+                ? imageConfig.novelai.model.replace('nai-diffusion-', 'NAI ')
+                : '未配置');
 
         return {
             api: apiStatus,
             tts: ttsStatus,
             stt: sttStatus,
             realtime: rtStatus,
+            image: imageStatus,
             embedding: embStatus,
             embeddingDesc: embDesc,
         };
@@ -120,6 +141,7 @@ function readStatuses(): Record<string, string | undefined> {
 
 const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
     const statuses = useMemo(readStatuses, []);
+    const performanceMode = usePerformanceMode();
 
     // Haptics toggle — UI-only preference via storage helper
     const [hapticsEnabled, setHapticsEnabled] = React.useState(() => {
@@ -145,10 +167,16 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
         }
     };
 
+    const setPerformancePreference = (preference: PerformanceModePreference) => {
+        haptic.light();
+        performanceMode.setPreference(preference);
+    };
+
     const statusMap: Record<string, string | undefined> = {
         api: statuses.api,
         tts: statuses.tts,
         stt: statuses.stt,
+        image: statuses.image,
         realtime: statuses.realtime,
         embedding: statuses.embedding,
     };
@@ -211,6 +239,42 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
                     <input type="checkbox" checked={fullscreenEnabled} onChange={e => toggleFullscreen(e.target.checked)} className="sr-only peer" />
                     <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500"></div>
                 </label>
+            </div>
+
+            {/* 流畅模式 */}
+            <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-4 shadow-sm border border-white/50">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-2 bg-indigo-100/50 rounded-xl text-indigo-600 shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5 10.5 3.75l-1.5 7.5h11.25L13.5 20.25l1.5-6.75H3.75Z" /></svg>
+                        </div>
+                        <div className="min-w-0">
+                            <div className="text-sm font-semibold text-slate-700">流畅模式</div>
+                            <div className="text-[10px] text-slate-400 truncate">
+                                当前：{performanceMode.resolved === 'lite' ? '流畅优先' : '完整效果'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-slate-100/70 p-1" data-testid="performance-mode-control">
+                    {PERFORMANCE_MODE_OPTIONS.map(option => {
+                        const active = performanceMode.preference === option.id;
+                        return (
+                            <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => setPerformancePreference(option.id)}
+                                className={`h-8 rounded-lg text-[11px] font-bold transition-all ${
+                                    active
+                                        ? 'bg-white text-indigo-600 shadow-sm'
+                                        : 'text-slate-400 active:bg-white/60'
+                                }`}
+                            >
+                                {option.label}
+                            </button>
+                        );
+                    })}
+                </div>
             </div>
 
             <div className="text-center text-[10px] text-slate-300 pb-8 pt-4 font-mono tracking-widest uppercase">

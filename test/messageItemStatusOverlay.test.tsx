@@ -159,6 +159,27 @@ describe('MessageItem status overlay', () => {
         expect(innerVoiceShell).not.toContainElement(screen.getByTestId('inner-voice-close-hint'));
     });
 
+    it('keeps freeform status card overlays centered in an explicit viewport-height shell', async () => {
+        renderMessageItem({
+            statusCardData: {
+                cardType: 'freeform',
+                body: 'Out of focus',
+                meta: { html: '<html><body><div>Out of focus</div></body></html>' },
+                style: {},
+            } satisfies StatusCardData,
+        });
+
+        fireEvent.click(screen.getByAltText('avatar').parentElement!);
+
+        const statusShell = await screen.findByTestId('status-card-overlay-shell');
+        expect(statusShell).toHaveClass('animate-status-card-in');
+        expect(statusShell).toHaveClass('my-auto');
+        expect(statusShell).toHaveClass('flex-col');
+        expect(statusShell).toHaveClass('items-center');
+        expect(statusShell).toHaveClass('justify-center');
+        expect(statusShell).toHaveStyle({ height: 'calc(100vh - 48px)' });
+    });
+
     it('shows expand control only for long classic inner voice text', () => {
         renderMessageItem({
             innerVoice: '今天风有点大，不过刚好适合把脑子里的杂音都吹散。',
@@ -220,5 +241,27 @@ describe('MessageItem status overlay', () => {
 
         expect(screen.queryByText('"第一次引用"')).not.toBeInTheDocument();
         expect(screen.getByText('"第二次引用"')).toBeInTheDocument();
+    });
+
+    it('renders image replies as thumbnails instead of raw URLs', () => {
+        const imageUrl = 'https://cdn.example.com/photos/window-selfie.webp';
+        renderMessageItem({
+            msg: {
+                ...baseMessage,
+                replyTo: {
+                    id: 9,
+                    name: 'Sully',
+                    content: imageUrl,
+                    type: 'image',
+                    thumbnailUrl: imageUrl,
+                    visualSummary: '窗边自拍',
+                },
+            },
+        });
+
+        expect(screen.getByTestId('reply-image-thumbnail')).toHaveAttribute('src', imageUrl);
+        expect(screen.getByText('[图片]')).toBeInTheDocument();
+        expect(screen.queryByText('窗边自拍')).not.toBeInTheDocument();
+        expect(screen.queryByText(imageUrl)).not.toBeInTheDocument();
     });
 });

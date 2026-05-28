@@ -3,7 +3,7 @@
 
 import React,{ useEffect,useRef,useState } from 'react';
 import ReactDOM from 'react-dom';
-import { DeviceMobileCamera } from '@phosphor-icons/react';
+import { ArrowsOutSimple, DownloadSimple, DeviceMobileCamera, X } from '@phosphor-icons/react';
 import { Message,ChatTheme } from '../../types';
 import { StatusCardData } from '../../types/statusCard';
 import { haptic } from '../../utils/haptics';
@@ -11,6 +11,7 @@ import { THEME_PLUGINS } from './ThemeRegistry';
 import DefaultTransferCard from './plugins/DefaultTransferCard';
 import { stripJunk } from '../../utils/markdownLite';
 import { parseBilingual } from '../../utils/chatParser';
+import { getImageMessageDisplayUrl,resolveOriginalImageUrl } from '../../utils/generatedImageStorage';
 import XhsCard from './cards/XhsCard';
 import SocialCard from './cards/SocialCard';
 import SystemNoticeCard from './cards/SystemNoticeCard';
@@ -30,6 +31,13 @@ import VoiceBubble from './VoiceBubble';
 const StatusCardRenderer = React.lazy(() => import('./StatusCardRenderer'));
 const CLASSIC_INNER_VOICE_PREVIEW_THRESHOLD = 48;
 const customCssTargetsBubbleShell = (css: string | undefined) => /\.sully-bubble-(?:user|ai)\b/.test(css || '');
+
+type ImagePreviewState = {
+    src: string;
+    alt: string;
+    summary?: string;
+    isLoadingOriginal?: boolean;
+};
 
 // --- Deduplicated Selection Checkbox ---
 const SelectionCheckbox: React.FC<{ isSelected: boolean; onToggle: () => void }> = ({ isSelected, onToggle }) => (
@@ -126,6 +134,8 @@ const MessageItem = React.memo(({
     const startPos = useRef({ x: 0, y: 0 }); // Track touch start position
     const [showInnerVoice, setShowInnerVoice] = useState(false);
     const [isClassicInnerVoiceExpanded, setIsClassicInnerVoiceExpanded] = useState(false);
+    const [imagePreview, setImagePreview] = useState<ImagePreviewState | null>(null);
+    const imagePreviewRequestRef = useRef(0);
 
     const styleConfig = isUser ? activeTheme.user : activeTheme.ai;
     const allowBubbleCssOverride = customCssTargetsBubbleShell(activeTheme.customCss);
@@ -219,11 +229,28 @@ const MessageItem = React.memo(({
         setShowInnerVoice(prev => !prev);
     };
 
+    const closeImagePreview = () => {
+        imagePreviewRequestRef.current += 1;
+        setImagePreview(null);
+    };
+
     useEffect(() => {
         if (!showInnerVoice) {
             setIsClassicInnerVoiceExpanded(false);
         }
     }, [showInnerVoice, trimmedInnerVoice]);
+
+    useEffect(() => {
+        if (!imagePreview) return;
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                imagePreviewRequestRef.current += 1;
+                setImagePreview(null);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [imagePreview]);
 
     useEffect(() => () => {
         if (longPressTimer.current) {
@@ -472,6 +499,7 @@ const MessageItem = React.memo(({
                                     }`}
                                     style={{
                                         maxWidth: statusCardData ? 'min(96vw, 560px)' : 'min(88vw, 360px)',
+                                        height: statusCardData ? 'calc(100vh - 48px)' : undefined,
                                     }}
                                     onClick={(e) => e.stopPropagation()}
                                 >
@@ -690,10 +718,133 @@ const MessageItem = React.memo(({
     }
 
     if (m.type === 'image') {
+        const imageSrc = String(m.content || '');
+        const thumbnailSrc = getImageMessageDisplayUrl(m);
+        const imageStatus = String(m.metadata?.status || '');
+        const isGeneratingImage = imageStatus === 'generating';
+        const isFailedImage = imageStatus === 'failed';
+        const originalAssetId = typeof m.metadata?.originalAssetId === 'string'
+            ? m.metadata.originalAssetId
+            : undefined;
+        const imageSummary = String(m.metadata?.visualSummary || m.metadata?.caption || '').trim();
+        const imageAlt = imageSummary || (isUser ? 'Uploaded image' : 'Generated image');
+        const fallbackPreviewSrc = imageSrc || thumbnailSrc;
+        if ((isGeneratingImage || isFailedImage) && !thumbnailSrc) {
+            return commonLayout(
+                <div
+                    className="sully-image-msg-shell flex h-[240px] w-[180px] flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl border border-black/5 bg-black/5 px-4 text-center shadow-sm"
+                    data-testid="chat-image-placeholder"
+                    role={isGeneratingImage ? 'status' : undefined}
+                >
+                    {isGeneratingImage ? (
+                        <div className="h-8 w-8 rounded-full border-2 border-slate-300 border-t-slate-500 animate-spin" />
+                    ) : (
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-rose-100 text-xs font-bold text-rose-500">!</div>
+                    )}
+                    <div className="text-xs font-medium text-slate-500">
+                        {isGeneratingImage ? '发送图片中...' : '图片发送失败'}
+                    </div>
+                </div>
+            );
+        }
+        const stopImageGesture = (event: React.SyntheticEvent) => {
+            if (!selectionMode) {
+                event.stopPropagation();
+            }
+        };
+        const openImagePreview = () => {
+            const requestId = imagePreviewRequestRef.current + 1;
+            imagePreviewRequestRef.current = requestId;
+
+            if (!originalAssetId) {
+                setImagePreview({ src: fallbackPreviewSrc, alt: imageAlt, summary: imageSummary });
+                return;
+            }
+
+            setImagePreview({
+                src: thumbnailSrc || fallbackPreviewSrc,
+                alt: imageAlt,
+                summary: imageSummary,
+                isLoadingOriginal: true,
+            });
+
+            void resolveOriginalImageUrl(originalAssetId, fallbackPreviewSrc).then(src => {
+                if (imagePreviewRequestRef.current !== requestId) return;
+                setImagePreview(prev => prev ? { ...prev, src, isLoadingOriginal: false } : prev);
+            });
+        };
+        const previewPortal = imagePreview ? ReactDOM.createPortal(
+            <div
+                className="sully-image-preview-backdrop fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 px-3 py-6 backdrop-blur-xl"
+                role="dialog"
+                aria-modal="true"
+                onClick={closeImagePreview}
+            >
+                <button
+                    type="button"
+                    className="sully-image-preview-action absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white shadow-lg backdrop-blur-md transition-transform active:scale-95"
+                    aria-label="关闭预览"
+                    title="关闭预览"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        closeImagePreview();
+                    }}
+                >
+                    <X className="h-5 w-5" weight="bold" />
+                </button>
+                <a
+                    className="sully-image-preview-action absolute bottom-5 right-4 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white shadow-lg backdrop-blur-md transition-transform active:scale-95"
+                    href={imagePreview.src}
+                    download={`sully-image-${m.id}.png`}
+                    aria-label="保存原图"
+                    title="保存原图"
+                    onClick={event => event.stopPropagation()}
+                >
+                    <DownloadSimple className="h-5 w-5" weight="bold" />
+                </a>
+                <img
+                    src={imagePreview.src}
+                    data-testid="chat-image-preview-img"
+                    className="max-h-[88vh] max-w-[94vw] rounded-lg object-contain shadow-2xl"
+                    alt={imagePreview.alt}
+                    decoding="async"
+                    onClick={event => event.stopPropagation()}
+                />
+            </div>,
+            document.body
+        ) : null;
+
         return commonLayout(
-            <div className="relative group">
-                <img src={m.content} className="sully-image-msg max-w-[200px] max-h-[300px] rounded-2xl shadow-sm border border-black/5" alt="Uploaded" loading="lazy" decoding="async" />
-            </div>
+            <>
+                <button
+                    type="button"
+                    className="sully-image-msg-shell relative group block overflow-hidden rounded-2xl border border-black/5 bg-black/5 shadow-sm transition-transform active:scale-[0.98]"
+                    aria-label="打开原图预览"
+                    title="打开原图预览"
+                    onMouseDown={stopImageGesture}
+                    onMouseUp={stopImageGesture}
+                    onTouchStart={stopImageGesture}
+                    onTouchEnd={stopImageGesture}
+                    onClick={(event) => {
+                        if (selectionMode) return;
+                        event.stopPropagation();
+                        openImagePreview();
+                    }}
+                >
+                    <img
+                        src={thumbnailSrc}
+                        data-testid="chat-image-thumbnail"
+                        className="sully-image-msg max-h-[300px] max-w-[200px] object-cover"
+                        alt={imageAlt}
+                        loading="lazy"
+                        decoding="async"
+                    />
+                    <span className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-white opacity-0 shadow-sm backdrop-blur-md transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                        <ArrowsOutSimple className="h-4 w-4" weight="bold" />
+                    </span>
+                </button>
+                {previewPortal}
+            </>
         );
     }
 
@@ -885,9 +1036,18 @@ const MessageItem = React.memo(({
         prev.msg.metadata?.hasAudio === next.msg.metadata?.hasAudio &&
         prev.msg.metadata?.duration === next.msg.metadata?.duration &&
         prev.msg.metadata?.sourceText === next.msg.metadata?.sourceText &&
+        prev.msg.metadata?.thumbnailUrl === next.msg.metadata?.thumbnailUrl &&
+        prev.msg.metadata?.originalAssetId === next.msg.metadata?.originalAssetId &&
+        prev.msg.metadata?.visualSummary === next.msg.metadata?.visualSummary &&
+        prev.msg.metadata?.caption === next.msg.metadata?.caption &&
+        prev.msg.metadata?.imageId === next.msg.metadata?.imageId &&
         prev.msg.replyTo?.id === next.msg.replyTo?.id &&
         prev.msg.replyTo?.name === next.msg.replyTo?.name &&
         prev.msg.replyTo?.content === next.msg.replyTo?.content &&
+        prev.msg.replyTo?.type === next.msg.replyTo?.type &&
+        prev.msg.replyTo?.thumbnailUrl === next.msg.replyTo?.thumbnailUrl &&
+        prev.msg.replyTo?.imageUrl === next.msg.replyTo?.imageUrl &&
+        prev.msg.replyTo?.visualSummary === next.msg.replyTo?.visualSummary &&
         prev.isFirstInGroup === next.isFirstInGroup &&
         prev.isLastInGroup === next.isLastInGroup &&
         prev.activeTheme === next.activeTheme &&

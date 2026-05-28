@@ -517,7 +517,7 @@ export class BackendAgentManager {
                     });
                 }, agentConfig.debugMode ? 60_000 : 5 * 60 * 1000);
             } catch (error: any) {
-                console.error('[Agent] Failed to start backend agent:', error.message);
+                console.warn('[Agent] Failed to start backend agent:', error.message);
             }
         })();
 

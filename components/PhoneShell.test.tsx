@@ -74,14 +74,14 @@ vi.mock('./os/UpdatePopup', async () => {
 vi.mock('./os/DynamicIsland', async () => {
     const React = await import('react');
     return {
-        default: () => React.createElement(React.Fragment, null),
+        default: () => React.createElement('div', { 'data-testid': 'dynamic-island' }, 'Dynamic Island'),
     };
 });
 
 vi.mock('./os/FloatingLyrics', async () => {
     const React = await import('react');
     return {
-        default: () => React.createElement(React.Fragment, null),
+        default: () => React.createElement('div', { 'data-testid': 'floating-lyrics' }, 'Floating Lyrics'),
     };
 });
 
@@ -194,7 +194,7 @@ describe('PhoneShell active app rendering', () => {
         vi.useRealTimers();
     });
 
-    it('does not rerender the active app when virtual time ticks in the status bar', async () => {
+    it('does not rerender the active app during same-minute virtual time checks', async () => {
         render(
             <VirtualTimeProvider>
                 <PhoneShell />
@@ -204,13 +204,78 @@ describe('PhoneShell active app rendering', () => {
         expect(launcherRenderCount).toBe(1);
 
         await act(async () => {
+            vi.advanceTimersByTime(500);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+        const statusBarCountAfterIdleOverlays = statusBarRenderCount;
+
+        await act(async () => {
             vi.advanceTimersByTime(3100);
             await Promise.resolve();
             await Promise.resolve();
         });
 
-        expect(statusBarRenderCount).toBeGreaterThan(1);
+        expect(statusBarRenderCount).toBe(statusBarCountAfterIdleOverlays);
         expect(launcherRenderCount).toBe(1);
+    });
+
+    it('marks lite mode and lowers active-app background blur', async () => {
+        vi.useRealTimers();
+        localStorage.setItem('sullyos_performance_mode', 'on');
+        mockedUseOS.mockReturnValue({
+            activeApp: AppID.EchoRecord,
+            characters: [],
+            closeApp: vi.fn(),
+            handleBack: vi.fn(() => true),
+            isDataLoaded: true,
+            isLocked: false,
+            theme: {
+                wallpaper: 'linear-gradient(#000000, #111111)',
+                hideStatusBar: false,
+            },
+            toasts: [],
+            unreadMessages: {},
+            unlock: vi.fn(),
+        } as any);
+
+        render(
+            <VirtualTimeProvider>
+                <PhoneShell />
+            </VirtualTimeProvider>,
+        );
+
+        expect(await screen.findByText('EchoRecord App', {}, { timeout: 3000 })).toBeTruthy();
+        expect(screen.getByTestId('phone-shell-root')).toHaveAttribute('data-performance-mode', 'lite');
+        expect(screen.getByTestId('phone-shell-background')).toHaveStyle({ filter: 'none' });
+    });
+
+    it('delays ambient overlays in lite mode until after idle', async () => {
+        localStorage.setItem('sullyos_performance_mode', 'on');
+
+        render(
+            <VirtualTimeProvider>
+                <PhoneShell />
+            </VirtualTimeProvider>,
+        );
+
+        expect(screen.queryByTestId('dynamic-island')).toBeNull();
+
+        await act(async () => {
+            vi.advanceTimersByTime(2499);
+            await Promise.resolve();
+        });
+        expect(screen.queryByTestId('dynamic-island')).toBeNull();
+
+        await act(async () => {
+            vi.advanceTimersByTime(3);
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(screen.getByTestId('dynamic-island')).toBeTruthy();
+        expect(screen.getByTestId('floating-lyrics')).toBeTruthy();
     });
 
     it('renders the EchoRecord app when it is the active app', async () => {

@@ -1,7 +1,7 @@
 
 
 const DB_NAME = 'AetherOS_Data';
-const DB_VERSION = 45; // Bumped for yesterday newspaper reports
+const DB_VERSION = 46; // Bumped for saved NovelAI Vibe references
 
 export const STORE_CHARACTERS = 'characters';
 export const STORE_MESSAGES = 'messages';
@@ -36,6 +36,7 @@ export const STORE_MEMORY_RECORD_AUDIO = 'memory_record_audio';
 export const STORE_HOT_NEWS_SNAPSHOTS = 'hot_news_snapshots';
 export const STORE_CHAT_CONTEXT_MIRRORS = 'chat_context_mirrors';
 export const STORE_YESTERDAY_NEWSPAPERS = 'yesterday_newspapers';
+export const STORE_VIBE_REFERENCES = 'vibe_references';
 
 export interface ScheduledMessage {
     id: string;
@@ -228,6 +229,10 @@ export const openDB = (): Promise<IDBDatabase> => {
                 const newspaperStore = db.createObjectStore(STORE_YESTERDAY_NEWSPAPERS, { keyPath: 'id' });
                 newspaperStore.createIndex('ownerUserIdCharIdDate', ['ownerUserId', 'charId', 'date'], { unique: true });
                 newspaperStore.createIndex('charIdDate', ['charId', 'date'], { unique: false });
+            }
+            if (!db.objectStoreNames.contains(STORE_VIBE_REFERENCES)) {
+                const vibeStore = db.createObjectStore(STORE_VIBE_REFERENCES, { keyPath: 'id' });
+                vibeStore.createIndex('updatedAt', 'updatedAt', { unique: false });
             }
         };
     });

@@ -8,6 +8,7 @@ import { setHapticsEnabled as setHapticsEnabledGlobal } from '../utils/haptics';
 import { shouldHideLifeStreamLikeMessage } from '../utils/lifeStreamVisibility';
 import { preloadImages } from '../utils/preloadResources';
 import { useAutoBackup } from '../hooks/useAutoBackup';
+import { usePerformanceMode } from '../hooks/usePerformanceMode';
 import {
     APPEARANCE_PRESET_ASSET_PREFIX,
     createAppearancePreset,
@@ -18,6 +19,7 @@ import {
     sanitizeAppearanceTheme,
     stripAppearanceThemeForLocalStorage,
 } from '../utils/appearancePresets';
+import { getImageGenerationDraftConfig } from '../utils/runtimeConfig';
 
 // Sub-contexts
 import { NotificationProvider,useNotification,NotificationContextType } from './NotificationContext';
@@ -273,6 +275,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     const notifCtx = useNotification();
     const characterCtx = useCharacter();
     const configCtx = useConfig();
+    const { isLite } = usePerformanceMode();
     const { addToast, setLastMsgTimestamp, setUnreadMessages } = notifCtx;
     const {
         characters,
@@ -299,6 +302,9 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
         updateRealtimeConfig: configUpdateRealtimeConfig,
         ttsConfig,
         sttConfig,
+        imageGenerationConfig,
+        imageApiPresets,
+        photoStylePresets,
     } = publicConfigCtx;
 
     const [theme, setTheme] = useState<OSTheme>(defaultTheme);
@@ -641,10 +647,15 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
                 schedulerRunningRef.current = false;
             }
         };
-        schedulerRef.current = setInterval(checkAllSchedules, 5000);
-        checkAllSchedules();
-        return () => { if (schedulerRef.current) clearInterval(schedulerRef.current); };
-    }, [isDataLoaded, characterIdsKey]);
+        const intervalMs = isLite ? 15000 : 5000;
+        const initialDelayMs = isLite ? 4000 : 0;
+        schedulerRef.current = setInterval(checkAllSchedules, intervalMs);
+        const initialTimer = setTimeout(checkAllSchedules, initialDelayMs);
+        return () => {
+            if (schedulerRef.current) clearInterval(schedulerRef.current);
+            clearTimeout(initialTimer);
+        };
+    }, [isDataLoaded, characterIdsKey, isLite]);
 
     // --- Service Worker: 通知点击 → 切换角色 + 打开聊天 ---
     useEffect(() => {
@@ -810,7 +821,19 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     const exportSystem = async (mode: SystemBackupMode, options?: SystemBackupOptions): Promise<Blob> => {
         try {
             setSysOperation({ status: 'processing', message: '正在初始化...', progress: 0 });
-            const stateSnapshot: ExportStateSnapshot = { apiConfig, apiPresets, availableModels, realtimeConfig, ttsConfig, sttConfig, theme };
+            const stateSnapshot: ExportStateSnapshot = {
+                apiConfig,
+                apiPresets,
+                availableModels,
+                realtimeConfig,
+                ttsConfig,
+                sttConfig,
+                imageGenerationConfig,
+                imageGenerationDraftConfig: getImageGenerationDraftConfig() || undefined,
+                imageApiPresets,
+                photoStylePresets,
+                theme,
+            };
             const blob = await exportSystemData(mode, stateSnapshot, (message, progress) => {
                 setSysOperation({ status: 'processing', message, progress });
             }, options);

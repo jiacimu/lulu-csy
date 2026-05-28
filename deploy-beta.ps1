@@ -84,6 +84,27 @@ function Get-GitDirty {
     return @($output).Count -gt 0
 }
 
+function Invoke-NativeCapture {
+    param(
+        [string]$FilePath,
+        [string[]]$ArgumentList
+    )
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & $FilePath @ArgumentList 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    return [pscustomobject]@{
+        Output   = @($output | ForEach-Object { $_.ToString() })
+        ExitCode = $exitCode
+    }
+}
+
 function Save-BetaDeployState {
     param([string]$PreviewUrl)
 
@@ -101,8 +122,16 @@ function Save-BetaDeployState {
 function Get-LatestPreviewUrl {
     param([string]$ProjectName, [string]$Branch)
 
-    $listOutput = & $wranglerNpx wrangler pages deployment list --project-name $ProjectName 2>&1
-    $listExitCode = $LASTEXITCODE
+    $listResult = Invoke-NativeCapture -FilePath $wranglerNpx -ArgumentList @(
+        'wrangler',
+        'pages',
+        'deployment',
+        'list',
+        '--project-name',
+        $ProjectName
+    )
+    $listOutput = $listResult.Output
+    $listExitCode = $listResult.ExitCode
     if ($listExitCode -ne 0) {
         throw "Pages deployment listing failed with exit code $listExitCode"
     }
@@ -145,8 +174,19 @@ try {
     }
 
     Write-Host "Deploying beta bundle to Cloudflare Pages preview..." -ForegroundColor Cyan
-    $deployOutput = & $wranglerNpx wrangler pages deploy dist --project-name $projectName --branch $betaBranch --commit-dirty=true 2>&1
-    $deployExitCode = $LASTEXITCODE
+    $deployResult = Invoke-NativeCapture -FilePath $wranglerNpx -ArgumentList @(
+        'wrangler',
+        'pages',
+        'deploy',
+        'dist',
+        '--project-name',
+        $projectName,
+        '--branch',
+        $betaBranch,
+        '--commit-dirty=true'
+    )
+    $deployOutput = $deployResult.Output
+    $deployExitCode = $deployResult.ExitCode
     $deployOutput | ForEach-Object { $_ }
     if ($deployExitCode -ne 0) {
         throw "Pages deploy failed with exit code $deployExitCode"

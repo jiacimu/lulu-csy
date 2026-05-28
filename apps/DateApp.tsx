@@ -3,13 +3,13 @@ import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { useVirtualTime } from '../context/VirtualTimeContext';
 import { DB } from '../utils/db';
-import { CharacterProfile,Message,DateState } from '../types';
+import { CharacterProfile,Message,DateState,UserProfile } from '../types';
 import { ContextBuilder } from '../utils/context';
 import { safeResponseJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
 import DateSession,{ DateExitSyncMode } from '../components/date/DateSession';
 import DateSettings from '../components/date/DateSettings';
-import { buildDatePreamble,buildTheaterScene,buildDateTail } from '../utils/datePrompts';
+import { buildDatePreamble,buildTheaterScene,buildDateTail,buildDateTimeBlock } from '../utils/datePrompts';
 import { extractThinking, extractInnerWhispers, type InnerWhisper } from '../utils/thinkingExtractor';
 import { DEFAULT_DATE_SUMMARY_PROMPT,buildSummaryPrompt,formatDateMessagesForBridge,formatMessagesForSummary } from '../utils/dateSummaryPrompts';
 import {
@@ -24,6 +24,8 @@ import { renderMarkdown } from '../utils/markdownLite';
 import { stripTranslationTags } from '../utils/chatParser';
 import { isDateModeContextMessage } from '../utils/mainlineMemory';
 import { trackedApiRequest } from '../utils/apiRequestLedger';
+import { buildTemporalContext } from '../utils/temporalContext';
+import { EventExtractor } from '../utils/eventExtractor';
 
 type SummaryType = 'auto' | 'manual';
 const DATE_SUMMARY_CONTEXT_KEEP_COUNT = 5;
@@ -68,6 +70,12 @@ const getBridgeTypeLabel = (m: Message) => {
 const getBridgeStatusLabel = (bridges: Message[]) => (
     bridges.every(isDateForkBridge) ? '已带入旧见面背景' : '已同步到主聊天'
 );
+const getDateMessageContextContent = (m: Message) => (
+    m.type === 'image' ? '[User sent an image]' : stripTranslationTags(m.content)
+);
+const getDateHistoryDisplayText = (content: string) => (
+    stripTranslationTags(content || '').replace(/\[.*?\]/g, '').trim()
+);
 
 const getCurrentSessionMessages = (msgs: Message[]) => {
     const dateMsgs = msgs.filter(isDateRawDialogueMessage).sort((a, b) => a.timestamp - b.timestamp);
@@ -103,6 +111,44 @@ const buildDateSummaryMemoryPrompt = (msgs: Message[]) => {
 const hasCompleteApiConfig = (config?: { baseUrl?: string; apiKey?: string; model?: string } | null): config is { baseUrl: string; apiKey: string; model: string } => (
     !!config?.baseUrl?.trim() && !!config?.apiKey?.trim() && !!config?.model?.trim()
 );
+
+export const buildDateSessionSystemPrompt = ({
+    char,
+    userProfile,
+    allMsgs,
+}: {
+    char: CharacterProfile;
+    userProfile: UserProfile;
+    allMsgs: Message[];
+}): string => {
+    let systemPrompt = buildDatePreamble(char.name, userProfile.name);
+    systemPrompt += ContextBuilder.buildCoreContext(char, userProfile);
+    systemPrompt += buildDateTimeBlock();
+    systemPrompt += buildDateSummaryMemoryPrompt(allMsgs);
+    const REQUIRED_EMOTIONS = ['normal', 'happy', 'angry', 'sad', 'shy'];
+    const dateEmotions = [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])];
+    const userPov = char.datePerspective || 'second';
+    const charPov = char.dateCharPerspective || 'third';
+    systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov, undefined, char.dateOutputWordCount, char.dateWritingStyle);
+    systemPrompt += buildDateTail(char.name, userProfile.name, userPov, charPov);
+    return systemPrompt;
+};
+
+export const appendDateTemporalContext = (content: string, temporalContext?: string): string => {
+    const normalized = temporalContext?.trim();
+    return normalized ? `${content}\n\n${normalized}` : content;
+};
+
+export const maybeExtractDateTemporalEvent = (
+    charId: string,
+    text: string,
+    secondaryConfig?: { baseUrl?: string; apiKey?: string; model?: string } | null,
+): void => {
+    if (!hasCompleteApiConfig(secondaryConfig)) return;
+    if (!EventExtractor.hasTimeKeyword(text)) return;
+    EventExtractor.extract(charId, text, secondaryConfig)
+        .catch(e => console.error('⏰ [DateEventExtractor] Background:', e));
+};
 
 const fetchDateChatCompletion = (
     config: { baseUrl: string; apiKey: string; model: string },
@@ -1302,7 +1348,7 @@ ${exitPromptContent}
             const gapHint = getTimeGapHint(lastMsg?.timestamp);
 
             const recentMsgs = msgs.slice(-peekLimit).map(m => {
-                const content = m.type === 'image' ? '[User sent an image]' : m.content;
+                const content = getDateMessageContextContent(m);
                 return `${m.role}: ${content}`;
             }).join('\n');
 
@@ -1375,7 +1421,14 @@ ${exitPromptContent}
         setDateMessages(dateFiltered);
 
         const limit = char.contextLimit || 500;
-        const visibleHistory = allMsgs.filter(isDateModeContextMessage);
+        const visibleHistory = allMsgs
+            .filter(isDateModeContextMessage)
+            .sort((a, b) => a.timestamp - b.timestamp);
+        const temporalHistory = visibleHistory.slice(-limit);
+        const previousContextMsg = temporalHistory[temporalHistory.length - 2];
+        const temporalContext = buildTemporalContext(temporalHistory, Date.now(), char.id)
+            || getTimeGapHint(previousContextMsg?.timestamp);
+        const userPromptText = appendDateTemporalContext(text, temporalContext);
 
         // Construct History for AI
         // We exclude the very last message (UserMsg we just sent) from history array 
@@ -1383,26 +1436,17 @@ ${exitPromptContent}
         // BUT, we must ensure the Opening (Assistant) is included in history.
         const historyMsgs = visibleHistory.slice(-limit, -1).map(m => ({
             role: m.role,
-            content: m.type === 'image' ? '[User sent an image]' : stripTranslationTags(m.content)
+            content: getDateMessageContextContent(m)
         }));
 
-        // ====== Build full immersive theater system prompt ======
-        let systemPrompt = buildDatePreamble(char.name, userProfile.name);
-        systemPrompt += ContextBuilder.buildCoreContext(char, userProfile);
-        systemPrompt += buildDateSummaryMemoryPrompt(allMsgs);
-        const REQUIRED_EMOTIONS = ['normal', 'happy', 'angry', 'sad', 'shy'];
-        const dateEmotions = [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])];
-        const userPov = char.datePerspective || 'second';
-        const charPov = char.dateCharPerspective || 'third';
-        systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov, undefined, char.dateOutputWordCount, char.dateWritingStyle);
-        systemPrompt += buildDateTail(char.name, userProfile.name, userPov, charPov);
+        const systemPrompt = buildDateSessionSystemPrompt({ char, userProfile, allMsgs });
 
         const response = await fetchDateChatCompletion(apiConfig, {
                 model: apiConfig.model,
                 messages: [
                     { role: 'system', content: systemPrompt },
                     ...historyMsgs,
-                    { role: 'user', content: `${text}\n\n(System Note: 严格遵守沉浸剧场格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签。叙述人称严格遵守当前视角设定。${directorHint ? `\n<director_note>${directorHint}</director_note>` : ''}${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。规则：
+                    { role: 'user', content: `${userPromptText}\n\n(System Note: 严格遵守沉浸剧场格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签。叙述人称严格遵守当前视角设定。${directorHint ? `\n<director_note>${directorHint}</director_note>` : ''}${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。规则：
 • 每一行仍然必须以 [emotion] 开头，<翻译> 标签只能出现在 [emotion] 后面，不能放在行首。
 • 只有${char.name}的「台词/说的话」用${dateTranslateSourceLang}写，并写成 [emotion]<翻译><原文>${dateTranslateSourceLang}台词</原文><译文>${dateTranslateTargetLang}译文</译文></翻译>。
 • 叙述、动作描写、心理活动、环境描写 → 保持中文不变，不用 <翻译> 标签。
@@ -1428,14 +1472,14 @@ ${exitPromptContent}
         const whisperResult = extractInnerWhispers(extracted.content);
         const content = whisperResult.content;
 
-        // 3. Save AI Response — DB stores only 原文 (translation tags stripped)
-        // but we return the full content (with XML) for real-time bilingual rendering in DateSession
-        const contentForDb = stripTranslationTags(content);
-        await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: contentForDb, metadata: { source: 'date', thinking: extracted.thinking } });
+        // Keep bilingual XML in storage so replay/novel mode can show subtitles later.
+        // Context and summaries strip translation tags before they are sent to the model.
+        await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content, metadata: { source: 'date', thinking: extracted.thinking } });
 
         // Refresh local state
         const freshMsgs = await DB.getMessagesByCharId(char.id);
         setDateMessages(freshMsgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp));
+        maybeExtractDateTemporalEvent(char.id, text, secondaryApiConfig);
         void maybeTriggerAutoSummary(freshMsgs);
 
         return { content, whispers: whisperResult.whispers };
@@ -1450,7 +1494,9 @@ ${exitPromptContent}
         // 1. Find the user input that triggered it
         // Note: filter out the last AI msg from context without deleting it yet.
         const allMsgs = await DB.getMessagesByCharId(char.id);
-        const validMsgs = allMsgs.filter(m => m.id !== lastMsg.id && isDateModeContextMessage(m));
+        const validMsgs = allMsgs
+            .filter(m => m.id !== lastMsg.id && isDateModeContextMessage(m))
+            .sort((a, b) => a.timestamp - b.timestamp);
         const validDateMsgs = validMsgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp);
         const lastUserMsg = [...validDateMsgs].reverse().find(m => m.role === 'user');
 
@@ -1458,28 +1504,24 @@ ${exitPromptContent}
 
         // 2. Call API logic
         const limit = char.contextLimit || 500;
+        const temporalHistory = validMsgs.slice(-limit);
+        const previousContextMsg = temporalHistory[temporalHistory.length - 2];
+        const temporalContext = buildTemporalContext(temporalHistory, Date.now(), char.id)
+            || getTimeGapHint(previousContextMsg?.timestamp);
+        const userPromptText = appendDateTemporalContext(lastUserMsg.content, temporalContext);
         const historyMsgs = validMsgs.slice(-limit, -1).map(m => ({
             role: m.role,
-            content: m.type === 'image' ? '[User sent an image]' : stripTranslationTags(m.content)
+            content: getDateMessageContextContent(m)
         }));
 
-        // ====== Build full immersive theater system prompt (reroll) ======
-        let systemPrompt = buildDatePreamble(char.name, userProfile.name);
-        systemPrompt += ContextBuilder.buildCoreContext(char, userProfile);
-        systemPrompt += buildDateSummaryMemoryPrompt(allMsgs);
-        const REQUIRED_EMOTIONS_R = ['normal', 'happy', 'angry', 'sad', 'shy'];
-        const dateEmotionsR = [...REQUIRED_EMOTIONS_R, ...(char.customDateSprites || [])];
-        const userPovR = char.datePerspective || 'second';
-        const charPovR = char.dateCharPerspective || 'third';
-        systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotionsR, userPovR, charPovR, undefined, char.dateOutputWordCount, char.dateWritingStyle);
-        systemPrompt += buildDateTail(char.name, userProfile.name, userPovR, charPovR);
+        const systemPrompt = buildDateSessionSystemPrompt({ char, userProfile, allMsgs });
 
         const response = await fetchDateChatCompletion(apiConfig, {
                 model: apiConfig.model,
                 messages: [
                     { role: 'system', content: systemPrompt },
                     ...historyMsgs,
-                    { role: 'user', content: `${lastUserMsg.content}\n\n(System Note: Reroll. 用不同的角度重写。严格遵守沉浸剧场格式、当前叙述人称。${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。每一行仍必须以 [emotion] 开头。只有${char.name}的台词用${dateTranslateSourceLang}写成 [emotion]<翻译><原文>...</原文><译文>...</译文></翻译>；叙述/动作/心理描写保持中文不变，不用 <翻译>。]` : ''})` }
+                    { role: 'user', content: `${userPromptText}\n\n(System Note: Reroll. 用不同的角度重写。严格遵守沉浸剧场格式、当前叙述人称。${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。每一行仍必须以 [emotion] 开头。只有${char.name}的台词用${dateTranslateSourceLang}写成 [emotion]<翻译><原文>...</原文><译文>...</译文></翻译>；叙述/动作/心理描写保持中文不变，不用 <翻译>。]` : ''})` }
                 ],
                 temperature: Math.min((char.dateTemperature ?? 0.85) + 0.05, 2.0),
                 max_tokens: 8192,
@@ -1498,9 +1540,7 @@ ${exitPromptContent}
         const whisperResult = extractInnerWhispers(extracted.content);
         const content = whisperResult.content;
 
-        // Save AI Response — DB stores only 原文 (translation stripped), return raw for real-time rendering
-        const contentForDbR = stripTranslationTags(content);
-        await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: contentForDbR, metadata: { source: 'date', thinking: extracted.thinking } });
+        await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content, metadata: { source: 'date', thinking: extracted.thinking } });
 
         // 3. Now safely delete the old AI message since the new one is saved
         await DB.deleteMessage(lastMsg.id);
@@ -1692,7 +1732,7 @@ ${exitPromptContent}
                                     </button>
                                 </div>
                                 {session.msgs.map(m => {
-                                    const text = (m.content || '').replace(/\[.*?\]/g, '').trim();
+                                    const text = getDateHistoryDisplayText(m.content || '');
                                     return (
                                         <React.Fragment key={m.id}>
                                             <div className={`mb-1 flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -1832,6 +1872,8 @@ ${exitPromptContent}
                     onChangeWritingStyle={(style) => updateCharacter(char.id, { dateWritingStyle: style })}
                     temperature={char.dateTemperature}
                     onChangeTemperature={(temp) => updateCharacter(char.id, { dateTemperature: temp })}
+                    fontScale={char.dateFontScale}
+                    onChangeFontScale={(scale) => updateCharacter(char.id, { dateFontScale: scale })}
                     translationEnabled={dateTranslationEnabled}
                     translateSourceLang={dateTranslateSourceLang}
                     translateTargetLang={dateTranslateTargetLang}

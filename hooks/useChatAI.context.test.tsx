@@ -213,6 +213,63 @@ describe('useChatAI context loading', () => {
         );
     });
 
+    it('passes the previous assistant thinking chain to pre-reply state sensing', async () => {
+        mockedSelectSecondaryApiConfig.mockReturnValue({
+            baseUrl: 'https://secondary.example.test',
+            apiKey: 'sk-secondary',
+            model: 'secondary-model',
+        } as any);
+
+        const previousAssistant = {
+            id: 2,
+            charId: 'char-1',
+            role: 'assistant',
+            type: 'text',
+            content: '我在。',
+            timestamp: 1002,
+            metadata: { thinking: '上一轮我其实有点担心她是不是在硬撑。' },
+        } as Message;
+        const currentUser = makeMessage(3, '今天还是有点累');
+        mockedDB.getRecentMessagesByCharId.mockResolvedValue([previousAssistant, currentUser]);
+
+        const char = {
+            id: 'char-1',
+            name: 'Sully',
+            avatar: '',
+            description: '',
+            systemPrompt: '',
+            memories: [],
+            contextLimit: 777,
+            statusBarMode: 'off',
+        } as CharacterProfile;
+
+        const { result } = renderHook(() => useChatAI({
+            char,
+            userProfile: { name: 'Tester', avatar: '' } as any,
+            apiConfig: { baseUrl: 'https://example.test', apiKey: 'sk-test', model: 'test-model' },
+            groups: [],
+            emojis: [],
+            categories: [],
+            addToast: vi.fn(),
+            setMessages: vi.fn(),
+        }));
+
+        await act(async () => {
+            await result.current.triggerAI([currentUser]);
+        });
+
+        expect(mockedMindSnapshotExtractor.senseBefore).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'char-1' }),
+            [previousAssistant, currentUser],
+            expect.objectContaining({ model: 'secondary-model' }),
+            '',
+            [],
+            expect.objectContaining({
+                previousThinking: '上一轮我其实有点担心她是不是在硬撑。',
+            }),
+        );
+    });
+
     it('does not run secondary background tasks through the primary API when secondary API is missing', async () => {
         mockedGetEmbeddingConfig.mockReturnValue({ apiKey: 'embedding-key' } as any);
         mockedGetSecondaryApiConfig.mockReturnValue(null as any);
@@ -247,10 +304,8 @@ describe('useChatAI context loading', () => {
         });
 
         expect(mockedSafeFetchJson).toHaveBeenCalledTimes(1);
-        expect(mockedSafeFetchJson).toHaveBeenCalledWith(
-            'https://primary.example.test/chat/completions',
-            expect.objectContaining({ method: 'POST' }),
-        );
+        expect(mockedSafeFetchJson.mock.calls[0][0]).toBe('https://primary.example.test/chat/completions');
+        expect(mockedSafeFetchJson.mock.calls[0][1]).toEqual(expect.objectContaining({ method: 'POST' }));
         expect(mockedMindSnapshotExtractor.senseBefore).not.toHaveBeenCalled();
         expect(mockedMindSnapshotExtractor.generateInnerVoice).not.toHaveBeenCalled();
         expect(mockedVectorMemoryExtractor.maybeExtract).not.toHaveBeenCalled();

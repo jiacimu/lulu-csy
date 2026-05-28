@@ -63,6 +63,10 @@ const SUPPRESSED_ERROR_PATTERNS: RegExp[] = [
     /chunk.*failed/i,                     // Vite HMR chunk loading
     /dynamically imported module/i,
     /ResizeObserver/i,                    // Harmless browser warning
+    /\[Agent\]/i,                         // Background autonomous-agent runtime
+    /\[Push\]/i,                          // Background Web Push setup/sync
+    /CloudSync/i,                         // Background cloud memory sync
+    /Unexpected token '<'.*not valid JSON/i, // HTML fallback from unavailable backend routes
 ];
 
 /**

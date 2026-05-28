@@ -149,6 +149,8 @@ interface DateSessionProps {
     // Temperature
     temperature?: number;
     onChangeTemperature: (temp: number | undefined) => void;
+    fontScale?: number;
+    onChangeFontScale: (scale: number | undefined) => void;
     // Translation
     translationEnabled?: boolean;
     translateSourceLang?: string;
@@ -189,6 +191,8 @@ const DateSession: React.FC<DateSessionProps> = ({
     onChangeWritingStyle,
     temperature,
     onChangeTemperature,
+    fontScale,
+    onChangeFontScale,
     translationEnabled,
     translateSourceLang,
     translateTargetLang,
@@ -196,6 +200,8 @@ const DateSession: React.FC<DateSessionProps> = ({
     onSetTranslateSourceLang,
     onSetTranslateTargetLang}) => {
     const { addToast, registerBackHandler } = useOS();
+    const textScale = Math.min(Math.max(fontScale ?? 1, 0.85), 1.3);
+    const scaledFont = (basePx: number) => `${Math.round(basePx * textScale * 10) / 10}px`;
     
     // Core VN State
     const [isNovelMode, setIsNovelMode] = useState(false);
@@ -632,6 +638,8 @@ const DateSession: React.FC<DateSessionProps> = ({
                 onChangeWritingStyle={onChangeWritingStyle}
                 temperature={temperature}
                 onChangeTemperature={onChangeTemperature}
+                fontScale={textScale}
+                onChangeFontScale={onChangeFontScale}
                 translationEnabled={translationEnabled}
                 translateSourceLang={translateSourceLang}
                 translateTargetLang={translateTargetLang}
@@ -646,7 +654,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                     <div className="min-h-full flex flex-col justify-end">
                         <div className="max-w-2xl mx-auto animate-fade-in space-y-6">
                             {sessionMessages.length === 0 && peekStatus && (
-                                <div className={`italic text-center text-sm mb-8 px-4 ${char.dateLightReading ? 'text-stone-400' : 'text-slate-200/50'}`}>
+                                <div className={`italic text-center mb-8 px-4 ${char.dateLightReading ? 'text-stone-400' : 'text-slate-200/50'}`} style={{ fontSize: scaledFont(14) }}>
                                     {cleanTextForDisplay(peekStatus).split('\n').map((line, idx) => line.trim() && <p key={idx} className="whitespace-pre-wrap leading-relaxed tracking-wide my-2">{line}</p>)}
                                 </div>
                             )}
@@ -664,7 +672,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                                     onContextMenu={(e) => { e.preventDefault(); setSelectedMessage(msg); setModalType('options'); }}
                                 >
                                     {msg.role === 'user' ? (
-                                        <p className={`whitespace-pre-wrap font-[inherit] text-[16px] text-right leading-loose tracking-wide italic pr-4 ${char.dateLightReading ? 'text-stone-400 border-r-2 border-stone-300/50' : 'text-slate-400 border-r-2 border-slate-600/50'}`}>{cleanTextForDisplay(msg.content)} <span className="text-[10px] uppercase not-italic ml-2 opacity-50">{userProfile.name}</span></p>
+                                        <p className={`whitespace-pre-wrap font-[inherit] text-right leading-loose tracking-wide italic pr-4 ${char.dateLightReading ? 'text-stone-400 border-r-2 border-stone-300/50' : 'text-slate-400 border-r-2 border-slate-600/50'}`} style={{ fontSize: scaledFont(16) }}>{cleanTextForDisplay(msg.content)} <span className="text-[10px] uppercase not-italic ml-2 opacity-50">{userProfile.name}</span></p>
                                     ) : (
                                         <div>
                                             {(() => {
@@ -675,9 +683,9 @@ const DateSession: React.FC<DateSessionProps> = ({
                                                     if (!cleanLine) return null;
                                                     return (
                                                         <div key={idx} className="mb-4 last:mb-0">
-                                                            <p className={`whitespace-pre-wrap font-[inherit] text-[18px] text-justify leading-loose tracking-wide pl-4 ${char.dateLightReading ? 'text-stone-700 border-l-2 border-stone-200' : 'text-slate-200 drop-shadow-md border-l-2 border-white/10'}`}>{cleanLine}</p>
+                                                            <p className={`whitespace-pre-wrap font-[inherit] text-justify leading-loose tracking-wide pl-4 ${char.dateLightReading ? 'text-stone-700 border-l-2 border-stone-200' : 'text-slate-200 drop-shadow-md border-l-2 border-white/10'}`} style={{ fontSize: scaledFont(18) }}>{cleanLine}</p>
                                                             {item.translationText && (
-                                                                <p className={`whitespace-pre-wrap font-[inherit] text-[14px] text-justify leading-relaxed tracking-wide pl-4 mt-1 ${char.dateLightReading ? 'text-stone-400 border-l-2 border-stone-200/50' : 'text-slate-400/60 border-l-2 border-white/5'}`}>{item.translationText}</p>
+                                                                <p className={`whitespace-pre-wrap font-[inherit] text-justify leading-relaxed tracking-wide pl-4 mt-1 ${char.dateLightReading ? 'text-stone-400 border-l-2 border-stone-200/50' : 'text-slate-400/60 border-l-2 border-white/5'}`} style={{ fontSize: scaledFont(14) }}>{item.translationText}</p>
                                                             )}
                                                         </div>
                                                     );
@@ -703,10 +711,10 @@ const DateSession: React.FC<DateSessionProps> = ({
                             {/* VN Dialogue Box */}
                             <div className={`w-[90%] max-w-lg rounded-2xl border border-white/10 p-6 min-h-[140px] shadow-2xl animate-slide-up hover:bg-black/70 cursor-pointer ${transientUiActive ? 'bg-black/70' : 'bg-black/60 backdrop-blur-xl'}`}>
                                 <div className="absolute -top-3 left-6"><div className="bg-white/90 text-black px-4 py-1 rounded-sm text-xs font-bold tracking-widest uppercase shadow-[0_4px_10px_rgba(0,0,0,0.3)] transform -skew-x-12">{char.name}</div></div>
-                                <p className="text-white/90 text-[16px] leading-relaxed font-light tracking-wide drop-shadow-md mt-2">{displayedText}{isTextAnimating && <span className="inline-block w-2 h-4 bg-white/70 ml-1 animate-pulse align-middle"></span>}</p>
+                                <p className="text-white/90 leading-relaxed font-light tracking-wide drop-shadow-md mt-2" style={{ fontSize: scaledFont(16) }}>{displayedText}{isTextAnimating && <span className="inline-block w-2 h-4 bg-white/70 ml-1 animate-pulse align-middle"></span>}</p>
                                 {/* Translation subtitle — fades in after typewriter finishes */}
                                 {!isTextAnimating && currentTranslation && (
-                                    <p className="text-white/40 text-[13px] leading-relaxed font-light tracking-wide mt-2 pt-2 border-t border-white/[0.06] animate-fade-in">
+                                    <p className="text-white/40 leading-relaxed font-light tracking-wide mt-2 pt-2 border-t border-white/[0.06] animate-fade-in" style={{ fontSize: scaledFont(13) }}>
                                         {currentTranslation}
                                     </p>
                                 )}

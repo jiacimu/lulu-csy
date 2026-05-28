@@ -14,6 +14,7 @@ import * as backupStore from './backupStore';
 import * as vectorMemoryStore from './vectorMemoryStore';
 import * as memoryRecordStore from './memoryRecordStore';
 import * as newspaperStore from './newspaperStore';
+import * as vibeReferenceStore from './vibeReferenceStore';
 
 
 // Compose the same `DB` object shape as the original monolithic file
@@ -209,4 +210,13 @@ export const DB = {
     markYesterdayNewspaperOpened: newspaperStore.markYesterdayNewspaperOpened,
     getLatestYesterdayNewspaperByPeriod: newspaperStore.getLatestYesterdayNewspaperByPeriod,
     getYesterdayNewspapersByCharId: newspaperStore.getYesterdayNewspapersByCharId,
+
+    // NovelAI Vibe References
+    getSavedVibeReferences: vibeReferenceStore.getSavedVibeReferences,
+    getSavedVibeReference: vibeReferenceStore.getSavedVibeReference,
+    saveSavedVibeReference: vibeReferenceStore.saveSavedVibeReference,
+    renameSavedVibeReference: vibeReferenceStore.renameSavedVibeReference,
+    deleteSavedVibeReference: vibeReferenceStore.deleteSavedVibeReference,
+    clearSavedVibeReferenceCache: vibeReferenceStore.clearSavedVibeReferenceCache,
+    upsertSavedVibeEncoding: vibeReferenceStore.upsertSavedVibeEncoding,
 };

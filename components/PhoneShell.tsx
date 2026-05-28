@@ -15,6 +15,7 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
 import { requestSystemFullscreen } from '../utils/systemFullscreen';
 import { isIOSStandaloneWebApp } from '../utils/iosStandalone';
+import { usePerformanceMode } from '../hooks/usePerformanceMode';
 
 // --- Lazy-loaded Apps (only downloaded when user opens them) ---
 const Settings = React.lazy(() => import('../apps/Settings'));
@@ -67,10 +68,11 @@ import {
   shouldShowSpecialEventPopup,
 } from '../utils/specialEvents';
 import { haptic } from '../utils/haptics';
-import DynamicIsland from './os/DynamicIsland';
-import FloatingLyrics from './os/FloatingLyrics';
 import UpdatePopup from './os/UpdatePopup';
 import { attemptChunkAutoReload,isChunkLoadError,reloadApplication } from '../utils/runtimeRecovery';
+
+const DynamicIsland = React.lazy(() => import('./os/DynamicIsland'));
+const FloatingLyrics = React.lazy(() => import('./os/FloatingLyrics'));
 
 const VALENTINE_EVENT_ID = 'valentine_2026';
 const valentineEvent = getSpecialEventDefinition(VALENTINE_EVENT_ID);
@@ -348,6 +350,8 @@ const ActiveAppContainer = memo(function ActiveAppContainer({
 const PhoneShell: React.FC = () => {
   const { theme, isLocked, unlock, activeApp, closeApp, isDataLoaded, toasts, unreadMessages, characters, handleBack } = useOS();
   const useIOSStandaloneLayout = isIOSStandaloneWebApp();
+  const { isLite } = usePerformanceMode();
+  const [showIdleOverlays, setShowIdleOverlays] = useState(false);
 
   // Use a ref so that the popstate / backButton handlers always see the latest values
   // without needing to be re-registered every time state changes.
@@ -496,6 +500,31 @@ const PhoneShell: React.FC = () => {
   }, [activeApp]);
 
   useEffect(() => {
+    if (isLocked) {
+      setShowIdleOverlays(false);
+      return;
+    }
+
+    const overlayDelayMs = isLite ? 2500 : 350;
+    let idleId: number | undefined;
+    const timerId = window.setTimeout(() => {
+      const rIC = window.requestIdleCallback || ((cb: IdleRequestCallback) => window.setTimeout(() => cb({
+        didTimeout: false,
+        timeRemaining: () => 0,
+      }), 1));
+      idleId = rIC(() => setShowIdleOverlays(true), { timeout: isLite ? 2500 : 1000 });
+    }, overlayDelayMs);
+
+    return () => {
+      window.clearTimeout(timerId);
+      if (idleId !== undefined) {
+        const cIC = window.cancelIdleCallback || window.clearTimeout;
+        cIC(idleId);
+      }
+    };
+  }, [isLocked, isLite]);
+
+  useEffect(() => {
     if (typeof document === 'undefined') return;
 
     const wallpaper = theme.wallpaper;
@@ -518,7 +547,7 @@ const PhoneShell: React.FC = () => {
   // in browser cache by the time they tap the Zhaixinglou icon.
   // NOTE: Safari/iOS does not support requestIdleCallback, so use setTimeout as a fallback.
   useEffect(() => {
-    if (isLocked) return;
+    if (isLocked || isLite) return;
     const rIC = window.requestIdleCallback || ((cb: () => void) => window.setTimeout(cb, 1));
     const cIC = window.cancelIdleCallback || window.clearTimeout;
     const id = rIC(() => {
@@ -528,7 +557,7 @@ const PhoneShell: React.FC = () => {
       import('../apps/zhaixinglou/AssetPreloader').then(m => m.prefetchZhaixinglouAssets());
     }, { timeout: 4000 });
     return () => cIC(id);
-  }, [isLocked]);
+  }, [isLocked, isLite]);
 
   if (!isDataLoaded) {
     return <div className="w-full h-full bg-black flex items-center justify-center"><div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin"></div></div>;
@@ -555,21 +584,26 @@ const PhoneShell: React.FC = () => {
   }
 
   return (
-    <div className="relative w-full h-full overflow-hidden bg-gradient-to-br from-pink-200 via-purple-200 to-indigo-200 text-slate-900 font-sans select-none overscroll-none">
+    <div
+      className="relative w-full h-full overflow-hidden bg-gradient-to-br from-pink-200 via-purple-200 to-indigo-200 text-slate-900 font-sans select-none overscroll-none"
+      data-testid="phone-shell-root"
+      data-performance-mode={isLite ? 'lite' : 'full'}
+    >
       {/* Optimized Background Layer */}
       <div
-        className="absolute inset-0 bg-cover bg-center transition-all duration-700 ease-[cubic-bezier(0.25,0.1,0.25,1)]"
+        data-testid="phone-shell-background"
+        className={`absolute inset-0 bg-cover bg-center transition-all ${isLite ? 'duration-200' : 'duration-700'} ease-[cubic-bezier(0.25,0.1,0.25,1)]`}
         style={{
           backgroundImage: bgImageValue,
-          transform: activeApp !== AppID.Launcher ? 'scale(1.1)' : 'scale(1)',
-          filter: activeApp !== AppID.Launcher ? 'blur(10px)' : 'none',
-          opacity: activeApp !== AppID.Launcher ? 0.6 : 1,
+          transform: activeApp !== AppID.Launcher && !isLite ? 'scale(1.1)' : 'scale(1)',
+          filter: activeApp !== AppID.Launcher && !isLite ? 'blur(10px)' : 'none',
+          opacity: activeApp !== AppID.Launcher ? (isLite ? 0.72 : 0.6) : 1,
           backfaceVisibility: 'hidden',
           contain: useIOSStandaloneLayout ? undefined : 'strict'
         }}
       />
 
-      <div className={`absolute inset-0 transition-all duration-500 ${activeApp === AppID.Launcher ? 'bg-transparent' : 'bg-white/50 backdrop-blur-3xl'}`} />
+      <div className={`absolute inset-0 transition-all ${isLite ? 'duration-200' : 'duration-500'} ${activeApp === AppID.Launcher ? 'bg-transparent' : isLite ? 'bg-white/45' : 'bg-white/50 backdrop-blur-3xl'}`} />
 
       {/* Full-screen app container. Individual apps handle their own safe-area spacing. */}
       <div
@@ -589,10 +623,18 @@ const PhoneShell: React.FC = () => {
         {!theme.hideStatusBar && <StatusBar />}
 
         {/* Overlays: Dynamic Island (Music mini player) */}
-        <DynamicIsland />
+        {showIdleOverlays && (
+          <Suspense fallback={null}>
+            <DynamicIsland />
+          </Suspense>
+        )}
 
         {/* Overlays: Floating Lyrics */}
-        <FloatingLyrics />
+        {showIdleOverlays && (
+          <Suspense fallback={null}>
+            <FloatingLyrics />
+          </Suspense>
+        )}
 
         {/* Overlays: iOS-Style Banner Notifications */}
         <div className="absolute top-0 left-0 w-full flex flex-col items-center gap-2 pointer-events-none z-[60]" style={{ paddingTop: 'max(12px, calc(var(--safe-top, env(safe-area-inset-top)) + 4px))' }}>

@@ -100,6 +100,11 @@ export default defineConfig(({ mode, command }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/minimax-api/, ''),
         },
+        '/minimax-global-api': {
+          target: 'https://api.minimax.io',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/minimax-global-api/, ''),
+        },
         '/minimax-music-api': {
           target: 'https://api.minimax.chat',
           changeOrigin: true,

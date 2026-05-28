@@ -1,11 +1,12 @@
 import React from 'react';
-import { Money,BookOpenText,GearSix,Image,ArrowsClockwise,HandTap,Phone } from '@phosphor-icons/react';
+import { Money,BookOpenText,GearSix,Image,ArrowsClockwise,HandTap,Phone,Sparkle } from '@phosphor-icons/react';
 
 export interface ActionsPanelProps {
     onPanelAction: (action: string) => void;
     isSummarizing: boolean;
     onReroll: () => void;
     canReroll: boolean;
+    manualPhotoEnabled?: boolean;
     chatImageInputRef: React.RefObject<HTMLInputElement>;
 }
 
@@ -14,6 +15,7 @@ const WeChatActionsPanel: React.FC<ActionsPanelProps> = ({
     isSummarizing,
     onReroll,
     canReroll,
+    manualPhotoEnabled = false,
     chatImageInputRef,
 }) => {
     // WeChat actions panel typically has a light grey background and white rounded rect icons
@@ -27,6 +29,15 @@ const WeChatActionsPanel: React.FC<ActionsPanelProps> = ({
                 </div>
                 <span className="text-[12px] text-[#888888]">相册</span>
             </button>
+
+            {manualPhotoEnabled && (
+                <button onClick={() => onPanelAction('manual-photo')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">
+                    <div className="w-[60px] h-[60px] bg-white rounded-[16px] flex items-center justify-center text-[#333333] shadow-[0_1px_3px_rgba(0,0,0,0.05)] border border-slate-100">
+                        <Sparkle className="w-7 h-7" weight="fill" />
+                    </div>
+                    <span className="text-[12px] text-[#888888]">生图</span>
+                </button>
+            )}
 
             {/* 转账 */}
             <button onClick={() => onPanelAction('transfer')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">

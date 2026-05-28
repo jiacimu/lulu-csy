@@ -1,7 +1,7 @@
 
 import React,{ useState } from 'react';
 import { useOS } from '../../context/OSContext';
-import { STT_PROVIDER_DEFAULTS,getActiveApiKey } from '../../types/stt';
+import { STT_PROVIDER_DEFAULTS,STT_SILICONFLOW_BASE_URL_PRESETS,getActiveApiKey } from '../../types/stt';
 import { getGuardedInputProps } from '../../utils/inputGuards';
 import type { SttProvider,SttConfig } from '../../types/stt';
 
@@ -116,14 +116,21 @@ const SttSettings: React.FC = () => {
     const [sttProvider, setSttProvider] = useState<SttProvider>(sttConfig.provider);
     const [sttGroqKey, setSttGroqKey] = useState(sttConfig.groqApiKey);
     const [sttSiliconKey, setSttSiliconKey] = useState(sttConfig.siliconflowApiKey);
+    const [sttSiliconBaseUrl, setSttSiliconBaseUrl] = useState(
+        sttConfig.provider === 'siliconflow' && sttConfig.baseUrl
+            ? sttConfig.baseUrl
+            : STT_PROVIDER_DEFAULTS.siliconflow.baseUrl,
+    );
     const [sttLanguage, setSttLanguage] = useState(sttConfig.language || '');
     const [isTesting, setIsTesting] = useState(false);
 
     const handleSaveAndTest = async () => {
+        const siliconBaseUrl = sttSiliconBaseUrl.trim() || STT_PROVIDER_DEFAULTS.siliconflow.baseUrl;
         const newConfig: SttConfig = {
             provider: sttProvider,
             groqApiKey: sttGroqKey,
             siliconflowApiKey: sttSiliconKey,
+            baseUrl: sttProvider === 'siliconflow' ? siliconBaseUrl : undefined,
             language: sttLanguage || undefined,
         };
 
@@ -258,6 +265,41 @@ const SttSettings: React.FC = () => {
                         → 免费获取硅基流动 Key
                     </a>
                 </div>
+
+                {sttProvider === 'siliconflow' && (
+                    <div>
+                        <label className="text-[10px] font-bold text-[#8b9bb1] uppercase tracking-widest mb-1.5 block pl-1">硅基流动 Base URL</label>
+                        <div className="grid grid-cols-2 gap-2 mb-2">
+                            {STT_SILICONFLOW_BASE_URL_PRESETS.map(preset => {
+                                const active = sttSiliconBaseUrl.trim().replace(/\/+$/, '') === preset.value;
+                                return (
+                                    <button
+                                        key={preset.id}
+                                        type="button"
+                                        onClick={() => setSttSiliconBaseUrl(preset.value)}
+                                        className={`py-2 rounded-xl text-xs font-bold transition-all border ${active
+                                            ? 'bg-[#7b8db8]/15 text-[#5a6f94] ring-1 ring-[#7b8db8]/30 border-[#7b8db8]/20'
+                                            : 'bg-white/50 text-[#8b9bb1] border-[#d4e4f7]/60'
+                                            }`}
+                                    >
+                                        {preset.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <input
+                            type="text"
+                            value={sttSiliconBaseUrl}
+                            onChange={e => setSttSiliconBaseUrl(e.target.value)}
+                            placeholder={STT_PROVIDER_DEFAULTS.siliconflow.baseUrl}
+                            className="w-full bg-white/60 border border-[#d4e4f7]/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all"
+                            {...getGuardedInputProps({ kind: 'url', field: 'stt-siliconflow-base-url', inputMode: 'text' })}
+                        />
+                        <p className="text-[10px] text-[#8b9bb1] mt-1.5 pl-1 leading-relaxed">
+                            国内默认不用改；海外用户可切到海外地址，或填自己的代理地址。
+                        </p>
+                    </div>
+                )}
 
                 {/* 当前 provider 的 key 为空时的警告 */}
                 {activeKeyEmpty && (

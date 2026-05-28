@@ -70,6 +70,29 @@ const UserApp: React.FC = () => {
                             placeholder="描述你自己..."
                         />
                     </div>
+
+                    <div>
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">我的生图锁脸</label>
+                        <p className="text-[10px] text-slate-400 mb-2">合照或画面包含你时使用。OpenAI 兼容生图读自然语言；NovelAI 读 tags。</p>
+                        <textarea
+                            value={userProfile.photoAppearancePrompt || ''}
+                            onChange={(e) => updateUserProfile({ photoAppearancePrompt: e.target.value })}
+                            className="mb-3 h-24 w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed text-slate-700 outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20"
+                            placeholder="自然语言外貌描述，例如：黑色中长发，圆眼，日常穿浅色针织衫..."
+                        />
+                        <textarea
+                            value={userProfile.naiAppearanceTags || ''}
+                            onChange={(e) => updateUserProfile({ naiAppearanceTags: e.target.value })}
+                            className="mb-3 h-20 w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs leading-relaxed text-slate-700 outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20"
+                            placeholder="NovelAI 合照 tags，建议不要写 solo"
+                        />
+                        <textarea
+                            value={userProfile.naiAppearanceNegativeTags || ''}
+                            onChange={(e) => updateUserProfile({ naiAppearanceNegativeTags: e.target.value })}
+                            className="h-16 w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs leading-relaxed text-slate-700 outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20"
+                            placeholder="我的外貌 negative tags，可留空"
+                        />
+                    </div>
                 </div>
             </div>
         </div>

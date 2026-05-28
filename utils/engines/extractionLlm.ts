@@ -1,4 +1,4 @@
-import type { APIConfig } from '../../types';
+import type { APIConfig, Emoji } from '../../types';
 import { trackedApiRequest } from '../apiRequestLedger';
 import { formatMessagesForContext } from '../messageContext';
 import { markSecondaryApiConfigFailure,markSecondaryApiConfigSuccess } from '../runtimeConfig';
@@ -90,10 +90,12 @@ ${formattedMsgs}
 export function formatMessages(
     msgs: { timestamp: number; type: string; role: string; content: string; metadata?: any }[],
     charName: string,
+    emojis: Pick<Emoji, 'name' | 'url'>[] = [],
 ): string {
     return formatMessagesForContext(msgs, {
         surface: 'memoryExtraction',
         charName,
+        emojis,
         includeTimestamp: true,
         includeSpeaker: true,
         maxContentChars: 300,

@@ -31,6 +31,17 @@ type AgentStartPayload = {
     agentConfig?: AgentConfig;
 };
 
+class AgentApiError extends Error {
+    status: number;
+
+    constructor(status: number, body: string) {
+        super(`Agent API ${status}: ${body.slice(0, 200)}`);
+        this.name = 'AgentApiError';
+        this.status = status;
+        Object.setPrototypeOf(this, AgentApiError.prototype);
+    }
+}
+
 const STOP_REQUEST_DEDUPE_WINDOW_MS = 1500;
 const AGENT_PROTOCOL_VERSION = '2';
 export const TODAY_SCHEDULE_UPDATED_EVENT_NAME = 'agent-today-schedule-updated';
@@ -282,10 +293,21 @@ async function agentFetch<T = any>(
 
     if (!response.ok) {
         const text = await response.text().catch(() => '');
-        throw new Error(`Agent API ${response.status}: ${text.slice(0, 200)}`);
+        throw new AgentApiError(response.status, text);
     }
 
     return response.json() as Promise<T>;
+}
+
+function shouldRetryAgentFetch(error: unknown): boolean {
+    const status = (error as { status?: unknown })?.status;
+    if (typeof status === 'number') {
+        return status === 408 || status === 429 || status >= 500;
+    }
+
+    const name = String((error as { name?: unknown })?.name || '');
+    const message = String((error as { message?: unknown })?.message || error || '');
+    return /abort|timeout|network|failed to fetch/i.test(`${name} ${message}`);
 }
 
 async function agentFetchWithRetry<T = any>(
@@ -300,11 +322,13 @@ async function agentFetchWithRetry<T = any>(
             return await agentFetch<T>(path, options);
         } catch (error) {
             lastError = error;
-            if (attempt < maxRetries) {
-                const delay = 1000 * Math.pow(2, attempt);
-                console.warn(`[Agent] ${path} failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay}ms...`);
-                await new Promise(resolve => setTimeout(resolve, delay));
+            if (attempt >= maxRetries || !shouldRetryAgentFetch(error)) {
+                break;
             }
+
+            const delay = 1000 * Math.pow(2, attempt);
+            console.warn(`[Agent] ${path} failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
 

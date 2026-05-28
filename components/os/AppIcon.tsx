@@ -2,7 +2,6 @@
 import React,{ useRef,useCallback } from 'react';
 import { AppConfig } from '../../types';
 import { Icons } from '../../constants';
-import { useOS } from '../../context/OSContext';
 import { haptic } from '../../utils/haptics';
 
 interface AppIconProps {
@@ -12,14 +11,25 @@ interface AppIconProps {
   size?: 'md' | 'lg';
   hideLabel?: boolean;
   variant?: 'default' | 'minimal' | 'dock';
+  customIconUrl?: string;
+  contentColor?: string;
+  showCustomIconFrame?: boolean;
+  isLite?: boolean;
 }
 
-const AppIcon: React.FC<AppIconProps> = React.memo(({ app, onClick, onLongPress, size = 'md', hideLabel = false, variant = 'default' }) => {
-  const { customIcons, theme } = useOS();
+const AppIcon: React.FC<AppIconProps> = React.memo(({
+  app,
+  onClick,
+  onLongPress,
+  size = 'md',
+  hideLabel = false,
+  variant = 'default',
+  customIconUrl,
+  contentColor = '#ffffff',
+  showCustomIconFrame = true,
+  isLite = false,
+}) => {
   const IconComponent = Icons[app.icon] || Icons.Settings;
-  const customIconUrl = customIcons[app.id];
-  const contentColor = theme.contentColor || '#ffffff';
-  const showCustomIconFrame = theme.customIconFrame !== false;
   const showIconFrame = !customIconUrl || showCustomIconFrame;
 
   // Long-press detection
@@ -79,10 +89,14 @@ const AppIcon: React.FC<AppIconProps> = React.memo(({ app, onClick, onLongPress,
       {/* Container: Glass Prism with internal glow */}
       <div className={`${sizeClasses} relative flex items-center justify-center transition-all duration-300 ${
         showIconFrame
-          ? `bg-white/10 backdrop-blur-xl rounded-[1.2rem]
-            border-t border-l border-white/40 border-b border-r border-white/10
-            shadow-[0_8px_16px_rgba(0,0,0,0.2)]
-            group-hover:bg-white/20 group-hover:shadow-[0_0_20px_rgba(255,255,255,0.3)] group-hover:border-white/60`
+          ? isLite
+            ? `bg-white/55 rounded-[1.2rem]
+              border border-white/25
+              shadow-[0_4px_10px_rgba(0,0,0,0.14)]`
+            : `bg-white/10 backdrop-blur-xl rounded-[1.2rem]
+              border-t border-l border-white/40 border-b border-r border-white/10
+              shadow-[0_8px_16px_rgba(0,0,0,0.2)]
+              group-hover:bg-white/20 group-hover:shadow-[0_0_20px_rgba(255,255,255,0.3)] group-hover:border-white/60`
           : ''
       }`}>
 
@@ -123,6 +137,11 @@ const AppIcon: React.FC<AppIconProps> = React.memo(({ app, onClick, onLongPress,
     prev.size === next.size &&
     prev.hideLabel === next.hideLabel &&
     prev.variant === next.variant &&
+    prev.customIconUrl === next.customIconUrl &&
+    prev.contentColor === next.contentColor &&
+    prev.showCustomIconFrame === next.showCustomIconFrame &&
+    prev.isLite === next.isLite &&
+    prev.onClick === next.onClick &&
     prev.onLongPress === next.onLongPress;
 });
 

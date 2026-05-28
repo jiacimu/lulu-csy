@@ -631,6 +631,21 @@ textarea[readonly] {
   max-width: 100%;
 }
 
+.sully-perf-lite .sully-image-msg-shell,
+.sully-perf-lite .sully-gallery-grid-image {
+  transition: none !important;
+}
+
+.sully-perf-lite .sully-image-preview-backdrop,
+.sully-perf-lite .sully-image-preview-action {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.sully-perf-lite .sully-gallery-grid-image:hover {
+  transform: none !important;
+}
+
 input:focus,
 textarea:focus,
 select:focus {

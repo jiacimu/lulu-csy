@@ -146,6 +146,102 @@ describe('message context formatter', () => {
         expect(userTransfer).toBe('[用户给你转账 ¥52.00，等待你收款]');
     });
 
+    it('formats emoji messages with registry, metadata, and URL filename fallbacks', () => {
+        const registryEmoji = formatMessageForContext(msg({
+            role: 'assistant',
+            type: 'emoji',
+            content: 'https://cdn.example/stickers/sully-goodnight.png',
+        }), {
+            surface: 'memoryExtraction',
+            charName: '糯米',
+            emojis: [{ name: 'Sully晚安', url: 'https://cdn.example/stickers/sully-goodnight.png' }],
+        });
+        const metadataEmoji = formatMessageForContext(msg({
+            role: 'assistant',
+            type: 'emoji',
+            content: 'data:image/png;base64,very-large-sticker',
+            metadata: { name: '委屈' },
+        }), {
+            surface: 'memoryExtraction',
+            charName: '糯米',
+        });
+        const filenameEmoji = formatMessageForContext(msg({
+            role: 'assistant',
+            type: 'emoji',
+            content: 'https://cdn.example/stickers/kiss-face.webp?size=2',
+        }), {
+            surface: 'memoryExtraction',
+            charName: '糯米',
+        });
+
+        expect(registryEmoji).toBe('[发送了表情包: Sully晚安]');
+        expect(metadataEmoji).toBe('[发送了表情包: 委屈]');
+        expect(filenameEmoji).toBe('[发送了表情包: kiss face]');
+        expect(metadataEmoji).not.toContain('data:image');
+    });
+
+    it('keeps generated assistant images as lightweight summaries in main chat history', () => {
+        const { apiMessages } = ChatPrompts.buildMessageHistory([
+            msg({
+                role: 'assistant',
+                type: 'image',
+                content: 'data:image/png;base64,very-large-generated-image',
+                metadata: {
+                    imageId: 'photo-1',
+                    visualSummary: '窗边自拍，暖光，近景构图。',
+                },
+            }),
+        ], 10, character, user, []);
+
+        expect(apiMessages[0]?.content).toBe('[2026-04-21 10:30] [你发送过的图片] 窗边自拍，暖光，近景构图。');
+    });
+
+    it('only attaches raw image content for the latest user image', () => {
+        const { apiMessages } = ChatPrompts.buildMessageHistory([
+            msg({
+                id: 1,
+                type: 'image',
+                content: 'data:image/png;base64,older-user-image',
+                metadata: { caption: '上一张图' },
+            }),
+            msg({
+                id: 2,
+                type: 'image',
+                content: 'data:image/png;base64,latest-user-image',
+                metadata: { caption: '最新图片' },
+                timestamp: new Date(2026, 3, 21, 10, 31).getTime(),
+            }),
+        ], 10, character, user, []);
+
+        expect(apiMessages[0]?.content).toBe('[2026-04-21 10:30] [用户发来的图片] 上一张图');
+        expect(Array.isArray(apiMessages[1]?.content)).toBe(true);
+        expect(apiMessages[1]?.content[1]).toEqual({
+            type: 'image_url',
+            image_url: { url: 'data:image/png;base64,latest-user-image' },
+        });
+    });
+
+    it('formats image reply prefixes without leaking raw image URLs', () => {
+        const text = formatMessageForContext(msg({
+            role: 'user',
+            content: '好帅',
+            replyTo: {
+                id: 91,
+                name: '糯米',
+                content: 'https://cdn.example.com/generated/window-selfie.webp',
+                type: 'image',
+                visualSummary: '窗边自拍',
+            },
+        }), {
+            surface: 'chat',
+            charName: '糯米',
+        });
+
+        expect(text).toContain('[回复 "窗边自拍...');
+        expect(text).toContain('好帅');
+        expect(text).not.toContain('https://cdn.example.com');
+    });
+
     it('keeps secondary model summaries unchanged while group director is low-induction', () => {
         const source = msg({
             role: 'assistant',

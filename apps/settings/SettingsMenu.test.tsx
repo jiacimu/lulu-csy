@@ -80,6 +80,20 @@ describe('SettingsMenu', () => {
             stt: {
                 provider: 'siliconflow',
             },
+            imageGeneration: {
+                config: {
+                    activeProvider: 'novelai',
+                    novelai: {
+                        apiToken: '',
+                        model: 'nai-diffusion-4-full',
+                    },
+                    openaiCompatible: {
+                        apiKey: '',
+                        model: '',
+                    },
+                },
+                stylePresets: [],
+            },
             embedding: {
                 provider: 'openai',
                 apiKey: 'live-embed-key',

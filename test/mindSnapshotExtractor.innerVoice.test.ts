@@ -108,6 +108,39 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
         expect(body.messages[2].content).toContain('请基于上方主聊天完整上下文镜像执行本任务');
     });
 
+    it('includes previous assistant thinking in the pre-reply state sensing prompt', async () => {
+        mockFetchContent(JSON.stringify({
+            excitement: 'stable',
+            stability: '-low',
+            pressure: '+low',
+            closeness: 'stable',
+            focus: '+low',
+            relief: 'stable',
+            energyDrain: '+low',
+            goalImpact: 'none',
+            scheduleSignal: 'none',
+            scheduleReason: '',
+        }));
+
+        await MindSnapshotExtractor.senseBefore(
+            baseCharacter,
+            currentMsgs as any,
+            apiConfig,
+            '',
+            [],
+            {
+                previousThinking: '上一轮他回复得很克制，但其实在担心对方是不是又熬夜了。',
+            },
+        );
+
+        const body = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body));
+        expect(body.max_tokens).toBe(65536);
+        expect(body.messages[1].content).toContain('上一轮Marcus的内心推演');
+        expect(body.messages[1].content).toContain('只用于判断Marcus的情绪惯性');
+        expect(body.messages[1].content).toContain('不可把它当作用户事实');
+        expect(body.messages[1].content).toContain('上一轮他回复得很克制');
+    });
+
     it('recovers innerVoice from raw output when JSON parsing fails', async () => {
         mockFetchContent('结果如下：\ninnerVoice: "今天不想再拖了，先把这件事做完再说。"');
 

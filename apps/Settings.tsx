@@ -10,6 +10,7 @@ const SubApiSettings = React.lazy(() => import('./settings/SubApiSettings'));
 const RealtimeSettings = React.lazy(() => import('./settings/realtime'));
 const TtsSettings = React.lazy(() => import('./settings/tts'));
 const SttSettings = React.lazy(() => import('./settings/SttSettings'));
+const ImageGenerationSettings = React.lazy(() => import('./settings/ImageGenerationSettings'));
 const EmbeddingSettings = React.lazy(() => import('./settings/EmbeddingSettings'));
 const DataSettings = React.lazy(() => import('./settings/DataSettings'));
 const AgentSettings = React.lazy(() => import('./settings/AgentSettings'));
@@ -21,6 +22,7 @@ const panelComponents: Record<Exclude<SettingsPanel, 'menu'>, React.LazyExoticCo
     realtime: RealtimeSettings,
     tts: TtsSettings,
     stt: SttSettings,
+    image: ImageGenerationSettings,
     embedding: EmbeddingSettings,
     data: DataSettings,
     agent: AgentSettings,
@@ -34,6 +36,7 @@ const panelTitles: Record<Exclude<SettingsPanel, 'menu'>, string> = {
     realtime: '实时感知',
     tts: '语音合成',
     stt: '语音识别',
+    image: '生图服务',
     embedding: '向量记忆引擎',
     agent: '自律代理',
     debug: 'API 请求账本',
@@ -51,7 +54,7 @@ const Settings: React.FC = () => {
     const ActiveComponent = activePanel !== 'menu' ? panelComponents[activePanel] : null;
 
     return (
-        <div className="h-full w-full bg-slate-50/50 flex flex-col font-light relative">
+        <div className="h-full w-full min-w-0 overflow-hidden bg-slate-50/50 flex flex-col font-light relative">
 
             {/* GLOBAL PROGRESS OVERLAY */}
             {sysOperation.status === 'processing' && (
@@ -70,19 +73,19 @@ const Settings: React.FC = () => {
 
             {/* Header */}
             <div className="h-20 bg-white/70 backdrop-blur-md flex items-end pb-3 px-4 border-b border-white/40 shrink-0 z-10 sticky top-0">
-                <div className="flex items-center gap-2 w-full">
+                <div className="flex items-center gap-2 w-full min-w-0">
                     <button onClick={handleBack} className="p-2 -ml-2 rounded-full hover:bg-black/5 active:scale-90 transition-transform">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-slate-600">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
                         </svg>
                     </button>
-                    <h1 className="text-xl font-medium text-slate-700 tracking-wide">
+                    <h1 className="min-w-0 truncate text-xl font-medium text-slate-700 tracking-wide">
                         {activePanel === 'menu' ? '系统设置' : panelTitles[activePanel]}
                     </h1>
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-6 no-scrollbar pb-20">
+            <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-5 sm:p-5 space-y-6 no-scrollbar pb-20">
                 {activePanel === 'menu' ? (
                     <SettingsMenu onNavigate={setActivePanel} />
                 ) : (

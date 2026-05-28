@@ -60,6 +60,11 @@ export const STT_PROVIDER_DEFAULTS: Record<SttProvider, {
     },
 };
 
+export const STT_SILICONFLOW_BASE_URL_PRESETS = [
+    { id: 'domestic', label: '国内默认', value: STT_PROVIDER_DEFAULTS.siliconflow.baseUrl },
+    { id: 'global', label: '海外', value: 'https://api-st.siliconflow.cn/v1' },
+] as const;
+
 // ─── 默认配置 ────────────────────────────────────────────────────────
 
 export const DEFAULT_STT_CONFIG: SttConfig = {

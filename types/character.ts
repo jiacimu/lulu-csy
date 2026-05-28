@@ -153,6 +153,14 @@ export interface CharacterProfile {
     showThinking?: boolean;
     hideSystemLogs?: boolean;
     hideBeforeMessageId?: number;
+    manualPhotoEnabled?: boolean;
+    autoPhotoEnabled?: boolean;
+    defaultPhotoStylePresetId?: string;
+    boundPhotoStylePresetIds?: string[];
+    defaultVibeReferenceIds?: string[];
+    naiAppearanceTags?: string;
+    naiAppearanceNegativeTags?: string;
+    photoAppearancePrompt?: string;
 
     dateBackground?: string;
     sprites?: Record<string, string>;
@@ -173,6 +181,7 @@ export interface CharacterProfile {
     dateOutputWordCount?: number;          // Target reply word count (0 or undefined = default ~150)
     dateWritingStyle?: string;             // Writing style preset key or custom prompt text
     dateTemperature?: number;              // LLM temperature for date mode (0.0-2.0, default 0.85)
+    dateFontScale?: number;                // Reading font scale for date mode (0.85-1.3, default 1)
 
     // Theater (520) Summary System
     theaterSummaryPrompt?: string;           // User-customized theater summary prompt

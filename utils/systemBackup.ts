@@ -1,9 +1,37 @@
 
-import { APIConfig,OSTheme,CharacterProfile,ChatTheme,FullBackupData,UserProfile,ApiPreset,GroupProfile,Worldbook,NovelBook,Message,RealtimeConfig,TtsConfig,SttConfig,BackupMusicAssets,SerializedVoiceAudio,MemoryRecord } from '../types';
+import {
+    APIConfig,
+    OSTheme,
+    CharacterProfile,
+    ChatTheme,
+    FullBackupData,
+    UserProfile,
+    ApiPreset,
+    GroupProfile,
+    Worldbook,
+    NovelBook,
+    Message,
+    RealtimeConfig,
+    TtsConfig,
+    SttConfig,
+    BackupMusicAssets,
+    SerializedVoiceAudio,
+    MemoryRecord,
+    ImageGenerationConfig,
+    PhotoStylePreset,
+    ImageApiPreset,
+    BackupExternalIndexedDbData,
+} from '../types';
 import { DB } from './db';
 import { buildBackendHeaders,getBackendUrl } from './backendClient';
 import { loadJSZip } from './lazyThirdParty';
-import { hasCloudSyncTarget } from './runtimeConfig';
+import {
+    IMAGE_API_PRESETS_KEY,
+    IMAGE_GENERATION_CONFIG_KEY,
+    IMAGE_GENERATION_DRAFT_CONFIG_KEY,
+    PHOTO_STYLE_PRESETS_KEY,
+    hasCloudSyncTarget,
+} from './runtimeConfig';
 import { rebaseImportedVectorMemories } from './vectorMemorySyncState';
 import { safeTimeoutSignal } from './safeTimeout';
 
@@ -45,6 +73,30 @@ const MUSIC_PROFILE_BG_STORE = 'backgrounds';
 const MUSIC_PROFILE_BG_KEY = 'custom_bg';
 const MUSIC_CUSTOM_SKIN_DB_NAME = 'music_custom_skins';
 const MUSIC_CUSTOM_SKIN_STORE = 'skins';
+const HALF_SUGAR_DB_NAME = 'halfsugar-health';
+const HALF_SUGAR_DB_VERSION = 2;
+const HALF_SUGAR_STORE_DEFINITIONS: Array<{
+    name: string;
+    options: IDBObjectStoreParameters;
+    indexes?: Array<{ name: string; keyPath: string | string[]; options?: IDBIndexParameters }>;
+}> = [
+    { name: 'meals', options: { keyPath: 'id' }, indexes: [{ name: 'by-date', keyPath: 'date' }] },
+    { name: 'weights', options: { keyPath: 'id' }, indexes: [{ name: 'by-date', keyPath: 'date' }] },
+    { name: 'exercises', options: { keyPath: 'id' }, indexes: [{ name: 'by-date', keyPath: 'date' }] },
+    { name: 'sleep', options: { keyPath: 'id' }, indexes: [{ name: 'by-date', keyPath: 'date' }] },
+    { name: 'goals', options: { keyPath: 'id' }, indexes: [{ name: 'by-goalType', keyPath: 'goalType' }] },
+    { name: 'favorites', options: { keyPath: 'id' }, indexes: [{ name: 'by-name', keyPath: 'name' }] },
+    {
+        name: 'summaries',
+        options: { keyPath: 'id' },
+        indexes: [
+            { name: 'by-periodType', keyPath: 'periodType' },
+            { name: 'by-periodKey', keyPath: 'periodKey' },
+        ],
+    },
+    { name: 'periods', options: { keyPath: 'id' }, indexes: [{ name: 'by-startDate', keyPath: 'startDate' }] },
+    { name: 'medications', options: { keyPath: 'id' }, indexes: [{ name: 'by-date', keyPath: 'date' }] },
+];
 const SULLYOS_UPSTREAM_COMPAT_ASSET_ID = 'sullyos_upstream_compat_payload';
 const SYSTEM_BACKUP_THEME_ASSET_IDS = new Set(['wallpaper', 'launcherWidgetImage', 'custom_font_data']);
 const SYSTEM_BACKUP_THEME_ASSET_PREFIXES = ['widget_', 'deco_'];
@@ -721,6 +773,23 @@ async function getExternalStoreValue(dbName: string, storeName: string, key: str
     }
 }
 
+async function exportExternalIndexedDbStores(
+    dbName: string,
+    storeNames: string[],
+    version = 1,
+): Promise<BackupExternalIndexedDbData | undefined> {
+    const stores: Record<string, any[]> = {};
+    let hasData = false;
+
+    for (const storeName of storeNames) {
+        const items = await getAllFromExternalStore(dbName, storeName);
+        stores[storeName] = items;
+        if (items.length > 0) hasData = true;
+    }
+
+    return hasData ? { version, stores } : undefined;
+}
+
 async function openIndexedDbWithStore(
     dbName: string,
     storeName: string,
@@ -752,6 +821,64 @@ async function openIndexedDbWithStore(
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => resolve(null);
     });
+}
+
+function ensureBackupStoreIndexes(store: IDBObjectStore, indexes?: Array<{ name: string; keyPath: string | string[]; options?: IDBIndexParameters }>): void {
+    for (const index of indexes || []) {
+        if (!store.indexNames.contains(index.name)) {
+            store.createIndex(index.name, index.keyPath, index.options);
+        }
+    }
+}
+
+async function openHalfSugarDbForRestore(): Promise<IDBDatabase | null> {
+    if (typeof indexedDB === 'undefined') return null;
+
+    return new Promise((resolve) => {
+        const request = indexedDB.open(HALF_SUGAR_DB_NAME, HALF_SUGAR_DB_VERSION);
+        request.onupgradeneeded = () => {
+            const db = request.result;
+            const tx = request.transaction;
+            for (const definition of HALF_SUGAR_STORE_DEFINITIONS) {
+                const store = db.objectStoreNames.contains(definition.name)
+                    ? tx?.objectStore(definition.name)
+                    : db.createObjectStore(definition.name, definition.options);
+                if (store) ensureBackupStoreIndexes(store, definition.indexes);
+            }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => resolve(null);
+        request.onblocked = () => resolve(null);
+    });
+}
+
+async function restoreHalfSugarDataFromBackup(halfSugarData?: BackupExternalIndexedDbData): Promise<void> {
+    if (!halfSugarData?.stores || typeof halfSugarData.stores !== 'object') return;
+
+    const db = await openHalfSugarDbForRestore();
+    if (!db) return;
+
+    try {
+        const storeNames = HALF_SUGAR_STORE_DEFINITIONS
+            .map(definition => definition.name)
+            .filter(name => db.objectStoreNames.contains(name));
+        if (storeNames.length === 0) return;
+
+        await new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(storeNames, 'readwrite');
+            for (const storeName of storeNames) {
+                const items = halfSugarData.stores[storeName];
+                if (!Array.isArray(items)) continue;
+                const store = tx.objectStore(storeName);
+                store.clear();
+                items.forEach(item => store.put(item));
+            }
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    } finally {
+        db.close();
+    }
 }
 
 async function exportMusicAssetsForBackup(mode: SystemBackupMode): Promise<BackupMusicAssets | undefined> {
@@ -902,14 +1029,17 @@ export const SYSTEM_BACKUP_ALWAYS_STORES = [
     'xhs_activities', 'xhs_stock',
     'vector_memories',
     'memory_records', 'memory_record_audio',
-    'scheduled_messages', 'letters'
+    'scheduled_messages', 'letters', 'yesterday_newspapers', 'vibe_references'
 ];
 
 export const SYSTEM_BACKUP_CONDITIONAL_STORES = [
     'voice_audio',
 ];
 
-export const SYSTEM_BACKUP_EXCLUDED_STORES: string[] = [];
+export const SYSTEM_BACKUP_EXCLUDED_STORES = [
+    'hot_news_snapshots',
+    'chat_context_mirrors',
+];
 
 const ALL_STORES = SYSTEM_BACKUP_ALWAYS_STORES;
 
@@ -931,6 +1061,7 @@ export const SYSTEM_BACKUP_LOCAL_STORAGE_KEYS = [
     // Misc app settings
     'schedule_app_theme', 'os_haptics_enabled', 'os_last_active_char_id',
     'os_memory_palace_config', 'os_remote_vector_config', 'os_cloud_backup_config',
+    IMAGE_GENERATION_CONFIG_KEY, IMAGE_GENERATION_DRAFT_CONFIG_KEY, IMAGE_API_PRESETS_KEY, PHOTO_STYLE_PRESETS_KEY,
     'study_api_config', 'study_tutor_presets',
     'chat_archive_prompts', 'chat_active_archive_prompt_id',
     'character_active_refine_prompt_id',
@@ -940,6 +1071,12 @@ export const SYSTEM_BACKUP_LOCAL_STORAGE_KEYS = [
     'netease_music_cookie', 'music_recent_keywords', 'music_liked_songs',
     'music_profile_bg_setting', 'music_player_skin', 'music_player_glass',
     'floating_lyrics_settings', 'temporal_pending_events',
+    'zhaixinglou_font_settings',
+    'os_fullscreen_enabled', 'sullyos_performance_mode',
+    'theater_custom_locations', 'theater_visit_counts', 'theater_bgm_enabled', 'theater_bgm_volume',
+    'crosstime_rooms',
+    'loveshow_active_season', 'loveshow_season_index', 'loveshow_phone_wallpaper_mode',
+    'echo_record_needle_drop_form_v1',
     SYSTEM_BACKUP_INCLUDE_VOICE_AUDIO_KEY,
 ];
 
@@ -950,9 +1087,33 @@ export const SYSTEM_BACKUP_LOCAL_STORAGE_PREFIXES = [
     'chat_auto_call_',
     'chat_auto_share_song_',
     'chat_inject_playback_context_',
+    'chat_today_schedule_enabled_',
+    'chat_today_schedule_entry_hidden_',
+    'chat_private_newspaper_enabled_',
+    'date_translation_',
+    'date_trans_src_',
+    'date_trans_tgt_',
+    'date_summary_ball_pos_',
     'mp_lastMsgId_',
     'mp_personality_tried_',
     'mp_first_archive_notice_',
+    'agent_lifestream_visibility_',
+    'theater_session_',
+    'theater_timelines_',
+    'theater_active_tl_',
+    'theater_ball_pos_',
+    'trajectory_nodes_',
+    'trajectory_meta_',
+    'crosstime_msgs_',
+    'loveshow_season_',
+    'loveshow_charstate_',
+    'loveshow_impression_',
+    'loveshow_npcs_',
+    'loveshow_social_',
+    'loveshow_missions_',
+    'loveshow_memories_',
+    'loveshow_ui_',
+    'loveshow_choice_history_',
 ];
 
 export const SYSTEM_BACKUP_EXCLUDED_LOCAL_STORAGE_KEYS = [
@@ -1162,6 +1323,10 @@ export interface ExportStateSnapshot {
     realtimeConfig: RealtimeConfig;
     ttsConfig: TtsConfig;
     sttConfig: SttConfig;
+    imageGenerationConfig: ImageGenerationConfig;
+    imageGenerationDraftConfig?: ImageGenerationConfig;
+    imageApiPresets: ImageApiPreset[];
+    photoStylePresets: PhotoStylePreset[];
     theme: OSTheme;
 }
 
@@ -1189,6 +1354,13 @@ export async function exportSystemData(
     const sparkSocialProfile = await DB.getAsset('spark_social_profile');
     const roomCustomAssets = await DB.getAsset('room_custom_assets_list');
     const musicAssets = await exportMusicAssetsForBackup(mode);
+    const halfSugarData = (mode === 'text_only' || mode === 'full')
+        ? await exportExternalIndexedDbStores(
+            HALF_SUGAR_DB_NAME,
+            HALF_SUGAR_STORE_DEFINITIONS.map(definition => definition.name),
+            HALF_SUGAR_DB_VERSION,
+        )
+        : undefined;
     const upstreamStructuredConfig = collectUpstreamStructuredLocalStorage(mode);
     const assetBackedUpstreamFields = await collectAssetBackedUpstreamFields(mode);
     const preservedUpstreamCompatPayload = await loadSullyOsCompatPayload();
@@ -1202,6 +1374,10 @@ export async function exportSystemData(
         realtimeConfig: (mode === 'text_only' || mode === 'full') ? state.realtimeConfig : undefined,
         ttsConfig: (mode === 'text_only' || mode === 'full') ? state.ttsConfig : undefined,
         sttConfig: (mode === 'text_only' || mode === 'full') ? state.sttConfig : undefined,
+        imageGenerationConfig: (mode === 'text_only' || mode === 'full') ? state.imageGenerationConfig : undefined,
+        imageGenerationDraftConfig: (mode === 'text_only' || mode === 'full') ? state.imageGenerationDraftConfig : undefined,
+        imageApiPresets: (mode === 'text_only' || mode === 'full') ? state.imageApiPresets : undefined,
+        photoStylePresets: (mode === 'text_only' || mode === 'full') ? state.photoStylePresets : undefined,
         theme: state.theme,
 
         socialAppData: (mode === 'text_only' || mode === 'media_only' || mode === 'full') ? {
@@ -1213,6 +1389,7 @@ export async function exportSystemData(
 
         roomCustomAssets: (mode === 'text_only' || mode === 'media_only' || mode === 'full') ? (roomCustomAssets ? JSON.parse(roomCustomAssets) : []) : undefined,
         musicAssets,
+        halfSugarData,
         mediaAssets: [],
         ...stripUndefinedFields(upstreamStructuredConfig),
         ...stripUndefinedFields(assetBackedUpstreamFields),
@@ -1230,12 +1407,14 @@ export async function exportSystemData(
         if (backupData.customIcons) backupData.customIcons = processObject(backupData.customIcons);
         if (backupData.appearancePresets) backupData.appearancePresets = processObject(backupData.appearancePresets);
         if (backupData.musicAssets) backupData.musicAssets = processObject(backupData.musicAssets);
+        if (backupData.halfSugarData) backupData.halfSugarData = processObject(backupData.halfSugarData);
     } else {
         if (backupData.socialAppData?.userProfile) backupData.socialAppData.userProfile = stripBase64(backupData.socialAppData.userProfile);
         if (backupData.socialAppData?.userBg) backupData.socialAppData.userBg = stripBase64(backupData.socialAppData.userBg);
         if (backupData.roomCustomAssets) backupData.roomCustomAssets = stripBase64(backupData.roomCustomAssets);
         if (backupData.customIcons) backupData.customIcons = stripBase64(backupData.customIcons);
         if (backupData.appearancePresets) backupData.appearancePresets = stripBase64(backupData.appearancePresets);
+        if (backupData.halfSugarData) backupData.halfSugarData = stripBase64(backupData.halfSugarData);
         if (backupData.theme) {
             const savedPresetDecos = backupData.theme.desktopDecorations
                 ?.filter(d => d.type === 'preset')
@@ -1269,7 +1448,7 @@ export async function exportSystemData(
             if (storeName === 'memory_record_audio') {
                 const exportableAudio = filterMemoryRecordAudioForBackup(rawData, backupData.memoryRecords || []);
                 processedData = processObject(await serializeMemoryRecordAudioForBackup(exportableAudio));
-                const keptAudioIds = new Set(
+                const keptAudioIds = new Set<string>(
                     processedData
                         .map((item: any) => item?.id)
                         .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0),
@@ -1362,6 +1541,8 @@ export async function exportSystemData(
             case 'voice_audio': backupData.voiceAudio = processedData; break;
             case 'scheduled_messages': backupData.scheduledMessages = processedData; break;
             case 'letters': backupData.letters = processedData; break;
+            case 'yesterday_newspapers': backupData.yesterdayNewspapers = processedData; break;
+            case 'vibe_references': backupData.vibeReferences = processedData; break;
         }
 
         await new Promise(resolve => setTimeout(resolve, 10));
@@ -1488,6 +1669,7 @@ export async function importSystemData(
 
     await DB.importFullData(data);
     await saveSullyOsCompatPayload(data);
+    await restoreHalfSugarDataFromBackup(data.halfSugarData);
     await restoreThemeAssetsFromBackup(data.theme);
     await restoreAssetBackedUpstreamFields(data);
 
@@ -1532,6 +1714,10 @@ export async function importSystemData(
     if (data.realtimeConfig) localStorage.setItem('os_realtime_config', JSON.stringify(data.realtimeConfig));
     if (data.ttsConfig) localStorage.setItem('os_tts_config', JSON.stringify(data.ttsConfig));
     if (data.sttConfig) localStorage.setItem('os_stt_config', JSON.stringify(data.sttConfig));
+    if (data.imageGenerationConfig) localStorage.setItem(IMAGE_GENERATION_CONFIG_KEY, JSON.stringify(data.imageGenerationConfig));
+    if (data.imageGenerationDraftConfig) localStorage.setItem(IMAGE_GENERATION_DRAFT_CONFIG_KEY, JSON.stringify(data.imageGenerationDraftConfig));
+    if (data.imageApiPresets) localStorage.setItem(IMAGE_API_PRESETS_KEY, JSON.stringify(data.imageApiPresets));
+    if (data.photoStylePresets) localStorage.setItem(PHOTO_STYLE_PRESETS_KEY, JSON.stringify(data.photoStylePresets));
     restoreUpstreamStructuredLocalStorage(data);
 
     if (data.socialAppData) {

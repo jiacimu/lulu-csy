@@ -194,6 +194,22 @@ describe('runtimeConfig', () => {
         });
     });
 
+    it('preserves STT base URL overrides', () => {
+        localStorage.setItem(STT_CONFIG_KEY, JSON.stringify({
+            provider: 'siliconflow',
+            siliconflowApiKey: 'silicon-key',
+            baseUrl: 'https://api-st.siliconflow.cn/v1',
+            language: 'en',
+        }));
+
+        expect(getSttConfig()).toMatchObject({
+            provider: 'siliconflow',
+            siliconflowApiKey: 'silicon-key',
+            baseUrl: 'https://api-st.siliconflow.cn/v1',
+            language: 'en',
+        });
+    });
+
     it('normalizes ElevenLabs voice-call TTS config onto safe defaults', () => {
         localStorage.setItem(TTS_CONFIG_KEY, JSON.stringify({
             voiceCallProvider: 'elevenlabs',

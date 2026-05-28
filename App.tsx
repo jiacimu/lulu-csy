@@ -6,7 +6,7 @@ import PhoneShell from './components/PhoneShell';
 import FeaturePreviewPage from './components/FeaturePreviewPage';
 import { startKeepAlive,startBackendHeartbeat } from './utils/keepAlive';
 import { installGlobalAutofillSuppression } from './utils/autofillSuppression';
-import { isFullscreenEnabled,requestSystemFullscreen } from './utils/systemFullscreen';
+import { isFullscreenEnabled,requestSystemFullscreenForMobileRestore } from './utils/systemFullscreen';
 import { isIOSStandaloneWebApp } from './utils/iosStandalone';
 
 const EDITABLE_SELECTION_SELECTOR = 'input:not([readonly]), textarea:not([readonly]), select, [contenteditable="true"], [data-allow-text-selection="true"]';
@@ -55,10 +55,10 @@ const SullyOSApp: React.FC = () => {
     document.addEventListener('selectstart', preventNonEditableSelection);
 
     if (isPwaMode() && isFullscreenEnabled()) {
-      // 积极维护全屏状态：任何点击或触摸（用户手势）都会尝试恢复全屏
-      // 这是为了解决 Android 侧滑返回、键盘收起时意外退出全屏的 Bug
+      // 积极维护全屏状态，但避免在移动端每次 touch/click 都打 fullscreen API。
+      // Android 侧滑返回、键盘收起后仍会恢复，只是 2.5 秒内最多尝试一次。
       const ensureFullscreen = () => {
-        requestSystemFullscreen();
+        requestSystemFullscreenForMobileRestore();
       };
 
       document.addEventListener('click', ensureFullscreen, { capture: true, passive: true });

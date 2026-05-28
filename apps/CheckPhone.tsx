@@ -135,6 +135,10 @@ export interface NormalizedPhoneState {
     customApps: PhoneCustomApp[];
 }
 
+interface GenerateOptions {
+    replaceExisting?: boolean;
+}
+
 export const normalizePhoneState = (
     phoneState: CharacterProfile['phoneState'] | undefined,
 ): NormalizedPhoneState => ({
@@ -401,7 +405,7 @@ const CheckPhone: React.FC = () => {
 
     // --- Core Generation Logic ---
 
-    const handleGenerate = async (type: string, customPrompt?: string) => {
+    const handleGenerate = async (type: string, customPrompt?: string, options: GenerateOptions = {}) => {
         if (!targetChar || !apiConfig.apiKey) {
             addToast('配置错误', 'error');
             return;
@@ -409,18 +413,31 @@ const CheckPhone: React.FC = () => {
         setIsLoading(true);
 
         try {
+            const existingRecords = targetChar.phoneState?.records || [];
+            const replacedRecords = options.replaceExisting
+                ? existingRecords.filter(record => record.type === type)
+                : [];
+            const replacedSystemMessageIds = new Set(
+                replacedRecords
+                    .map(record => record.systemMessageId)
+                    .filter((id): id is number => typeof id === 'number')
+            );
+
             // Include full memory details for accuracy
             const context = ContextBuilder.buildCoreContext(targetChar, userProfile, true);
             const msgs = await DB.getRecentMessagesByCharId(targetChar.id, MAX_PHONE_PROMPT_MESSAGES);
+            const contextMsgs = msgs.filter(m => !replacedSystemMessageIds.has(m.id));
 
-            const lastMsg = msgs[msgs.length - 1];
+            const lastMsg = contextMsgs[contextMsgs.length - 1];
             const timeGap = getTimeGapHint(lastMsg?.timestamp);
 
-            const recentMsgs = msgs.slice(-50).map(m => {
-                const roleName = m.role === 'user' ? userProfile.name : targetChar.name;
-                const content = m.type === 'text' ? m.content : `[${m.type}]`;
-                return `${roleName}: ${content}`;
-            }).join('\n');
+            const recentMsgs = contextMsgs
+                .slice(-50)
+                .map(m => {
+                    const roleName = m.role === 'user' ? userProfile.name : targetChar.name;
+                    const content = m.type === 'text' ? m.content : `[${m.type}]`;
+                    return `${roleName}: ${content}`;
+                }).join('\n');
 
             let promptInstruction = "";
             let logPrefix = "";
@@ -584,15 +601,23 @@ ${cityContext}
                 }
             }
 
-            const existingRecords = targetChar.phoneState?.records || [];
-            const nextRecords = prunePhoneRecords([...existingRecords, ...newRecordsToAdd]);
-            const prunedCount = existingRecords.length + newRecordsToAdd.length - nextRecords.length;
+            const baseRecords = options.replaceExisting
+                ? existingRecords.filter(record => record.type !== type)
+                : existingRecords;
+            const nextRecords = prunePhoneRecords([...baseRecords, ...newRecordsToAdd]);
+            const prunedCount = baseRecords.length + newRecordsToAdd.length - nextRecords.length;
             updateCharacter(targetChar.id, {
                 phoneState: { ...targetChar.phoneState, records: nextRecords }
             });
 
+            if (replacedSystemMessageIds.size > 0) {
+                await DB.deleteMessages(Array.from(replacedSystemMessageIds));
+            }
+
             addToast(
-                prunedCount > 0
+                options.replaceExisting
+                    ? `已重Roll ${newRecordsToAdd.length} 条数据`
+                    : prunedCount > 0
                     ? `已刷新 ${newRecordsToAdd.length} 条数据，整理了 ${prunedCount} 条旧记录`
                     : `已刷新 ${newRecordsToAdd.length} 条数据`,
                 'success'
@@ -1086,7 +1111,12 @@ Format:
                                     <div className="flex items-center justify-between mt-2.5">
                                         <div className="text-[#b2b2b2] text-[13px] flex items-center gap-2">
                                             <span>{r.title}</span>
-                                            <button onClick={() => handleDeleteRecord(r)} className="text-[#576b95] opacity-0 group-hover:opacity-100 transition-opacity">删除</button>
+                                            <button
+                                                onClick={() => handleDeleteRecord(r)}
+                                                className="text-[#576b95] px-1.5 py-0.5 rounded active:bg-[#f5f5f5] transition-colors"
+                                            >
+                                                删除
+                                            </button>
                                         </div>
                                         <div className="w-8 h-5 bg-[#f5f5f5] rounded flex items-center justify-center cursor-pointer active:bg-gray-200 transition-colors">
                                             <div className="flex gap-1">
@@ -1101,14 +1131,22 @@ Format:
                     </div>
                 </div>
 
-                <div className="absolute bottom-6 w-full flex justify-center pointer-events-none z-30">
+                <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-2 px-4 pointer-events-none z-30">
                     <button
                         disabled={isLoading}
                         onClick={() => handleGenerate('social')}
-                        className="pointer-events-auto bg-green-500 text-white px-6 py-2.5 rounded-full shadow-lg font-bold text-xs flex items-center gap-2 active:scale-95 transition-transform"
+                        className="pointer-events-auto bg-green-500 text-white px-4 py-2.5 rounded-full shadow-lg font-bold text-xs flex items-center gap-2 active:scale-95 transition-transform disabled:opacity-60"
                     >
                         {isLoading ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>}
                         刷新朋友圈
+                    </button>
+                    <button
+                        disabled={isLoading}
+                        onClick={() => handleGenerate('social', undefined, { replaceExisting: true })}
+                        className="pointer-events-auto bg-[#576b95] text-white px-4 py-2.5 rounded-full shadow-lg font-bold text-xs flex items-center gap-2 active:scale-95 transition-transform disabled:opacity-60"
+                    >
+                        {isLoading ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5M16.5 3 21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>}
+                        重Roll
                     </button>
                 </div>
             </div>

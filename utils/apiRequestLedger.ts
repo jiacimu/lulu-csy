@@ -10,6 +10,7 @@ export type ApiTraceFeature =
     | 'date'
     | 'theater'
     | 'newspaper'
+    | 'image'
     | 'unknown';
 
 export type ApiRequestStatus = 'pending' | 'success' | 'failed' | 'aborted';
@@ -269,6 +270,7 @@ export function getApiRequestLedgerSummary(referenceTime = Date.now()) {
         memory: 0,
         summary: 0,
         tts: 0,
+        image: 0,
         phone: 0,
         loveshow: 0,
         date: 0,

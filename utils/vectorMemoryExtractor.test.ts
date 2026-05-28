@@ -13,6 +13,7 @@ const {
     getVectorMemoryHeaders,
     getCharacterById,
     saveCharacter,
+    getEmojis,
     callLLM,
     hasExtractionLock,
     acquireExtractionLock,
@@ -24,6 +25,7 @@ const {
     getVectorMemoryHeaders: vi.fn(),
     getCharacterById: vi.fn(),
     saveCharacter: vi.fn(),
+    getEmojis: vi.fn(),
     callLLM: vi.fn(),
     hasExtractionLock: vi.fn(),
     acquireExtractionLock: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock('./db', () => ({
         getVectorMemoryHeaders,
         getCharacterById,
         saveCharacter,
+        getEmojis,
     },
 }));
 
@@ -95,6 +98,7 @@ describe('vectorMemoryExtractor memory context selection', () => {
             vectorMemoryLastExtractAt: 0,
         });
         saveCharacter.mockResolvedValue(undefined);
+        getEmojis.mockResolvedValue([]);
     });
 
     it('keeps only the newest active memory headers for extraction prompts', () => {
@@ -195,5 +199,45 @@ describe('vectorMemoryExtractor memory context selection', () => {
         expect(prompt).toContain('未接来电');
         expect(prompt).toContain('用户 查看了 Sully 手机中的「音乐」');
         expect(prompt).not.toContain('连接中断');
+    });
+
+    it('includes emoji names in manual vector extraction prompts without raw sticker URLs', async () => {
+        getEmojis.mockResolvedValue([{ name: 'Sully晚安', url: 'https://cdn.example/stickers/night.png' }]);
+        getMessagesByCharId.mockResolvedValue([
+            {
+                id: 1,
+                charId: 'char-1',
+                role: 'assistant',
+                type: 'emoji',
+                content: 'https://cdn.example/stickers/night.png',
+                timestamp: 1000,
+            },
+            {
+                id: 2,
+                charId: 'char-1',
+                role: 'user',
+                type: 'emoji',
+                content: 'data:image/png;base64,very-large-sticker',
+                timestamp: 2000,
+                metadata: { name: '亲亲' },
+            },
+        ]);
+        getVectorMemoryHeaders.mockResolvedValue([]);
+
+        await expect(VectorMemoryExtractor.batchExtractFromMessages(
+            'char-1',
+            0,
+            10,
+            { baseUrl: 'https://llm.example.com/v1', apiKey: 'llm-key', model: 'test-model' },
+            'embedding-key',
+            'Sully',
+        )).resolves.toBe(0);
+
+        expect(callLLM).toHaveBeenCalledTimes(1);
+        const prompt = callLLM.mock.calls[0][0] as string;
+        expect(prompt).toContain('[发送了表情包: Sully晚安]');
+        expect(prompt).toContain('[发送了表情包: 亲亲]');
+        expect(prompt).not.toContain('https://cdn.example/stickers/night.png');
+        expect(prompt).not.toContain('data:image');
     });
 });

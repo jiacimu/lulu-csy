@@ -32,6 +32,22 @@ const skeletonLoaders: Record<string, React.LazyExoticComponent<React.FC<{ data:
 // ─── CSS value whitelist ────────────────────────────────────────
 const SAFE_COLOR_RE = /^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\)|[a-zA-Z]{3,20})$/;
 const SAFE_FONT_STYLES = new Set(['serif', 'sans', 'handwrite', 'mono']);
+const FREEFORM_VIEWPORT_PADDING_X_PX = 20;
+const FREEFORM_VIEWPORT_PADDING_Y_PX = 96;
+
+function getFreeformViewportLimits() {
+    if (typeof window === 'undefined') {
+        return {
+            width: STATUS_CARD_WIDTH_PX,
+            height: STATUS_CARD_MIN_HEIGHT_PX,
+        };
+    }
+
+    return {
+        width: Math.max(160, window.innerWidth - FREEFORM_VIEWPORT_PADDING_X_PX),
+        height: Math.max(180, window.innerHeight - FREEFORM_VIEWPORT_PADDING_Y_PX),
+    };
+}
 
 function sanitizeColor(value: string | undefined, fallback: string): string;
 function sanitizeColor(value: string | undefined, fallback: undefined): string | undefined;
@@ -63,11 +79,12 @@ const FreeformStatusCard: React.FC<{ html: string; allowScripts?: boolean }> = (
         height: STATUS_CARD_MIN_HEIGHT_PX,
     });
     const [hasMeasuredSize, setHasMeasuredSize] = useState(false);
-
-    // Freeform cards get a much more generous viewport allowance than skeleton cards
-    const FREEFORM_VIEWPORT_PADDING_PX = 20;
+    const [viewportLimits, setViewportLimits] = useState(getFreeformViewportLimits);
+    const previousHtmlRef = useRef(html);
 
     useEffect(() => {
+        if (previousHtmlRef.current === html) return;
+        previousHtmlRef.current = html;
         setPreviewSize({
             width: STATUS_CARD_WIDTH_PX,
             height: STATUS_CARD_MIN_HEIGHT_PX,
@@ -76,21 +93,20 @@ const FreeformStatusCard: React.FC<{ html: string; allowScripts?: boolean }> = (
     }, [html]);
 
     useEffect(() => {
+        const updateViewportLimits = () => setViewportLimits(getFreeformViewportLimits());
+        window.addEventListener('resize', updateViewportLimits);
+        return () => window.removeEventListener('resize', updateViewportLimits);
+    }, []);
+
+    useEffect(() => {
         const handleMessage = (event: MessageEvent<{ type?: string; channel?: string; width?: number; height?: number }>) => {
             if (event.source !== previewRef.current?.contentWindow) return;
             if (event.data?.type !== 'preview-height') return;
             if (event.data.channel !== frameChannel) return;
 
-            const viewportWidthLimit = typeof window !== 'undefined'
-                ? Math.max(160, window.innerWidth - FREEFORM_VIEWPORT_PADDING_PX)
-                : STATUS_CARD_WIDTH_PX;
-
             const nextWidth = typeof event.data.width === 'number'
-                ? Math.min(
-                    Math.max(event.data.width + STATUS_CARD_MEASURE_BUFFER_PX, 1),
-                    viewportWidthLimit,
-                )
-                : viewportWidthLimit;
+                ? Math.max(event.data.width + STATUS_CARD_MEASURE_BUFFER_PX, 1)
+                : STATUS_CARD_WIDTH_PX;
 
             const nextHeight = typeof event.data.height === 'number'
                 ? Math.max(event.data.height + STATUS_CARD_MEASURE_BUFFER_PX, 1)
@@ -116,28 +132,52 @@ const FreeformStatusCard: React.FC<{ html: string; allowScripts?: boolean }> = (
         );
     }, [allowScripts, frameChannel, html, previewReady]);
 
+    const measuredWidth = hasMeasuredSize ? previewSize.width : viewportLimits.width;
+    const measuredHeight = hasMeasuredSize ? previewSize.height : 1;
+    const fitScale = hasMeasuredSize
+        ? Math.min(1, viewportLimits.width / measuredWidth, viewportLimits.height / measuredHeight)
+        : 1;
+    const fittedWidth = Math.ceil(measuredWidth * fitScale);
+    const fittedHeight = Math.ceil(measuredHeight * fitScale);
+
     return (
-        <iframe
-            ref={previewRef}
-            srcDoc={STATUS_CARD_IFRAME_SHELL}
-            sandbox="allow-scripts"
-            title="Freeform creative card"
-            data-preview-channel={frameChannel}
+        <div
+            data-testid="freeform-status-card-fit"
             style={{
-                width: hasMeasuredSize ? `${previewSize.width}px` : `calc(100vw - ${FREEFORM_VIEWPORT_PADDING_PX}px)`,
-                maxWidth: `calc(100vw - ${FREEFORM_VIEWPORT_PADDING_PX}px)`,
-                height: hasMeasuredSize ? `${previewSize.height}px` : '1px',
-                border: 'none',
-                borderRadius: '24px',
-                background: 'transparent',
-                colorScheme: 'light dark',
-                overflow: 'hidden',
+                position: 'relative',
+                width: `${fittedWidth}px`,
+                height: `${fittedHeight}px`,
+                maxWidth: `calc(100vw - ${FREEFORM_VIEWPORT_PADDING_X_PX}px)`,
+                maxHeight: `calc(100vh - ${FREEFORM_VIEWPORT_PADDING_Y_PX}px)`,
                 display: 'block',
                 opacity: hasMeasuredSize ? 1 : 0,
                 transition: 'opacity 120ms ease',
             }}
-            onLoad={() => setPreviewReady(true)}
-        />
+        >
+            <iframe
+                ref={previewRef}
+                srcDoc={STATUS_CARD_IFRAME_SHELL}
+                sandbox="allow-scripts"
+                title="Freeform creative card"
+                data-preview-channel={frameChannel}
+                style={{
+                    position: 'absolute',
+                    left: '50%',
+                    top: '50%',
+                    width: `${measuredWidth}px`,
+                    height: `${measuredHeight}px`,
+                    border: 'none',
+                    borderRadius: '24px',
+                    background: 'transparent',
+                    colorScheme: 'light dark',
+                    overflow: 'hidden',
+                    display: 'block',
+                    transform: `translate(-50%, -50%) scale(${fitScale})`,
+                    transformOrigin: 'center center',
+                }}
+                onLoad={() => setPreviewReady(true)}
+            />
+        </div>
     );
 };
 

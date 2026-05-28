@@ -1,7 +1,7 @@
 import React,{ useState,useEffect,useRef,useLayoutEffect,useMemo,useCallback } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { Message,MessageType,MemoryFragment,Emoji,EmojiCategory,AppID,YesterdayNewspaperPeriodType,YesterdayNewspaperRecord } from '../types';
+import { Message,MessageType,MemoryFragment,Emoji,EmojiCategory,AppID,YesterdayNewspaperPeriodType,YesterdayNewspaperRecord,type ManualPhotoGenerationOptions,type PhotoDirectorResult,type PhotoHintTrigger,type PhotoMeta,type PhotoStylePreset,type SavedVibeEncoding,type SavedVibeReference,type VibeReferenceInput } from '../types';
 import { processImage } from '../utils/file';
 import { safeResponseJson } from '../utils/safeApi';
 import { parseBilingual } from '../utils/chatParser';
@@ -40,6 +40,30 @@ import {
   type AgentApiConfig,
   type AgentTodayScheduleState,
 } from '../utils/agentBackendClient';
+import {
+    buildManualPhotoPrompt,
+    buildPhotoContextSummary,
+    buildPhotoPromptFromDirector,
+    createPhotoMeta,
+    generatePhotoImage,
+    getCompatiblePhotoStylePresets,
+    isImageGenerationConfigured,
+    NO_PHOTO_STYLE_PRESET,
+    NO_PHOTO_STYLE_PRESET_ID,
+    resolvePhotoStylePreset,
+    runManualPhotoDirector,
+    runPhotoDirector,
+    shouldIncludeUserAppearanceForPhoto,
+} from '../utils/photoGeneration';
+import { DEFAULT_IMAGE_GENERATION_CONFIG, selectSecondaryApiConfig } from '../utils/runtimeConfig';
+import {
+    buildSavedVibeFromImage,
+    buildVibeInputFromSaved,
+    getSavedVibeEncoding,
+    parseNaiv4VibeFile,
+} from '../utils/vibeReferences';
+import { prepareGeneratedImageStorage } from '../utils/generatedImageStorage';
+import type { SecondaryFullContextOptions } from '../utils/mindSnapshotExtractor';
 import { buildLifeProfileContextSnapshot } from '../utils/lifeProfileContextSnapshot';
 import { formatMemoryArchiveLine,selectMessagesForMemoryArchive } from '../utils/archiveMessageSelector';
 import {
@@ -76,6 +100,64 @@ function isMainChatVisibleMessage(message: Message): boolean {
 }
 
 const CHAT_HISTORY_RAW_WINDOW_MAX = 1500;
+const EMPTY_PHOTO_STYLE_PRESETS: PhotoStylePreset[] = [];
+
+function compareMessageDisplayOrder(a: Message, b: Message): number {
+    const timestampDelta = (a.timestamp || 0) - (b.timestamp || 0);
+    if (timestampDelta !== 0) return timestampDelta;
+    return a.id - b.id;
+}
+
+function matchesCharacterId(character: { id: string; charInstanceId?: string }, id?: string | null): boolean {
+    if (!id) return false;
+    return character.id === id || character.charInstanceId === id;
+}
+
+function readString(value: unknown): string {
+    return typeof value === 'string' ? value.trim() : '';
+}
+
+function getImageReplySummary(message: Message): string {
+    const metadata = message.metadata || {};
+    const photoMeta = metadata.photoMeta || {};
+    const director = photoMeta.directorResult || {};
+    return readString(metadata.visualSummary)
+        || readString(metadata.caption)
+        || readString(metadata.description)
+        || readString(metadata.ocrText)
+        || readString(photoMeta.continuity_summary)
+        || readString(director.caption)
+        || readString(director.scene_zh);
+}
+
+function getReplyPreviewText(message: Message): string {
+    if (message.type === 'image') {
+        return '[图片]';
+    }
+    if (message.type === 'emoji') return '[表情]';
+    if (message.type === 'voice') {
+        const sourceText = readString(message.metadata?.sourceText) || readString(message.content);
+        return sourceText ? `[语音] ${sourceText}` : '[语音]';
+    }
+    return message.content;
+}
+
+function buildReplyToPayload(message: Message, assistantName: string): NonNullable<Message['replyTo']> {
+    const imageSummary = message.type === 'image' ? getImageReplySummary(message) : '';
+    const imageUrl = message.type === 'image'
+        ? readString(message.metadata?.thumbnailUrl) || readString(message.content)
+        : undefined;
+
+    return {
+        id: message.id,
+        content: getReplyPreviewText(message),
+        name: message.role === 'user' ? '我' : assistantName,
+        type: message.type,
+        thumbnailUrl: message.type === 'image' ? readString(message.metadata?.thumbnailUrl) || undefined : undefined,
+        imageUrl,
+        visualSummary: imageSummary || undefined,
+    };
+}
 
 function getDisplayableMainChatMessages(
     messages: Message[],
@@ -121,7 +203,7 @@ const writeChatFeatureToggle = (key: string, value: boolean) => {
 };
 
 const Chat: React.FC = () => {
-    const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, closeApp, openApp, appParams, customThemes, removeCustomTheme, addToast, userProfile, lastMsgTimestamp, groups, clearUnread, realtimeConfig, ttsConfig, sttConfig, isDataLoaded } = useOS();
+    const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, closeApp, openApp, appParams, customThemes, removeCustomTheme, addToast, userProfile, updateUserProfile, lastMsgTimestamp, groups, clearUnread, realtimeConfig, ttsConfig, sttConfig, imageGenerationConfig, photoStylePresets, isDataLoaded } = useOS();
     const [messages, setMessages] = useState<Message[]>([]);
     const [hasMoreHistory, setHasMoreHistory] = useState(false);
     const [isHistoryLoading, setIsHistoryLoading] = useState(false);
@@ -172,6 +254,7 @@ const Chat: React.FC = () => {
     const consumedTargetRef = useRef('');
     const pendingTargetScrollRef = useRef(false);
     const messagesRef = useRef<Message[]>(messages);
+    const pendingGeneratedImageMessagesRef = useRef<Map<number, Message>>(new Map());
     const todayLifeEnsureSeqRef = useRef(0);
     const todayScheduleRequestSeqRef = useRef(0);
     const todayLifeSlowTimerRef = useRef<number | null>(null);
@@ -181,12 +264,15 @@ const Chat: React.FC = () => {
     const draftPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingDraftPersistRef = useRef<{ key: string; value: string } | null>(null);
     const openingStoryPhoneMsgIdsRef = useRef<Set<number>>(new Set());
+    const photoHintHandlerRef = useRef<((payload: PhotoHintTrigger) => void) | null>(null);
+    const manualPhotoInFlightRef = useRef(false);
+    const autoPhotoInFlightRef = useRef<Set<string>>(new Set());
     messagesRef.current = messages;
 
     // Reply Logic
     const [replyTarget, setReplyTarget] = useState<Message | null>(null);
 
-    const [modalType, setModalType] = useState<'none' | 'transfer' | 'emoji-import' | 'chat-settings' | 'message-options' | 'edit-message' | 'delete-emoji' | 'delete-category' | 'add-category' | 'history-manager' | 'archive-settings' | 'prompt-editor' | 'category-options' | 'category-visibility'>('none');
+    const [modalType, setModalType] = useState<'none' | 'transfer' | 'emoji-import' | 'chat-settings' | 'manual-photo' | 'message-options' | 'edit-message' | 'delete-emoji' | 'delete-category' | 'add-category' | 'history-manager' | 'archive-settings' | 'prompt-editor' | 'category-options' | 'category-visibility'>('none');
     const [allHistoryMessages, setAllHistoryMessages] = useState<Message[]>([]);
     const [transferAmt, setTransferAmt] = useState('');
     const [emojiImportText, setEmojiImportText] = useState('');
@@ -199,6 +285,8 @@ const Chat: React.FC = () => {
     const [editContent, setEditContent] = useState('');
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [transferActionMsg, setTransferActionMsg] = useState<Message | null>(null);
+    const [manualPhotoGenerating, setManualPhotoGenerating] = useState(false);
+    const [savedVibeReferences, setSavedVibeReferences] = useState<SavedVibeReference[]>([]);
 
     // Archive Prompts State
     const [archivePrompts, setArchivePrompts] = useState<{ id: string, name: string, content: string }[]>(DEFAULT_ARCHIVE_PROMPTS);
@@ -267,11 +355,28 @@ const Chat: React.FC = () => {
     }, [voiceRecorder.error]);
 
     const matchedChar = activeCharacterId
-        ? characters.find(c => c.id === activeCharacterId)
+        ? characters.find(c => matchesCharacterId(c, activeCharacterId))
         : undefined;
     const char = matchedChar || (isDataLoaded ? characters[0] : undefined);
     currentChatCharIdRef.current = char?.id;
     const currentThemeId = char?.bubbleStyle || 'default';
+    const effectiveImageGenerationConfig = imageGenerationConfig || DEFAULT_IMAGE_GENERATION_CONFIG;
+    const effectivePhotoStylePresets = photoStylePresets || EMPTY_PHOTO_STYLE_PRESETS;
+    const activePhotoStylePresets = useMemo(() => {
+        const compatibleStyles = getCompatiblePhotoStylePresets(effectivePhotoStylePresets, effectiveImageGenerationConfig.activeProvider)
+            .filter(style => style.id !== NO_PHOTO_STYLE_PRESET_ID);
+        return [NO_PHOTO_STYLE_PRESET, ...compatibleStyles];
+    }, [effectivePhotoStylePresets, effectiveImageGenerationConfig.activeProvider]);
+    const refreshSavedVibeReferences = useCallback(async () => {
+        const vibes = await DB.getSavedVibeReferences();
+        setSavedVibeReferences(vibes);
+    }, []);
+
+    useEffect(() => {
+        if (!isDataLoaded) return;
+        void refreshSavedVibeReferences().catch(error => console.warn('[Vibe] failed to load saved references:', error));
+    }, [isDataLoaded, refreshSavedVibeReferences]);
+
     const activeTheme = useMemo(() => customThemes.find(t => t.id === currentThemeId) || PRESET_THEMES[currentThemeId] || PRESET_THEMES.default, [currentThemeId, customThemes]);
     const characterTtsConfig = useMemo(
         () => ttsConfig && char ? withCharacterTtsVoice(ttsConfig, char) : ttsConfig,
@@ -742,7 +847,7 @@ const Chat: React.FC = () => {
     useEffect(() => {
         if (!isDataLoaded || characters.length === 0) return;
 
-        if (!activeCharacterId || !characters.some(candidate => candidate.id === activeCharacterId)) {
+        if (!activeCharacterId || !characters.some(candidate => matchesCharacterId(candidate, activeCharacterId))) {
             setActiveCharacterId(characters[0].id);
         }
     }, [isDataLoaded, characters, activeCharacterId, setActiveCharacterId]);
@@ -812,6 +917,8 @@ const Chat: React.FC = () => {
         } : undefined,
         autoShareSong,
         injectPlaybackContext,
+        autoPhoto: !!char?.autoPhotoEnabled,
+        onPhotoHint: (payload) => photoHintHandlerRef.current?.(payload),
         onMoodUpdate: (charId: string, moodState: any, statusCardData?: any) => {
             const updates: any = { moodState };
             if (statusCardData) updates.lastStatusCard = statusCardData;
@@ -866,6 +973,70 @@ const Chat: React.FC = () => {
     // How many messages to load per batch (initial load + each "load more" click)
     const LOAD_BATCH_SIZE = 30;
 
+    const mergePendingGeneratedImageMessages = useCallback((baseMessages: Message[]) => {
+        const pendingMessages = Array.from(pendingGeneratedImageMessagesRef.current.values());
+        if (pendingMessages.length === 0) return baseMessages;
+
+        const currentContentCharId = currentChatCharIdRef.current;
+        const existingIds = new Set(baseMessages.map(message => message.id));
+        let mergedMessages = baseMessages;
+
+        for (const pendingMessage of pendingMessages) {
+            if (existingIds.has(pendingMessage.id)) {
+                const persistedMessage = baseMessages.find(message => message.id === pendingMessage.id);
+                if (persistedMessage?.metadata?.status === 'ready') {
+                    pendingGeneratedImageMessagesRef.current.delete(pendingMessage.id);
+                }
+                continue;
+            }
+            const baseHasSameCharacter = baseMessages.some(message => message.charId === pendingMessage.charId);
+            if (currentContentCharId && pendingMessage.charId !== currentContentCharId && !baseHasSameCharacter) continue;
+            if (mergedMessages === baseMessages) mergedMessages = [...baseMessages];
+            mergedMessages.push(pendingMessage);
+            existingIds.add(pendingMessage.id);
+        }
+
+        if (mergedMessages === baseMessages) return baseMessages;
+        return mergedMessages.sort(compareMessageDisplayOrder);
+    }, []);
+
+    const upsertGeneratedImageMessage = useCallback((imageMessage: Message, replacedMessageId?: number) => {
+        if (replacedMessageId && replacedMessageId !== imageMessage.id) {
+            pendingGeneratedImageMessagesRef.current.delete(replacedMessageId);
+        }
+        pendingGeneratedImageMessagesRef.current.set(imageMessage.id, imageMessage);
+        setMessages(prev => {
+            const baseMessages = replacedMessageId && replacedMessageId !== imageMessage.id
+                ? prev.filter(message => message.id !== replacedMessageId)
+                : prev;
+            const next = baseMessages.some(message => message.id === imageMessage.id)
+                ? baseMessages.map(message => (
+                    message.id === imageMessage.id
+                        ? {
+                            ...message,
+                            ...imageMessage,
+                            metadata: {
+                                ...(message.metadata || {}),
+                                ...(imageMessage.metadata || {}),
+                            },
+                        }
+                        : message
+                )).sort(compareMessageDisplayOrder)
+                : [...baseMessages, imageMessage].sort(compareMessageDisplayOrder);
+            messagesRef.current = next;
+            return next;
+        });
+    }, []);
+
+    const removeGeneratedImageMessage = useCallback((messageId: number) => {
+        pendingGeneratedImageMessagesRef.current.delete(messageId);
+        setMessages(prev => {
+            const next = prev.filter(message => message.id !== messageId);
+            messagesRef.current = next;
+            return next;
+        });
+    }, []);
+
     const reloadMessages = useCallback(async (requestedVisibleCount: number) => {
         if (!activeCharacterId) return;
 
@@ -904,7 +1075,9 @@ const Chat: React.FC = () => {
             if (activeCharIdRef.current !== charIdAtStart) return;
 
             setHasMoreHistory(recentWindow.hasMore);
-            setMessages(recentWindow.messages);
+            const nextMessages = mergePendingGeneratedImageMessages(recentWindow.messages);
+            messagesRef.current = nextMessages;
+            setMessages(nextMessages);
         } catch (error) {
             if (activeCharIdRef.current !== charIdAtStart) return;
             console.error('[Chat] Failed to load recent messages:', error);
@@ -915,7 +1088,7 @@ const Chat: React.FC = () => {
                 setIsHistoryLoading(false);
             }
         }
-    }, [activeCharacterId, char?.hideBeforeMessageId, char?.hideSystemLogs]);
+    }, [activeCharacterId, char?.hideBeforeMessageId, char?.hideSystemLogs, mergePendingGeneratedImageMessages]);
 
     useEffect(() => {
         const rawTargetMessageId = appParams?.targetMessageId;
@@ -1247,11 +1420,7 @@ const Chat: React.FC = () => {
         const msgPayload: any = { charId: char.id, role: 'user', type, content: text, metadata };
 
         if (replyTarget) {
-            msgPayload.replyTo = {
-                id: replyTarget.id,
-                content: replyTarget.content,
-                name: replyTarget.role === 'user' ? '我' : char.name
-            };
+            msgPayload.replyTo = buildReplyToPayload(replyTarget, char.name);
             setReplyTarget(null);
         }
 
@@ -1383,14 +1552,563 @@ const Chat: React.FC = () => {
         }
     };
 
+    const saveGeneratedPhoto = useCallback(async (
+        charId: string,
+        dataUrl: string,
+        photoMeta: PhotoMeta,
+        caption?: string,
+        writeContinuity = false,
+        pendingMessageId?: number,
+    ) => {
+        const timestamp = Date.now();
+        const imageId = `photo-${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
+        const contentCharId = await DB.resolveCharacterContentId(charId);
+        const imageStorage = await prepareGeneratedImageStorage(imageId, dataUrl);
+        const messageTimestamp = pendingMessageId
+            ? pendingGeneratedImageMessagesRef.current.get(pendingMessageId)?.timestamp || timestamp
+            : timestamp;
+        const visualSummary = buildPhotoContextSummary(photoMeta, caption);
+        const imageMetadata = {
+            caption,
+            imageId,
+            status: 'ready',
+            thumbnailUrl: imageStorage.thumbnailUrl,
+            originalAssetId: imageStorage.originalAssetId,
+            visualSummary,
+            photoMeta,
+            source: photoMeta.source,
+        };
+        let imageMessageId = pendingMessageId || 0;
+        let replacedMessageId: number | undefined;
+
+        if (pendingMessageId) {
+            try {
+                await DB.updateMessage(pendingMessageId, imageStorage.displayUrl);
+                await DB.updateMessageMetadata(pendingMessageId, imageMetadata);
+            } catch (error) {
+                console.warn('[Photo] Failed to update pending image message, saving a new image message:', error);
+                replacedMessageId = pendingMessageId;
+                imageMessageId = 0;
+            }
+        }
+
+        if (!imageMessageId) {
+            imageMessageId = await DB.saveMessage({
+                charId: contentCharId,
+                role: 'assistant',
+                type: 'image',
+                content: imageStorage.displayUrl,
+                timestamp: messageTimestamp,
+                metadata: imageMetadata,
+            });
+        }
+
+        const activeCharForContext = characters.find(c => c.id === contentCharId) || char;
+        const recentChat = messagesRef.current.slice(-10).map(m => {
+            const sender = m.role === 'user' ? userProfile.name : (activeCharForContext?.name || '角色');
+            const content = m.type === 'image' ? '[图片]' : m.content.substring(0, 100);
+            return `${sender}: ${content}`;
+        });
+
+        await DB.saveGalleryImage({
+            id: imageId,
+            charId: contentCharId,
+            url: imageStorage.displayUrl,
+            timestamp,
+            savedDate: new Date(timestamp).toISOString().split('T')[0],
+            chatContext: recentChat,
+            thumbnailUrl: imageStorage.thumbnailUrl,
+            originalAssetId: imageStorage.originalAssetId,
+            visualSummary,
+            photoMeta,
+        });
+
+        const activeContentCharId = activeCharacterId
+            ? await DB.resolveCharacterContentId(activeCharacterId)
+            : undefined;
+        const renderedContentCharId = currentChatCharIdRef.current
+            ? await DB.resolveCharacterContentId(currentChatCharIdRef.current)
+            : undefined;
+        const isCurrentChatPhoto = contentCharId === activeContentCharId
+            || contentCharId === renderedContentCharId;
+
+        if (isCurrentChatPhoto) {
+            const imageMessage: Message = {
+                id: imageMessageId,
+                charId: contentCharId,
+                role: 'assistant',
+                type: 'image',
+                content: imageStorage.displayUrl,
+                timestamp: messageTimestamp,
+                metadata: imageMetadata,
+            };
+            upsertGeneratedImageMessage(imageMessage, replacedMessageId);
+            [0, 250, 1000].forEach(delay => {
+                window.setTimeout(() => {
+                    void reloadMessages(visibleCountRef.current);
+                }, delay);
+            });
+        }
+
+        if (writeContinuity && photoMeta.continuity_summary) {
+            try {
+                await DB.saveMessage({
+                    charId: contentCharId,
+                    role: 'system',
+                    type: 'system',
+                    content: [
+                        '[照片事件]',
+                        caption ? `caption: ${caption}` : '',
+                        `连续性: ${photoMeta.continuity_summary}`,
+                    ].filter(Boolean).join('\n'),
+                    metadata: {
+                        hiddenFromUser: true,
+                        source: 'photo_continuity',
+                        photoMeta,
+                        sourceMessageId: imageMessageId,
+                    },
+                });
+            } catch (error) {
+                console.warn('[Photo] Failed to save continuity event after image delivery:', error);
+            }
+        }
+    }, [activeCharacterId, characters, char, reloadMessages, upsertGeneratedImageMessage, userProfile.name]);
+
+    const buildDefaultVibeReferencesForChar = useCallback((targetChar?: { defaultVibeReferenceIds?: string[] }): VibeReferenceInput[] => {
+        const ids = (targetChar?.defaultVibeReferenceIds || []).slice(0, 3);
+        return ids
+            .map(id => savedVibeReferences.find(vibe => vibe.id === id))
+            .filter((vibe): vibe is SavedVibeReference => Boolean(vibe))
+            .map(buildVibeInputFromSaved);
+    }, [savedVibeReferences]);
+
+    const createPendingGeneratedImageMessage = useCallback(async (
+        charId: string,
+        photoMeta: PhotoMeta,
+        caption?: string,
+    ): Promise<number> => {
+        const timestamp = Date.now();
+        const contentCharId = await DB.resolveCharacterContentId(charId);
+        const pendingMetadata = {
+            caption,
+            status: 'generating',
+            source: photoMeta.source,
+            photoMeta,
+            photoHint: photoMeta.photoHint,
+        };
+        const pendingMessageId = await DB.saveMessage({
+            charId: contentCharId,
+            role: 'assistant',
+            type: 'image',
+            content: '',
+            timestamp,
+            metadata: pendingMetadata,
+        });
+
+        const activeContentCharId = activeCharacterId
+            ? await DB.resolveCharacterContentId(activeCharacterId)
+            : undefined;
+        const renderedContentCharId = currentChatCharIdRef.current
+            ? await DB.resolveCharacterContentId(currentChatCharIdRef.current)
+            : undefined;
+        const isCurrentChatPhoto = contentCharId === activeContentCharId
+            || contentCharId === renderedContentCharId;
+
+        if (isCurrentChatPhoto) {
+            upsertGeneratedImageMessage({
+                id: pendingMessageId,
+                charId: contentCharId,
+                role: 'assistant',
+                type: 'image',
+                content: '',
+                timestamp,
+                metadata: pendingMetadata,
+            });
+        }
+
+        return pendingMessageId;
+    }, [activeCharacterId, upsertGeneratedImageMessage]);
+
+    const prepareVibeReferencesForGeneration = useCallback((
+        references: VibeReferenceInput[] | undefined,
+        meta: PhotoMeta,
+    ): VibeReferenceInput[] => {
+        if (effectiveImageGenerationConfig.activeProvider !== 'novelai') return [];
+        const model = meta.naiModel || meta.model;
+        return (references || []).slice(0, 3).map(reference => {
+            const saved = reference.savedVibeId
+                ? savedVibeReferences.find(vibe => vibe.id === reference.savedVibeId)
+                : undefined;
+            const informationExtracted = reference.informationExtracted
+                || saved?.defaultInformationExtracted
+                || 0.6;
+            const cached = saved ? getSavedVibeEncoding(saved, model, informationExtracted) : undefined;
+            return {
+                ...reference,
+                name: reference.name || saved?.name || 'Vibe 参考图',
+                previewUrl: reference.previewUrl || saved?.previewUrl,
+                imageDataUrl: reference.imageDataUrl || saved?.imageDataUrl,
+                encodedReference: reference.encodedReference || cached?.encodedReference,
+                strength: reference.strength || saved?.defaultStrength || 0.6,
+                informationExtracted,
+            };
+        });
+    }, [effectiveImageGenerationConfig.activeProvider, savedVibeReferences]);
+
+    const handleVibeReferenceEncoded = useCallback(async (
+        reference: VibeReferenceInput,
+        encoding: SavedVibeEncoding,
+    ) => {
+        if (!reference.savedVibeId) return;
+        await DB.upsertSavedVibeEncoding(reference.savedVibeId, encoding);
+        await refreshSavedVibeReferences();
+    }, [refreshSavedVibeReferences]);
+
+    const handleSaveVibeReference = useCallback(async (reference: VibeReferenceInput): Promise<SavedVibeReference> => {
+        const saved = buildSavedVibeFromImage(reference);
+        await DB.saveSavedVibeReference(saved);
+        await refreshSavedVibeReferences();
+        return saved;
+    }, [refreshSavedVibeReferences]);
+
+    const handleImportVibeFile = useCallback(async (file: File): Promise<SavedVibeReference> => {
+        const saved = await parseNaiv4VibeFile(file);
+        await DB.saveSavedVibeReference(saved);
+        await refreshSavedVibeReferences();
+        return saved;
+    }, [refreshSavedVibeReferences]);
+
+    const handleRenameSavedVibe = useCallback(async (id: string, name: string) => {
+        await DB.renameSavedVibeReference(id, name);
+        await refreshSavedVibeReferences();
+    }, [refreshSavedVibeReferences]);
+
+    const handleDeleteSavedVibe = useCallback(async (id: string) => {
+        await DB.deleteSavedVibeReference(id);
+        if (char?.defaultVibeReferenceIds?.includes(id)) {
+            updateCharacter(char.id, {
+                defaultVibeReferenceIds: char.defaultVibeReferenceIds.filter(vibeId => vibeId !== id),
+            });
+        }
+        await refreshSavedVibeReferences();
+    }, [char, refreshSavedVibeReferences, updateCharacter]);
+
+    const handleClearSavedVibeCache = useCallback(async (id: string) => {
+        await DB.clearSavedVibeReferenceCache(id);
+        await refreshSavedVibeReferences();
+    }, [refreshSavedVibeReferences]);
+
+    const handleToggleDefaultVibeReference = useCallback((vibeId: string) => {
+        if (!char) return;
+        const current = char.defaultVibeReferenceIds || [];
+        const next = current.includes(vibeId)
+            ? current.filter(id => id !== vibeId)
+            : current.length >= 3
+                ? current
+                : [...current, vibeId];
+        if (next === current) {
+            addToast('角色默认 Vibe 最多选择 3 个', 'error');
+            return;
+        }
+        updateCharacter(char.id, { defaultVibeReferenceIds: next });
+    }, [addToast, char, updateCharacter]);
+
+    const handleManualPhotoGenerate = useCallback(async (
+        prompt: string,
+        stylePresetId?: string,
+        vibeReferences?: VibeReferenceInput[],
+        options?: ManualPhotoGenerationOptions,
+    ) => {
+        if (!char) return;
+        if (!isImageGenerationConfigured(effectiveImageGenerationConfig)) {
+            addToast('请先在设置里配置当前生图供应商', 'error');
+            return;
+        }
+        const cleanPrompt = prompt.trim();
+        if (!cleanPrompt) {
+            addToast('请先写一点想生成的画面', 'info');
+            return;
+        }
+        if (manualPhotoInFlightRef.current) {
+            addToast('图片还在生成中，请稍等一下', 'info');
+            return;
+        }
+
+        manualPhotoInFlightRef.current = true;
+        setManualPhotoGenerating(true);
+        try {
+            const manualMode = options?.mode || 'direct';
+            const includeAppearance = options?.useAppearance !== false;
+            const includeUserAppearance = includeAppearance && options?.useUserAppearance === true;
+            const optionAppearanceTags = typeof options?.appearanceTags === 'string' ? options.appearanceTags : undefined;
+            const optionAppearanceNegativeTags = typeof options?.appearanceNegativeTags === 'string' ? options.appearanceNegativeTags : undefined;
+            const optionUserAppearanceTags = typeof options?.userAppearanceTags === 'string' ? options.userAppearanceTags : undefined;
+            const optionUserAppearanceNegativeTags = typeof options?.userAppearanceNegativeTags === 'string' ? options.userAppearanceNegativeTags : undefined;
+            const optionAppearancePrompt = typeof options?.appearancePrompt === 'string' ? options.appearancePrompt : undefined;
+            const optionUserAppearancePrompt = typeof options?.userAppearancePrompt === 'string' ? options.userAppearancePrompt : undefined;
+            const isNaiProvider = effectiveImageGenerationConfig.activeProvider === 'novelai';
+            const appearanceTags = includeAppearance && isNaiProvider ? (optionAppearanceTags ?? char.naiAppearanceTags ?? '').trim() : '';
+            const appearanceNegativeTags = includeAppearance && isNaiProvider ? (optionAppearanceNegativeTags ?? char.naiAppearanceNegativeTags ?? '').trim() : '';
+            const userAppearanceTags = includeUserAppearance && isNaiProvider ? (optionUserAppearanceTags ?? userProfile.naiAppearanceTags ?? '').trim() : '';
+            const userAppearanceNegativeTags = includeUserAppearance && isNaiProvider ? (optionUserAppearanceNegativeTags ?? userProfile.naiAppearanceNegativeTags ?? '').trim() : '';
+            const appearancePrompt = includeAppearance ? (optionAppearancePrompt ?? char.photoAppearancePrompt ?? '').trim() : '';
+            const userAppearancePrompt = includeUserAppearance ? (optionUserAppearancePrompt ?? userProfile.photoAppearancePrompt ?? '').trim() : '';
+            const style = resolvePhotoStylePreset(stylePresetId, activePhotoStylePresets, char, effectiveImageGenerationConfig.activeProvider, {
+                allowUnboundRequested: Boolean(stylePresetId),
+            });
+            const seed = Math.floor(Math.random() * 9999999999);
+            let directorResult: PhotoDirectorResult | undefined;
+            let prompts: ReturnType<typeof buildManualPhotoPrompt>;
+
+            if (manualMode === 'story') {
+                const secondaryConfig = selectSecondaryApiConfig();
+                if (!secondaryConfig?.baseUrl || !secondaryConfig.apiKey || !secondaryConfig.model) {
+                    addToast('剧情模式需要先配置副 API', 'error');
+                    return;
+                }
+
+                const gallery = await DB.getGalleryImages(char.id);
+                const recentPhotoMetas = gallery
+                    .sort((a, b) => a.timestamp - b.timestamp)
+                    .map(item => item.photoMeta)
+                    .filter((meta): meta is PhotoMeta => Boolean(meta))
+                    .slice(-8);
+
+                const director = await runManualPhotoDirector({
+                    apiConfig: secondaryConfig,
+                    char,
+                    userProfile,
+                    currentMsgs: messagesRef.current,
+                    userPrompt: cleanPrompt,
+                    stylePresets: activePhotoStylePresets,
+                    recentPhotoMetas,
+                    providerType: effectiveImageGenerationConfig.activeProvider,
+                    appearanceTags,
+                    appearanceNegativeTags,
+                    userAppearanceTags,
+                    userAppearanceNegativeTags,
+                    appearancePrompt,
+                    userAppearancePrompt,
+                });
+                if (!director) {
+                    throw new Error('剧情模式没有返回可用生图结果');
+                }
+
+                const hasDirectorScene = effectiveImageGenerationConfig.activeProvider === 'openai-compatible'
+                    ? Boolean(director.scene_zh.trim())
+                    : Boolean(
+                        director.scene_zh.trim()
+                        || director.subject_tags?.trim()
+                        || director.pose_tags?.trim()
+                        || director.scene_tags?.trim()
+                        || director.clothing_tags?.trim()
+                        || director.expression_tags?.trim()
+                        || director.camera_tags?.trim()
+                        || director.mood_tags?.trim()
+                    );
+                if (!hasDirectorScene) {
+                    throw new Error('剧情模式没有返回可用画面内容');
+                }
+
+                directorResult = {
+                    ...director,
+                    shouldGeneratePhoto: true,
+                    stylePresetId: style.id,
+                };
+                prompts = buildPhotoPromptFromDirector(directorResult, undefined, style, effectiveImageGenerationConfig, {
+                    appearanceTags,
+                    appearanceNegativeTags,
+                    userAppearanceTags,
+                    userAppearanceNegativeTags,
+                    appearancePrompt,
+                    userAppearancePrompt,
+                    includeAppearance,
+                    includeUserAppearance,
+                });
+            } else {
+                prompts = buildManualPhotoPrompt(cleanPrompt, style, effectiveImageGenerationConfig, {
+                    appearanceTags,
+                    appearanceNegativeTags,
+                    userAppearanceTags,
+                    userAppearanceNegativeTags,
+                    appearancePrompt,
+                    userAppearancePrompt,
+                    includeAppearance,
+                    includeUserAppearance,
+                });
+            }
+
+            const meta = createPhotoMeta('manual', effectiveImageGenerationConfig, style, prompts, seed, directorResult);
+            const selectedVibes = vibeReferences && vibeReferences.length > 0
+                ? vibeReferences
+                : buildDefaultVibeReferencesForChar(char);
+            const result = await generatePhotoImage(effectiveImageGenerationConfig, meta, {
+                vibeReferences: prepareVibeReferencesForGeneration(selectedVibes, meta),
+                onVibeReferenceEncoded: handleVibeReferenceEncoded,
+            });
+            await saveGeneratedPhoto(char.id, result.dataUrl, meta, directorResult?.caption || cleanPrompt, false);
+            setShowPanel('none');
+            setModalType('none');
+            addToast('图片已发送并保存到相册', 'success');
+        } catch (error: any) {
+            console.error('[ManualPhoto] failed:', error);
+            addToast(error?.message || '生图失败', 'error');
+        } finally {
+            manualPhotoInFlightRef.current = false;
+            setManualPhotoGenerating(false);
+        }
+    }, [activePhotoStylePresets, addToast, buildDefaultVibeReferencesForChar, char, effectiveImageGenerationConfig, handleVibeReferenceEncoded, prepareVibeReferencesForGeneration, saveGeneratedPhoto, userProfile]);
+
+    const handlePhotoHint = useCallback((payload: PhotoHintTrigger) => {
+        if (!payload?.char?.id || !payload.hint) return;
+        if (!payload.char.autoPhotoEnabled) return;
+        if (!isImageGenerationConfigured(effectiveImageGenerationConfig)) {
+            addToast('主动发照片已触发，但当前生图供应商还没有配置完整', 'error');
+            return;
+        }
+
+        const autoPhotoKey = [
+            payload.char.id,
+            payload.sourceMessageId || 'no-source',
+            payload.hint.anchor_text,
+            payload.hint.share_intent,
+        ].join('|');
+        if (autoPhotoInFlightRef.current.has(autoPhotoKey)) {
+            console.warn('[AutoPhoto] Duplicate photo job skipped:', autoPhotoKey);
+            return;
+        }
+        autoPhotoInFlightRef.current.add(autoPhotoKey);
+
+        window.setTimeout(() => {
+            (async () => {
+                let pendingImageMessageId: number | undefined;
+                try {
+                    const secondaryConfig = selectSecondaryApiConfig();
+                    if (!secondaryConfig?.apiKey) {
+                        addToast('主动发照片需要先配置副 API', 'error');
+                        return;
+                    }
+
+                    const gallery = await DB.getGalleryImages(payload.char.id);
+                    const recentPhotoMetas = gallery
+                        .sort((a, b) => a.timestamp - b.timestamp)
+                        .map(item => item.photoMeta)
+                        .filter((meta): meta is PhotoMeta => Boolean(meta))
+                        .slice(-8);
+                    const isNaiProvider = effectiveImageGenerationConfig.activeProvider === 'novelai';
+                    const hintIncludesUser = shouldIncludeUserAppearanceForPhoto(undefined, payload.aiReply, payload.hint);
+
+                    const director = await runPhotoDirector({
+                        apiConfig: secondaryConfig,
+                        char: payload.char,
+                        userProfile: payload.userProfile,
+                        currentMsgs: payload.currentMsgs,
+                        aiReply: payload.aiReply,
+                        thinking: payload.thinking,
+                        hint: payload.hint,
+                        stylePresets: effectivePhotoStylePresets,
+                        recentPhotoMetas,
+                        providerType: effectiveImageGenerationConfig.activeProvider,
+                        appearanceTags: isNaiProvider ? payload.char.naiAppearanceTags : '',
+                        appearanceNegativeTags: isNaiProvider ? payload.char.naiAppearanceNegativeTags : '',
+                        userAppearanceTags: isNaiProvider && hintIncludesUser ? payload.userProfile.naiAppearanceTags : '',
+                        userAppearanceNegativeTags: isNaiProvider && hintIncludesUser ? payload.userProfile.naiAppearanceNegativeTags : '',
+                        appearancePrompt: payload.char.photoAppearancePrompt,
+                        userAppearancePrompt: hintIncludesUser ? payload.userProfile.photoAppearancePrompt : '',
+                        contextOptions: payload.contextOptions as SecondaryFullContextOptions | undefined,
+                    });
+                    if (!director) {
+                        throw new Error('Photo Director 没有返回可用导演结果，已停止生图');
+                    }
+                    if (!director.shouldGeneratePhoto && payload.hint.strength < 0.85) return;
+
+                    const hasDirectorScene = effectiveImageGenerationConfig.activeProvider === 'openai-compatible'
+                        ? Boolean(director.scene_zh.trim())
+                        : Boolean(
+                            director.scene_zh.trim()
+                            || director.subject_tags?.trim()
+                            || director.pose_tags?.trim()
+                            || director.scene_tags?.trim()
+                            || director.clothing_tags?.trim()
+                        );
+                    if (!hasDirectorScene) {
+                        console.warn('[AutoPhoto] Photo Director returned no usable scene; generation stopped.', director);
+                        throw new Error('Photo Director 没有返回可用画面内容，已停止生图');
+                    }
+
+                    const finalDirector: PhotoDirectorResult = {
+                        ...director,
+                        shouldGeneratePhoto: true,
+                    };
+                    const style = resolvePhotoStylePreset(finalDirector.stylePresetId, effectivePhotoStylePresets, payload.char, effectiveImageGenerationConfig.activeProvider);
+                    const includeAppearance = true;
+                    const includeUserAppearance = shouldIncludeUserAppearanceForPhoto(finalDirector, payload.aiReply, payload.hint);
+                    const prompts = buildPhotoPromptFromDirector(finalDirector, payload.hint, style, effectiveImageGenerationConfig, {
+                        appearanceTags: isNaiProvider ? payload.char.naiAppearanceTags : '',
+                        appearanceNegativeTags: isNaiProvider ? payload.char.naiAppearanceNegativeTags : '',
+                        userAppearanceTags: isNaiProvider && includeUserAppearance ? payload.userProfile.naiAppearanceTags : '',
+                        userAppearanceNegativeTags: isNaiProvider && includeUserAppearance ? payload.userProfile.naiAppearanceNegativeTags : '',
+                        appearancePrompt: payload.char.photoAppearancePrompt,
+                        userAppearancePrompt: includeUserAppearance ? payload.userProfile.photoAppearancePrompt : '',
+                        includeAppearance,
+                        includeUserAppearance,
+                    });
+                    const seed = Math.floor(Math.random() * 9999999999);
+                    const meta = createPhotoMeta('chat_auto', effectiveImageGenerationConfig, style, prompts, seed, finalDirector, payload.hint);
+                    console.groupCollapsed('[AutoPhoto] generation payload');
+                    console.info('provider:', effectiveImageGenerationConfig.activeProvider);
+                    console.info('director:', finalDirector);
+                    console.info('style:', style);
+                    console.info('positivePrompt:', prompts.positivePrompt);
+                    console.info('negativePrompt:', prompts.negativePrompt);
+                    console.info('finalPrompt:', prompts.finalPrompt);
+                    console.info('photoMeta:', meta);
+                    console.groupEnd();
+                    const defaultVibes = buildDefaultVibeReferencesForChar(payload.char);
+                    pendingImageMessageId = await createPendingGeneratedImageMessage(payload.char.id, meta, finalDirector.caption);
+                    const result = await generatePhotoImage(effectiveImageGenerationConfig, meta, {
+                        vibeReferences: prepareVibeReferencesForGeneration(defaultVibes, meta),
+                        onVibeReferenceEncoded: handleVibeReferenceEncoded,
+                    });
+                    await saveGeneratedPhoto(payload.char.id, result.dataUrl, meta, finalDirector.caption, true, pendingImageMessageId);
+                    addToast(`${payload.char.name}发来了一张照片`, 'success');
+                } catch (error: any) {
+                    console.error('[AutoPhoto] failed:', error);
+                    if (pendingImageMessageId) {
+                        removeGeneratedImageMessage(pendingImageMessageId);
+                        await DB.deleteMessage(pendingImageMessageId)
+                            .catch(deleteError => console.warn('[AutoPhoto] failed to delete pending image message:', deleteError));
+                    }
+                    await DB.saveMessage({
+                        charId: payload.char.id,
+                        role: 'system',
+                        type: 'system',
+                        content: `[照片发送失败]\n${payload.char.name}刚才尝试发送一张照片，但图片没有成功送达。下一轮不要声称已经发过照片，也不要责怪用户看不到；如果用户还想要，可以重新尝试。`,
+                        metadata: {
+                            hiddenFromUser: true,
+                            source: 'photo_delivery_failed',
+                            photoHint: payload.hint,
+                            errorMessage: error?.message || String(error || 'unknown'),
+                        },
+                    }).catch(saveError => console.warn('[AutoPhoto] failed to save failure event:', saveError));
+                    addToast(error?.message || '主动发照片失败', 'error');
+                } finally {
+                    autoPhotoInFlightRef.current.delete(autoPhotoKey);
+                }
+            })();
+        }, 0);
+    }, [addToast, buildDefaultVibeReferencesForChar, createPendingGeneratedImageMessage, effectiveImageGenerationConfig, effectivePhotoStylePresets, handleVibeReferenceEncoded, prepareVibeReferencesForGeneration, removeGeneratedImageMessage, saveGeneratedPhoto]);
+    photoHintHandlerRef.current = handlePhotoHint;
+
     const handlePanelAction = (type: string, payload?: any) => {
         switch (type) {
             case 'transfer': setModalType('transfer'); break;
+            case 'manual-photo': setModalType('manual-photo'); break;
             case 'poke': handleSendText('[戳一戳]', 'interaction'); break;
             case 'archive': setModalType('archive-settings'); break;
             case 'settings': setModalType('chat-settings'); break;
             case 'emoji-import': setModalType('emoji-import'); break;
-            case 'send-emoji': if (payload) handleSendText(payload.url, 'emoji'); break;
+            case 'send-emoji': if (payload) handleSendText(payload.url, 'emoji', { name: payload.name, categoryId: payload.categoryId }); break;
             case 'delete-emoji-req': setSelectedEmoji(payload); setModalType('delete-emoji'); break;
             case 'add-category': setModalType('add-category'); break;
             case 'select-category': setActiveCategory(payload); break;
@@ -1610,6 +2328,50 @@ const Chat: React.FC = () => {
         setModalType('none');
         addToast('设置已保存', 'success');
     };
+
+    const handleToggleBoundPhotoStyle = (styleId: string) => {
+        if (!char) return;
+        const allIds = activePhotoStylePresets.map(style => style.id);
+        const current = new Set(
+            char.boundPhotoStylePresetIds && char.boundPhotoStylePresetIds.length > 0
+                ? char.boundPhotoStylePresetIds
+                : allIds,
+        );
+        if (current.has(styleId)) current.delete(styleId);
+        else current.add(styleId);
+        if (current.size === 0) {
+            addToast('至少保留一个可用风格', 'info');
+            return;
+        }
+        const nextIds = current.size === allIds.length ? undefined : Array.from(current);
+        const updates: any = { boundPhotoStylePresetIds: nextIds };
+        if (char.defaultPhotoStylePresetId && nextIds && !nextIds.includes(char.defaultPhotoStylePresetId)) {
+            updates.defaultPhotoStylePresetId = nextIds.find(id => id !== NO_PHOTO_STYLE_PRESET_ID) || nextIds[0];
+        }
+        updateCharacter(char.id, updates);
+    };
+
+    const handleSaveNaiAppearance = useCallback((
+        tags: string,
+        negativeTags: string,
+        appearancePrompt?: string,
+        userTags?: string,
+        userNegativeTags?: string,
+        userAppearancePrompt?: string,
+    ) => {
+        if (!char) return;
+        updateCharacter(char.id, {
+            naiAppearanceTags: tags.trim() || undefined,
+            naiAppearanceNegativeTags: negativeTags.trim() || undefined,
+            photoAppearancePrompt: appearancePrompt?.trim() || undefined,
+        });
+        updateUserProfile({
+            naiAppearanceTags: userTags?.trim() || undefined,
+            naiAppearanceNegativeTags: userNegativeTags?.trim() || undefined,
+            photoAppearancePrompt: userAppearancePrompt?.trim() || undefined,
+        });
+        addToast('锁脸设定已保存', 'success');
+    }, [addToast, char, updateCharacter, updateUserProfile]);
 
     const handleClearHistory = async () => {
         if (!char) return;
@@ -2291,7 +3053,7 @@ const Chat: React.FC = () => {
                 editContent={editContent} setEditContent={setEditContent}
                 archivePrompts={archivePrompts} selectedPromptId={selectedPromptId} setSelectedPromptId={setSelectedPromptId}
                 editingPrompt={editingPrompt} setEditingPrompt={setEditingPrompt} isSummarizing={isSummarizing}
-                selectedMessage={selectedMessage} selectedEmoji={selectedEmoji} activeCharacter={char} messages={messages}
+                selectedMessage={selectedMessage} selectedEmoji={selectedEmoji} activeCharacter={char} userProfile={userProfile} messages={messages}
                 allHistoryMessages={allHistoryMessages}
 
                 newCategoryName={newCategoryName} setNewCategoryName={setNewCategoryName} onAddCategory={handleAddCategory}
@@ -2399,6 +3161,28 @@ const Chat: React.FC = () => {
                 onGenerateNewspaperPeriod={handleGenerateNewspaperPeriod}
                 todayScheduleEnabled={todayScheduleFeatureEnabled}
                 onToggleTodaySchedule={handleToggleTodayScheduleFeature}
+                photoStylePresets={activePhotoStylePresets}
+                photoConfigReady={isImageGenerationConfigured(effectiveImageGenerationConfig)}
+                manualPhotoGenerating={manualPhotoGenerating}
+                imageProviderType={effectiveImageGenerationConfig.activeProvider}
+                savedVibeReferences={savedVibeReferences}
+                onManualPhotoGenerate={handleManualPhotoGenerate}
+                onSaveVibeReference={handleSaveVibeReference}
+                onImportVibeFile={handleImportVibeFile}
+                onRenameSavedVibe={handleRenameSavedVibe}
+                onDeleteSavedVibe={handleDeleteSavedVibe}
+                onClearSavedVibeCache={handleClearSavedVibeCache}
+                onToggleManualPhoto={() => updateCharacter(char.id, { manualPhotoEnabled: !char.manualPhotoEnabled })}
+                onToggleAutoPhoto={() => updateCharacter(char.id, { autoPhotoEnabled: !char.autoPhotoEnabled })}
+                onSetDefaultPhotoStyle={(styleId: string) => {
+                    const boundIds = char.boundPhotoStylePresetIds && char.boundPhotoStylePresetIds.length > 0
+                        ? Array.from(new Set([...char.boundPhotoStylePresetIds, styleId]))
+                        : undefined;
+                    updateCharacter(char.id, { defaultPhotoStylePresetId: styleId, boundPhotoStylePresetIds: boundIds });
+                }}
+                onToggleBoundPhotoStyle={handleToggleBoundPhotoStyle}
+                onToggleDefaultVibeReference={handleToggleDefaultVibeReference}
+                onSaveNaiAppearance={handleSaveNaiAppearance}
             />
 
             <ChatHeader
@@ -2603,7 +3387,7 @@ const Chat: React.FC = () => {
             <div className="relative z-40">
                 {replyTarget && (
                     <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
-                        <div className="flex items-center gap-2 truncate"><span className="font-bold text-slate-700">正在回复:</span><span className="truncate max-w-[200px]">{replyTarget.content}</span></div>
+                        <div className="flex items-center gap-2 truncate"><span className="font-bold text-slate-700">正在回复:</span><span className="truncate max-w-[200px]">{getReplyPreviewText(replyTarget)}</span></div>
                         <button onClick={() => setReplyTarget(null)} className="p-1 text-slate-400 hover:text-slate-600">×</button>
                     </div>
                 )}
@@ -2626,6 +3410,7 @@ const Chat: React.FC = () => {
                     onRemoveTheme={removeCustomTheme} activeThemeId={currentThemeId}
                     onPanelAction={handlePanelAction}
                     onImageSelect={handleImageSelect}
+                    manualPhotoEnabled={!!char.manualPhotoEnabled}
                     isSummarizing={isSummarizing}
                     categories={userVisibleCategories}
                     activeCategory={activeCategory}

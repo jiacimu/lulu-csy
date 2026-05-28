@@ -1,4 +1,7 @@
 const FULLSCREEN_ENABLED_KEY = 'os_fullscreen_enabled';
+export const FULLSCREEN_RESTORE_THROTTLE_MS = 2500;
+
+let lastFullscreenRestoreRequestAt: number | null = null;
 
 /**
  * Checks whether the user enabled immersive fullscreen mode.
@@ -33,6 +36,25 @@ export function requestSystemFullscreen(): void {
 }
 
 /**
+ * Requests fullscreen from high-frequency mobile gestures without hammering
+ * the browser fullscreen API on every touch/click pair.
+ */
+export function requestSystemFullscreenForMobileRestore(now = Date.now()): void {
+  if (typeof document === 'undefined') return;
+  if (!isFullscreenEnabled()) return;
+  if (document.fullscreenElement) return;
+  if (
+    lastFullscreenRestoreRequestAt !== null &&
+    now - lastFullscreenRestoreRequestAt < FULLSCREEN_RESTORE_THROTTLE_MS
+  ) {
+    return;
+  }
+
+  lastFullscreenRestoreRequestAt = now;
+  requestSystemFullscreen();
+}
+
+/**
  * Exits browser fullscreen.
  */
 export function exitSystemFullscreen(): void {
@@ -40,4 +62,8 @@ export function exitSystemFullscreen(): void {
   if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
   }
+}
+
+export function resetSystemFullscreenRestoreThrottleForTests(): void {
+  lastFullscreenRestoreRequestAt = null;
 }

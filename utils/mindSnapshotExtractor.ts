@@ -55,6 +55,7 @@ export interface SecondaryFullContextOptions {
     mirrorMessages?: ChatContextMirrorMessage[];
     mirrorAssistantReply?: string;
     mirrorThinking?: string;
+    previousThinking?: string;
     contextLimit?: number;
     historyMsgCount?: number;
     model?: string;
@@ -331,7 +332,7 @@ async function callSecondaryLLM(
     system: string,
     user: string,
     signal: AbortSignal,
-    maxTokens: number = 800,
+    maxTokens: number = SECONDARY_LLM_MAX_TOKENS,
     temperature: number = 0.6,
     contextMessages?: SecondaryLLMMessage[],
     trace?: ApiRequestTraceMeta,
@@ -371,7 +372,9 @@ async function callSecondaryLLM(
                 model: apiConfig.model,
                 messages,
                 temperature,
-                max_tokens: maxTokens,
+                max_tokens: Number.isFinite(maxTokens) && maxTokens > 0
+                    ? maxTokens
+                    : SECONDARY_LLM_MAX_TOKENS,
             }),
             signal,
         }));
@@ -429,7 +432,11 @@ function buildSensePrompt(
     charContext: string,
     timeContext: { timeStr: string; timeOfDay: string; dateStr: string; dayOfWeek: string },
     goalListStr?: string,
+    previousThinking?: string,
 ): { system: string; user: string } {
+    const previousThinkingBlock = previousThinking?.trim()
+        ? `\n## 上一轮${charName}的内心推演\n以下是上一轮主模型 thinking / 内心推演，只用于判断${charName}的情绪惯性、未说出口的压力或余波。不可把它当作用户事实，不可当作新增剧情。\n${previousThinking.trim().slice(0, 1200)}\n`
+        : '';
 
     const system = `你是一个角色状态感知模块。你的任务是分析最近的对话，判断角色${charName}的内部状态变化。
 
@@ -477,6 +484,7 @@ ${timeContext.dateStr} ${timeContext.dayOfWeek} ${timeContext.timeOfDay} ${timeC
 
 ## 最近对话
 ${recentContext}
+${previousThinkingBlock}
 
 ---
 
@@ -527,7 +535,14 @@ async function senseBefore(
         const charContext = resolvedContext.charContext;
         const timeContext = RealtimeContextManager.getTimeContext();
 
-        const prompt = buildSensePrompt(char.name, recentContext, charContext, timeContext, goalListStr);
+        const prompt = buildSensePrompt(
+            char.name,
+            recentContext,
+            charContext,
+            timeContext,
+            goalListStr,
+            contextOptions?.previousThinking,
+        );
 
         const content = await callSecondaryLLM(
             apiConfig,

@@ -123,6 +123,10 @@ export interface Message {
         id: number;
         content: string;
         name: string;
+        type?: MessageType;
+        thumbnailUrl?: string;
+        imageUrl?: string;
+        visualSummary?: string;
     };
 }
 
