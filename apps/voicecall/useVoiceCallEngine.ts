@@ -53,7 +53,9 @@ import {
     getVoiceCallRuntimeProfile,
     VOICE_CALL_DEFAULT_SAMPLE_RATE,
     type VoiceCallInputMode,
+    type VoiceCallRuntimeProfile,
 } from './voiceCallRuntime';
+import { loadVadWeb,withMutedVadModelLoadErrors } from '../../utils/voiceVadLoader';
 
 // ─── 类型 ──────────────────────────────────────────────────────────────
 
@@ -67,6 +69,137 @@ const BARGE_IN_MIN_SPEECH_MS = 750;
 const BARGE_IN_CONFIRMED_AUDIO_WINDOW_MS = 2500;
 const BARGE_IN_AEC_IGNORE_MS = 250;
 const VAD_SAMPLE_RATE = 16000;
+const VAD_ASSET_BASE_PATH = '/vad/';
+const VAD_ONNX_WASM_BASE_PATH = '/vad/onnx/stable-20260529/';
+const VAD_START_ATTEMPTS: Array<{
+    model: 'v5' | 'legacy';
+    processorType: 'AudioWorklet' | 'ScriptProcessor' | 'auto';
+}> = [
+        { model: 'legacy', processorType: 'auto' },
+        { model: 'legacy', processorType: 'ScriptProcessor' },
+    ];
+
+function getVoiceCallErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message || error.name;
+    if (typeof error === 'string') return error;
+    try {
+        return JSON.stringify(error) ?? String(error);
+    } catch {
+        return String(error);
+    }
+}
+
+function describeMicrophoneError(error: unknown): string {
+    const name = typeof DOMException !== 'undefined' && error instanceof DOMException ? error.name : '';
+    if (name === 'NotAllowedError' || name === 'SecurityError') return '麦克风权限被拒绝';
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return '未检测到可用麦克风';
+    if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
+        return '麦克风被系统或其他应用占用';
+    }
+    if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+        return '当前浏览器不支持指定的麦克风参数';
+    }
+    return `麦克风不可用：${getVoiceCallErrorMessage(error)}`;
+}
+
+function describeVadError(error: unknown): string {
+    const message = getVoiceCallErrorMessage(error);
+    const lower = message.toLowerCase();
+    if (lower.includes('worklet')) return 'AudioWorklet 启动失败';
+    if (lower.includes('audiocontext') || lower.includes('audio context')) return '音频上下文启动失败';
+    if (lower.includes('wasm') || lower.includes('onnx') || lower.includes('ort') || lower.includes('inferencesession')) {
+        return 'VAD 模型加载失败';
+    }
+    return 'VAD 启动失败';
+}
+
+async function requestVoiceCallMicrophoneStream(): Promise<MediaStream> {
+    if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('当前浏览器不支持麦克风输入');
+    }
+
+    try {
+        return await navigator.mediaDevices.getUserMedia({
+            audio: {
+                channelCount: 1,
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                sampleRate: VAD_SAMPLE_RATE,
+            },
+        });
+    } catch (firstError) {
+        console.warn('[Engine] Microphone request with constraints failed, retrying with audio:true:', firstError);
+        try {
+            return await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (fallbackError) {
+            throw new Error(describeMicrophoneError(fallbackError));
+        }
+    }
+}
+
+function configureVoiceCallOrt(ort: any): void {
+    if (!ort?.env) return;
+    ort.env.logLevel = 'error';
+    if (!ort.env.wasm) return;
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.proxy = false;
+    ort.env.wasm.initTimeout = 10000;
+}
+
+type VoiceCallVadHandlers = {
+    onVADMisfire: () => Promise<void> | void;
+    onSpeechStart: () => Promise<void> | void;
+    onSpeechEnd: (audio: Float32Array) => Promise<void> | void;
+};
+
+type VoiceCallVadLike = {
+    start?: () => Promise<void> | void;
+    destroy?: () => Promise<void> | void;
+};
+
+async function createStartedVoiceCallVad(
+    MicVAD: (typeof import('@ricky0123/vad-web'))['MicVAD'],
+    stream: MediaStream,
+    runtime: VoiceCallRuntimeProfile,
+    handlers: VoiceCallVadHandlers,
+): Promise<VoiceCallVadLike> {
+    const attempts = runtime.lowMemoryMode
+        ? VAD_START_ATTEMPTS.filter(attempt => attempt.processorType === 'ScriptProcessor')
+        : VAD_START_ATTEMPTS;
+    let lastError: unknown = null;
+
+    for (const attempt of attempts) {
+        let vad: any = null;
+        try {
+            console.log(`[Engine] VAD init attempt: model=${attempt.model}, processor=${attempt.processorType}`);
+            vad = await withMutedVadModelLoadErrors(() => MicVAD.new({
+                model: attempt.model,
+                getStream: async () => stream,
+                pauseStream: async () => { /* no-op: stream lifecycle is owned by the engine */ },
+                resumeStream: async () => stream,
+                onnxWASMBasePath: VAD_ONNX_WASM_BASE_PATH,
+                baseAssetPath: VAD_ASSET_BASE_PATH,
+                processorType: attempt.processorType,
+                ortConfig: configureVoiceCallOrt,
+                positiveSpeechThreshold: attempt.model === 'v5' ? 0.6 : 0.55,
+                negativeSpeechThreshold: 0.3,
+                redemptionMs: 300,
+                startOnLoad: false,
+                ...handlers,
+            }));
+            await vad.start();
+            console.log(`[Engine] VAD started: model=${attempt.model}, processor=${attempt.processorType}`);
+            return vad;
+        } catch (error) {
+            lastError = error;
+            console.warn(`[Engine] VAD attempt failed: model=${attempt.model}, processor=${attempt.processorType}`, error);
+            try { await vad?.destroy?.(); } catch { }
+        }
+    }
+
+    throw lastError ?? new Error('VAD 初始化失败');
+}
 
 export interface VoiceCallSubtitleEntry {
     id: number;
@@ -135,6 +268,8 @@ export interface UseVoiceCallEngineReturn {
     lowMemoryMode: boolean;
     /** 当前输入模式；省内存或 VAD 初始化失败时为 text-only */
     voiceInputMode: VoiceCallInputMode;
+    /** 语音输入降级原因，用于 UI 和现场排查 */
+    voiceInputFallbackReason: string;
     // ─── 通话质量反馈 ───
     /** STT 返回空结果，提示用户"没听清" */
     sttEmptyHint: boolean;
@@ -356,6 +491,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
     const [ttsDegraded, setTtsDegraded] = useState(false);
     const [transcriptSource, setTranscriptSource] = useState<VoiceCallTranscriptSource>('voice');
     const [voiceInputMode, setVoiceInputMode] = useState<VoiceCallInputMode>(runtimeProfile.voiceInputMode);
+    const [voiceInputFallbackReason, setVoiceInputFallbackReason] = useState('');
     // ─── 外语模式 (Foreign Language) ───
     const [aiTranslation, setAiTranslation] = useState('');
     const [subtitleHistory, setSubtitleHistory] = useState<VoiceCallSubtitleEntry[]>([]);
@@ -1200,6 +1336,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         aiSpeakingStartedAtRef.current = 0;
         lastCallHistoryRef.current = [];
         recentContextMessagesRef.current = [];
+        setVoiceInputFallbackReason('');
 
         try {
             const runtime = runtimeProfileRef.current;
@@ -1219,24 +1356,17 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             let nextVoiceInputMode = runtime.voiceInputMode;
             if (runtime.voiceInputMode === 'voice') {
                 try {
-                    if (!navigator.mediaDevices?.getUserMedia) {
-                        throw new Error('当前浏览器不支持麦克风输入');
-                    }
-                    stream = await navigator.mediaDevices.getUserMedia({
-                        audio: {
-                            echoCancellation: true,
-                            noiseSuppression: true,
-                            sampleRate: 16000,
-                        },
-                    });
+                    stream = await requestVoiceCallMicrophoneStream();
                     streamRef.current = stream;
                 } catch (error) {
                     console.warn('[Engine] Microphone unavailable, falling back to text input:', error);
+                    setVoiceInputFallbackReason(getVoiceCallErrorMessage(error));
                     nextVoiceInputMode = 'text-only';
                     setVoiceInputMode('text-only');
                 }
             } else {
                 console.log('[Engine] Low-memory runtime: skipping microphone and VAD initialization');
+                setVoiceInputFallbackReason('当前运行环境使用文字输入模式');
                 setVoiceInputMode('text-only');
             }
 
@@ -1291,18 +1421,8 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             // 5. 初始化 VAD
             if (stream && nextVoiceInputMode === 'voice') {
                 try {
-                    const { MicVAD } = await import('@ricky0123/vad-web');
-                    const vad = await MicVAD.new({
-                        model: 'v5',
-                        getStream: async () => stream,
-                        pauseStream: async () => { /* no-op */ },
-                        resumeStream: async () => stream,
-                        onnxWASMBasePath: '/vad/onnx/',
-                        baseAssetPath: '/vad/',
-                        positiveSpeechThreshold: 0.6,
-                        negativeSpeechThreshold: 0.3,
-                        redemptionMs: 300,
-                        startOnLoad: false,
+                    const { MicVAD } = await loadVadWeb();
+                    const vad = await createStartedVoiceCallVad(MicVAD, stream, runtime, {
                         onVADMisfire: () => {
                             console.log('[Engine] VAD: misfire');
                             clearBargeInCandidate();
@@ -1388,10 +1508,11 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                     });
 
                     vadRef.current = vad;
-                    vad.start();
+                    setVoiceInputFallbackReason('');
                     setVoiceInputMode('voice');
                 } catch (error) {
                     console.warn('[Engine] VAD unavailable, falling back to text input:', error);
+                    setVoiceInputFallbackReason(describeVadError(error));
                     try { stream.getTracks().forEach(t => t.stop()); } catch { }
                     if (streamRef.current === stream) {
                         streamRef.current = null;
@@ -1549,6 +1670,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         engineStateRef.current = 'idle';
         setIsUserSpeaking(false);
         setVoiceInputMode(runtimeProfileRef.current.voiceInputMode);
+        setVoiceInputFallbackReason('');
         console.log('[Engine] Voice call engine stopped');
     }, [clearBargeInCandidate]);
 
@@ -1604,6 +1726,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         transcriptSource,
         lowMemoryMode: runtimeProfile.lowMemoryMode,
         voiceInputMode,
+        voiceInputFallbackReason,
         // ─── 通话质量反馈 ───
         sttEmptyHint,
         // ─── 外语模式 (Foreign Language) ───

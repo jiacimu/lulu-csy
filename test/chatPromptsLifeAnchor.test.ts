@@ -207,4 +207,49 @@ describe('ChatPrompts life anchor injection', () => {
         expect(systemPrompt).not.toContain('别人的纪念日');
         vi.useRealTimers();
     });
+
+    it('keeps dynamic chat actions hidden until their switches are enabled', async () => {
+        const systemPrompt = await ChatPrompts.buildSystemPrompt(
+            character(),
+            user(),
+            [],
+            [],
+            [],
+            [],
+        );
+
+        expect(systemPrompt).toContain('### 测试角色，你可以在聊天中使用的聊天动作');
+        expect(systemPrompt).toContain('屏幕对面的糯米');
+        expect(systemPrompt).toContain('[[SEND_EMOJI: 表情名称]]');
+        expect(systemPrompt).not.toContain('【语音消息：你说的话】');
+        expect(systemPrompt).not.toContain('[[CALL: mode]]');
+        expect(systemPrompt).not.toContain('[[SHARE_SONG: 歌名 | 歌手名 | 歌曲ID]]');
+        expect(systemPrompt).not.toContain('[[PHOTO_DECISION:true]]');
+    });
+
+    it('injects switched chat actions into the unified action section', async () => {
+        const systemPrompt = await ChatPrompts.buildSystemPrompt(
+            character(),
+            user(),
+            [],
+            [],
+            [],
+            [],
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            {
+                autoVoice: true,
+                autoCall: true,
+                autoShareSong: true,
+                autoPhoto: true,
+            },
+        );
+
+        expect(systemPrompt).toContain('【语音消息：你说的话】');
+        expect(systemPrompt).toContain('[[CALL: mode]]');
+        expect(systemPrompt).toContain('[[SHARE_SONG: 歌名 | 歌手名 | 歌曲ID]]');
+        expect(systemPrompt).toContain('[[PHOTO_DECISION:true]]');
+    });
 });

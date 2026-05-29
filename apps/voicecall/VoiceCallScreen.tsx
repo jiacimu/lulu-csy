@@ -156,6 +156,7 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
         transcriptSource,
         lowMemoryMode,
         voiceInputMode,
+        voiceInputFallbackReason,
         // ─── 通话质量反馈 ───
         sttEmptyHint,
         // ─── 外语模式 (Foreign Language) ───
@@ -563,6 +564,7 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                         onVolumeChange={setVolume}
                         sttEmptyHint={sttEmptyHint}
                         voiceInputDisabled={voiceInputMode === 'text-only'}
+                        voiceInputFallbackReason={voiceInputFallbackReason}
                     />
                 )}
 

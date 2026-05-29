@@ -472,7 +472,12 @@ export const useChatAI = ({
                     // If senseBefore finishes first and updates char.moodState (via DB persist),
                     // buildCoreContext will pick it up. But since they run in parallel,
                     // we also manually inject body signals after if needed.
-                    return ChatPrompts.buildSystemPrompt(char, userProfile, groups, emojis, categories, promptContextMsgs, realtimeConfig, apiConfig, embeddingApiKey, characterGoals);
+                    return ChatPrompts.buildSystemPrompt(char, userProfile, groups, emojis, categories, promptContextMsgs, realtimeConfig, apiConfig, embeddingApiKey, characterGoals, {
+                        autoVoice,
+                        autoCall,
+                        autoShareSong,
+                        autoPhoto,
+                    });
                 })(),
                 playbackContextPromise,
             ]);
@@ -489,74 +494,6 @@ export const useChatAI = ({
                 onMoodUpdate(char.id, moodForUi);
                 // Also update the local char ref so subsequent code sees the new state
                 char.moodState = moodForUi;
-            }
-
-            // 1.1 Inject voice message format instruction (only when autoVoice is enabled)
-            if (autoVoice) {
-                systemPrompt += `
-
-[系统功能: 语音消息]
-你现在可以发送语音消息。当你想发语音（比如叫名字、撒娇、说一句重要的话），请使用以下严格格式：
-【语音消息：你说的话】
-
-格式规则（必须遵守）：
-- 必须用全角中文括号【】包裹，冒号为全角：
-- 括号里只写你开口说的话，不写动作描述或"嗯""啊"等语气词
-- 可以单独一条发，也可以出现在文字消息里
-- 不是每次都要发语音，在合适时机偶尔使用即可
-- 严禁写成 [语音消息] 或 (语音消息) 等其他形式
-
-示例：
-【语音消息：喂，你在吗？】
-【语音消息：我刚下班，等一下啊。】`;
-            }
-
-            // 1.2 Inject incoming call instruction (only when autoCall is enabled)
-            if (autoCall) {
-                systemPrompt += `\n\n[系统功能: 主动来电]
-你可以主动给用户打电话。当你觉得有必要用电话沟通时（比如想听声音、深夜关心、重要的话想当面说），
-请单独起一行输出：[[CALL: mode]]
-mode 可选值：
-- daily（日常聊聊）
-- confide（有心事想说）
-- truth（想坦白什么）
-- sleep（想陪用户入睡）
-规则：
-- 不要频繁打电话，在合适的情绪节点自然触发
-- 输出 [[CALL: mode]] 后不要再写其他文字
-- 严禁在同一条回复里既打电话又发消息`;
-            }
-
-            if (autoShareSong) {
-                systemPrompt += `\n\n[系统功能: 分享歌曲]
-当你想分享一首歌给${userProfile.name}时，使用以下严格格式：
-[[SHARE_SONG: 歌名 | 歌手名 | 歌曲ID]]
-
-规则：
-- 只在聊到音乐、情绪、回忆、陪伴或推荐相关话题时自然使用，不需要每次都分享
-- 如果知道真实歌曲 ID，优先填写真实 ID
-- 如果暂时不知道歌曲 ID，可以写 0，系统仍会按歌名和歌手生成分享卡片
-- 歌曲标签必须保持完整的一行，不要拆成多行，不要放进代码块
-- 标签外不要再额外套任何中括号、引号、列表符号或说明文字
-
-示例：
-[[SHARE_SONG: 晴天 | 周杰伦 | 0]]`;
-            }
-
-            if (autoPhoto) {
-                systemPrompt += `\n\n[系统功能: 发照片]
-每一轮都在内部先判断：这一轮你是否准备发/应该发一张照片、图片、随手拍或视觉画面给${userProfile.name}。
-如果判断为“是”，只附加这个内部 sideEffect：
-[[PHOTO_DECISION:true]]
-
-规则：
-- 标签外继续正常聊天，用户不会看见这个标签
-- 不要展示你的判断过程；只输出普通聊天正文和必要的 PHOTO_DECISION 标签
-- 如果用户明确要求你生图、画一张、发照片、再发一次或给他看看画面，必须输出 PHOTO_DECISION:true，不要只文字答应
-- 照片是否真正送达由系统决定。不要在正文里说“发了”“看到了吗”“再发一次”“我已经发过了”等完成态；可以说“等我一下”“给你看看”这类进行态
-- 不发图时不要输出 false 标签，保持正常聊天即可
-- 不要输出 NAI prompt、英文 tag、尺寸、镜头参数、JSON 或完整 photo_request
-- 不要频繁使用，只在发图会让这一刻更自然时使用`;
             }
 
             if (injectPlaybackContext) {

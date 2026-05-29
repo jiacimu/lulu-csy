@@ -24,6 +24,7 @@ import { useVoiceTts } from '../hooks/useVoiceTts';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { CloudStt,SttNotConfiguredError } from '../utils/cloudStt';
 import { haptic } from '../utils/haptics';
+import { removePhoneRecordsLinkedToMessageIds } from '../utils/phoneRecordSync';
 import { withCharacterTtsVoice } from '../utils/characterTts';
 import { getEffectiveHistoryStartMessageId,isAfterHistoryStart } from '../utils/historyStart';
 import { shouldHideLifeStreamLikeMessage } from '../utils/lifeStreamVisibility';
@@ -272,7 +273,7 @@ const Chat: React.FC = () => {
     // Reply Logic
     const [replyTarget, setReplyTarget] = useState<Message | null>(null);
 
-    const [modalType, setModalType] = useState<'none' | 'transfer' | 'emoji-import' | 'chat-settings' | 'manual-photo' | 'message-options' | 'edit-message' | 'delete-emoji' | 'delete-category' | 'add-category' | 'history-manager' | 'archive-settings' | 'prompt-editor' | 'category-options' | 'category-visibility'>('none');
+    const [modalType, setModalType] = useState<'none' | 'transfer' | 'emoji-import' | 'chat-settings' | 'manual-photo' | 'message-options' | 'edit-message' | 'delete-emoji' | 'delete-emojis' | 'delete-category' | 'add-category' | 'history-manager' | 'archive-settings' | 'prompt-editor' | 'category-options' | 'category-visibility'>('none');
     const [allHistoryMessages, setAllHistoryMessages] = useState<Message[]>([]);
     const [transferAmt, setTransferAmt] = useState('');
     const [emojiImportText, setEmojiImportText] = useState('');
@@ -281,6 +282,7 @@ const Chat: React.FC = () => {
     const [preserveContext, setPreserveContext] = useState(true);
     const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
     const [selectedEmoji, setSelectedEmoji] = useState<Emoji | null>(null);
+    const [selectedEmojisForDelete, setSelectedEmojisForDelete] = useState<Emoji[]>([]);
     const [selectedCategory, setSelectedCategory] = useState<EmojiCategory | null>(null); // For deletion modal
     const [editContent, setEditContent] = useState('');
     const [isSummarizing, setIsSummarizing] = useState(false);
@@ -1382,6 +1384,13 @@ const Chat: React.FC = () => {
         return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
     };
 
+    const removeDeletedPhoneRecordLinks = useCallback((deletedMessageIds: Iterable<number>) => {
+        if (!char) return;
+        const nextPhoneState = removePhoneRecordsLinkedToMessageIds(char.phoneState, deletedMessageIds);
+        if (!nextPhoneState) return;
+        updateCharacter(char.id, { phoneState: nextPhoneState });
+    }, [char, updateCharacter]);
+
     // --- Actions ---
 
     const handleSendText = async (customContent?: string, customType?: MessageType, metadata?: any) => {
@@ -2224,6 +2233,16 @@ const Chat: React.FC = () => {
             case 'emoji-import': setModalType('emoji-import'); break;
             case 'send-emoji': if (payload) handleSendText(payload.url, 'emoji', { name: payload.name, categoryId: payload.categoryId }); break;
             case 'delete-emoji-req': setSelectedEmoji(payload); setModalType('delete-emoji'); break;
+            case 'delete-emojis-req': {
+                const emojisToDelete = Array.isArray(payload) ? payload.filter(Boolean) : [];
+                if (emojisToDelete.length === 0) {
+                    addToast('先选择要删除的表情包', 'info');
+                    break;
+                }
+                setSelectedEmojisForDelete(emojisToDelete);
+                setModalType('delete-emojis');
+                break;
+            }
             case 'add-category': setModalType('add-category'); break;
             case 'select-category': setActiveCategory(payload); break;
             case 'category-options': setSelectedCategory(payload); setModalType('category-options'); break;
@@ -2499,13 +2518,18 @@ const Chat: React.FC = () => {
                 return;
             }
             await DB.deleteMessages(toDelete.map(m => m.id));
+            removeDeletedPhoneRecordLinks(toDelete.map(m => m.id));
             setMessages(toKeep);
             setHasMoreHistory(false);
             setVisibleCount(LOAD_BATCH_SIZE);
             visibleCountRef.current = LOAD_BATCH_SIZE;
             addToast(`已清理 ${toDelete.length} 条历史，保留最近10条`, 'success');
         } else {
+            const linkedPhoneMessageIds = (char.phoneState?.records || [])
+                .map(record => record.systemMessageId)
+                .filter((id): id is number => typeof id === 'number');
             await DB.clearMessages(char.id);
+            removeDeletedPhoneRecordLinks(linkedPhoneMessageIds);
             setMessages([]);
             setHasMoreHistory(false);
             setVisibleCount(LOAD_BATCH_SIZE);
@@ -2616,6 +2640,7 @@ const Chat: React.FC = () => {
             await DB.deleteVoiceAudio(selectedMessage.id);
         }
         await DB.deleteMessage(selectedMessage.id);
+        removeDeletedPhoneRecordLinks([selectedMessage.id]);
         setMessages(prev => prev.filter(m => m.id !== selectedMessage.id));
 
         // 清理由于此条消息引发的心理状态残留
@@ -2796,6 +2821,16 @@ const Chat: React.FC = () => {
         addToast('表情包已删除', 'success');
     };
 
+    const handleDeleteSelectedEmojis = async () => {
+        const emojiNames = Array.from(new Set(selectedEmojisForDelete.map(emoji => emoji.name).filter(Boolean)));
+        if (emojiNames.length === 0) return;
+        await DB.deleteEmojis(emojiNames);
+        await loadEmojiData();
+        setModalType('none');
+        setSelectedEmojisForDelete([]);
+        addToast(`已删除 ${emojiNames.length} 个表情包`, 'success');
+    };
+
     // --- Batch Selection ---
     const handleEnterSelectionMode = () => {
         if (selectedMessage) {
@@ -2878,6 +2913,7 @@ const Chat: React.FC = () => {
             await DB.deleteVoiceAudio(vid);
         }
         await DB.deleteMessages(Array.from(selectedMsgIds));
+        removeDeletedPhoneRecordLinks(selectedMsgIds);
         setMessages(prev => prev.filter(m => !selectedMsgIds.has(m.id)));
         addToast(`已删除 ${deleteCount} 条消息`, 'success');
         setSelectionMode(false);
@@ -3167,7 +3203,7 @@ const Chat: React.FC = () => {
                 editContent={editContent} setEditContent={setEditContent}
                 archivePrompts={archivePrompts} selectedPromptId={selectedPromptId} setSelectedPromptId={setSelectedPromptId}
                 editingPrompt={editingPrompt} setEditingPrompt={setEditingPrompt} isSummarizing={isSummarizing}
-                selectedMessage={selectedMessage} selectedEmoji={selectedEmoji} activeCharacter={char} userProfile={userProfile} messages={messages}
+                selectedMessage={selectedMessage} selectedEmoji={selectedEmoji} selectedEmojis={selectedEmojisForDelete} activeCharacter={char} userProfile={userProfile} messages={messages}
                 allHistoryMessages={allHistoryMessages}
 
                 newCategoryName={newCategoryName} setNewCategoryName={setNewCategoryName} onAddCategory={handleAddCategory}
@@ -3187,7 +3223,7 @@ const Chat: React.FC = () => {
                 onSetHistoryStart={handleSetHistoryStart} onEnterSelectionMode={handleEnterSelectionMode}
                 onCloseMessageOptions={() => { setModalType('none'); setSelectedMessage(null); }}
                 onReplyMessage={handleReplyMessage} onEditMessageStart={() => { if (selectedMessage) { setEditContent(selectedMessage.content); setModalType('edit-message'); } }}
-                onConfirmEditMessage={confirmEditMessage} onDeleteMessage={handleDeleteMessage} onCopyMessage={handleCopyMessage} onDeleteEmoji={handleDeleteEmoji} onDeleteCategory={handleDeleteCategory}
+                onConfirmEditMessage={confirmEditMessage} onDeleteMessage={handleDeleteMessage} onCopyMessage={handleCopyMessage} onDeleteEmoji={handleDeleteEmoji} onDeleteSelectedEmojis={handleDeleteSelectedEmojis} onDeleteCategory={handleDeleteCategory}
                 allCharacters={characters} onSaveCategoryVisibility={handleSaveCategoryVisibility}
                 translationEnabled={translationEnabled}
                 onToggleTranslation={() => { const next = !translationEnabled; setTranslationEnabled(next); localStorage.setItem(`chat_translate_enabled_${activeCharacterId}`, JSON.stringify(next)); if (!next) { setShowingTargetIds(new Set()); } }}

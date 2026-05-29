@@ -2,7 +2,7 @@
 import React,{ useEffect,useRef,useState } from 'react';
 import Modal from '../os/Modal';
 import { useOS } from '../../context/OSContext';
-import { AppID,CharacterProfile,Message,EmojiCategory,YesterdayNewspaperPeriodType,PhotoStylePreset,ImageProviderType,SavedVibeReference,VibeReferenceInput,type ManualPhotoGenerationOptions,type ManualPhotoMode,type UserProfile } from '../../types';
+import { AppID,CharacterProfile,Message,Emoji,EmojiCategory,YesterdayNewspaperPeriodType,PhotoStylePreset,ImageProviderType,SavedVibeReference,VibeReferenceInput,type ManualPhotoGenerationOptions,type ManualPhotoMode,type UserProfile } from '../../types';
 import { CustomStatusTemplate } from '../../types/statusCard';
 import VibeReferencePicker from './VibeReferencePicker';
 import { NO_PHOTO_STYLE_PRESET,NO_PHOTO_STYLE_PRESET_ID } from '../../utils/photoGeneration';
@@ -43,7 +43,8 @@ interface ChatModalsProps {
 
     // Selection Props
     selectedMessage: Message | null;
-    selectedEmoji: { name: string, url: string } | null;
+    selectedEmoji: Emoji | null;
+    selectedEmojis: Emoji[];
     selectedCategory: EmojiCategory | null;
     activeCharacter: CharacterProfile;
     userProfile: UserProfile;
@@ -71,6 +72,7 @@ interface ChatModalsProps {
     onDeleteMessage: () => void;
     onCopyMessage: () => void;
     onDeleteEmoji: () => void;
+    onDeleteSelectedEmojis: () => void;
     onDeleteCategory: () => void;
     // Category Visibility
     allCharacters?: CharacterProfile[];
@@ -155,12 +157,12 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     newCategoryName, setNewCategoryName, onAddCategory,
     archivePrompts, selectedPromptId, setSelectedPromptId,
     editingPrompt, setEditingPrompt, isSummarizing,
-    selectedMessage, selectedEmoji, selectedCategory, activeCharacter, userProfile,
+    selectedMessage, selectedEmoji, selectedEmojis, selectedCategory, activeCharacter, userProfile,
     allHistoryMessages = [],
     onTransfer, onImportEmoji, onSaveSettings,
     onBgUpload, onRemoveBg, onClearHistory,
     onArchive, onCreatePrompt, onEditPrompt, onSavePrompt, onDeletePrompt,
-    onSetHistoryStart, onEnterSelectionMode, onReplyMessage, onCloseMessageOptions, onEditMessageStart, onConfirmEditMessage, onDeleteMessage, onCopyMessage, onDeleteEmoji, onDeleteCategory,
+    onSetHistoryStart, onEnterSelectionMode, onReplyMessage, onCloseMessageOptions, onEditMessageStart, onConfirmEditMessage, onDeleteMessage, onCopyMessage, onDeleteEmoji, onDeleteSelectedEmojis, onDeleteCategory,
     allCharacters = [], onSaveCategoryVisibility,
     translationEnabled, onToggleTranslation, translateSourceLang, translateTargetLang, onSetTranslateSourceLang, onSetTranslateLang,
     xhsEnabled, onToggleXhs,
@@ -1193,6 +1195,22 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                 <div className="flex flex-col items-center gap-4 py-2">
                     {selectedEmoji && <img src={selectedEmoji.url} className="w-24 h-24 object-contain rounded-xl border" />}
                     <p className="text-center text-sm text-slate-500">确定要删除这个表情包吗？</p>
+                </div>
+            </Modal>
+
+            <Modal
+                isOpen={modalType === 'delete-emojis'} title="批量删除表情包" onClose={() => setModalType('none')}
+                footer={<><button onClick={() => setModalType('none')} className="flex-1 py-3 bg-slate-100 rounded-2xl">取消</button><button onClick={onDeleteSelectedEmojis} className="flex-1 py-3 bg-red-500 text-white font-bold rounded-2xl">删除 {selectedEmojis.length}</button></>}
+            >
+                <div className="flex flex-col items-center gap-4 py-2">
+                    <div className="grid grid-cols-4 gap-2 w-full max-w-[240px]">
+                        {selectedEmojis.slice(0, 8).map(emoji => (
+                            <div key={emoji.name} className="aspect-square rounded-xl border border-slate-100 bg-slate-50 p-1.5">
+                                <img src={emoji.url} className="w-full h-full object-contain" alt={emoji.name} />
+                            </div>
+                        ))}
+                    </div>
+                    <p className="text-center text-sm text-slate-500">确定要删除选中的 {selectedEmojis.length} 个表情包吗？</p>
                 </div>
             </Modal>
 

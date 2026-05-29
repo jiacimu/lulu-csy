@@ -11,6 +11,7 @@ interface CallControlsProps {
     volume?: number;
     onVolumeChange?: (v: number) => void;
     voiceInputDisabled?: boolean;
+    voiceInputFallbackReason?: string;
 }
 
 const CallControls: React.FC<CallControlsProps> = ({
@@ -22,6 +23,7 @@ const CallControls: React.FC<CallControlsProps> = ({
     volume = 1,
     onVolumeChange,
     voiceInputDisabled = false,
+    voiceInputFallbackReason = '',
 }) => {
     const [ripples, setRipples] = useState<number[]>([]);
     const [showVolumeSlider, setShowVolumeSlider] = useState(false);
@@ -53,7 +55,7 @@ const CallControls: React.FC<CallControlsProps> = ({
                 onClick={voiceInputDisabled ? undefined : onToggleMute}
                 disabled={voiceInputDisabled}
                 className={`vc-dock-btn ${isMuted || voiceInputDisabled ? 'vc-dock-btn--active' : ''} ${voiceInputDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                title={voiceInputDisabled ? '当前设备使用文字输入' : '麦克风'}
+                title={voiceInputDisabled ? (voiceInputFallbackReason || '当前设备使用文字输入') : '麦克风'}
             >
                 {isMuted || voiceInputDisabled
                     ? <MicrophoneSlash weight="fill" className="w-6 h-6" />

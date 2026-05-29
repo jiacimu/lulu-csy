@@ -26,8 +26,7 @@
 
 @font-face {
     font-family: 'ZhaixinglouCN';
-    src: url('/fonts/zhaixinglou-cn.woff2') format('woff2'),
-        url('/fonts/zhaixinglou-cn.ttf') format('truetype');
+    src: url('/fonts/zhaixinglou-cn.woff2') format('woff2');
     font-weight: normal;
     font-style: normal;
     font-display: swap;

@@ -79,6 +79,7 @@ export const DB = {
     getEmojis: contentStore.getEmojis,
     saveEmoji: contentStore.saveEmoji,
     deleteEmoji: contentStore.deleteEmoji,
+    deleteEmojis: contentStore.deleteEmojis,
     getEmojiCategories: contentStore.getEmojiCategories,
     saveEmojiCategory: contentStore.saveEmojiCategory,
     deleteEmojiCategory: contentStore.deleteEmojiCategory,

@@ -9,7 +9,7 @@ import React,{ useState } from 'react';
 
 interface ForwardCardProps {
     forwardData: any;
-    commonLayout: (content: React.ReactNode) => JSX.Element;
+    commonLayout: (content: React.ReactNode) => React.ReactElement;
     interactionProps: any;
     selectionMode: boolean;
 }

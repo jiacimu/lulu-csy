@@ -1,6 +1,6 @@
 
-import React,{ useRef,useState,useMemo } from 'react';
-import { ShareNetwork,Trash,Plus,Smiley,PaperPlaneTilt,Money,BookOpenText,GearSix,Image,Lock,ArrowsClockwise,Sparkle } from '@phosphor-icons/react';
+import React,{ useEffect,useRef,useState,useMemo } from 'react';
+import { ShareNetwork,Trash,Plus,Smiley,PaperPlaneTilt,Money,BookOpenText,GearSix,Image,Lock,ArrowsClockwise,Sparkle,CheckSquare,Square,X } from '@phosphor-icons/react';
 import { CharacterProfile,ChatTheme,EmojiCategory,Emoji } from '../../types';
 import { PRESET_THEMES } from './ChatConstants';
 import { THEME_PLUGINS } from './ThemeRegistry';
@@ -77,6 +77,8 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     const startPos = useRef({ x: 0, y: 0 });
     const isLongPressTriggered = useRef(false); // Track if long press action fired
     const useIOSStandaloneInputFix = isIOSStandaloneWebApp();
+    const [emojiManageMode, setEmojiManageMode] = useState(false);
+    const [selectedEmojiNames, setSelectedEmojiNames] = useState<Set<string>>(new Set());
     // WeChat auto-expand ref & useEffect moved to plugins/WeChatInputBar.tsx
 
     // Resolve plugin theme ID: custom themes should use default (non-plugin) UI
@@ -128,6 +130,32 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         return results;
     }, [input, allVisibleEmojis]);
 
+    const selectedEmojis = useMemo(
+        () => emojis.filter(emoji => selectedEmojiNames.has(emoji.name)),
+        [emojis, selectedEmojiNames],
+    );
+    const allCurrentEmojisSelected = emojis.length > 0 && selectedEmojis.length === emojis.length;
+
+    useEffect(() => {
+        if (showPanel === 'emojis') return;
+        setEmojiManageMode(false);
+        setSelectedEmojiNames(new Set());
+    }, [showPanel]);
+
+    useEffect(() => {
+        setSelectedEmojiNames(prev => {
+            if (prev.size === 0) return prev;
+            const availableNames = new Set(emojis.map(emoji => emoji.name));
+            let changed = false;
+            const next = new Set<string>();
+            prev.forEach(name => {
+                if (availableNames.has(name)) next.add(name);
+                else changed = true;
+            });
+            return changed ? next : prev;
+        });
+    }, [emojis]);
+
     const handleSuggestClick = (emoji: Emoji) => {
         onPanelAction('send-emoji', emoji);
         setInput('');
@@ -160,6 +188,42 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         }
     };
 
+    const toggleEmojiSelection = (name: string) => {
+        setSelectedEmojiNames(prev => {
+            const next = new Set(prev);
+            if (next.has(name)) next.delete(name);
+            else next.add(name);
+            return next;
+        });
+    };
+
+    const closeEmojiManageMode = () => {
+        clearTimer();
+        isLongPressTriggered.current = false;
+        setEmojiManageMode(false);
+        setSelectedEmojiNames(new Set());
+    };
+
+    const toggleEmojiManageMode = () => {
+        clearTimer();
+        isLongPressTriggered.current = false;
+        setEmojiManageMode(prev => !prev);
+        setSelectedEmojiNames(new Set());
+    };
+
+    const toggleAllCurrentEmojis = () => {
+        setSelectedEmojiNames(prev => {
+            if (emojis.length === 0) return prev;
+            if (prev.size === emojis.length) return new Set();
+            return new Set(emojis.map(emoji => emoji.name));
+        });
+    };
+
+    const requestDeleteSelectedEmojis = () => {
+        if (selectedEmojis.length === 0) return;
+        onPanelAction('delete-emojis-req', selectedEmojis);
+    };
+
     const handleTouchStart = (item: any, type: 'emoji' | 'category', e: React.TouchEvent | React.MouseEvent) => {
         // 1. Always reset state first to ensure clean slate for any interaction
         // This fixes the bug where deleting a category leaves the flag true, blocking clicks on system categories
@@ -168,6 +232,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
 
         // 2. Skip long-press for the default category (no options needed)
         if (type === 'category' && item.id === 'default') return;
+        if (emojiManageMode && type === 'emoji') return;
 
         // 3. Store coordinates and start timer for valid long-press candidates
         if ('touches' in e) {
@@ -225,6 +290,12 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         clearTimer();
 
         if (type === 'emoji') {
+            if (emojiManageMode) {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleEmojiSelection(item.name);
+                return;
+            }
             onPanelAction('send-emoji', item);
         } else {
             onPanelAction('select-category', item.id);
@@ -368,6 +439,12 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             <>
                                 {/* Categories Bar */}
                                 <div className="h-10 bg-white border-b border-slate-100 flex items-center px-2 gap-2 overflow-x-auto no-scrollbar shrink-0">
+                                    <button
+                                        onClick={toggleEmojiManageMode}
+                                        className={`h-7 px-3 rounded-full text-[11px] font-bold shrink-0 transition-colors ${emojiManageMode ? 'bg-red-50 text-red-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                    >
+                                        {emojiManageMode ? '完成' : '管理'}
+                                    </button>
                                     {categories.map(cat => (
                                         <button
                                             key={cat.id}
@@ -392,30 +469,69 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                     <button onClick={() => onPanelAction('add-category')} className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center shrink-0 hover:bg-slate-200">+</button>
                                 </div>
 
+                                {emojiManageMode && (
+                                    <div className="h-11 bg-white/80 border-b border-slate-100 flex items-center gap-2 px-3 shrink-0">
+                                        <div className="text-xs font-bold text-slate-600 mr-auto">已选 {selectedEmojis.length}</div>
+                                        <button
+                                            onClick={toggleAllCurrentEmojis}
+                                            disabled={emojis.length === 0}
+                                            className="px-3 py-1.5 rounded-full bg-slate-100 text-[11px] font-bold text-slate-500 disabled:opacity-40"
+                                        >
+                                            {allCurrentEmojisSelected ? '取消全选' : '全选'}
+                                        </button>
+                                        <button
+                                            onClick={closeEmojiManageMode}
+                                            className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"
+                                            aria-label="退出表情管理"
+                                        >
+                                            <X className="w-4 h-4" weight="bold" />
+                                        </button>
+                                        <button
+                                            onClick={requestDeleteSelectedEmojis}
+                                            disabled={selectedEmojis.length === 0}
+                                            className={`h-8 px-3 rounded-full text-[11px] font-bold flex items-center gap-1.5 transition-colors ${selectedEmojis.length === 0 ? 'bg-slate-100 text-slate-300' : 'bg-red-500 text-white'}`}
+                                        >
+                                            <Trash className="w-3.5 h-3.5" weight="bold" />
+                                            删除
+                                        </button>
+                                    </div>
+                                )}
+
                                 <div className="flex-1 overflow-y-auto no-scrollbar p-4">
                                     <div className="grid grid-cols-4 gap-3">
-                                        <button onClick={() => onPanelAction('emoji-import')} className="aspect-square bg-slate-100 rounded-2xl border-2 border-dashed border-slate-300 flex items-center justify-center text-2xl text-slate-400">+</button>
-                                        {emojis.map((e, i) => (
-                                            <button
-                                                key={i}
-                                                onClick={(ev) => handleItemClick(ev, e, 'emoji')}
-                                                // Long press handlers for Emojis
-                                                onTouchStart={(ev) => handleTouchStart(e, 'emoji', ev)}
-                                                onTouchMove={handleTouchMove}
-                                                onTouchEnd={handleTouchEnd}
-                                                onMouseDown={(ev) => handleTouchStart(e, 'emoji', ev)}
-                                                onMouseMove={handleTouchMove}
-                                                onMouseUp={handleTouchEnd}
-                                                onMouseLeave={handleTouchEnd}
-                                                onContextMenu={(ev) => ev.preventDefault()}
-                                                className="bg-white rounded-2xl p-2 shadow-sm relative active:scale-95 transition-transform select-none flex flex-col items-center"
-                                            >
-                                                <div className="aspect-square w-full">
-                                                    <img src={e.url} className="w-full h-full object-contain pointer-events-none" />
-                                                </div>
-                                                <span className="text-[9px] text-slate-400 truncate w-full text-center mt-0.5 leading-tight">{e.name}</span>
-                                            </button>
-                                        ))}
+                                        {!emojiManageMode && (
+                                            <button onClick={() => onPanelAction('emoji-import')} className="aspect-square bg-slate-100 rounded-2xl border-2 border-dashed border-slate-300 flex items-center justify-center text-2xl text-slate-400">+</button>
+                                        )}
+                                        {emojis.map(e => {
+                                            const isSelected = selectedEmojiNames.has(e.name);
+                                            return (
+                                                <button
+                                                    key={e.name}
+                                                    onClick={(ev) => handleItemClick(ev, e, 'emoji')}
+                                                    // Long press handlers for Emojis
+                                                    onTouchStart={(ev) => handleTouchStart(e, 'emoji', ev)}
+                                                    onTouchMove={handleTouchMove}
+                                                    onTouchEnd={handleTouchEnd}
+                                                    onMouseDown={(ev) => handleTouchStart(e, 'emoji', ev)}
+                                                    onMouseMove={handleTouchMove}
+                                                    onMouseUp={handleTouchEnd}
+                                                    onMouseLeave={handleTouchEnd}
+                                                    onContextMenu={(ev) => ev.preventDefault()}
+                                                    aria-pressed={emojiManageMode ? isSelected : undefined}
+                                                    className={`bg-white rounded-2xl p-2 shadow-sm relative active:scale-95 transition-transform select-none flex flex-col items-center ${emojiManageMode ? 'border border-slate-100' : ''} ${isSelected ? 'ring-2 ring-red-400 ring-offset-2' : ''}`}
+                                                >
+                                                    {emojiManageMode && (
+                                                        <div className={`absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center shadow-sm ${isSelected ? 'bg-red-500 text-white' : 'bg-white/90 text-slate-300'}`}>
+                                                            {isSelected ? <CheckSquare className="w-4 h-4" weight="fill" /> : <Square className="w-4 h-4" weight="bold" />}
+                                                        </div>
+                                                    )}
+                                                    <div className="aspect-square w-full">
+                                                        <img src={e.url} className="w-full h-full object-contain pointer-events-none" alt={e.name} />
+                                                    </div>
+                                                    <span className="text-[9px] text-slate-400 truncate w-full text-center mt-0.5 leading-tight">{e.name}</span>
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             </>

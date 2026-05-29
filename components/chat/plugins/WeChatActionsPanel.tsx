@@ -7,7 +7,7 @@ export interface ActionsPanelProps {
     onReroll: () => void;
     canReroll: boolean;
     manualPhotoEnabled?: boolean;
-    chatImageInputRef: React.RefObject<HTMLInputElement>;
+    chatImageInputRef: React.RefObject<HTMLInputElement | null>;
 }
 
 const WeChatActionsPanel: React.FC<ActionsPanelProps> = ({

@@ -203,9 +203,17 @@ function buildPages(messages: Message[]): TheaterVNPage[] {
 function useTypewriter(text: string, speed = 30) {
     const [displayed, setDisplayed] = useState('');
     const [done, setDone] = useState(false);
-    const timerRef = useRef<ReturnType<typeof setInterval>>();
+    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    const clearTimer = useCallback(() => {
+        if (timerRef.current !== null) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+        }
+    }, []);
 
     useEffect(() => {
+        clearTimer();
         setDisplayed('');
         setDone(false);
         let idx = 0;
@@ -214,19 +222,19 @@ function useTypewriter(text: string, speed = 30) {
             if (idx >= text.length) {
                 setDisplayed(text);
                 setDone(true);
-                clearInterval(timerRef.current);
+                clearTimer();
             } else {
                 setDisplayed(text.slice(0, idx));
             }
         }, speed);
-        return () => clearInterval(timerRef.current);
-    }, [text, speed]);
+        return clearTimer;
+    }, [clearTimer, text, speed]);
 
     const skipToEnd = useCallback(() => {
-        clearInterval(timerRef.current);
+        clearTimer();
         setDisplayed(text);
         setDone(true);
-    }, [text]);
+    }, [clearTimer, text]);
 
     return { displayed, done, skipToEnd };
 }
@@ -287,7 +295,7 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
     const [hideDialog, setHideDialog] = useState(false);
     const [showWorldlineGuide, setShowWorldlineGuide] = useState(false);
     const [inputBeats, setInputBeats] = useState<TheaterInputBeat[]>(() => [createInputBeat('speech')]);
-    const autoTimerRef = useRef<ReturnType<typeof setTimeout>>();
+    const autoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const prevPagesRef = useRef<TheaterVNPage[]>([]);
     const prevMessageIdsRef = useRef<Set<string>>(new Set());
     const pageIndexRef = useRef(0);
@@ -449,7 +457,12 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
         } else {
             autoTimerRef.current = setTimeout(() => setPageIndex(i => i + 1), 2000);
         }
-        return () => clearTimeout(autoTimerRef.current);
+        return () => {
+            if (autoTimerRef.current !== null) {
+                clearTimeout(autoTimerRef.current);
+                autoTimerRef.current = null;
+            }
+        };
     }, [autoMode, done, isLastPage, isLoading, pageIndex]);
 
     // ── Sprite System ──

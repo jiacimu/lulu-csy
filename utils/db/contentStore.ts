@@ -57,7 +57,28 @@ export const getEmojis = async (): Promise<Emoji[]> => {
     });
 };
 export const saveEmoji = async (name: string, url: string, categoryId?: string): Promise<void> => { const db = await openDB(); db.transaction(STORE_EMOJIS, 'readwrite').objectStore(STORE_EMOJIS).put({ name, url, categoryId }); };
-export const deleteEmoji = async (name: string): Promise<void> => { const db = await openDB(); db.transaction(STORE_EMOJIS, 'readwrite').objectStore(STORE_EMOJIS).delete(name); };
+export const deleteEmoji = async (name: string): Promise<void> => {
+    const db = await openDB();
+    const tx = db.transaction(STORE_EMOJIS, 'readwrite');
+    tx.objectStore(STORE_EMOJIS).delete(name);
+    return new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+    });
+};
+export const deleteEmojis = async (names: string[]): Promise<void> => {
+    if (names.length === 0) return;
+    const db = await openDB();
+    const tx = db.transaction(STORE_EMOJIS, 'readwrite');
+    const store = tx.objectStore(STORE_EMOJIS);
+    Array.from(new Set(names)).forEach(name => store.delete(name));
+    return new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+    });
+};
 
 export const getEmojiCategories = async (): Promise<EmojiCategory[]> => {
     const db = await openDB();

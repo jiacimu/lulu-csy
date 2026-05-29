@@ -5,6 +5,7 @@ import { CharacterProfile,PhoneEvidence,PhoneCustomApp } from '../types';
 import { ContextBuilder } from '../utils/context';
 import Modal from '../components/os/Modal';
 import { extractContent, extractJson, safeResponseJson } from '../utils/safeApi';
+import { getFiniteMessageIds, removePhoneRecordsLinkedToMessageIds } from '../utils/phoneRecordSync';
 // === [Deprecated] 高德地图 POI 搜索已因额度耗尽停用，外卖商家改由大模型生成 ===
 // import { searchNearbyRestaurants } from '../utils/mapService';
 import MeituanTakeoutCard from '../components/chat/cards/phone/MeituanTakeoutCard';
@@ -28,6 +29,7 @@ export const MAX_PHONE_CHAT_DETAIL_CHARS = 6000;
 export const MAX_PHONE_PROMPT_MESSAGES = 50;
 const MAX_PHONE_META_CHARS = 160;
 const MAX_CHAT_DETAIL_LINES_RENDERED = 120;
+const MOBILE_VISIBLE_DELETE_CLASS = 'opacity-100 md:opacity-0 md:group-hover:opacity-100';
 
 const limitPhoneText = (value: string, maxChars: number): string => {
     if (value.length <= maxChars) return value;
@@ -303,6 +305,48 @@ const CheckPhone: React.FC = () => {
             }
         }
     }, [characters]);
+
+    useEffect(() => {
+        if (!targetChar || view !== 'phone') return;
+
+        const linkedMessageIds = getFiniteMessageIds(
+            records
+                .map(record => record.systemMessageId)
+                .filter((id): id is number => typeof id === 'number')
+        );
+        if (linkedMessageIds.length === 0) return;
+
+        let cancelled = false;
+        DB.getMessagesByIds(linkedMessageIds)
+            .then(existingMessages => {
+                if (cancelled) return;
+                const existingMessageIds = new Set(existingMessages.map(message => message.id));
+                const missingMessageIds = linkedMessageIds.filter(id => !existingMessageIds.has(id));
+                const nextPhoneState = removePhoneRecordsLinkedToMessageIds(targetChar.phoneState, missingMessageIds);
+                if (!nextPhoneState) return;
+
+                updateCharacter(targetChar.id, { phoneState: nextPhoneState });
+                setTargetChar(prev => prev && prev.id === targetChar.id
+                    ? { ...prev, phoneState: nextPhoneState }
+                    : prev
+                );
+
+                if (
+                    selectedChatRecord?.systemMessageId
+                    && missingMessageIds.includes(selectedChatRecord.systemMessageId)
+                ) {
+                    setSelectedChatRecord(null);
+                    setActiveAppId('chat');
+                }
+            })
+            .catch(error => {
+                console.warn('[CheckPhone] Failed to reconcile phone records with chat history:', error);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [targetChar?.id, view, records, selectedChatRecord?.systemMessageId, updateCharacter]);
 
     // Reset page scroll on navigation to prevent mobile layout shift
     useEffect(() => {
@@ -765,7 +809,7 @@ Format:
                                     </div>
                                 </div>
                             </div>
-                            <button onClick={(e) => { e.stopPropagation(); handleDeleteRecord(r); }} className="absolute top-2 right-2 w-6 h-6 bg-red-100 text-red-500 rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10">×</button>
+                            <button onClick={(e) => { e.stopPropagation(); handleDeleteRecord(r); }} className={`absolute top-2 right-2 w-6 h-6 bg-red-100 text-red-500 rounded-full flex items-center justify-center text-xs ${MOBILE_VISIBLE_DELETE_CLASS} transition-opacity z-10`}>×</button>
                         </div>
                     ))}
                 </div>
@@ -925,7 +969,7 @@ Format:
                                     </div>
 
                                     {/* Delete */}
-                                    <button onClick={() => handleDeleteRecord(r)} className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-md z-10">×</button>
+                                    <button onClick={() => handleDeleteRecord(r)} className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs ${MOBILE_VISIBLE_DELETE_CLASS} transition-opacity shadow-md z-10`}>×</button>
                                 </div>
                             );
                         })}
@@ -983,7 +1027,7 @@ Format:
                                     value={r.value}
                                     shop={r.shop}
                                 />
-                                <button onClick={() => handleDeleteRecord(r)} className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-md z-10">×</button>
+                                <button onClick={() => handleDeleteRecord(r)} className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs ${MOBILE_VISIBLE_DELETE_CLASS} transition-opacity shadow-md z-10`}>×</button>
                             </div>
                         ))}
                     </div>
@@ -1028,7 +1072,7 @@ Format:
                             <div className="text-xs text-slate-500 leading-relaxed">{r.detail}</div>
                             <div className="text-[10px] text-slate-300 mt-2 text-right">{new Date(r.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
 
-                            <button onClick={() => handleDeleteRecord(r)} className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-md">×</button>
+                            <button onClick={() => handleDeleteRecord(r)} className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs ${MOBILE_VISIBLE_DELETE_CLASS} transition-opacity shadow-md`}>×</button>
                         </div>
                     ))}
                 </div>
@@ -1165,7 +1209,7 @@ Format:
             </button>
             <span className="text-[10px] font-medium text-white/90 drop-shadow-md tracking-wide px-1 py-0.5 rounded bg-black/10 backdrop-blur-[2px]">{label}</span>
             {onDelete && (
-                <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="absolute -top-1 -right-1 w-5 h-5 bg-slate-400 text-white rounded-full flex items-center justify-center text-[10px] shadow-sm opacity-0 group-hover:opacity-100 transition-opacity z-20 hover:bg-red-500">×</button>
+                <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className={`absolute -top-1 -right-1 w-5 h-5 bg-slate-400 text-white rounded-full flex items-center justify-center text-[10px] shadow-sm ${MOBILE_VISIBLE_DELETE_CLASS} transition-opacity z-20 hover:bg-red-500`}>×</button>
             )}
         </div>
     );

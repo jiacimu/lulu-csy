@@ -80,6 +80,70 @@ describe('StoryPhoneScreen home UI', () => {
         expect(screen.getByText('发现')).toBeInTheDocument();
     });
 
+    it('renders QQ like a real message app and opens a readonly roaming chat', () => {
+        const qqApp = PHONE_APPS.find(app => app.id === 'qq') || PHONE_APPS[0];
+        render(
+            <StoryPhoneScreen
+                charName="陈步青"
+                activeAppId="qq"
+                spotlightApp={qqApp}
+                apps={[qqApp]}
+                currentTime="22:08"
+                clue={{
+                    appId: 'qq',
+                    appName: 'QQ',
+                    title: 'QQ',
+                    subtitle: '消息、群聊和空间都还亮着',
+                    timestamp: '22:08',
+                    items: [
+                        {
+                            label: '高三旧群(34)',
+                            value: '林野: 你头像怎么又换回来了？\n我: 手滑。\n林野: 别装，空间访客看得到。',
+                            detail: '22:08 · 群聊',
+                        },
+                        {
+                            label: 'QQ空间访客',
+                            value: '昨晚 23:41 有人连续看了三条说说。',
+                            detail: '仅好友可见',
+                        },
+                        {
+                            label: '群文件',
+                            value: '毕业照原图.zip 最近被重新下载。',
+                            detail: '微云 · 148MB',
+                        },
+                    ],
+                    evidenceText: 'QQ 停在消息页，群聊、空间、群文件都有痕迹。',
+                    insertSummary: '用户看见了 QQ 里的旧群和空间访问记录。',
+                }}
+            />,
+        );
+
+        expect(screen.getAllByText('消息').length).toBeGreaterThan(0);
+        expect(screen.getByText('搜索好友 / 群聊 / 聊天记录')).toBeInTheDocument();
+        expect(screen.getByText('好友动态')).toBeInTheDocument();
+        expect(screen.getByText('QQ空间')).toBeInTheDocument();
+        expect(screen.getAllByText('群聊').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('文件').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('联系人').length).toBeGreaterThan(0);
+        expect(screen.getByText('动态')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByText('QQ空间').closest('button') as HTMLButtonElement);
+
+        expect(screen.getByText('留言')).toBeInTheDocument();
+        expect(screen.getAllByText('访客').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('赞').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('评论').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('转发').length).toBeGreaterThan(0);
+
+        fireEvent.click(screen.getByLabelText('返回上一层'));
+
+        fireEvent.click(screen.getByText('高三旧群(34)').closest('button') as HTMLButtonElement);
+
+        expect(screen.getAllByText(/QQ漫游记录/).length).toBeGreaterThan(0);
+        expect(screen.getByText('只读漫游记录，不能发送消息')).toBeInTheDocument();
+        expect(screen.getByText('你头像怎么又换回来了？')).toBeInTheDocument();
+    });
+
     it('keeps WeChat contact buckets, sparse chats, me page, and moments populated from data', () => {
         const wechatApp = PHONE_APPS.find(app => app.id === 'wechat') || PHONE_APPS[0];
         render(

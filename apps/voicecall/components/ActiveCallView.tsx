@@ -97,6 +97,8 @@ interface ActiveCallViewProps {
     sttEmptyHint?: boolean;
     /** 当前设备禁用语音输入，使用文字输入兜底 */
     voiceInputDisabled?: boolean;
+    /** 语音输入降级原因 */
+    voiceInputFallbackReason?: string;
 }
 
 const ActiveCallView: React.FC<ActiveCallViewProps> = ({
@@ -124,6 +126,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
     // ─── 通话质量反馈 ───
     sttEmptyHint = false,
     voiceInputDisabled = false,
+    voiceInputFallbackReason = '',
 }) => {
     // 接通闪光效果
     const [showFlash, setShowFlash] = useState(true);
@@ -275,7 +278,12 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                         <span className="text-[10px] text-amber-300/60 tracking-wider">· 文字模式</span>
                     )}
                     {voiceInputDisabled && !ttsDegraded && (
-                        <span className="text-[10px] text-amber-300/60 tracking-wider">· 文字输入</span>
+                        <span
+                            className="inline-block max-w-[140px] truncate text-[10px] text-amber-300/60 tracking-wider sm:max-w-[180px]"
+                            title={voiceInputFallbackReason || '当前设备使用文字输入'}
+                        >
+                            · {voiceInputFallbackReason || '文字输入'}
+                        </span>
                     )}
                 </div>
             </div>
@@ -446,6 +454,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                     volume={volume}
                     onVolumeChange={onVolumeChange}
                     voiceInputDisabled={voiceInputDisabled}
+                    voiceInputFallbackReason={voiceInputFallbackReason}
                 />
             </div>
         </div>

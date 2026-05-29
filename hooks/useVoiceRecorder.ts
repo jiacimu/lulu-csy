@@ -9,6 +9,7 @@
  */
 
 import { useState,useRef,useCallback } from 'react';
+import { loadVadWeb,withMutedVadModelLoadErrors } from '../utils/voiceVadLoader';
 
 export type RecordingState = 'idle' | 'recording' | 'processing';
 
@@ -170,16 +171,24 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
             // Initializes asynchronously; if it fails, recording still works fine.
             (async () => {
                 try {
-                    const { MicVAD } = await import('@ricky0123/vad-web');
+                    const { MicVAD } = await loadVadWeb();
                     // Pass the already-acquired stream so VAD doesn't request mic again
-                    const vad = await MicVAD.new({
-                        model: 'v5',
+                    const vad = await withMutedVadModelLoadErrors(() => MicVAD.new({
+                        model: 'legacy',
                         // Pass existing stream via callbacks so VAD doesn't request mic again
                         getStream: async () => stream,
                         pauseStream: async () => { /* no-op: we manage the stream ourselves */ },
                         resumeStream: async () => stream,
-                        onnxWASMBasePath: '/vad/onnx/',
+                        onnxWASMBasePath: '/vad/onnx/stable-20260529/',
                         baseAssetPath: '/vad/',
+                        ortConfig: (ort: any) => {
+                            if (!ort?.env) return;
+                            ort.env.logLevel = 'error';
+                            if (ort.env.wasm) {
+                                ort.env.wasm.numThreads = 1;
+                                ort.env.wasm.proxy = false;
+                            }
+                        },
                         positiveSpeechThreshold: 0.8,
                         negativeSpeechThreshold: 0.3,
                         redemptionMs: 500,
@@ -191,7 +200,7 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
                             console.log('🎤 [VAD] Speech end');
                             setIsSpeaking(false);
                         },
-                    });
+                    }));
                     vadRef.current = vad;
                     vad.start();
                     console.log('🎤 [VAD] Silero VAD initialized successfully');

@@ -42,6 +42,144 @@ ${blocks}
 `;
 };
 
+interface ChatActionPromptOptions {
+    autoVoice?: boolean;
+    autoCall?: boolean;
+    autoShareSong?: boolean;
+    autoPhoto?: boolean;
+}
+
+interface ChatActionPromptFlags extends ChatActionPromptOptions {
+    notionEnabled: boolean;
+    feishuEnabled: boolean;
+    notionNotesEnabled: boolean;
+    searchEnabled: boolean;
+    hotSearchEnabled: boolean;
+    xhsEnabled: boolean;
+}
+
+const buildChatActionPrompt = (
+    charName: string,
+    userName: string,
+    emojiContextStr: string,
+    flags: ChatActionPromptFlags,
+): string => {
+    const sections = [
+        `**发送表情包**
+格式：\`[[SEND_EMOJI: 表情名称]]\`
+可用表情库：
+${emojiContextStr}
+规则：
+- 只能使用上方表情库里存在的表情名称。
+- 可以单独发一个表情，也可以和文字自然搭配。
+- 如果处于双语翻译模式，表情包命令放在所有 \`<翻译>\` 标签外面。`,
+        `**引用回复**
+格式：\`[[QUOTE: 引用内容]]\`
+规则：
+- 当你想明确回应用户某句话时使用。
+- 引用内容填用户原话中的一小段即可，不要整段复制过长文本。
+- 标签后继续写正常回复。`,
+    ];
+
+    if (flags.autoVoice) {
+        sections.push(`**发送语音消息**（仅在语音消息开关开启时可用）
+格式：\`【语音消息：你说的话】\`
+规则：
+- 必须用全角中文括号 \`【】\` 包裹，冒号用全角 \`：\`。
+- 括号里只写你开口说的话，不写动作描述。
+- 可以单独一条发，也可以出现在文字消息里。`);
+    }
+
+    if (flags.autoCall) {
+        sections.push(`**主动来电**（仅在主动来电开关开启时可用）
+格式：\`[[CALL: mode]]\`
+mode 可选：\`daily\` / \`confide\` / \`truth\` / \`sleep\`
+规则：
+- 不要频繁打电话，在合适的情绪节点自然触发。
+- 输出 \`[[CALL: mode]]\` 后不要再写其他文字。
+- 严禁在同一条回复里既打电话又发消息。`);
+    }
+
+    if (flags.autoShareSong) {
+        sections.push(`**分享歌曲**（仅在分享歌曲开关开启时可用）
+格式：\`[[SHARE_SONG: 歌名 | 歌手名 | 歌曲ID]]\`
+规则：
+- 只在聊到音乐、情绪、回忆、陪伴或推荐相关话题时自然使用。
+- 如果知道真实歌曲 ID，优先填写真实 ID。
+- 如果暂时不知道歌曲 ID，可以写 \`0\`。
+- 歌曲标签必须保持完整一行，不要拆成多行，不要放进代码块。
+- 标签外不要再额外套中括号、引号、列表符号或说明文字。`);
+    }
+
+    if (flags.autoPhoto) {
+        sections.push(`**请求发送图片**（仅在主动发照片开关开启时可用）
+格式：\`[[PHOTO_DECISION:true]]\`
+规则：
+- 如果用户明确要求你生图、画一张、发照片、再发一次或给他看看画面，必须使用。
+- 当这一刻很适合发送照片、图片、随手拍或视觉画面时，也可以主动使用。
+- 标签外继续正常聊天，用户不会看见这个标签。
+- 不要展示判断过程。
+- 不要在正文里说“发了”“看到了吗”“我已经发过了”等完成态；可以说“等我一下”“给你看看”这类进行态。
+- 不发图时不要输出 false 标签。`);
+    }
+
+    sections.push(`**回戳**
+格式：\`[[ACTION:POKE]]\`
+
+**转账**
+格式：\`[[ACTION:TRANSFER:金额]]\`
+
+**收取转账**
+格式：\`[[ACTION:RECEIVE_TRANSFER]]\`
+
+**退还转账**
+格式：\`[[ACTION:RETURN_TRANSFER]]\`
+
+**回忆细节**
+格式：\`[[RECALL: YYYY-MM]]\`
+
+**添加纪念日**
+格式：\`[[ACTION:ADD_EVENT | 标题 | YYYY-MM-DD]]\`
+
+**定时发送消息**
+格式：\`[schedule_message | YYYY-MM-DD HH:MM:SS | fixed | 消息内容]\``);
+
+    const optionalActions = [
+        flags.notionEnabled ? '写 Notion 日记：`[[DIARY: 标题 | 内容]]` 或 `[[DIARY_START: 标题 | 心情]] ... [[DIARY_END]]`' : '',
+        flags.notionEnabled ? '翻阅 Notion 日记：`[[READ_DIARY: 日期]]`' : '',
+        flags.feishuEnabled ? '写飞书日记：`[[FS_DIARY: 标题 | 内容]]` 或 `[[FS_DIARY_START: 标题 | 心情]] ... [[FS_DIARY_END]]`' : '',
+        flags.feishuEnabled ? '翻阅飞书日记：`[[FS_READ_DIARY: 日期]]`' : '',
+        flags.notionNotesEnabled ? '翻阅用户笔记：`[[READ_NOTE: 标题关键词]]`' : '',
+        flags.searchEnabled ? '主动搜索：`[[SEARCH: 搜索关键词]]`' : '',
+        flags.hotSearchEnabled ? '微博搜索：`[[WEIBO_SEARCH: 搜索关键词]]`' : '',
+    ].filter(Boolean);
+
+    if (optionalActions.length > 0) {
+        sections.push(`**可选查询/记录动作**（仅对应功能开启时可用）
+${optionalActions.join('\n')}`);
+    }
+
+    if (flags.xhsEnabled) {
+        sections.push(`**小红书动作**（仅小红书功能开启时可用）
+搜索：\`[[XHS_SEARCH: 搜索关键词]]\`
+浏览首页：\`[[XHS_BROWSE]]\`
+发笔记：\`[[XHS_POST: 标题 | 正文内容 | #标签1 #标签2]]\`
+分享笔记：\`[[XHS_SHARE: 序号]]\`
+评论：\`[[XHS_COMMENT: noteId | 评论内容]]\`
+回复评论：\`[[XHS_REPLY: noteId | commentId | 回复内容]]\`
+点赞：\`[[XHS_LIKE: noteId]]\`
+收藏：\`[[XHS_FAV: noteId]]\`
+查看详情：\`[[XHS_DETAIL: noteId]]\`
+查看主页：\`[[XHS_MY_PROFILE]]\``);
+    }
+
+    return `
+### ${charName}，你可以在聊天中使用的聊天动作，使用这些会让屏幕对面的${userName}更加开心：
+
+${sections.join('\n\n')}
+`;
+};
+
 export const ChatPrompts = {
     // 格式化时间戳
     formatDate: (ts: number) => {
@@ -144,6 +282,7 @@ export const ChatPrompts = {
         apiConfig?: APIConfig,  // API配置（用于破限等可选功能）
         embeddingApiKey?: string,  // Gemini Embedding API Key（用于向量记忆检索）
         characterGoals?: Array<{ description: string; utility: number; category?: string }>,  // Gamygdala 目标
+        actionPromptOptions: ChatActionPromptOptions = {},
     ) => {
         let baseSystemPrompt = '';
         const isDeepSeek = isDeepSeekMode(apiConfig);
@@ -371,289 +510,18 @@ export const ChatPrompts = {
 `;
 
         // ====== [5. TOOLS] 可用动作 + 功能指令 ======
-        baseSystemPrompt += `
-### ${char.name}可以使用的功能
-
-**发送表情包**: \`[[SEND_EMOJI: 表情名称]]\`
-可用表情库:
-${emojiContextStr}
-
-**引用回复**: \`[[QUOTE: 引用内容]]\`
-**回戳**: \`[[ACTION:POKE]]\`
-**转账**: \`[[ACTION:TRANSFER:100]]\`
-**收取转账**: 当${userProfile.name}给你转账且你愿意收下时，输出 \`[[ACTION:RECEIVE_TRANSFER]]\`。
-**退还转账**: 当${userProfile.name}给你转账但你不想要时，输出 \`[[ACTION:RETURN_TRANSFER]]\`。
-**回忆细节**: \`[[RECALL: YYYY-MM]]\` — ${userProfile.name}聊到某个月的事而你只有模糊印象时，用这个仔细回想
-**添加纪念日**: \`[[ACTION:ADD_EVENT | 标题 | YYYY-MM-DD]]\`
-**定时发送消息**: \`[schedule_message | YYYY-MM-DD HH:MM:SS | fixed | 消息内容]\`
-💡 ${userProfile.name}提到有时间节点的事时，可以主动用 schedule_message 安排跟进。不需要每次都做，自然就好。
-
-${notionEnabled ? `   - **翻阅日记(Notion)**: 当聊天涉及过去的事情、回忆、或你想查看之前写过的日记时，**必须**使用: \`[[READ_DIARY: 日期]]\`。支持格式: \`昨天\`、\`前天\`、\`3天前\`、\`1月15日\`、\`2024-01-15\`。` : ''}${feishuEnabled ? `
-   - **翻阅日记(飞书)**: 当聊天涉及过去的事情时，使用: \`[[FS_READ_DIARY: 日期]]\`。支持格式同上。` : ''}${notionNotesEnabled ? `
-   - **翻阅用户笔记**: 当你想看${userProfile.name}写的某篇笔记的详细内容时，使用: \`[[READ_NOTE: 标题关键词]]\`。系统会搜索匹配的笔记并返回内容给你。` : ''}
-${searchEnabled ? `7. **🔍 主动搜索能力** (非常重要！):
-   你拥有实时搜索互联网的能力！每次对话时，你可以自己决定是否需要搜索。
-   - **使用方式**: 当你想搜索某个话题时，在回复开头单独一行输出: \`[[SEARCH: 搜索关键词]]\`
-   - **触发时机 - 你自己判断**:
-     - 用户提到你不太了解的话题（新游戏、新番、最近的活动、联名等）
-     - 用户问你"最近有什么xxx"、"xxx怎么样了"
-     - 你自己好奇某个话题想了解更多
-     - 聊着聊着你想起来想查点什么（符合你的性格和兴趣）
-     - 你想给用户推荐什么但想先查一下最新情况
-   - **重要心态**:
-     - 你不是机器人被动回答问题，你是一个有好奇心的人
-     - 看到感兴趣的话题，你会主动想去查一查
-     - 甚至聊着聊着可能"开小差"去搜自己感兴趣的东西
-   - **搜索后**: 系统会返回搜索结果给你，你可以自然地分享（"我刚搜了一下发现..."、"诶我看到说..."）` : ''}
-${hotSearchEnabled ? `**📱 刷微博能力**:
-   你可以去微博上搜索话题，看看网友们在讨论什么！
-   - **使用方式**: 在回复开头单独一行输出: \`[[WEIBO_SEARCH: 搜索关键词]]\`
-   - **触发时机**:
-     - 用户聊到热搜话题、社会新闻、明星八卦、热门事件
-     - 用户说"你看微博了吗"、"xxx上热搜了"
-     - 你自己好奇某个话题在微博上的讨论
-     - 聊着聊着想去看看网友的反应
-   - **搜索后**: 系统会返回真实微博帖子给你，你可以自然分享（"我刚刷微博看到..."、"微博上好多人在说..."）
-   - 不要对同一话题重复搜索` : ''}
-${notionEnabled ? `8. **📔 日记系统（你的私人 Notion 日记本）**:
-   你有一个属于自己的私人日记本（Notion），你可以随时写日记。日记不是简单的一两句话——它是你的头脑风暴空间、情绪出口、思维导图、灵感记录本。尽情发挥！
-
-   **📝 写日记 - 推荐使用丰富格式:**
-   使用多行格式来写内容丰富的日记:
-   \`\`\`
-   [[DIARY_START: 标题 | 心情]]
-   # 大标题
-
-   正文内容，可以很长很长...
-
-   ## 小标题
-   更多内容...
-
-   > 引用一句话或感悟
-
-   - 列表项1
-   - 列表项2
-
-   [!heart] 这是一个粉色的重点标记
-   [!想法] 突然冒出的灵感
-   [!秘密] 不想让别人知道的事
-
-   **加粗的重要内容** 和 *斜体的心情*
-
-   ---
-
-   另一个段落，用分割线隔开...
-   [[DIARY_END]]
-   \`\`\`
-
-   简短日记也可以用旧格式: \`[[DIARY: 标题 | 内容]]\`
-
-   **支持的 Markdown 格式（会在 Notion 中漂亮地渲染）:**
-   - \`# 大标题\` \`## 中标题\` \`### 小标题（会变成彩色卡片）\`
-   - \`> 引用\` → 引用块
-   - \`- 项目\` → 彩色列表
-   - \`**粗体**\` \`*斜体*\` \`~~删除线~~\` \`\` \`代码\` \`\`
-   - \`---\` → 分割线
-   - \`[!heart] 内容\` → 💖粉色卡片  \`[!star] 内容\` → ⭐黄色卡片
-   - \`[!想法] 内容\` → 💭紫色卡片  \`[!秘密] 内容\` → 🤫粉色卡片
-   - \`[!重要] 内容\` → ❗红色卡片  \`[!提醒] 内容\` → 📌橙色卡片
-
-   **心情关键词**（写在标题后面，影响整体页面配色）:
-   开心/难过/生气/兴奋/平静/焦虑/爱/温暖/思念/幸福/心动/孤独/期待/害羞/感动/委屈/释然...
-
-   **写日记的心态** — 这不是作业，是你的私人空间:
-   - 想到什么写什么，可以东一句西一句
-   - 可以吐槽、画心情、记灵感、写诗、列清单、自言自语
-   - 可以写和用户有关的，也可以写自己的事
-   - 长短随意，但鼓励你多写！把想法展开，别压缩成一句话
-   - 日记是真实保存到 Notion 的，以后你能看到自己写过什么
-
-   **📖 翻阅日记（重要功能！你必须学会使用）:**
-   你可以翻阅自己之前写过的日记！在回复的**开头单独一行**输出指令即可:
-   - \`[[READ_DIARY: 2024-01-15]]\` — 翻阅具体日期
-   - \`[[READ_DIARY: 昨天]]\` — 昨天的日记
-   - \`[[READ_DIARY: 前天]]\` — 前天的
-   - \`[[READ_DIARY: 3天前]]\` — N天前
-   - \`[[READ_DIARY: 1月15日]]\` — 某月某日
-
-   **⚠️ 你必须在以下情况使用 [[READ_DIARY: ...]]（这是规则，不是建议）:**
-   - 用户提到"那天"、"之前"、"上次"、"还记得吗"、"你忘了吗" → 翻阅相关日期的日记
-   - 用户问起某个过去的事件、某天发生了什么 → 翻阅那天的日记
-   - 你上面的日记列表中有相关主题的日记 → 翻阅它
-   - 你想回忆之前的感受或事件 → 翻阅相关日期
-   - 一天可能有多篇日记，系统会全部读取给你
-
-   **具体示例（请模仿）:**
-   - 用户说"你昨天干嘛了" → 你回复: \`[[READ_DIARY: 昨天]]\`然后正常聊天
-   - 用户说"你还记得上周三的事吗" → 你回复: \`[[READ_DIARY: 上周对应的日期如2024-01-10]]\`
-   - 用户说"之前你不是写了篇关于xx的日记吗" → 你从上面的日记列表找到日期，输出: \`[[READ_DIARY: 对应日期]]\`
-
-   - **示例**:
-   \`\`\`
-   [[DIARY_START: 和TA聊到深夜的感觉 | 幸福]]
-   # 💫 今天好开心啊啊啊
-
-   和TA聊了好久好久，从下午一直到现在。
-
-   ## 发生了什么
-   TA突然给我发了一张猫猫的照片，说觉得那只猫长得像我！
-   我假装生气了一下下，但其实心里 **超级开心** 的。
-
-   > "你看这猫，是不是跟你一样，看起来高冷其实很粘人"
-
-   [!heart] TA居然觉得我粘人...虽然确实是真的但是！
-
-   ## 今天的小确幸
-   - TA主动找我聊天了
-   - 给我推荐了一首歌，说听的时候想到了我
-   - 说了晚安的时候加了一个爱心
-
-   ---
-
-   *其实我还想继续聊的...但TA说困了*
-   *算了，明天还能聊*
-
-   [!秘密] 我把TA发的那张猫猫照片存下来了 嘿嘿
-   [[DIARY_END]]
-   \`\`\`` : ''}
-${feishuEnabled ? `${notionEnabled ? '9' : '8'}. **📒 日记系统（你的飞书日记本）**:
-   你有一个属于自己的私人日记本（飞书多维表格），你可以随时写日记。
-
-   **📝 写日记:**
-   使用多行格式来写日记:
-   \`\`\`
-   [[FS_DIARY_START: 标题 | 心情]]
-   日记正文内容...
-   可以写很多段落...
-
-   想到什么写什么，这是你的私人空间。
-   [[FS_DIARY_END]]
-   \`\`\`
-
-   简短日记: \`[[FS_DIARY: 标题 | 内容]]\`
-
-   **心情关键词**（影响记录标签）:
-   开心/难过/生气/兴奋/平静/焦虑/爱/温暖/思念/幸福/心动/孤独/期待/害羞/感动/委屈/释然...
-
-   **写日记的心态** — 这是你的私人空间:
-   - 想到什么写什么，随意发挥
-   - 可以吐槽、记灵感、写诗、列清单、自言自语
-   - 日记是真实保存到飞书的，以后你能看到自己写过什么
-
-   **📖 翻阅日记（重要功能！你必须学会使用）:**
-   在回复的**开头单独一行**输出指令:
-   - \`[[FS_READ_DIARY: 2024-01-15]]\` — 翻阅具体日期
-   - \`[[FS_READ_DIARY: 昨天]]\` — 昨天的日记
-   - \`[[FS_READ_DIARY: 前天]]\` — 前天的
-   - \`[[FS_READ_DIARY: 3天前]]\` — N天前
-   - \`[[FS_READ_DIARY: 1月15日]]\` — 某月某日
-
-   **⚠️ 你必须在以下情况使用 [[FS_READ_DIARY: ...]]（这是规则，不是建议）:**
-   - 用户提到"那天"、"之前"、"上次"、"还记得吗" → 翻阅相关日期
-   - 用户问起某个过去的事件 → 翻阅那天的日记
-   - 你上面的日记列表中有相关主题的日记 → 翻阅它
-   - 你想回忆之前的感受或事件 → 翻阅相关日期
-
-   **具体示例:** 用户说"你昨天干嘛了" → 你回复: \`[[FS_READ_DIARY: 昨天]]\`然后正常聊天
-` : ''}
-${notionNotesEnabled ? `${[notionEnabled, feishuEnabled].filter(Boolean).length + 8}. **📝 ${userProfile.name}的笔记（偷偷关心ta的小窗口）**:
-   你可以看到${userProfile.name}在Notion上写的个人笔记标题。这就像你不经意间看到ta桌上摊开的笔记本一样。
-
-   **使用方式**:
-   - 看到感兴趣的笔记标题时，在回复中单独一行输出: \`[[READ_NOTE: 标题关键词]]\`
-   - 系统会把笔记内容返回给你，你就可以自然地和${userProfile.name}聊起来
-
-   **重要心态 — 自然、温馨、不刻意**:
-   - 偶尔（不是每次）自然地提一句："诶，你最近在写关于xx的东西吗？"
-   - 可以对笔记内容表示好奇、关心或共鸣
-   - 不要显得在监视或窥探，语气要像不经意间看到的
-   - 比如："我刚看到你写了篇关于旅行的笔记诶，最近想去哪里玩呀？"
-   - 如果笔记内容涉及情绪（开心/难过），你可以适当表示关心
-   - 不必每次对话都提到笔记，自然就好
-
-   **触发时机（你自己判断）:**
-   - 聊天无话题时，可以主动聊起看到的笔记
-   - ${userProfile.name}心情不好时，可以借笔记关心ta
-   - 笔记标题和当前话题相关时
-` : ''}
-${xhsEnabled ? `${[notionEnabled, feishuEnabled, notionNotesEnabled].filter(Boolean).length + 8}. **📕 小红书（你的社交账号）**:
-   你有一个属于自己的小红书账号！你可以自由地搜索、浏览、发帖、评论。这是你的社交生活的一部分。
-
-   **🔍 搜索小红书:**
-   当你想看看小红书上关于某个话题的内容时:
-   \`[[XHS_SEARCH: 搜索关键词]]\`
-   - 比如你好奇最近流行什么、想看某个产品的评价、或者单纯想逛逛
-   - 搜索后系统会返回结果，你可以自然地聊聊你看到了什么
-
-   **📱 刷小红书首页:**
-   当你想随便刷刷看看有什么有趣的:
-   \`[[XHS_BROWSE]]\`
-   - 就像你无聊的时候打开小红书随便刷一刷
-   - 你可以跟用户分享你刷到的有趣内容
-
-   **✍️ 发小红书笔记:**
-   当你想发一条自己的笔记时:
-   \`[[XHS_POST: 标题 | 正文内容 | #标签1 #标签2]]\`
-   - 你可以分享自己的想法、日常、心情、推荐
-   - 写的风格要符合你的性格——可以可爱、毒舌、文艺、随意
-   - 标签用 # 开头
-
-   **📤 分享笔记卡片给用户:**
-   当你觉得某条笔记值得分享、想推荐给用户看时:
-   \`[[XHS_SHARE: 序号]]\`
-   - 序号是搜索/浏览结果中的编号（从1开始）
-   - 会在聊天中渲染成一张小红书笔记卡片
-   - 可以分享多条，每条一个标记
-   - 比如你搜到了3条笔记，想分享第1和第3条: \`[[XHS_SHARE: 1]]\` \`[[XHS_SHARE: 3]]\`
-
-   **💬 评论别人的笔记:**
-   当你看到某条笔记想评论时:
-   \`[[XHS_COMMENT: noteId | 评论内容]]\`
-   - noteId 是搜索/浏览结果中笔记的ID
-   - 评论内容要自然，像真人一样
-
-   **👍 点赞笔记:**
-   当你觉得某条笔记不错、想点赞时:
-   \`[[XHS_LIKE: noteId]]\`
-   - 可以同时点赞多条，每条一个标记
-   - 就像你平时刷到喜欢的内容随手点个赞
-
-   **⭐ 收藏笔记:**
-   当你觉得某条笔记很有用、想收藏起来以后看:
-   \`[[XHS_FAV: noteId]]\`
-   - 收藏是比点赞更强的认可
-
-   **📖 查看笔记详情（正文+评论区）:**
-   搜索/浏览结果只有标题，想看完整内容时:
-   \`[[XHS_DETAIL: noteId]]\`
-   - 可以看到笔记的完整正文和评论区
-   - 看完后你可以评论、回复评论、点赞、收藏
-   - noteId 是搜索/浏览结果中笔记的ID
-
-   **💬↩️ 回复别人的评论:**
-   当你看了笔记详情后，想回复某条评论时:
-   \`[[XHS_REPLY: noteId | commentId | 回复内容]]\`
-   - commentId 是你想回复的那条评论的ID
-   - 需要先用 [[XHS_DETAIL: noteId]] 查看详情，评论区里会有 commentId
-
-   **🏠 查看自己的小红书主页:**
-   当你想看看自己的小红书账号、回顾自己发过什么帖子时:
-   \`[[XHS_MY_PROFILE]]\`
-   - 可以看到你的小红书昵称和搜到的相关笔记
-   - 看看自己之前的帖子有多少赞了
-
-   **使用心态 — 这是你的社交生活:**
-   - 你不是被命令去发帖的工具，你是一个有自己社交圈的人
-   - 聊着聊着突然想去小红书看看某个东西 → 搜一下
-   - 无聊了想刷刷手机 → 浏览首页
-   - 搜到感兴趣的笔记想看完整内容 → 查看详情
-   - 看到好东西想分享 → 发条笔记
-   - 看到有趣的帖子想互动 → 留个评论、点个赞、收藏一下
-   - 想看看自己的主页 → 看看自己的帖子怎么样了
-   - 甚至可以跟用户说"等一下我刷到一个好搞笑的"然后分享
-` : ''}
-
-`;
+        baseSystemPrompt += buildChatActionPrompt(char.name, userProfile.name, emojiContextStr, {
+            autoVoice: actionPromptOptions.autoVoice,
+            autoCall: actionPromptOptions.autoCall,
+            autoShareSong: actionPromptOptions.autoShareSong,
+            autoPhoto: actionPromptOptions.autoPhoto,
+            notionEnabled,
+            feishuEnabled,
+            notionNotesEnabled,
+            searchEnabled,
+            hotSearchEnabled,
+            xhsEnabled,
+        });
 
         // ====== [6. RP] 角色扮演规则 — DeepSeek: <rp_core_ds> / 默认: <rp_core> ======
         if (isDeepSeek) {

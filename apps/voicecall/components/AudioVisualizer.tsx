@@ -10,7 +10,7 @@ const LOGICAL_HEIGHT = 80;
 
 const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ isActive, isSpeaking }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const animationRef = useRef<number>();
+    const animationRef = useRef<number | null>(null);
     const isSpeakingRef = useRef(isSpeaking);
     const isActiveRef = useRef(isActive);
 

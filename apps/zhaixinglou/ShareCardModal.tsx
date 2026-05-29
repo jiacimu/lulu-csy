@@ -43,7 +43,7 @@ const BORDER_WORDS = [
 // ═══════════════════════════════════
 
 const AkashicCard: React.FC<{
-    cardRef: React.RefObject<HTMLDivElement>;
+    cardRef: React.RefObject<HTMLDivElement | null>;
     paragraphList: string[];
     title: string;
     subtitle?: string;
@@ -65,7 +65,7 @@ const AkashicCard: React.FC<{
 
     return (
         <div
-            ref={cardRef as React.RefObject<HTMLDivElement>}
+            ref={cardRef}
             style={{
                 position: 'relative',
                 overflow: 'hidden',
@@ -384,7 +384,7 @@ const AkashicCard: React.FC<{
 // ═══════════════════════════════════
 
 const GoldCard: React.FC<{
-    cardRef: React.RefObject<HTMLDivElement>;
+    cardRef: React.RefObject<HTMLDivElement | null>;
     paragraphList: string[];
     title: string;
     subtitle?: string;
@@ -402,7 +402,7 @@ const GoldCard: React.FC<{
 
     return (
         <div
-            ref={cardRef as React.RefObject<HTMLDivElement>}
+            ref={cardRef}
             style={{
                 position: 'relative',
                 overflow: 'hidden',

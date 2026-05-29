@@ -20,12 +20,12 @@
 | --- | --- | --- | --- |
 | 标题 | `ZhaixinglouTitle` | `/fonts/zhaixinglou-title.woff2` | 英文标题、功能标题、星座名等 |
 | 装饰正文 | `ZhaixinglouFont` | `/fonts/zhaixinglou-body.woff2` | 英文标签、小标题、按钮、仪式感装饰文案 |
-| 中文正文 | `ZhaixinglouCN` | `/fonts/zhaixinglou-cn.woff2`，回退 `/fonts/zhaixinglou-cn.ttf` | 摘星楼根容器、中文正文、分享卡正文 |
+| 中文正文 | `ZhaixinglouCN` | `/fonts/zhaixinglou-cn.woff2` | 摘星楼根容器、中文正文、分享卡正文 |
 | 塔罗牌面 | `TarotFont` | `/fonts/tarot.woff2` | 塔罗牌面符号和牌名字体 |
 | 手写英文 | `Dancing Script` | `/fonts/dancing-script.woff2` | 阿卡西暗影里的手写英文装饰 |
 | 便签/诗句 | `NoteFont` | `/fonts/note.woff2` | 星象仪表盘提示、手写感说明文字 |
 
-额外发现已修复：`AssetPreloader.ts` 预加载 `/fonts/zhaixinglou-cn.woff2`，`zhaixinglou.css` 也已让 `ZhaixinglouCN` 优先使用同一个 `.woff2` 文件，并保留 `.ttf` 作为回退。
+额外发现已修复：`AssetPreloader.ts` 预加载 `/fonts/zhaixinglou-cn.woff2`，`zhaixinglou.css` 也已让 `ZhaixinglouCN` 使用同一个 `.woff2` 文件，避免额外携带未使用的 `.ttf` 回退文件。
 
 ## 每个字体槽的使用位置
 
@@ -144,7 +144,7 @@
 | --- | --- | --- | --- |
 | `title` | `ZhaixinglouTitle` | `/fonts/zhaixinglou-title.woff2` | 是 |
 | `accent` | `ZhaixinglouFont` | `/fonts/zhaixinglou-body.woff2` | 是 |
-| `bodyCn` | `ZhaixinglouCN` | `/fonts/zhaixinglou-cn.woff2`，`.ttf` 回退 | 是 |
+| `bodyCn` | `ZhaixinglouCN` | `/fonts/zhaixinglou-cn.woff2` | 是 |
 | `tarot` | `TarotFont` | `/fonts/tarot.woff2` | 中 |
 | `script` | `Dancing Script` | `/fonts/dancing-script.woff2` | 中 |
 | `note` | `NoteFont` | `/fonts/note.woff2` | 中 |
@@ -182,7 +182,7 @@
 3. `apps/zhaixinglou/ZhaixinglouApp.tsx`
    - 进入摘星楼时加载并注入本机字体设置。
 4. `apps/zhaixinglou/zhaixinglou.css`
-   - `ZhaixinglouCN` 优先加载 `.woff2`，`.ttf` 作为回退。
+   - `ZhaixinglouCN` 使用 `.woff2`，不再携带额外 `.ttf` 回退。
 
 ## 风险点
 

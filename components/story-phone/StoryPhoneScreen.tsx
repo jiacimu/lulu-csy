@@ -109,7 +109,7 @@ export interface StoryPhoneHomeSurface {
 
 export const PHONE_APPS: PhoneAppDef[] = [
     { id: 'wechat', name: '微信', icon: '微', color: '#18b35f', prompt: '生成角色真实在使用的微信数据，而不是一页线索卡。必须输出丰富 wechatData：角色自己的微信资料、聊天列表、联系人、群聊、朋友圈、收藏、服务/账单、作品/视频号、小店与卡包、表情、设置等。内容要从当前角色人设、世界观、关系、主聊天历史和本轮状态推导；允许有隐私痕迹、未读、置顶、撤回、转账、红包、工作群、好友互动。每个私聊/群聊都要有多条 chatMessages，不要只有和 user 的聊天完整；朋友圈要有角色本人和好友/联系人发布的多条动态与点赞评论，post.text 必须像本人发的朋友圈原话，禁止写成“旧识/重点关注对象/家族纽带/人生导师”这类人设关系摘要。top-level items 只作为当前停留页摘要，完整内容放进 wechatData。' },
-    { id: 'qq', name: 'QQ', icon: 'Q', color: '#2d7df0', prompt: '精做 QQ 界面。生成 4-6 个可点开的 QQ 线索：消息列表、群聊、空间动态、相册、文件、收藏、匿名/旧关系、等级/签名、聊天记录。items 的 label 写好友/群/功能名，value 写屏幕上可见原文或列表项，detail 写时间、群身份、空间权限、文件名、相册名或旧记录痕迹。' },
+    { id: 'qq', name: 'QQ', icon: 'Q', color: '#2d7df0', prompt: '精做一个完整的 QQ App 内容快照，不要只生成几条粗略线索。必须让 QQ 像角色真实长期使用的社交软件：消息页、好友私聊、多个群聊、QQ空间说说/访客/留言、相册、群文件/微云、收藏、联系人资料、等级/个性签名、匿名或旧关系痕迹都要有内容。生成 8-12 个可点开的 items；items 的 label 写好友名、群名、功能页或相册/文件夹名，detail 写具体时间、群身份、空间权限、QQ号、文件名、相册名、访客记录或旧记录痕迹。每个 item.value 不能只有二三条，至少写 5-8 行屏幕上可见的原文或列表项：私聊/群聊要有多轮对话、撤回/未读/语音/图片/表情/文件等痕迹；空间动态要有多条说说、点赞评论和访客；相册要有多个相册/照片描述；文件要有多个文件名、大小、下载/转发记录；资料页要有昵称、QQ号、等级、签名、备注、共同群或最近互动。内容要从当前角色人设、关系、主聊天历史和本轮状态推导，像翻到一整个 QQ，而不是每个模块只有摘要。避免写成“旧识/重点对象”这类人设说明，必须写屏幕上真的会出现的 QQ 文案。' },
     { id: 'messages', name: '信息', icon: '💬', color: 'from-emerald-400 to-green-600', prompt: '生成一段手机聊天/未发送消息/置顶会话线索。' },
     { id: 'notes', name: '备忘录', icon: '📝', color: 'from-amber-200 to-yellow-500', prompt: '生成一条备忘录、清单或私密随手记。' },
     { id: 'photos', name: '相册', icon: '🖼️', color: 'from-fuchsia-300 to-sky-400', prompt: '生成几张相册缩略图的文字描述，像用户翻到了相册最近项目。' },
@@ -155,7 +155,6 @@ type StoryPhoneIcon = React.ComponentType<{
 
 const APP_ICON_MAP: Record<string, StoryPhoneIcon> = {
     wechat: ChatCircleText,
-    qq: UsersThree,
     messages: ChatCircleText,
     notes: NotePencil,
     photos: ImageSquare,
@@ -253,13 +252,13 @@ const APP_THEMES: Record<string, AppTheme> = {
         accentHex: '#07c160',
     },
     qq: {
-        screen: 'bg-[#eef6ff] text-[#1d304a]',
-        header: 'bg-[#f8fbff]/94 text-[#1d304a]',
-        border: 'border-blue-950/10',
-        muted: 'text-[#60738c]',
-        accent: 'text-[#2474d8]',
-        accentSoft: 'bg-blue-500/12',
-        accentHex: '#2d7df0',
+        screen: 'bg-[#f4f8ff] text-[#1f2a3d]',
+        header: 'bg-white text-[#1f2a3d]',
+        border: 'border-[#eef2f7]',
+        muted: 'text-[#8491a5]',
+        accent: 'text-[#2f8cff]',
+        accentSoft: 'bg-[#edf6ff]',
+        accentHex: '#2F8CFF',
     },
     messages: {
         screen: 'bg-[#eef7f1] text-[#1d3028]',
@@ -547,7 +546,7 @@ const SYSTEM_APP_THEME = {
 
 const SYSTEM_APP_ACCENTS: Record<string, string> = {
     wechat: '#5f796b',
-    qq: '#60758d',
+    qq: '#2d7df0',
     messages: '#5e796b',
     notes: '#887957',
     photos: '#7b7286',
@@ -598,6 +597,15 @@ const ILLUSTRATION_TILE_GRADIENTS = [
 function getAppTheme(app?: PhoneAppDef): AppTheme {
     const baseTheme = (app && APP_THEMES[app.id]) || DEFAULT_APP_THEME;
     const accentHex = (app && SYSTEM_APP_ACCENTS[app.id]) || '#687386';
+    if (app?.id === 'qq') {
+        return {
+            ...baseTheme,
+            accent: 'story-phone-accent-text',
+            accentSoft: 'story-phone-accent-soft',
+            accentHex: '#2F8CFF',
+            dark: false,
+        };
+    }
     return {
         ...baseTheme,
         ...SYSTEM_APP_THEME,
@@ -616,7 +624,20 @@ function getAppIconStyle(app: PhoneAppDef | undefined, theme: AppTheme): React.C
 }
 
 function getAppSystemStyle(theme: AppTheme): React.CSSProperties {
-    return { '--story-phone-accent': theme.accentHex } as React.CSSProperties;
+    const baseStyle = { '--story-phone-accent': theme.accentHex } as React.CSSProperties;
+    if (theme.accentHex === '#2F8CFF') {
+        return {
+            ...baseStyle,
+            '--story-phone-card': '#fff',
+            '--story-phone-card-soft': '#F2F7FF',
+            '--story-phone-border': '#EEF2F7',
+            '--story-phone-shadow': 'none',
+            '--story-phone-text': '#1F2A3D',
+            '--story-phone-muted': '#8491A5',
+            background: '#F4F8FF',
+        } as React.CSSProperties;
+    }
+    return baseStyle;
 }
 
 function getClueItems(clue?: PhoneClue | null): PhoneClueItem[] {
@@ -740,6 +761,79 @@ const PhoneThreadDetail: React.FC<{
     const mineBubble = platform === 'wechat' ? 'bg-[#95ec69] text-[#132015]' : 'bg-[#2d7df0] text-white';
     const otherBubble = platform === 'wechat' ? 'bg-white text-[#1f2d25]' : 'bg-white text-[#1d304a]';
 
+    if (platform === 'qq') {
+        const qqThreadInset = compact ? '-mx-3 -my-3' : '-mx-4 -my-4';
+        const qqThreadPad = compact ? 'px-3' : 'px-4';
+        const qqThreadSubtitle = item.detail ? `${item.detail} · QQ漫游记录` : '手机在线 · QQ漫游记录';
+        return (
+            <div className={`${qqThreadInset} min-h-full bg-[#F4F8FF] text-[#1F2A3D]`}>
+                <div className={`flex h-12 items-center gap-2 border-b bg-white ${qqThreadPad}`} style={{ borderColor: '#EEF2F7' }}>
+                    <button
+                        type="button"
+                        onClick={onBack}
+                        disabled={!onBack}
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#2F8CFF] active:bg-[#F2F7FF] disabled:opacity-50"
+                        aria-label="返回上一层"
+                    >
+                        <CaretLeft weight="bold" className="h-[18px] w-[18px]" />
+                    </button>
+                    <div className="min-w-0 flex-1 text-center">
+                        <div className={`${compact ? 'text-[13px]' : 'text-[15px]'} truncate font-semibold text-[#1F2A3D]`}>{item.label || routeTitle('thread', '聊天')}</div>
+                        <div className={`${compact ? 'text-[8px]' : 'text-[10px]'} truncate text-[#8491A5]`}>{qqThreadSubtitle}</div>
+                    </div>
+                    <DotsThree weight="bold" className="h-5 w-5 shrink-0 text-[#2F8CFF]" />
+                </div>
+                <div className={`${qqThreadPad} py-3`}>
+                    <div className="overflow-hidden rounded-[18px] bg-white">
+                        <div className="flex items-center gap-3 border-b px-3 py-3" style={{ borderColor: '#EEF2F7' }}>
+                            <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#50b7ff,#2477ef)] text-sm font-bold text-white shadow-sm">
+                                {(item.label || 'Q').slice(0, 1)}
+                                <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#36d16a]" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                                <span className={`${compact ? 'text-[12px]' : 'text-sm'} block truncate font-bold text-[#17233c]`}>{item.label || 'QQ聊天'}</span>
+                                <span className={`${compact ? 'text-[8px]' : 'text-[10px]'} block truncate text-[#7d8da5]`}>{qqThreadSubtitle}</span>
+                            </span>
+                            <DotsThree weight="bold" className="h-5 w-5 text-[#5b6f91]" />
+                        </div>
+                    <div className={`${compact ? 'space-y-2 px-2.5 py-3' : 'space-y-2.5 px-3 py-3.5'} bg-[#F4F8FF]`}>
+                        <div className={`mx-auto w-fit rounded-full bg-white/72 px-2.5 py-1 ${compact ? 'text-[8px]' : 'text-[10px]'} text-[#8a99ad] shadow-sm`}>
+                            {item.detail || '聊天记录已同步到本机'}
+                        </div>
+                        {lines.map((line, index) => (
+                            <div key={`${line.speaker}-${index}`} className={`flex items-end gap-2 ${line.mine ? 'justify-end' : 'justify-start'}`}>
+                                {!line.mine && (
+                                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#8dc9ff,#2d7df0)] text-[10px] font-bold text-white shadow-sm">
+                                        {(line.speaker || item.label || '?').slice(0, 1)}
+                                    </span>
+                                )}
+                                <div
+                                    className={`max-w-[78%] px-3 py-2 shadow-sm ${line.mine ? 'rounded-[1.05rem] rounded-br-sm text-white' : 'rounded-[1.05rem] rounded-bl-sm bg-white text-[#17233c]'}`}
+                                    style={line.mine ? { background: 'linear-gradient(135deg, #2d8cff 0%, #176fe8 100%)' } : undefined}
+                                >
+                                    {!line.mine && <div className={`${compact ? 'text-[8px]' : 'text-[9px]'} mb-0.5 font-semibold text-[#2d7df0]`}>{line.speaker}</div>}
+                                    <div className={`${compact ? 'text-[10px]' : 'text-xs'} whitespace-pre-wrap leading-relaxed`}>{line.text}</div>
+                                </div>
+                                {line.mine && (
+                                    <span className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-slate-200 shadow-sm">
+                                        {charAvatar ? <img src={charAvatar} alt={charName} className="h-full w-full object-cover" /> : <UserCircle className="h-full w-full p-1 text-slate-500" />}
+                                    </span>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                    <div className="flex items-center gap-2 border-t border-[#c8d9ee] bg-[#fafdff]/95 px-3 py-2.5 text-[#6b7890]">
+                        <Waveform className="h-4 w-4 shrink-0" />
+                        <span className={`min-w-0 flex-1 rounded-full bg-[#eef4fb] px-3 py-1.5 ${compact ? 'text-[9px]' : 'text-[11px]'} text-[#8a99ad]`}>只读漫游记录，不能发送消息</span>
+                        <Plus className="h-4 w-4 shrink-0" />
+                        <PaperPlaneTilt weight="fill" className="h-4 w-4 shrink-0 text-[#2d7df0]" />
+                    </div>
+                </div>
+            </div>
+            </div>
+        );
+    }
+
     return (
         <div>
             <RouteBackButton compact={compact} theme={theme} title={item.label || routeTitle('thread', '聊天')} onBack={onBack} />
@@ -809,73 +903,183 @@ const WeChatScreen: React.FC<AppContentProps> = ({ clue, charName, charAvatar, c
 
     return <WeChatApp data={wechatData} compact={compact} onVisibleContentChange={handleVisibleContentChange} />;
 };
+
+const QQ_LIGHT_BLUE = '#F2F7FF';
+const QQ_PAGE_BG = '#F4F8FF';
+const QQ_DIVIDER = '#EEF2F7';
+const QQ_RED = '#FF4D5A';
+
+type QQEntryKind = 'chat' | 'group' | 'space' | 'file' | 'profile' | 'album' | 'favorite';
+
+const QQ_AVATAR_BACKGROUNDS = [
+    'linear-gradient(135deg, #4db8ff 0%, #1e74ec 100%)',
+    'linear-gradient(135deg, #62d4ff 0%, #2586f5 100%)',
+    'linear-gradient(135deg, #8b9cff 0%, #5266e8 100%)',
+    'linear-gradient(135deg, #6cd6c8 0%, #2e8fdc 100%)',
+    'linear-gradient(135deg, #ffa75d 0%, #ff6f7b 100%)',
+    'linear-gradient(135deg, #93c7ff 0%, #3d7bff 100%)',
+];
+
+function getQQEntryKind(item: PhoneClueItem): QQEntryKind {
+    const raw = `${item.label} ${item.detail || ''} ${item.value || ''}`;
+    if (/文件|群文件|文档|pdf|doc|zip|云盘|微云/i.test(raw)) return 'file';
+    if (/群|班级|社团|频道|家族|工作组/.test(`${item.label} ${item.detail || ''}`)) return 'group';
+    if (/空间|说说|动态|留言|访客/.test(raw)) return 'space';
+    if (/相册|照片|图片/.test(raw)) return 'album';
+    if (/收藏|书签/.test(raw)) return 'favorite';
+    if (/资料|签名|等级|名片|备注|Q龄/i.test(raw)) return 'profile';
+    return 'chat';
+}
+
+function getQQEntryMeta(item: PhoneClueItem, index: number): {
+    kind: QQEntryKind;
+    tag: string;
+    icon: StoryPhoneIcon;
+    background: string;
+} {
+    const kind = getQQEntryKind(item);
+    const iconMap: Record<QQEntryKind, StoryPhoneIcon> = {
+        chat: ChatCircleText,
+        group: UsersThree,
+        space: Star,
+        file: Folder,
+        profile: UserCircle,
+        album: ImageSquare,
+        favorite: BookmarkSimple,
+    };
+    const tagMap: Record<QQEntryKind, string> = {
+        chat: '好友',
+        group: '群聊',
+        space: '空间',
+        file: '文件',
+        profile: '资料',
+        album: '相册',
+        favorite: '收藏',
+    };
+    return {
+        kind,
+        tag: tagMap[kind],
+        icon: iconMap[kind],
+        background: QQ_AVATAR_BACKGROUNDS[index % QQ_AVATAR_BACKGROUNDS.length],
+    };
+}
+
+function getQQItemTime(item: PhoneClueItem, fallback?: string): string {
+    const source = item.detail || item.value || '';
+    const match = source.match(/(\d{1,2}:\d{2}|刚刚|昨天|前天|周[一二三四五六日天]|星期[一二三四五六日天]|凌晨|上午|下午|晚上)/);
+    return match?.[0] || fallback || '刚刚';
+}
+
 const QQScreen: React.FC<AppContentProps> = ({ clue, charName, charAvatar, compact, theme, nestedRoute = DEFAULT_NESTED_ROUTE, onNavigate }) => {
     const items = getClueItems(clue).slice(0, compact ? 4 : 6);
     const selectedItem = getRouteItem(items, nestedRoute.itemIndex);
     const goHome = onNavigate ? () => onNavigate(DEFAULT_NESTED_ROUTE) : undefined;
+    const pageInset = compact ? '-mx-3 -my-3' : '-mx-4 -my-4';
+    const pagePad = compact ? 'px-3' : 'px-4';
+    const qqNumber = `QQ号 ${String(10000 + charName.length * 137 + items.length * 11)}`;
 
     if (nestedRoute.name === 'thread') {
         return <PhoneThreadDetail item={selectedItem} charName={charName} charAvatar={charAvatar} compact={compact} theme={theme} platform="qq" onBack={goHome} />;
     }
 
+    const HeaderButton = ({ label, icon: Icon, onClick }: { label: string; icon: StoryPhoneIcon; onClick?: () => void }) => (
+        <button
+            type="button"
+            onClick={onClick}
+            disabled={!onClick}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-[#2F8CFF] active:bg-[#F2F7FF] disabled:opacity-50"
+            aria-label={label}
+        >
+            <Icon weight="bold" className="h-[18px] w-[18px]" />
+        </button>
+    );
+
+    const FlatHeader = ({ title, right }: { title: string; right?: React.ReactNode }) => (
+        <div className={`flex h-12 items-center gap-2 border-b bg-white ${pagePad}`} style={{ borderColor: QQ_DIVIDER }}>
+            <button
+                type="button"
+                onClick={goHome}
+                disabled={!goHome}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#2F8CFF] active:bg-[#F2F7FF] disabled:opacity-50"
+                aria-label="返回上一层"
+            >
+                <CaretLeft weight="bold" className="h-[18px] w-[18px]" />
+            </button>
+            <span className={`${compact ? 'text-sm' : 'text-base'} min-w-0 flex-1 truncate font-semibold text-[#1F2A3D]`}>{title}</span>
+            {right || <span className="w-8" />}
+        </div>
+    );
+
     if (nestedRoute.name === 'space') {
         return (
-            <div>
-                <RouteBackButton compact={compact} theme={theme} title="QQ空间" onBack={goHome} />
-                <div className="space-y-3">
-                    <div className="rounded-[1.45rem] bg-gradient-to-br from-[#2d7df0] via-[#55b6ff] to-[#bce9ff] p-4 text-white shadow-[0_16px_32px_rgba(45,125,240,0.2)]">
-                        <div className="flex items-center justify-between">
-                            <Star weight="fill" className="h-6 w-6" />
-                            <span className="rounded-full bg-white/18 px-2 py-1 text-[10px] font-semibold">空间动态</span>
+            <div className={`${pageInset} min-h-full text-[#1F2A3D]`} style={{ backgroundColor: QQ_PAGE_BG }}>
+                <FlatHeader
+                    title="QQ空间"
+                    right={
+                        <div className="flex items-center gap-1">
+                            <button type="button" className="rounded-full bg-[#F2F7FF] px-2.5 py-1 text-[10px] font-semibold text-[#2F8CFF]">访客</button>
                         </div>
-                        <div className={`${compact ? 'mt-5 text-xl' : 'mt-7 text-2xl'} font-bold`}>{selectedItem.label || '最近动态'}</div>
-                        <div className={`${compact ? 'mt-1 text-[10px]' : 'mt-2 text-xs'} line-clamp-3 text-white/78`}>{getItemPreview(selectedItem, 96)}</div>
+                    }
+                />
+                <div className="bg-white">
+                    <div className="relative h-28 bg-[linear-gradient(135deg,#12A8FF_0%,#2F8CFF_54%,#BFEAFF_100%)]">
+                        <div className="absolute bottom-3 left-4 text-white">
+                            <div className={`${compact ? 'text-lg' : 'text-xl'} font-bold`}>QQ空间</div>
+                            <div className={`${compact ? 'text-[9px]' : 'text-[11px]'} text-white/82`}>{clue.subtitle || '好友可见 · 最近有访问痕迹'}</div>
+                        </div>
                     </div>
-                    <div className={`overflow-hidden rounded-[1.25rem] border ${theme.border} bg-white/76`}>
-                        {items.map((item, index) => (
-                            <button
-                                key={`${item.label}-space-${index}`}
-                                type="button"
-                                onClick={() => onNavigate?.({ name: 'thread', itemIndex: index })}
-                                disabled={!onNavigate}
-                                className="flex w-full gap-3 border-b border-blue-900/8 p-3 text-left last:border-b-0 active:bg-blue-50/70 disabled:active:bg-transparent"
-                            >
-                                <ImageSquare className={`mt-1 h-4 w-4 shrink-0 ${theme.accent}`} />
-                                <span className="min-w-0 flex-1">
-                                    <span className={`${compact ? 'text-[11px]' : 'text-sm'} block font-semibold`}>{item.label}</span>
-                                    <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} mt-1 line-clamp-2 block ${theme.muted}`}>{getItemPreview(item, 84)}</span>
-                                    <span className={`${compact ? 'text-[8px]' : 'text-[10px]'} mt-1 block text-blue-400`}>{item.detail || '仅好友可见'}</span>
+                    <div className={`${pagePad} pb-3`}>
+                        <div className="-mt-7 flex items-end gap-3">
+                            <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[18px] border-4 border-white bg-[#2F8CFF] text-xl font-black text-white">
+                                {charAvatar ? <img src={charAvatar} alt={charName} className="h-full w-full object-cover" /> : charName.slice(0, 1)}
+                            </span>
+                            <div className="min-w-0 flex-1 pb-1">
+                                <div className={`${compact ? 'text-sm' : 'text-base'} truncate font-semibold text-[#1F2A3D]`}>{charName}</div>
+                                <div className={`${compact ? 'text-[9px]' : 'text-[11px]'} truncate text-[#8491A5]`}>{qqNumber} · {selectedItem.detail || '个性签名还停在旧状态'}</div>
+                            </div>
+                            <button type="button" className="mb-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold text-[#2F8CFF]" style={{ borderColor: QQ_DIVIDER }}>装扮</button>
+                        </div>
+                        <div className={`${compact ? 'mt-3' : 'mt-4'} grid grid-cols-4 rounded-[18px] text-center`} style={{ backgroundColor: QQ_LIGHT_BLUE }}>
+                            {['说说', '相册', '留言', '访客'].map((label, index) => (
+                                <span key={label} className="border-r px-2 py-2 last:border-r-0" style={{ borderColor: '#fff' }}>
+                                    <span className={`${compact ? 'text-xs' : 'text-sm'} block font-semibold text-[#1F2A3D]`}>{items.length + index + 1}</span>
+                                    <span className={`${compact ? 'text-[8px]' : 'text-[10px]'} text-[#8491A5]`}>{label}</span>
                                 </span>
-                            </button>
-                        ))}
+                            ))}
+                        </div>
                     </div>
                 </div>
-            </div>
-        );
-    }
-
-    if (nestedRoute.name === 'files' || nestedRoute.name === 'profile') {
-        const title = nestedRoute.name === 'files' ? '群文件' : '个人资料';
-        return (
-            <div>
-                <RouteBackButton compact={compact} theme={theme} title={title} onBack={goHome} />
-                <div className={`overflow-hidden rounded-[1.25rem] border ${theme.border} bg-white/76`}>
+                <div className={`${pagePad} space-y-2 pb-4 pt-2`}>
                     {items.map((item, index) => (
                         <button
-                            key={`${item.label}-qq-file-${index}`}
+                            key={`${item.label}-space-${index}`}
                             type="button"
                             onClick={() => onNavigate?.({ name: 'thread', itemIndex: index })}
                             disabled={!onNavigate}
-                            className="flex w-full items-center gap-3 border-b border-blue-900/8 p-3 text-left last:border-b-0 active:bg-blue-50/70 disabled:active:bg-transparent"
+                            className="w-full rounded-[18px] bg-white p-3 text-left active:bg-[#F8FBFF] disabled:active:bg-white"
                         >
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
-                                {nestedRoute.name === 'files' ? <Folder className="h-4 w-4" /> : <UserCircle className="h-4 w-4" />}
-                            </span>
-                            <span className="min-w-0 flex-1">
-                                <span className={`${compact ? 'text-[11px]' : 'text-sm'} block truncate font-semibold`}>{item.label}</span>
-                                <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} block truncate ${theme.muted}`}>{item.detail || getItemPreview(item, 58)}</span>
-                            </span>
-                            <CaretRight className={`h-4 w-4 ${theme.muted}`} />
+                            <div className="flex gap-2.5">
+                                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: QQ_AVATAR_BACKGROUNDS[index % QQ_AVATAR_BACKGROUNDS.length] }}>
+                                    {(item.label || charName).slice(0, 1)}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                    <span className="flex items-center justify-between gap-2">
+                                        <span className={`${compact ? 'text-[12px]' : 'text-sm'} truncate font-semibold text-[#1F2A3D]`}>{item.label}</span>
+                                        <span className={`${compact ? 'text-[8px]' : 'text-[10px]'} shrink-0 text-[#8491A5]`}>{getQQItemTime(item, clue.timestamp)}</span>
+                                    </span>
+                                    <span className={`${compact ? 'text-[10px]' : 'text-xs'} mt-1 line-clamp-3 block leading-relaxed text-[#1F2A3D]`}>{getItemPreview(item, 112)}</span>
+                                    <span className="mt-2 grid grid-cols-3 gap-1.5">
+                                        {[0, 1, 2].map(tile => (
+                                            <span key={tile} className="h-12 rounded-xl bg-[linear-gradient(135deg,#D9EEFF,#F7FBFF)]" />
+                                        ))}
+                                    </span>
+                                    <span className="mt-2 flex items-center gap-4 text-[10px] font-medium text-[#8491A5]">
+                                        <span className="inline-flex items-center gap-1"><Star className="h-3.5 w-3.5" />赞</span>
+                                        <span className="inline-flex items-center gap-1"><ChatCircleText className="h-3.5 w-3.5" />评论</span>
+                                        <span className="inline-flex items-center gap-1"><ShareNetwork className="h-3.5 w-3.5" />转发</span>
+                                    </span>
+                                </span>
+                            </div>
                         </button>
                     ))}
                 </div>
@@ -883,63 +1087,164 @@ const QQScreen: React.FC<AppContentProps> = ({ clue, charName, charAvatar, compa
         );
     }
 
-    return (
-        <div className="space-y-3">
-            <div className={`relative overflow-hidden rounded-[1.45rem] border ${theme.border} bg-white/78 p-3 shadow-sm`}>
-                <div className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-blue-300/24" />
-                <div className="relative flex items-center gap-3">
-                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#2d7df0] text-2xl font-black text-white shadow-sm">Q</span>
-                    <span className="min-w-0 flex-1">
-                        <span className={`${compact ? 'text-sm' : 'text-base'} block truncate font-bold`}>QQ</span>
-                        <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} block truncate ${theme.muted}`}>{clue.subtitle || '旧关系、群聊、空间和文件还在同步'}</span>
-                    </span>
-                    <span className={`rounded-full ${theme.accentSoft} px-2 py-1 text-[10px] font-semibold ${theme.accent}`}>在线</span>
+    if (nestedRoute.name === 'files' || nestedRoute.name === 'profile' || nestedRoute.name === 'search' || nestedRoute.name === 'contacts') {
+        const title = nestedRoute.name === 'files' ? '文件' : nestedRoute.name === 'search' ? '搜索' : '联系人';
+        const leadItem = selectedItem || items[0];
+        return (
+            <div className={`${pageInset} min-h-full text-[#1F2A3D]`} style={{ backgroundColor: QQ_PAGE_BG }}>
+                <FlatHeader title={title} />
+                <div className={`${pagePad} py-3`}>
+                    {nestedRoute.name === 'search' ? (
+                        <button type="button" className="flex h-9 w-full items-center gap-2 rounded-[18px] px-3 text-left" style={{ backgroundColor: QQ_LIGHT_BLUE }}>
+                            <MagnifyingGlass className="h-4 w-4 shrink-0 text-[#2F8CFF]" />
+                            <span className={`${compact ? 'text-[10px]' : 'text-xs'} truncate text-[#8491A5]`}>搜索好友 / 群聊 / 聊天记录</span>
+                        </button>
+                    ) : (
+                        <div className="rounded-[18px] bg-white p-3">
+                            <div className="flex items-center gap-3">
+                                <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[16px] bg-[#2F8CFF] text-lg font-black text-white">
+                                    {nestedRoute.name === 'files' ? <Folder weight="fill" className="h-6 w-6" /> : charAvatar ? <img src={charAvatar} alt={charName} className="h-full w-full object-cover" /> : (leadItem?.label || charName).slice(0, 1)}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                    <span className={`${compact ? 'text-sm' : 'text-base'} block truncate font-semibold text-[#1F2A3D]`}>{nestedRoute.name === 'files' ? '文件助手' : leadItem?.label || charName}</span>
+                                    <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} block truncate text-[#8491A5]`}>{leadItem?.detail || (nestedRoute.name === 'files' ? '群文件、离线文件、微云记录' : `${qqNumber} · 资料卡`)}</span>
+                                </span>
+                            </div>
+                        </div>
+                    )}
                 </div>
-                <div className="relative mt-3 grid grid-cols-4 gap-2">
-                    {[
-                        { name: '空间', route: 'space' as const, icon: Star },
-                        { name: '群文件', route: 'files' as const, icon: Folder },
-                        { name: '资料', route: 'profile' as const, icon: UserCircle },
-                        { name: '搜索', route: 'files' as const, icon: MagnifyingGlass },
-                    ].map(action => {
-                        const Icon = action.icon;
+                <div className="bg-white">
+                    {items.map((item, index) => {
+                        const meta = getQQEntryMeta(item, index);
+                        const Icon = nestedRoute.name === 'files' ? Folder : meta.icon;
                         return (
                             <button
-                                key={action.name}
+                                key={`${item.label}-qq-file-${index}`}
                                 type="button"
-                                onClick={() => onNavigate?.({ name: action.route })}
+                                onClick={() => onNavigate?.({ name: 'thread', itemIndex: index })}
                                 disabled={!onNavigate}
-                                className={`rounded-2xl border ${theme.border} bg-white/64 px-2 py-2 text-center active:scale-95 disabled:active:scale-100`}
+                                className="flex h-[68px] w-full items-center gap-3 border-b px-4 text-left last:border-b-0 active:bg-[#F8FBFF] disabled:active:bg-white"
+                                style={{ borderColor: QQ_DIVIDER }}
                             >
-                                <Icon className={`mx-auto h-4 w-4 ${theme.accent}`} />
-                                <span className={`${compact ? 'text-[8px]' : 'text-[9px]'} mt-1 block font-semibold ${theme.muted}`}>{action.name}</span>
+                                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] text-[#2F8CFF]" style={{ backgroundColor: QQ_LIGHT_BLUE }}>
+                                    <Icon weight="regular" className="h-5 w-5" />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                    <span className={`${compact ? 'text-[12px]' : 'text-sm'} block truncate font-semibold text-[#1F2A3D]`}>{item.label}</span>
+                                    <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} block truncate text-[#8491A5]`}>{item.detail || getItemPreview(item, 58)}</span>
+                                </span>
+                                <CaretRight className="h-4 w-4 text-[#8491A5]" />
                             </button>
                         );
                     })}
                 </div>
             </div>
-            <div className={`overflow-hidden rounded-[1.25rem] border ${theme.border} bg-white/76`}>
-                {items.map((item, index) => (
+        );
+    }
+
+    return (
+        <div className={`${pageInset} min-h-full text-[#1F2A3D]`} style={{ backgroundColor: QQ_PAGE_BG }}>
+            <div className="border-b bg-white" style={{ borderColor: QQ_DIVIDER }}>
+                <div className={`flex h-12 items-center gap-3 ${pagePad}`}>
+                    <span className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#2F8CFF] text-base font-black text-white">
+                        {charAvatar ? <img src={charAvatar} alt={charName} className="h-full w-full object-cover" /> : charName.slice(0, 1)}
+                        <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#37D06B]" />
+                    </span>
+                    <span className={`${compact ? 'text-base' : 'text-[17px]'} min-w-0 flex-1 font-semibold text-[#1F2A3D]`}>消息</span>
+                    <HeaderButton label="搜索" icon={MagnifyingGlass} onClick={() => onNavigate?.({ name: 'search' })} />
+                    <HeaderButton label="添加" icon={Plus} onClick={() => onNavigate?.({ name: 'contacts' })} />
+                </div>
+                <div className={`${pagePad} pb-3`}>
                     <button
-                        key={`${item.label}-qq-${index}`}
                         type="button"
-                        onClick={() => onNavigate?.({ name: 'thread', itemIndex: index })}
+                        onClick={() => onNavigate?.({ name: 'search' })}
                         disabled={!onNavigate}
-                        className="flex w-full items-center gap-3 border-b border-blue-900/8 p-3 text-left last:border-b-0 active:bg-blue-50/70 disabled:active:bg-transparent"
+                        className="flex h-9 w-full items-center gap-2 rounded-[18px] px-3 text-left active:opacity-90 disabled:active:opacity-100"
+                        style={{ backgroundColor: QQ_LIGHT_BLUE }}
                     >
-                        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#49a6ff] to-[#1d62d5] text-sm font-bold text-white shadow-sm">
-                            {item.label.slice(0, 1) || 'Q'}
-                            {index === 0 && <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-red-500" />}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                            <span className="flex items-baseline justify-between gap-2">
-                                <span className={`${compact ? 'text-[11px]' : 'text-sm'} truncate font-semibold`}>{item.label}</span>
-                                <span className={`${compact ? 'text-[8px]' : 'text-[10px]'} shrink-0 ${theme.muted}`}>{clue.timestamp || '刚刚'}</span>
-                            </span>
-                            <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} mt-0.5 block truncate ${theme.muted}`}>{getItemPreview(item, 58)}</span>
-                        </span>
+                        <MagnifyingGlass className="h-4 w-4 shrink-0 text-[#2F8CFF]" />
+                        <span className={`${compact ? 'text-[10px]' : 'text-[13px]'} truncate text-[#8491A5]`}>搜索好友 / 群聊 / 聊天记录</span>
                     </button>
-                ))}
+                </div>
+            </div>
+
+            <div className="grid grid-cols-5 border-b bg-white px-1.5 py-2" style={{ borderColor: QQ_DIVIDER }}>
+                {[
+                    { name: '好友动态', route: { name: 'space' } as StoryPhoneNestedRoute, icon: ShareNetwork },
+                    { name: 'QQ空间', route: { name: 'space' } as StoryPhoneNestedRoute, icon: Star },
+                    { name: '联系人', route: { name: 'profile' } as StoryPhoneNestedRoute, icon: UserCircle },
+                    { name: '群聊', route: { name: 'contacts' } as StoryPhoneNestedRoute, icon: UsersThree },
+                    { name: '文件', route: { name: 'files' } as StoryPhoneNestedRoute, icon: Folder },
+                ].map(action => {
+                    const Icon = action.icon;
+                    return (
+                        <button
+                            key={action.name}
+                            type="button"
+                            onClick={() => onNavigate?.(action.route)}
+                            disabled={!onNavigate}
+                            className="flex flex-col items-center gap-1 px-1 py-1 active:bg-[#F8FBFF] disabled:active:bg-transparent"
+                        >
+                            <Icon weight="regular" className="h-5 w-5 text-[#2F8CFF]" />
+                            <span className={`${compact ? 'text-[8px]' : 'text-[10px]'} whitespace-nowrap font-medium text-[#8491A5]`}>{action.name}</span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            <div className="mt-2 bg-white">
+                {items.map((item, index) => {
+                    const meta = getQQEntryMeta(item, index);
+                    const Icon = meta.icon;
+                    const useInitial = meta.kind === 'chat' || meta.kind === 'group';
+                    return (
+                        <button
+                            key={`${item.label}-qq-${index}`}
+                            type="button"
+                            onClick={() => onNavigate?.({ name: 'thread', itemIndex: index })}
+                            disabled={!onNavigate}
+                            className="flex h-[72px] w-full items-center gap-3 border-b px-4 text-left last:border-b-0 active:bg-[#F8FBFF] disabled:active:bg-white"
+                            style={{ borderColor: QQ_DIVIDER }}
+                        >
+                            <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-base font-semibold text-white" style={{ background: meta.background }}>
+                                {useInitial ? (item.label.slice(0, 1) || 'Q') : <Icon weight="regular" className="h-5 w-5" />}
+                                {index === 0 && <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full border-2 border-white px-1 text-center text-[9px] leading-4 text-white" style={{ backgroundColor: QQ_RED }}>2</span>}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                                <span className="flex items-baseline justify-between gap-2">
+                                    <span className={`${compact ? 'text-[13px]' : 'text-[16px]'} min-w-0 truncate font-semibold text-[#1F2A3D]`}>{item.label}</span>
+                                    <span className={`${compact ? 'text-[8px]' : 'text-[10px]'} shrink-0 text-[#8491A5]`}>{getQQItemTime(item, clue.timestamp)}</span>
+                                </span>
+                                <span className="mt-1 flex min-w-0 items-center gap-1.5">
+                                    <span className={`shrink-0 rounded bg-[#EEF7FF] px-1.5 py-0.5 ${compact ? 'text-[8px]' : 'text-[10px]'} font-medium text-[#2F8CFF]`}>{meta.tag}</span>
+                                    <span className={`${compact ? 'text-[10px]' : 'text-[13px]'} min-w-0 truncate text-[#8491A5]`}>{getItemPreview(item, 62)}</span>
+                                </span>
+                            </span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            <div className="mt-2 grid grid-cols-3 border-y bg-white px-5 py-1.5" style={{ borderColor: QQ_DIVIDER }}>
+                {[
+                    { label: '消息', active: true, icon: ChatCircleText },
+                    { label: '联系人', active: false, icon: UserCircle, route: { name: 'profile' } as StoryPhoneNestedRoute },
+                    { label: '动态', active: false, icon: Star, route: { name: 'space' } as StoryPhoneNestedRoute },
+                ].map(tab => {
+                    const Icon = tab.icon;
+                    return (
+                        <button
+                            key={tab.label}
+                            type="button"
+                            onClick={() => onNavigate?.(tab.route || DEFAULT_NESTED_ROUTE)}
+                            disabled={!onNavigate}
+                            className={`flex flex-col items-center gap-0.5 rounded-xl py-1 ${tab.active ? 'text-[#2F8CFF]' : 'text-[#8491A5]'} active:bg-[#F8FBFF] disabled:active:bg-transparent`}
+                        >
+                            <Icon weight={tab.active ? 'fill' : 'regular'} className="h-4 w-4" />
+                            <span className={`${compact ? 'text-[8px]' : 'text-[10px]'} font-medium`}>{tab.label}</span>
+                        </button>
+                    );
+                })}
             </div>
         </div>
     );
@@ -2184,7 +2489,7 @@ const StoryPhoneScreen: React.FC<StoryPhoneScreenProps> = ({
         spotlightDetail: homeSurface?.spotlightDetail || (clue ? previewText(clue.evidenceText || clue.insertSummary || clue.title, 44) : `${spotlightApp.name} 里有一页等待读取。`),
         spotlightFooter: homeSurface?.spotlightFooter || (clue?.timestamp ? `${clue.appName} · ${clue.timestamp}` : '等待读取'),
     };
-    const useNativeAppChrome = activeAppId === 'wechat';
+    const useNativeAppChrome = activeAppId === 'wechat' || activeAppId === 'qq';
     const nestedNavigationEnabled = !compact && (activeAppId === 'wechat' || activeAppId === 'qq');
 
     React.useEffect(() => {
