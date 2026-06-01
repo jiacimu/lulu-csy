@@ -28,6 +28,36 @@ const blobToBase64 = (blob: Blob): Promise<string> => new Promise((resolve, reje
     reader.readAsDataURL(blob);
 });
 
+const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = event => resolve(String(event.target?.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('文件读取失败'));
+    reader.readAsDataURL(file);
+});
+
+const extractInputEffectAssetFromCode = (source: string): string => {
+    const text = source.trim();
+    if (!text) throw new Error('请先粘贴 CSS 或 SVG 代码');
+
+    const quotedUrlMatch = text.match(/url\(\s*(['"])(data:image\/[\s\S]*?)\1\s*\)/i);
+    const unquotedUrlMatch = text.match(/url\(\s*(data:image\/[^)]+)\s*\)/i);
+    const directDataMatch = text.match(/data:image\/(?:svg\+xml|png|gif|webp|jpeg|jpg);?[^'"\s)]*/i);
+    const dataUrl = (quotedUrlMatch?.[2] || unquotedUrlMatch?.[1] || directDataMatch?.[0] || '').trim();
+
+    if (dataUrl.startsWith('data:image/')) {
+        return dataUrl;
+    }
+
+    const svgStart = text.indexOf('<svg');
+    const svgEnd = text.lastIndexOf('</svg>');
+    if (svgStart >= 0 && svgEnd > svgStart) {
+        const svg = text.slice(svgStart, svgEnd + '</svg>'.length);
+        return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    }
+
+    throw new Error('没有识别到 data:image 或完整 <svg> 代码');
+};
+
 const PresetManager: React.FC<PresetManagerProps> = ({ presets, onSave, onApply, onDelete, onRename, onExport, onImport, addToast }) => {
     const [newName, setNewName] = useState('');
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -233,8 +263,11 @@ const Appearance: React.FC = () => {
   const widgetInputRef = useRef<HTMLInputElement>(null);
   const [activeWidgetSlot, setActiveWidgetSlot] = useState<string | null>(null);
   const iconInputRef = useRef<HTMLInputElement>(null);
+  const inputEffectInputRef = useRef<HTMLInputElement>(null);
   const fontInputRef = useRef<HTMLInputElement>(null);
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
+  const [inputEffectCode, setInputEffectCode] = useState('');
+  const [showInputEffectCode, setShowInputEffectCode] = useState(false);
   
   // Font State
   const [fontMode, setFontMode] = useState<'local' | 'web'>('local');
@@ -353,6 +386,56 @@ const Appearance: React.FC = () => {
       delete current[slot];
       // Always pass object (even empty {}) so updateTheme's DB cleanup runs
       updateTheme({ launcherWidgets: current });
+  };
+
+  const handleInputEffectUpload = async (file: File) => {
+      try {
+          if (!file.type.startsWith('image/')) {
+              addToast('请上传图片 / SVG / GIF 文件', 'error');
+              return;
+          }
+          if (file.size > 15 * 1024 * 1024) {
+              addToast('动效素材请控制在 15MB 内', 'error');
+              return;
+          }
+          const dataUrl = await readFileAsDataUrl(file);
+          updateTheme({
+              inputEffectAsset: dataUrl,
+              inputEffectEnabled: true,
+              inputEffectScale: theme.inputEffectScale || 1,
+              inputEffectOpacity: theme.inputEffectOpacity || 0.85,
+              inputEffectOffsetX: theme.inputEffectOffsetX ?? 0,
+              inputEffectOffsetY: theme.inputEffectOffsetY ?? 0,
+              inputEffectDuration: theme.inputEffectDuration ?? 0.95,
+              inputEffectSpinSpeed: theme.inputEffectSpinSpeed ?? 1,
+          });
+          addToast('输入动效已更新', 'success');
+      } catch (e: any) {
+          addToast(e?.message || '动效素材读取失败', 'error');
+      } finally {
+          if (inputEffectInputRef.current) inputEffectInputRef.current.value = '';
+      }
+  };
+
+  const applyInputEffectCode = () => {
+      try {
+          const dataUrl = extractInputEffectAssetFromCode(inputEffectCode);
+          updateTheme({
+              inputEffectAsset: dataUrl,
+              inputEffectEnabled: true,
+              inputEffectScale: theme.inputEffectScale || 1,
+              inputEffectOpacity: theme.inputEffectOpacity || 0.85,
+              inputEffectOffsetX: theme.inputEffectOffsetX ?? 0,
+              inputEffectOffsetY: theme.inputEffectOffsetY ?? 0,
+              inputEffectDuration: theme.inputEffectDuration ?? 0.95,
+              inputEffectSpinSpeed: theme.inputEffectSpinSpeed ?? 1,
+          });
+          setInputEffectCode('');
+          setShowInputEffectCode(false);
+          addToast('输入动效代码已应用', 'success');
+      } catch (e: any) {
+          addToast(e?.message || '代码解析失败', 'error');
+      }
   };
 
   const handleFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -559,6 +642,190 @@ const Appearance: React.FC = () => {
                         >
                             <div className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow-sm transition-transform ${theme.hideStatusBar ? 'translate-x-6' : 'translate-x-1'}`} />
                         </button>
+                    </div>
+                </section>
+
+                {/* Global Input Effect */}
+                <section className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+                    <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">输入魔法阵</h2>
+                    <div className="flex items-center justify-between gap-4 mb-4">
+                        <div className="min-w-0">
+                            <div className="text-sm font-medium text-slate-700">全局输入动效</div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">输入文字时在当前输入框附近显示</div>
+                        </div>
+                        <button
+                            onClick={() => updateTheme({ inputEffectEnabled: !theme.inputEffectEnabled })}
+                            className={`w-12 h-7 rounded-full transition-colors relative shrink-0 ${theme.inputEffectEnabled ? 'bg-primary' : 'bg-slate-200'}`}
+                        >
+                            <div className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow-sm transition-transform ${theme.inputEffectEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                        </button>
+                    </div>
+
+                    <input
+                        type="file"
+                        ref={inputEffectInputRef}
+                        className="hidden"
+                        accept="image/*,.svg,.gif,.webp"
+                        onChange={(e) => e.target.files?.[0] && handleInputEffectUpload(e.target.files[0])}
+                    />
+
+                    <div className="grid grid-cols-[88px_1fr] gap-3 items-center">
+                        <button
+                            onClick={() => inputEffectInputRef.current?.click()}
+                            className="h-24 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden active:scale-95 transition-transform"
+                        >
+                            {theme.inputEffectAsset ? (
+                                <img src={theme.inputEffectAsset} className="w-full h-full object-contain p-2" />
+                            ) : (
+                                <span className="text-2xl text-slate-300">✦</span>
+                            )}
+                        </button>
+                        <div className="min-w-0 space-y-2">
+                            <button
+                                onClick={() => inputEffectInputRef.current?.click()}
+                                className="w-full py-2.5 bg-gradient-to-r from-indigo-50 to-cyan-50 text-indigo-500 font-bold text-xs rounded-xl border border-indigo-200 active:scale-95 transition-transform"
+                            >
+                                上传自定义素材
+                            </button>
+                            <button
+                                onClick={() => setShowInputEffectCode(prev => !prev)}
+                                className="w-full py-2.5 bg-slate-50 text-slate-500 font-bold text-xs rounded-xl border border-slate-200 active:scale-95 transition-transform"
+                            >
+                                粘贴 CSS / SVG 代码
+                            </button>
+                            {theme.inputEffectAsset && (
+                                <button
+                                    onClick={() => updateTheme({ inputEffectAsset: undefined })}
+                                    className="w-full py-2 bg-red-50 text-red-400 font-bold text-xs rounded-xl active:scale-95 transition-transform"
+                                >
+                                    恢复默认魔法阵
+                                </button>
+                            )}
+                            <input
+                                placeholder="试着输入预览"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-primary transition-all"
+                            />
+                        </div>
+                    </div>
+
+                    {showInputEffectCode && (
+                        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                            <textarea
+                                value={inputEffectCode}
+                                onChange={(e) => setInputEffectCode(e.target.value)}
+                                placeholder="粘贴包含 background-image: url(data:image/svg+xml,...) 的 CSS，或直接粘贴完整 <svg>...</svg>"
+                                data-allow-text-selection="true"
+                                className="h-32 w-full resize-none rounded-xl border border-slate-200 bg-white p-3 font-mono text-[10px] leading-relaxed text-slate-600 outline-none focus:border-primary/50"
+                            />
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                                <button
+                                    onClick={() => { setInputEffectCode(''); setShowInputEffectCode(false); }}
+                                    className="py-2 rounded-xl bg-white text-slate-400 text-xs font-bold border border-slate-200 active:scale-95 transition-transform"
+                                >
+                                    取消
+                                </button>
+                                <button
+                                    onClick={applyInputEffectCode}
+                                    disabled={!inputEffectCode.trim()}
+                                    className="py-2 rounded-xl bg-primary text-white text-xs font-bold shadow-md active:scale-95 transition-transform disabled:opacity-40 disabled:shadow-none"
+                                >
+                                    应用代码
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="mt-4 space-y-4">
+                        <div>
+                            <div className="flex justify-between mb-1.5">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase">大小</label>
+                                <span className="text-[10px] text-slate-500 font-mono">{(theme.inputEffectScale || 1).toFixed(1)}x</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="0.5"
+                                max="2"
+                                step="0.1"
+                                value={theme.inputEffectScale || 1}
+                                onChange={(e) => updateTheme({ inputEffectScale: parseFloat(e.target.value) })}
+                                className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-indigo-400"
+                            />
+                        </div>
+                        <div>
+                            <div className="flex justify-between mb-1.5">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase">透明度</label>
+                                <span className="text-[10px] text-slate-500 font-mono">{Math.round((theme.inputEffectOpacity ?? 0.85) * 100)}%</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="0.2"
+                                max="1"
+                                step="0.05"
+                                value={theme.inputEffectOpacity ?? 0.85}
+                                onChange={(e) => updateTheme({ inputEffectOpacity: parseFloat(e.target.value) })}
+                                className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-cyan-400"
+                            />
+                        </div>
+                        <div>
+                            <div className="flex justify-between mb-1.5">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase">左右位置</label>
+                                <span className="text-[10px] text-slate-500 font-mono">{Math.round(theme.inputEffectOffsetX ?? 0)}px</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="-120"
+                                max="120"
+                                step="4"
+                                value={theme.inputEffectOffsetX ?? 0}
+                                onChange={(e) => updateTheme({ inputEffectOffsetX: parseFloat(e.target.value) })}
+                                className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-amber-300"
+                            />
+                        </div>
+                        <div>
+                            <div className="flex justify-between mb-1.5">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase">上下位置</label>
+                                <span className="text-[10px] text-slate-500 font-mono">{Math.round(theme.inputEffectOffsetY ?? 0)}px</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="-120"
+                                max="120"
+                                step="4"
+                                value={theme.inputEffectOffsetY ?? 0}
+                                onChange={(e) => updateTheme({ inputEffectOffsetY: parseFloat(e.target.value) })}
+                                className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-amber-300"
+                            />
+                        </div>
+                        <div>
+                            <div className="flex justify-between mb-1.5">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase">旋转速度</label>
+                                <span className="text-[10px] text-slate-500 font-mono">{(theme.inputEffectSpinSpeed ?? 1).toFixed(1)}x</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="0"
+                                max="3"
+                                step="0.1"
+                                value={theme.inputEffectSpinSpeed ?? 1}
+                                onChange={(e) => updateTheme({ inputEffectSpinSpeed: parseFloat(e.target.value) })}
+                                className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-violet-400"
+                            />
+                        </div>
+                        <div>
+                            <div className="flex justify-between mb-1.5">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase">出现时长</label>
+                                <span className="text-[10px] text-slate-500 font-mono">{(theme.inputEffectDuration ?? 0.95).toFixed(2)}s</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="0.35"
+                                max="3"
+                                step="0.05"
+                                value={theme.inputEffectDuration ?? 0.95}
+                                onChange={(e) => updateTheme({ inputEffectDuration: parseFloat(e.target.value) })}
+                                className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-pink-300"
+                            />
+                        </div>
                     </div>
                 </section>
 

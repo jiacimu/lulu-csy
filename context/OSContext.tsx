@@ -85,6 +85,13 @@ const defaultTheme: OSTheme = {
     darkMode: false,
     contentColor: '#ffffff',
     customIconFrame: true,
+    inputEffectEnabled: false,
+    inputEffectScale: 1,
+    inputEffectOpacity: 0.85,
+    inputEffectOffsetX: 0,
+    inputEffectOffsetY: 0,
+    inputEffectDuration: 0.95,
+    inputEffectSpinSpeed: 1,
 };
 
 const generateAvatar = (seed: string) => {
@@ -398,6 +405,9 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
                     if (loadedTheme.customFont && loadedTheme.customFont.startsWith('data:')) {
                         loadedTheme.customFont = undefined;
                     }
+                    if (loadedTheme.inputEffectAsset && loadedTheme.inputEffectAsset.startsWith('data:')) {
+                        loadedTheme.inputEffectAsset = undefined;
+                    }
                 } catch (e) { console.error('Theme load error', e); }
             }
 
@@ -421,6 +431,10 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
                     if (assetMap['custom_font_data']) {
                         loadedTheme.customFont = assetMap['custom_font_data'];
+                    }
+
+                    if (assetMap['input_effect_asset']) {
+                        loadedTheme.inputEffectAsset = assetMap['input_effect_asset'];
                     }
 
                     const loadedIcons: Record<string, string> = {};
@@ -689,7 +703,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     }, [isDataLoaded, characterIdsKey]);
 
     const updateTheme = async (updates: Partial<OSTheme>) => {
-        const { wallpaper, launcherWidgetImage, launcherWidgets, desktopDecorations, customFont } = updates;
+        const { wallpaper, launcherWidgetImage, launcherWidgets, desktopDecorations, customFont, inputEffectAsset } = updates;
         const newTheme = sanitizeAppearanceTheme({ ...theme, ...updates });
         setTheme(newTheme);
 
@@ -742,6 +756,14 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
             } else {
                 await DB.deleteAsset('custom_font_data');
                 applyCustomFont(undefined);
+            }
+        }
+
+        if (inputEffectAsset !== undefined) {
+            if (newTheme.inputEffectAsset && newTheme.inputEffectAsset.startsWith('data:')) {
+                await DB.saveAsset('input_effect_asset', newTheme.inputEffectAsset);
+            } else {
+                await DB.deleteAsset('input_effect_asset');
             }
         }
 

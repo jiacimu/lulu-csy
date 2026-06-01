@@ -81,6 +81,14 @@ export interface OSTheme {
     launcherWidgets?: Record<string, string>; // slots: 'tl' | 'tr' | 'wide'
     desktopDecorations?: DesktopDecoration[];
     customFont?: string;
+    inputEffectEnabled?: boolean;
+    inputEffectAsset?: string;
+    inputEffectScale?: number;
+    inputEffectOpacity?: number;
+    inputEffectOffsetX?: number;
+    inputEffectOffsetY?: number;
+    inputEffectDuration?: number;
+    inputEffectSpinSpeed?: number;
     hideStatusBar?: boolean;
     customIconFrame?: boolean;
 }

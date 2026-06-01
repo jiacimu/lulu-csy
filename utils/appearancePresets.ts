@@ -8,6 +8,7 @@ export const APPEARANCE_PRESET_VERSION = 1;
 const WIDGET_ASSET_PREFIX = 'widget_';
 const DECORATION_ASSET_PREFIX = 'deco_';
 const ICON_ASSET_PREFIX = 'icon_';
+const INPUT_EFFECT_ASSET_ID = 'input_effect_asset';
 const ALLOWED_WIDGET_SLOTS = new Set(['tl', 'tr', 'wide']);
 
 type AssetRecord = { id: string; data: string };
@@ -28,6 +29,38 @@ export function sanitizeAppearanceTheme(theme: OSTheme): OSTheme {
     next.darkMode = next.darkMode === true;
     if (next.contentColor !== undefined && typeof next.contentColor !== 'string') next.contentColor = undefined;
     if (next.customFont !== undefined && typeof next.customFont !== 'string') next.customFont = undefined;
+    if (next.inputEffectEnabled !== undefined && typeof next.inputEffectEnabled !== 'boolean') next.inputEffectEnabled = undefined;
+    if (next.inputEffectAsset !== undefined && typeof next.inputEffectAsset !== 'string') next.inputEffectAsset = undefined;
+    if (next.inputEffectScale !== undefined) {
+        next.inputEffectScale = typeof next.inputEffectScale === 'number'
+            ? Math.min(Math.max(next.inputEffectScale, 0.5), 2)
+            : undefined;
+    }
+    if (next.inputEffectOpacity !== undefined) {
+        next.inputEffectOpacity = typeof next.inputEffectOpacity === 'number'
+            ? Math.min(Math.max(next.inputEffectOpacity, 0.2), 1)
+            : undefined;
+    }
+    if (next.inputEffectOffsetX !== undefined) {
+        next.inputEffectOffsetX = typeof next.inputEffectOffsetX === 'number'
+            ? Math.min(Math.max(next.inputEffectOffsetX, -120), 120)
+            : undefined;
+    }
+    if (next.inputEffectOffsetY !== undefined) {
+        next.inputEffectOffsetY = typeof next.inputEffectOffsetY === 'number'
+            ? Math.min(Math.max(next.inputEffectOffsetY, -120), 120)
+            : undefined;
+    }
+    if (next.inputEffectDuration !== undefined) {
+        next.inputEffectDuration = typeof next.inputEffectDuration === 'number'
+            ? Math.min(Math.max(next.inputEffectDuration, 0.35), 3)
+            : undefined;
+    }
+    if (next.inputEffectSpinSpeed !== undefined) {
+        next.inputEffectSpinSpeed = typeof next.inputEffectSpinSpeed === 'number'
+            ? Math.min(Math.max(next.inputEffectSpinSpeed, 0), 3)
+            : undefined;
+    }
     if (next.customIconFrame !== undefined && typeof next.customIconFrame !== 'boolean') next.customIconFrame = undefined;
 
     if (next.launcherWidgets && typeof next.launcherWidgets === 'object') {
@@ -78,6 +111,10 @@ export function stripAppearanceThemeForLocalStorage(theme: OSTheme): OSTheme {
 
     if (typeof lsTheme.customFont === 'string' && lsTheme.customFont.startsWith('data:')) {
         lsTheme.customFont = '';
+    }
+
+    if (typeof lsTheme.inputEffectAsset === 'string' && lsTheme.inputEffectAsset.startsWith('data:')) {
+        lsTheme.inputEffectAsset = '';
     }
 
     lsTheme.launcherWidgetImage = undefined;
@@ -152,6 +189,7 @@ export async function replaceAppearancePresetAssets(store: AppearanceAssetStore,
         if (
             asset.id === 'wallpaper'
             || asset.id === 'launcherWidgetImage'
+            || asset.id === INPUT_EFFECT_ASSET_ID
             || asset.id === 'custom_font_data'
             || asset.id.startsWith(ICON_ASSET_PREFIX)
             || asset.id.startsWith(WIDGET_ASSET_PREFIX)
@@ -184,6 +222,10 @@ export async function replaceAppearancePresetAssets(store: AppearanceAssetStore,
 
     if (theme.customFont && theme.customFont.startsWith('data:')) {
         await store.saveAsset('custom_font_data', theme.customFont);
+    }
+
+    if (theme.inputEffectAsset && theme.inputEffectAsset.startsWith('data:')) {
+        await store.saveAsset(INPUT_EFFECT_ASSET_ID, theme.inputEffectAsset);
     }
 
     if (preset.customIcons) {

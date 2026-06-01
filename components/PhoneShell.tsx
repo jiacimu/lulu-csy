@@ -7,6 +7,7 @@ import { useOS } from '../context/OSContext';
 import { useVirtualTime } from '../context/VirtualTimeContext';
 import StatusBar from './os/StatusBar';
 import AppSplashScreen from './os/AppSplashScreen';
+import GlobalInputEffect from './os/GlobalInputEffect';
 import Launcher from '../apps/Launcher';
 import { AppID } from '../types';
 import { App as CapApp } from '@capacitor/app';
@@ -660,6 +661,17 @@ const PhoneShell: React.FC = () => {
           ))}
         </div>
       </div>
+
+      <GlobalInputEffect
+        enabled={theme.inputEffectEnabled}
+        asset={theme.inputEffectAsset}
+        scale={theme.inputEffectScale}
+        opacity={theme.inputEffectOpacity}
+        offsetX={theme.inputEffectOffsetX}
+        offsetY={theme.inputEffectOffsetY}
+        duration={theme.inputEffectDuration}
+        spinSpeed={theme.inputEffectSpinSpeed}
+      />
 
       {/* First-time disclaimer popup */}
       {showDisclaimer && <DisclaimerPopup onAccept={handleAcceptDisclaimer} />}
