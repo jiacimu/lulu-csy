@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MessageItem from '../components/chat/MessageItem';
 import type { StatusCardData } from '../types/statusCard';
 
@@ -35,6 +35,21 @@ const baseMessage = {
     metadata: {},
 } as any;
 
+class AutoLoadImage {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    private _src = '';
+
+    get src() {
+        return this._src;
+    }
+
+    set src(value: string) {
+        this._src = value;
+        queueMicrotask(() => this.onload?.());
+    }
+}
+
 function messageItemProps(extraProps: Record<string, unknown> = {}) {
     return {
         msg: baseMessage,
@@ -61,7 +76,12 @@ function renderMessageItem(extraProps: Record<string, unknown> = {}) {
     return render(<MessageItem {...messageItemProps(extraProps)} />);
 }
 
+beforeEach(() => {
+    vi.stubGlobal('Image', AutoLoadImage);
+});
+
 afterEach(() => {
+    vi.unstubAllGlobals();
     vi.useRealTimers();
 });
 
@@ -243,7 +263,7 @@ describe('MessageItem status overlay', () => {
         expect(screen.getByText('"第二次引用"')).toBeInTheDocument();
     });
 
-    it('renders image replies as thumbnails instead of raw URLs', () => {
+    it('renders image replies as thumbnails instead of raw URLs', async () => {
         const imageUrl = 'https://cdn.example.com/photos/window-selfie.webp';
         renderMessageItem({
             msg: {
@@ -259,7 +279,9 @@ describe('MessageItem status overlay', () => {
             },
         });
 
-        expect(screen.getByTestId('reply-image-thumbnail')).toHaveAttribute('src', imageUrl);
+        await waitFor(() => {
+            expect(screen.getByTestId('reply-image-thumbnail')).toHaveAttribute('src', imageUrl);
+        });
         expect(screen.getByText('[图片]')).toBeInTheDocument();
         expect(screen.queryByText('窗边自拍')).not.toBeInTheDocument();
         expect(screen.queryByText(imageUrl)).not.toBeInTheDocument();

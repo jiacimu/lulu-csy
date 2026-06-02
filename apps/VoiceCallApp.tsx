@@ -2,7 +2,8 @@ import React,{ useEffect,useRef,useCallback } from 'react';
 import { useOS } from '../context/OSContext';
 import VoiceCallScreen from './voicecall/VoiceCallScreen';
 import { CallDirection } from './voicecall/useVoiceCall';
-import type { VoiceCallMode } from './voicecall/voiceCallTypes';
+import { DEFAULT_REPLY_CHANNEL,isVoiceCallReplyChannel } from './voicecall/voiceCallTypes';
+import type { VoiceCallMode,VoiceCallReplyChannel } from './voicecall/voiceCallTypes';
 import './voicecall/voicecall.css';
 
 const VoiceCallApp: React.FC = () => {
@@ -14,6 +15,9 @@ const VoiceCallApp: React.FC = () => {
 
     const direction: CallDirection = (appParams?.direction as CallDirection) || 'outgoing';
     const incomingMode: VoiceCallMode | undefined = appParams?.mode as VoiceCallMode | undefined;
+    const incomingReplyChannel: VoiceCallReplyChannel = isVoiceCallReplyChannel(appParams?.replyChannel)
+        ? appParams.replyChannel
+        : DEFAULT_REPLY_CHANNEL;
     const callReason: string | undefined = appParams?.callReason as string | undefined;
 
     // 获取当前通话角色的信息
@@ -59,6 +63,7 @@ const VoiceCallApp: React.FC = () => {
             apiConfig={apiConfig}
             addToast={addToast}
             incomingMode={incomingMode}
+            incomingReplyChannel={incomingReplyChannel}
             callReason={callReason}
         />
     );

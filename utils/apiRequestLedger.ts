@@ -7,6 +7,8 @@ export type ApiTraceFeature =
     | 'tts'
     | 'phone'
     | 'loveshow'
+    | 'love_show'
+    | 'zhaixinglou'
     | 'date'
     | 'theater'
     | 'newspaper'
@@ -273,6 +275,8 @@ export function getApiRequestLedgerSummary(referenceTime = Date.now()) {
         image: 0,
         phone: 0,
         loveshow: 0,
+        love_show: 0,
+        zhaixinglou: 0,
         date: 0,
         theater: 0,
         newspaper: 0,

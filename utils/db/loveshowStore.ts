@@ -8,8 +8,10 @@
  *   loveshow_npcs_${seasonId}                → NpcProfile[]
  *   loveshow_active_season                   → string (seasonId)
  *   loveshow_social_${seasonId}_day${day}     → LoveShowSocialPost[]
+ *   loveshow_social_signals_${seasonId}       → SocialSignal[]
  *   loveshow_missions_${seasonId}            → DirectorMission[]
  *   loveshow_memories_${seasonId}            → MemoryCard[]
+ *   loveshow_highlights_${seasonId}          → HighlightMemory[]
  */
 
 import type {
@@ -17,10 +19,20 @@ import type {
     CharacterState,
     LoveShowUserImpression,
     NpcProfile,
+    LoveShowCastingDraft,
     LoveShowSocialPost,
     DirectorMission,
     MemoryCard,
+    HighlightMemory,
+    SocialSignal,
 } from '../../types/loveshow';
+import { normalizeSeasonState } from '../loveshowEngine';
+import { getFallbackLoveShowNpcAppearance } from '../loveshowCast';
+import {
+    appendLoveShowSocialSignals,
+    markLoveShowSocialSignalsConsumed,
+    normalizeLoveShowSocialPosts,
+} from '../loveshowSocial';
 
 // ── Key helpers ──
 
@@ -30,9 +42,13 @@ const KEY_IMPRESSION     = 'loveshow_impression_';
 const KEY_NPCS           = 'loveshow_npcs_';
 const KEY_ACTIVE_SEASON  = 'loveshow_active_season';
 const KEY_SOCIAL         = 'loveshow_social_';
+const KEY_SOCIAL_SIGNALS = 'loveshow_social_signals_';
 const KEY_MISSIONS       = 'loveshow_missions_';
 const KEY_MEMORIES       = 'loveshow_memories_';
+const KEY_HIGHLIGHTS     = 'loveshow_highlights_';
 const KEY_SEASON_INDEX   = 'loveshow_season_index';
+const KEY_CASTING_DRAFT  = 'loveshow_casting_draft_v2';
+const HIGHLIGHT_MEMORY_LIMIT = 15;
 
 // ═══════════════════════════════════
 //  赛季 CRUD
@@ -41,11 +57,12 @@ const KEY_SEASON_INDEX   = 'loveshow_season_index';
 /** Save or update a season */
 export function saveSeason(season: SeasonState): void {
     try {
-        localStorage.setItem(KEY_SEASON + season.seasonId, JSON.stringify(season));
+        const normalized = normalizeSeasonState(season);
+        localStorage.setItem(KEY_SEASON + normalized.seasonId, JSON.stringify(normalized));
         // Maintain an index of all season IDs for enumeration
         const index = _getSeasonIndex();
-        if (!index.includes(season.seasonId)) {
-            index.push(season.seasonId);
+        if (!index.includes(normalized.seasonId)) {
+            index.push(normalized.seasonId);
             localStorage.setItem(KEY_SEASON_INDEX, JSON.stringify(index));
         }
     } catch (e) {
@@ -58,7 +75,7 @@ export function getSeason(seasonId: string): SeasonState | null {
     try {
         const raw = localStorage.getItem(KEY_SEASON + seasonId);
         if (!raw) return null;
-        return JSON.parse(raw) as SeasonState;
+        return normalizeSeasonState(JSON.parse(raw) as SeasonState);
     } catch {
         return null;
     }
@@ -90,6 +107,8 @@ export function deleteSeason(seasonId: string): void {
         localStorage.removeItem(KEY_NPCS + seasonId);
         localStorage.removeItem(KEY_MISSIONS + seasonId);
         localStorage.removeItem(KEY_MEMORIES + seasonId);
+        localStorage.removeItem(KEY_HIGHLIGHTS + seasonId);
+        localStorage.removeItem(KEY_SOCIAL_SIGNALS + seasonId);
 
         // Clean up per-character keys
         _cleanCharacterKeys(seasonId, season?.charIds || []);
@@ -206,7 +225,7 @@ export function getAllImpressions(seasonId: string): LoveShowUserImpression[] {
 /** Save the NPC list for a season */
 export function saveNpcs(seasonId: string, npcs: NpcProfile[]): void {
     try {
-        localStorage.setItem(KEY_NPCS + seasonId, JSON.stringify(npcs));
+        localStorage.setItem(KEY_NPCS + seasonId, JSON.stringify(serializeNpcsForStorage(npcs)));
     } catch (e) {
         console.error('[LoveShowStore] Failed to save NPCs:', e);
     }
@@ -217,9 +236,57 @@ export function getNpcs(seasonId: string): NpcProfile[] {
     try {
         const raw = localStorage.getItem(KEY_NPCS + seasonId);
         if (!raw) return [];
-        return JSON.parse(raw) as NpcProfile[];
+        const parsed = JSON.parse(raw);
+        return normalizeNpcsForStorage(Array.isArray(parsed) ? parsed as NpcProfile[] : []);
     } catch {
         return [];
+    }
+}
+
+// ═══════════════════════════════════
+//  选角草稿
+// ═══════════════════════════════════
+
+/** Save the current casting preview draft */
+export function saveCastingDraft(draft: LoveShowCastingDraft): void {
+    try {
+        localStorage.setItem(KEY_CASTING_DRAFT, JSON.stringify({
+            ...draft,
+            npcs: serializeNpcsForStorage(draft.npcs),
+        }));
+    } catch (e) {
+        console.error('[LoveShowStore] Failed to save casting draft:', e);
+    }
+}
+
+/** Get the current casting preview draft */
+export function getCastingDraft(): LoveShowCastingDraft | null {
+    try {
+        const raw = localStorage.getItem(KEY_CASTING_DRAFT);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as Partial<LoveShowCastingDraft>;
+        if (!parsed || typeof parsed.draftId !== 'string' || !Array.isArray(parsed.npcs)) return null;
+        return {
+            draftId: parsed.draftId,
+            targetGuestCount: typeof parsed.targetGuestCount === 'number' ? parsed.targetGuestCount : 5,
+            selectedCharacterIds: Array.isArray(parsed.selectedCharacterIds)
+                ? parsed.selectedCharacterIds.filter((id): id is string => typeof id === 'string')
+                : [],
+            npcs: normalizeNpcsForStorage(parsed.npcs as NpcProfile[]),
+            createdAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : Date.now(),
+            updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now(),
+        };
+    } catch {
+        return null;
+    }
+}
+
+/** Clear the current casting preview draft */
+export function clearCastingDraft(): void {
+    try {
+        localStorage.removeItem(KEY_CASTING_DRAFT);
+    } catch {
+        // ignore
     }
 }
 
@@ -230,7 +297,7 @@ export function getNpcs(seasonId: string): NpcProfile[] {
 /** Save social posts for a specific day */
 export function saveSocialPosts(seasonId: string, day: number, posts: LoveShowSocialPost[]): void {
     try {
-        localStorage.setItem(KEY_SOCIAL + seasonId + '_day' + day, JSON.stringify(posts));
+        localStorage.setItem(KEY_SOCIAL + seasonId + '_day' + day, JSON.stringify(normalizeLoveShowSocialPosts(posts, day)));
     } catch (e) {
         console.error('[LoveShowStore] Failed to save social posts:', e);
     }
@@ -241,10 +308,44 @@ export function getSocialPosts(seasonId: string, day: number): LoveShowSocialPos
     try {
         const raw = localStorage.getItem(KEY_SOCIAL + seasonId + '_day' + day);
         if (!raw) return [];
-        return JSON.parse(raw) as LoveShowSocialPost[];
+        const parsed = JSON.parse(raw) as Partial<LoveShowSocialPost>[];
+        return normalizeLoveShowSocialPosts(Array.isArray(parsed) ? parsed : [], day);
     } catch {
         return [];
     }
+}
+
+/** Save social signals for a season */
+export function saveSocialSignals(seasonId: string, signals: SocialSignal[]): void {
+    try {
+        localStorage.setItem(KEY_SOCIAL_SIGNALS + seasonId, JSON.stringify(signals));
+    } catch (e) {
+        console.error('[LoveShowStore] Failed to save social signals:', e);
+    }
+}
+
+/** Get social signals for a season */
+export function getSocialSignals(seasonId: string): SocialSignal[] {
+    try {
+        const raw = localStorage.getItem(KEY_SOCIAL_SIGNALS + seasonId);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw) as SocialSignal[];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+/** Append social signals without mutating character state */
+export function appendSocialSignals(seasonId: string, signals: SocialSignal[]): void {
+    if (signals.length === 0) return;
+    saveSocialSignals(seasonId, appendLoveShowSocialSignals(getSocialSignals(seasonId), signals));
+}
+
+/** Mark signals consumed after the existing state/beat funnel has seen them */
+export function consumeSocialSignals(seasonId: string, signalIds: string[]): void {
+    if (signalIds.length === 0) return;
+    saveSocialSignals(seasonId, markLoveShowSocialSignalsConsumed(getSocialSignals(seasonId), signalIds));
 }
 
 // ═══════════════════════════════════
@@ -298,6 +399,67 @@ export function getMemoryCards(seasonId: string): MemoryCard[] {
 }
 
 // ═══════════════════════════════════
+//  高光记忆
+// ═══════════════════════════════════
+
+function normalizeHighlightMemory(memory: HighlightMemory): HighlightMemory | null {
+    if (!memory || typeof memory !== 'object') return null;
+    const guestIds = Array.isArray(memory.guestIds)
+        ? Array.from(new Set(memory.guestIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))))
+        : [];
+    const summary = typeof memory.summary === 'string' ? memory.summary.trim() : '';
+    const meaning = typeof memory.meaning === 'string' ? memory.meaning.trim() : '';
+    if (!memory.id || !memory.seasonId || guestIds.length === 0 || !summary || !meaning) return null;
+    return {
+        ...memory,
+        guestIds,
+        summary,
+        meaning,
+        callbackLine: typeof memory.callbackLine === 'string' && memory.callbackLine.trim()
+            ? memory.callbackLine.trim()
+            : undefined,
+        weight: Math.min(100, Math.max(0, Number(memory.weight) || 0)),
+        createdAt: typeof memory.createdAt === 'number' ? memory.createdAt : Date.now(),
+    };
+}
+
+function trimHighlightMemories(memories: HighlightMemory[]): HighlightMemory[] {
+    const deduped = new Map<string, HighlightMemory>();
+    for (const memory of memories) {
+        const normalized = normalizeHighlightMemory(memory);
+        if (normalized) deduped.set(normalized.id, normalized);
+    }
+    return [...deduped.values()]
+        .sort((a, b) => (b.weight - a.weight) || (b.day - a.day) || (b.createdAt - a.createdAt))
+        .slice(0, HIGHLIGHT_MEMORY_LIMIT)
+        .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export function saveHighlightMemories(seasonId: string, memories: HighlightMemory[]): void {
+    try {
+        localStorage.setItem(KEY_HIGHLIGHTS + seasonId, JSON.stringify(trimHighlightMemories(memories)));
+    } catch (e) {
+        console.error('[LoveShowStore] Failed to save highlight memories:', e);
+    }
+}
+
+export function appendHighlightMemories(seasonId: string, memories: HighlightMemory[]): void {
+    if (memories.length === 0) return;
+    saveHighlightMemories(seasonId, [...getHighlightMemories(seasonId), ...memories]);
+}
+
+export function getHighlightMemories(seasonId: string): HighlightMemory[] {
+    try {
+        const raw = localStorage.getItem(KEY_HIGHLIGHTS + seasonId);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw) as HighlightMemory[];
+        return Array.isArray(parsed) ? trimHighlightMemories(parsed) : [];
+    } catch {
+        return [];
+    }
+}
+
+// ═══════════════════════════════════
 //  工具函数
 // ═══════════════════════════════════
 
@@ -345,6 +507,25 @@ function _getSeasonIndex(): string[] {
     } catch {
         return [];
     }
+}
+
+function serializeNpcsForStorage(npcs: NpcProfile[]): NpcProfile[] {
+    return normalizeNpcsForStorage(npcs).map(npc => {
+        if (npc.avatarAssetId && typeof npc.avatar === 'string' && npc.avatar.startsWith('data:')) {
+            const { avatar: _avatar, ...rest } = npc;
+            return rest;
+        }
+        return npc;
+    });
+}
+
+function normalizeNpcsForStorage(npcs: NpcProfile[]): NpcProfile[] {
+    return npcs.map((npc, index) => ({
+        ...npc,
+        appearance: typeof npc.appearance === 'string' && npc.appearance.trim()
+            ? npc.appearance.trim()
+            : getFallbackLoveShowNpcAppearance(index),
+    }));
 }
 
 /** Remove character-state and impression keys for a deleted season */

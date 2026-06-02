@@ -43,6 +43,8 @@ const SHARE_POSTER_SCALE = 2;
 const MAX_LYRIC_LINES = 2;
 const MAX_LYRIC_LINE_LENGTH = 28;
 const DEFAULT_SHARE_CARD_NAME = 'Emo Cloud 分享海报.png';
+const SHARE_POSTER_FONT_STACK = `var(--app-font, 'Quicksand', sans-serif),-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans SC','Microsoft YaHei',sans-serif`;
+const SHARE_POSTER_DISPLAY_FONT_STACK = `var(--app-font, 'Quicksand', sans-serif),Georgia,serif`;
 const BRACKETED_SECTION_RE = /^\s*[\[(【（].{0,24}[\])】）]\s*$/;
 const TIMESTAMP_RE = /^\s*(?:\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?]\s*)+/;
 
@@ -130,7 +132,7 @@ function buildShareCardHtml(preview: MemoryRecordSharePreview): string {
     const escapedGradient = escapeHtml(gradient);
 
     return `
-        <div style="width:${SHARE_POSTER_WIDTH}px;height:${SHARE_POSTER_HEIGHT}px;box-sizing:border-box;border-radius:38px;background:#111015;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans SC','Microsoft YaHei',sans-serif;color:#fff;box-shadow:0 26px 68px rgba(0,0,0,0.34);overflow:hidden;position:relative;">
+        <div style="width:${SHARE_POSTER_WIDTH}px;height:${SHARE_POSTER_HEIGHT}px;box-sizing:border-box;border-radius:38px;background:#111015;font-family:${SHARE_POSTER_FONT_STACK};color:#fff;box-shadow:0 26px 68px rgba(0,0,0,0.34);overflow:hidden;position:relative;">
             <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,0.10) 0%,rgba(255,255,255,0.02) 34%,rgba(0,0,0,0.64) 100%),${escapedGradient};opacity:0.8;"></div>
             ${escapedCoverUrl ? `<img crossOrigin="anonymous" src="${escapedCoverUrl}" alt="" style="position:absolute;inset:-42px;width:calc(100% + 84px);height:calc(100% + 84px);object-fit:cover;filter:blur(28px) saturate(1.14);opacity:0.34;" />` : ''}
             <div style="position:absolute;inset:0;background:radial-gradient(circle at 70% 16%,rgba(255,233,192,0.24) 0,rgba(255,233,192,0) 34%),linear-gradient(180deg,rgba(11,10,15,0.22) 0%,rgba(11,10,15,0.08) 40%,rgba(11,10,15,0.82) 100%);"></div>
@@ -145,7 +147,7 @@ function buildShareCardHtml(preview: MemoryRecordSharePreview): string {
             <div style="position:absolute;right:46px;top:125px;z-index:1;width:248px;height:248px;border-radius:999px;background:radial-gradient(circle at center,#0f0f12 0 21%,#222026 22% 23%,#0c0b10 24% 46%,#2b2930 47% 48%,#0b0a0e 49% 100%);box-shadow:0 24px 46px rgba(0,0,0,0.42),0 0 0 1px rgba(255,255,255,0.08) inset;"></div>
             <div style="position:absolute;left:116px;top:88px;z-index:2;width:308px;height:308px;border-radius:36px;padding:8px;background:rgba(255,255,255,0.15);box-shadow:0 26px 58px rgba(0,0,0,0.44);">
                 <div style="width:100%;height:100%;border-radius:29px;overflow:hidden;${coverStyle}box-shadow:0 0 0 1px rgba(255,255,255,0.20) inset;display:flex;align-items:center;justify-content:center;">
-                    ${escapedCoverUrl ? `<img crossOrigin="anonymous" src="${escapedCoverUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />` : `<span style="font-size:78px;font-family:Georgia,serif;color:rgba(255,255,255,0.76);text-shadow:0 10px 22px rgba(0,0,0,0.28);">♪</span>`}
+                    ${escapedCoverUrl ? `<img crossOrigin="anonymous" src="${escapedCoverUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />` : `<span style="font-size:78px;font-family:${SHARE_POSTER_DISPLAY_FONT_STACK};color:rgba(255,255,255,0.76);text-shadow:0 10px 22px rgba(0,0,0,0.28);">♪</span>`}
                 </div>
             </div>
 
@@ -180,6 +182,16 @@ async function waitForImages(root: HTMLElement): Promise<void> {
             image.onerror = () => resolve();
         });
     }));
+}
+
+async function waitForFonts(): Promise<void> {
+    if (typeof document === 'undefined' || !('fonts' in document)) return;
+
+    try {
+        await document.fonts.ready;
+    } catch {
+        // Font readiness is best-effort; poster rendering can still continue with fallbacks.
+    }
 }
 
 function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -226,6 +238,7 @@ export async function renderMemoryRecordSharePosterPng(preview: MemoryRecordShar
 
     try {
         await waitForImages(host);
+        await waitForFonts();
         const card = host.firstElementChild as HTMLElement | null;
         if (!card) throw new Error('分享海报生成失败');
 

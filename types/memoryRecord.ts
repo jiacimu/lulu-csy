@@ -100,6 +100,10 @@ export interface MemoryRecord {
     lyricsConfirmedAt?: number;
     inspirationReference?: string;
     coverImageUrl?: string;
+    coverOriginalAssetId?: string;
+    coverPrompt?: string;
+    coverStyle?: string;
+    coverTone?: string;
     coverGradient: string;
     seedMemoryIds: string[];
     selectedMemoryIds?: string[];

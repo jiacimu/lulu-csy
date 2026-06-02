@@ -3,6 +3,7 @@ import {
     type ApiPreset,
     type RealtimeConfig,
     type ImageGenerationConfig,
+    type ImageGenerationStyle,
     type ImageApiPreset,
     type ImageProviderType,
     type NaiImageModel,
@@ -36,6 +37,7 @@ import {
     safeLocalStorageRemove,
     safeLocalStorageSet,
 } from './storage';
+import { LOVE_SHOW_IMAGE_STYLE_PRESETS } from './loveshowPrompts';
 
 export type EmbeddingProvider = 'openai' | 'cohere';
 export type EmbeddingEngineId = 'standard' | 'enhanced';
@@ -114,6 +116,7 @@ export const NAI_IMAGE_MODELS: NaiImageModel[] = [
 ];
 
 export const IMAGE_PROVIDER_TYPES: ImageProviderType[] = ['novelai', 'openai-compatible'];
+export const IMAGE_GENERATION_STYLES: ImageGenerationStyle[] = ['guoman', 'cg', 'real'];
 export const PHOTO_STYLE_PROVIDER_SCOPES: PhotoStyleProviderScope[] = ['all', 'novelai', 'openai-compatible'];
 type NaiImageOption = { value: string; label: string; aliases?: string[] };
 export const NAI_IMAGE_SAMPLER_OPTIONS: NaiImageOption[] = [
@@ -162,7 +165,7 @@ export const DEFAULT_NOVELAI_IMAGE_CONFIG: NovelAIImageProviderConfig = {
 export const DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG: OpenAICompatibleImageProviderConfig = {
     baseUrl: '',
     apiKey: '',
-    model: '',
+    model: 'gpt-image-2',
     size: '1024x1024',
     responseFormat: 'auto',
     n: null,
@@ -182,6 +185,7 @@ export const DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG: OpenAICompatibleImageProvid
 
 export const DEFAULT_IMAGE_GENERATION_CONFIG: ImageGenerationConfig = {
     activeProvider: 'novelai',
+    imageStyle: 'guoman',
     novelai: DEFAULT_NOVELAI_IMAGE_CONFIG,
     openaiCompatible: DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG,
 };
@@ -189,6 +193,7 @@ export const DEFAULT_IMAGE_GENERATION_CONFIG: ImageGenerationConfig = {
 export const DEFAULT_IMAGE_API_PRESETS: ImageApiPreset[] = [];
 
 export const DEFAULT_PHOTO_STYLE_PRESETS: PhotoStylePreset[] = [
+    ...LOVE_SHOW_IMAGE_STYLE_PRESETS,
     {
         id: 'soft-polaroid-compatible',
         name: '柔光拍立得 / 兼容接口',
@@ -266,7 +271,7 @@ const RETIRED_DEFAULT_PHOTO_STYLE_PRESET_IDS = new Set([
     'clean-anime-snapshot',
 ]);
 const PHOTO_STYLE_PRESETS_MIGRATION_KEY = 'os_photo_style_presets_migration';
-const PHOTO_STYLE_PRESETS_MIGRATION_VERSION = 'openai-compatible-defaults-2026-05-28';
+const PHOTO_STYLE_PRESETS_MIGRATION_VERSION = 'loveshow-image-presets-2026-05-31';
 
 export const EMBEDDING_ENGINES: Record<
     EmbeddingEngineId,
@@ -592,6 +597,11 @@ function normalizeImageProviderType(value: unknown): ImageProviderType {
     return IMAGE_PROVIDER_TYPES.includes(provider) ? provider : DEFAULT_IMAGE_GENERATION_CONFIG.activeProvider;
 }
 
+function normalizeImageGenerationStyle(value: unknown): ImageGenerationStyle {
+    const style = normalizeString(value) as ImageGenerationStyle;
+    return IMAGE_GENERATION_STYLES.includes(style) ? style : DEFAULT_IMAGE_GENERATION_CONFIG.imageStyle;
+}
+
 function normalizePhotoStyleProviderScope(value: unknown, fallback: PhotoStyleProviderScope = 'novelai'): PhotoStyleProviderScope {
     const scope = normalizeString(value) as PhotoStyleProviderScope;
     return PHOTO_STYLE_PROVIDER_SCOPES.includes(scope) ? scope : fallback;
@@ -758,7 +768,7 @@ function normalizeOpenAICompatibleImageConfig(value: Partial<OpenAICompatibleIma
         ...raw,
         baseUrl: normalizeUrl(raw.baseUrl),
         apiKey: normalizeString(raw.apiKey),
-        model: normalizeString(raw.model),
+        model: normalizeString(raw.model) || DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.model,
         size: normalizeOpenAIImageSize(raw.size),
         responseFormat: normalizeOpenAIImageResponseFormat(raw.responseFormat ?? raw.response_format),
         n: normalizeNullableInteger(raw.n, DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.n || null, 1, 10),
@@ -783,6 +793,7 @@ function normalizeImageGenerationConfig(value: Partial<ImageGenerationConfig> | 
 
     return {
         activeProvider: normalizeImageProviderType(raw.activeProvider),
+        imageStyle: normalizeImageGenerationStyle(raw.imageStyle),
         novelai: normalizeNovelAIImageConfig(looksLikeLegacyNai ? raw : raw.novelai),
         openaiCompatible: normalizeOpenAICompatibleImageConfig(raw.openaiCompatible),
     };

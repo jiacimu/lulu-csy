@@ -10,6 +10,7 @@ import Modal from '../components/os/Modal';
 import DateSession,{ DateExitSyncMode } from '../components/date/DateSession';
 import DateSettings from '../components/date/DateSettings';
 import { buildDatePreamble,buildTheaterScene,buildDateTail,buildDateTimeBlock } from '../utils/datePrompts';
+import { pronoun } from '../utils/genderWords';
 import { extractThinking, extractInnerWhispers, type InnerWhisper } from '../utils/thinkingExtractor';
 import { DEFAULT_DATE_SUMMARY_PROMPT,buildSummaryPrompt,formatDateMessagesForBridge,formatMessagesForSummary } from '../utils/dateSummaryPrompts';
 import {
@@ -129,8 +130,8 @@ export const buildDateSessionSystemPrompt = ({
     const dateEmotions = [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])];
     const userPov = char.datePerspective || 'second';
     const charPov = char.dateCharPerspective || 'third';
-    systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov, undefined, char.dateOutputWordCount, char.dateWritingStyle);
-    systemPrompt += buildDateTail(char.name, userProfile.name, userPov, charPov);
+    systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov, undefined, char.dateOutputWordCount, char.dateWritingStyle, char.gender ?? 'male');
+    systemPrompt += buildDateTail(char.name, userProfile.name, userPov, charPov, char.gender ?? 'male');
     return systemPrompt;
 };
 
@@ -1453,7 +1454,7 @@ ${exitPromptContent}
 • <原文> 和 <译文> 内不要再写 [emotion] 标签。
 示例：
 [happy]<翻译><原文>「おはよう！今日はいい天気だね」</原文><译文>「早上好！今天天气真好呢」</译文></翻译>
-[shy] 她的脸颊微微泛红，视线移向了窗外。]` : ''})` }
+[shy] ${pronoun(char.gender ?? 'male')}的脸颊微微泛红，视线移向了窗外。]` : ''})` }
                 ],
                 temperature: char.dateTemperature ?? 0.85,
                 max_tokens: 8192,

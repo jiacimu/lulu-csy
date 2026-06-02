@@ -180,6 +180,33 @@ describe('EchoRecordApp', () => {
         });
     });
 
+    it('restores the currently edited ready record prompt after remounting', async () => {
+        mockedGetMemoryRecords.mockResolvedValue([
+            buildRecord({
+                id: 'record-ready',
+                title: '星河私语',
+                status: 'ready',
+                stylePrompt: 'cinematic dream pop, warm vocal, soft vinyl texture',
+                negativeStylePrompt: 'no harsh drums, no metallic vocal',
+                masterAudioId: 'record-ready:master',
+            }),
+        ]);
+
+        const first = render(<EchoRecordApp />);
+
+        await screen.findByText('星河私语');
+        fireEvent.click(screen.getByText('继续编辑'));
+
+        expect(await screen.findByDisplayValue('cinematic dream pop, warm vocal, soft vinyl texture')).toBeTruthy();
+        expect(screen.getByDisplayValue('no harsh drums, no metallic vocal')).toBeTruthy();
+
+        first.unmount();
+        render(<EchoRecordApp />);
+
+        expect(await screen.findByDisplayValue('cinematic dream pop, warm vocal, soft vinyl texture')).toBeTruthy();
+        expect(screen.getByDisplayValue('no harsh drums, no metallic vocal')).toBeTruthy();
+    });
+
     it('guides a loaded lyric draft from finalizing lyrics into arrangement', async () => {
         render(<EchoRecordApp />);
 

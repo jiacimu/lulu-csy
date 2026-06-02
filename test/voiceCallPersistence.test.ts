@@ -76,6 +76,23 @@ describe('voice call persistence', () => {
         ]);
     });
 
+    it('does not expose or save assistant audio for the text reply channel', () => {
+        const firstBlob = new Blob(['a'], { type: 'audio/wav' });
+        const secondBlob = new Blob(['b'], { type: 'audio/wav' });
+        const history = [
+            { role: 'assistant', content: '文字通道第一句', audioBlob: firstBlob },
+            { role: 'user', content: '我还可以说话' },
+            { role: 'assistant', content: '但我只显示文字', audioBlob: secondBlob },
+        ];
+
+        expect(buildPersistedCallConversation(history, 'text')).toEqual([
+            { role: 'assistant', content: '文字通道第一句' },
+            { role: 'user', content: '我还可以说话' },
+            { role: 'assistant', content: '但我只显示文字' },
+        ]);
+        expect(buildPersistedCallAudioEntries(42, history, 'text')).toEqual([]);
+    });
+
     it('strips assistant translation tags and emotion directions but preserves user parentheses', () => {
         expect(sanitizeVoiceCallAssistantText('(laughs softly) [[翻译:你好呀]] Hello there')).toBe('Hello there');
         expect(sanitizeVoiceCallAssistantText('（轻笑）那我继续说啦')).toBe('那我继续说啦');

@@ -94,7 +94,7 @@ export const APP_CONFIGS: AppConfig[] = [
   { id: AppID.Theater, name: '约会', icon: 'Theater', color: 'rose' },
   { id: AppID.Trajectory, name: '轨迹', icon: 'Trajectory', color: 'indigo' },
   { id: AppID.Crosstime, name: '跨时空对话', icon: 'Crosstime', color: 'violet' },
-  { id: AppID.LoveShow, name: '恋综', icon: 'LoveShow', color: 'rose' },
+  { id: AppID.LoveShow, name: '心动放送', icon: 'LoveShow', color: 'rose' },
   { id: AppID.Study, name: '自习室', icon: 'Study', color: 'emerald' },
   { id: AppID.Game, name: 'TRPG', icon: 'Game', color: 'orange' },
   { id: AppID.Novel, name: '笔友会', icon: 'Novel', color: 'amber' },
@@ -127,4 +127,4 @@ export const INSTALLED_APPS: AppConfig[] = APP_CONFIGS.filter(app => !HIDDEN_LAU
 
 export const DOCK_APPS = [AppID.Chat, AppID.GroupChat, AppID.Social, AppID.Settings];
 
-export const THINKING_CHAIN_UI_ENABLED = false;
+export const THINKING_CHAIN_UI_ENABLED = true;

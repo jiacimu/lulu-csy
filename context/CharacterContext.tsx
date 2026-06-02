@@ -12,6 +12,9 @@ export interface CharacterUpdateOptions {
 }
 
 const CHINST_REVERT_FLAG = 'chinst_revert_migration_done';
+const LEGACY_SULLY_AVATAR_URLS = new Set([
+    'https://sharkpan.xyz/f/BZ3VSa/head.png',
+]);
 
 interface MigrationProgress {
     current: number;
@@ -280,11 +283,13 @@ export const CharacterProvider: React.FC<CharacterProviderProps> = ({
                     if (existingCharacter) {
                         const currentSprites = existingCharacter.sprites || {};
                         const presetSprites = initialCharacter.sprites || {};
+                        const existingAvatar = typeof existingCharacter.avatar === 'string' ? existingCharacter.avatar.trim() : '';
                         const isCorrupted = !currentSprites['normal'] || !currentSprites['chibi'];
                         const needsWallUpdate = existingCharacter.roomConfig?.wallImage !== initialCharacter.roomConfig?.wallImage;
                         const needsSkinSets = !existingCharacter.dateSkinSets || existingCharacter.dateSkinSets.length === 0;
+                        const needsAvatarUpdate = !existingAvatar || LEGACY_SULLY_AVATAR_URLS.has(existingAvatar);
 
-                        if (isCorrupted || !existingCharacter.roomConfig || needsWallUpdate || needsSkinSets) {
+                        if (isCorrupted || !existingCharacter.roomConfig || needsWallUpdate || needsSkinSets || needsAvatarUpdate) {
                             const restoredSprites = { ...presetSprites, ...currentSprites };
 
                             if (!restoredSprites['normal']) restoredSprites['normal'] = presetSprites['normal'];
@@ -312,6 +317,7 @@ export const CharacterProvider: React.FC<CharacterProviderProps> = ({
 
                             const updatedCharacter = {
                                 ...existingCharacter,
+                                avatar: needsAvatarUpdate ? initialCharacter.avatar : existingCharacter.avatar,
                                 sprites: restoredSprites,
                                 roomConfig: updatedRoomConfig,
                                 dateSkinSets: mergedSkins

@@ -1,4 +1,5 @@
 import { getVoiceCallVisibleText } from './voiceCallTextSanitizer';
+import type { VoiceCallReplyChannel } from './voiceCallTypes';
 
 export const VOICE_CALL_OPENING_PROMPT = '[系统：电话接通，请说开场白]';
 
@@ -20,18 +21,22 @@ export function filterPersistedCallHistory(history: VoiceCallHistoryEntry[]): Vo
 
 export function buildPersistedCallConversation(
     history: VoiceCallHistoryEntry[],
+    replyChannel: VoiceCallReplyChannel = 'voice',
 ): PersistedCallConversationEntry[] {
     return filterPersistedCallHistory(history).map((entry) => ({
         role: entry.role,
         content: getVoiceCallVisibleText(entry.role, entry.content),
-        ...(entry.audioBlob ? { hasAudio: true } : {}),
+        ...(replyChannel === 'voice' && entry.audioBlob ? { hasAudio: true } : {}),
     }));
 }
 
 export function buildPersistedCallAudioEntries(
     savedMsgId: number | string,
     history: VoiceCallHistoryEntry[],
+    replyChannel: VoiceCallReplyChannel = 'voice',
 ): Array<{ key: string; blob: Blob }> {
+    if (replyChannel === 'text') return [];
+
     return filterPersistedCallHistory(history).flatMap((entry, index) => (
         entry.audioBlob
             ? [{ key: `call_${savedMsgId}_${index}`, blob: entry.audioBlob }]

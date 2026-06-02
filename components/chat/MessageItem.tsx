@@ -28,6 +28,7 @@ import SongShareCardBubble from './cards/SongShareCardBubble';
 import ChatBubble from './ChatBubble';
 import InteractionPill from './InteractionPill';
 import VoiceBubble from './VoiceBubble';
+import { useSafeImageLoad } from './useSafeImageLoad';
 const StatusCardRenderer = React.lazy(() => import('./StatusCardRenderer'));
 const CLASSIC_INNER_VOICE_PREVIEW_THRESHOLD = 48;
 const customCssTargetsBubbleShell = (css: string | undefined) => /\.sully-bubble-(?:user|ai)\b/.test(css || '');
@@ -139,6 +140,13 @@ const MessageItem = React.memo(({
 
     const styleConfig = isUser ? activeTheme.user : activeTheme.ai;
     const allowBubbleCssOverride = customCssTargetsBubbleShell(activeTheme.customCss);
+    const imageSrc = m.type === 'image' ? String(m.content || '').trim() : '';
+    const thumbnailSrc = m.type === 'image' ? getImageMessageDisplayUrl(m).trim() : '';
+    const imageDisplaySrc = thumbnailSrc || imageSrc;
+    const imageDisplayKey = m.type === 'image' ? `${m.id}:${imageDisplaySrc}` : '';
+    const safeImage = useSafeImageLoad(imageDisplaySrc, imageDisplayKey);
+    const emojiSrc = m.type === 'emoji' ? String(m.content || '').trim() : '';
+    const safeEmoji = useSafeImageLoad(emojiSrc, m.type === 'emoji' ? `${m.id}:${emojiSrc}` : '');
 
     const handleTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
         // Record initial position
@@ -712,14 +720,22 @@ const MessageItem = React.memo(({
     }
 
     if (m.type === 'emoji') {
+        if (!emojiSrc || safeEmoji.isFailed || !safeEmoji.isLoaded) return null;
         return commonLayout(
-            <img src={m.content} className="max-w-[160px] max-h-[160px] hover:scale-105 transition-transform drop-shadow-md active:scale-95" loading="lazy" decoding="async" />
+            <img
+                src={safeEmoji.src}
+                data-testid="chat-emoji-image"
+                className="max-w-[160px] max-h-[160px] hover:scale-105 transition-transform drop-shadow-md active:scale-95"
+                loading="lazy"
+                decoding="async"
+                onError={safeEmoji.markFailed}
+            />
         );
     }
 
     if (m.type === 'image') {
-        const imageSrc = String(m.content || '');
-        const thumbnailSrc = getImageMessageDisplayUrl(m);
+        const hasDisplayableImageSrc = Boolean(imageDisplaySrc);
+        const imageLoadFailed = safeImage.isFailed;
         const imageStatus = String(m.metadata?.status || '');
         const isGeneratingImage = imageStatus === 'generating';
         const isFailedImage = imageStatus === 'failed';
@@ -729,7 +745,7 @@ const MessageItem = React.memo(({
         const imageSummary = String(m.metadata?.visualSummary || m.metadata?.caption || '').trim();
         const imageAlt = isUser ? 'Uploaded image' : 'Generated image';
         const fallbackPreviewSrc = imageSrc || thumbnailSrc;
-        if ((isGeneratingImage || isFailedImage) && !thumbnailSrc) {
+        if ((isGeneratingImage || isFailedImage) && (!hasDisplayableImageSrc || imageLoadFailed)) {
             return commonLayout(
                 <div
                     className="sully-image-msg-shell flex h-[240px] w-[180px] flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl border border-black/5 bg-black/5 px-4 text-center shadow-sm"
@@ -747,6 +763,7 @@ const MessageItem = React.memo(({
                 </div>
             );
         }
+        if (!hasDisplayableImageSrc || imageLoadFailed || !safeImage.isLoaded) return null;
         const stopImageGesture = (event: React.SyntheticEvent) => {
             if (!selectionMode) {
                 event.stopPropagation();
@@ -832,12 +849,13 @@ const MessageItem = React.memo(({
                     }}
                 >
                     <img
-                        src={thumbnailSrc}
+                        src={safeImage.src}
                         data-testid="chat-image-thumbnail"
                         className="sully-image-msg max-h-[300px] max-w-[200px] object-cover"
                         alt={imageAlt}
                         loading="lazy"
                         decoding="async"
+                        onError={safeImage.markFailed}
                     />
                     <span className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-white opacity-0 shadow-sm backdrop-blur-md transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
                         <ArrowsOutSimple className="h-4 w-4" weight="bold" />

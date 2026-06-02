@@ -67,26 +67,6 @@ export function resolveLocalFallbackSyncState(hasCloudSyncTarget: boolean): Memo
     return hasCloudSyncTarget ? 'pending_sync' : 'local_only';
 }
 
-export function rebaseImportedVectorMemory(
-    memory: VectorMemory,
-    hasCloudSyncTarget: boolean,
-): VectorMemory {
-    return withVectorMemorySyncState(
-        {
-            ...memory,
-            source: memory.source === 'sync' ? 'import' : memory.source,
-        },
-        resolveLocalFallbackSyncState(hasCloudSyncTarget),
-    );
-}
-
-export function rebaseImportedVectorMemories(
-    memories: VectorMemory[],
-    hasCloudSyncTarget: boolean,
-): VectorMemory[] {
-    return memories.map((memory) => rebaseImportedVectorMemory(memory, hasCloudSyncTarget));
-}
-
 export function isPendingCloudSync(memory: Pick<VectorMemory, 'syncState' | 'cloudSynced' | 'source'>): boolean {
     return getVectorMemorySyncState(memory) === 'pending_sync';
 }

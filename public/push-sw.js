@@ -1,26 +1,114 @@
 /**
- * Push Service Worker — CSY-Sully OS
+ * Push Service Worker — Csy-OS
  * 
  * Handles:
  *   1. Web Push events → Show system notifications (message bombing style)
  *   2. Notification click → postMessage to React page OR open new window
  */
 
+const APP_NOTIFICATION_NAME = 'Csy-OS';
+const DEFAULT_NOTIFICATION_BODY = '发来了一条新消息';
+const MAX_NOTIFICATION_BODY_LENGTH = 120;
+const MAX_NOTIFICATION_TITLE_LENGTH = 24;
+const BILINGUAL_MARKER_RE = /%%\s*BILINGUAL\s*%%/gi;
+const URL_RE = /\bhttps?:\/\/[^\s"'<>，。；！？、)）\]]+/gi;
+const BARE_DOMAIN_RE = /\b(?:[a-z0-9-]+\.)+(?:com|net|org|dev|app|io|cn|xyz|site|top|me|cc|vip|pages)(?:\/[^\s"'<>，。；！？、)）\]]*)?/gi;
+const TECHNICAL_DETAIL_LINE_RE = /^\s*(?:URL|Request URL|Final Request URL|finalRequestURL|Final Base URL|finalBaseURL|Base URL|Endpoint|Response|Trace|Stack)\s*[:：].*$/gim;
+
+function truncateNotificationText(value, maxLength) {
+    if (value.length <= maxLength) return value;
+    return value.slice(0, Math.max(0, maxLength - 1)).trimEnd() + '…';
+}
+
+function formatNotificationTitle(title) {
+    const normalized = String(title || '')
+        .replace(URL_RE, '')
+        .replace(BARE_DOMAIN_RE, '')
+        .replace(/<[^>\n]{1,80}>/g, '')
+        .replace(/[·•|｜]+$/g, '')
+        .trim();
+
+    if (!normalized || /^CSY-Sully\s*OS$/i.test(normalized) || /^CSY-SullyOS$/i.test(normalized)) {
+        return APP_NOTIFICATION_NAME;
+    }
+
+    if (normalized === APP_NOTIFICATION_NAME || /来消息了|发来消息|发来了一条消息/.test(normalized)) {
+        return truncateNotificationText(normalized, MAX_NOTIFICATION_TITLE_LENGTH);
+    }
+
+    return truncateNotificationText(normalized + ' 来消息了', MAX_NOTIFICATION_TITLE_LENGTH);
+}
+
+function normalizeVoicePreview(value) {
+    const durationMatch = value.match(/[【\[]语音(?:消息)?[：:]\s*\d+\s*(?:秒|s|sec)?[】\]]\s*["“”「『]?([\s\S]*?)["“”」』]?\s*$/);
+    if (durationMatch && durationMatch[1] && durationMatch[1].trim()) {
+        return '语音消息：' + durationMatch[1].trim();
+    }
+
+    const wrappedMatch = value.match(/^[\s\S]*?[【\[]语音(?:消息)?[：:]\s*([\s\S]+?)\s*[】\]][\s\S]*$/);
+    if (wrappedMatch && wrappedMatch[1] && wrappedMatch[1].trim()) {
+        return '语音消息：' + wrappedMatch[1].trim();
+    }
+
+    const xmlMatch = value.match(/<语音>([\s\S]+?)<\/语音>/i);
+    if (xmlMatch && xmlMatch[1] && xmlMatch[1].trim()) {
+        return '语音消息：' + xmlMatch[1].trim();
+    }
+
+    return value;
+}
+
+function normalizeEmojiPreview(value) {
+    const sendEmojiMatch = value.match(/\[\[SEND_EMOJI:\s*([^\]]+?)\s*\]\]/i);
+    if (sendEmojiMatch && sendEmojiMatch[1] && sendEmojiMatch[1].trim()) {
+        return '发来一个表情：' + sendEmojiMatch[1].trim();
+    }
+    return value;
+}
+
+function formatNotificationBody(content) {
+    let normalized = String(content || '')
+        .replace(BILINGUAL_MARKER_RE, '\n')
+        .replace(/\r\n?/g, '\n')
+        .trim();
+
+    normalized = normalizeEmojiPreview(normalized);
+    normalized = normalizeVoicePreview(normalized);
+
+    normalized = normalized
+        .replace(TECHNICAL_DETAIL_LINE_RE, '\n')
+        .replace(URL_RE, '')
+        .replace(BARE_DOMAIN_RE, '')
+        .replace(/<\/?(?:翻译|原文|译文|语音|think|thinking|reasoning)[^>]*>/gi, '\n')
+        .replace(/<[^>\n]{1,80}>/g, '\n')
+        .replace(/[`*_~#>]+/g, '')
+        .split('\n')
+        .map(function(line) { return line.trim(); })
+        .filter(Boolean)
+        .join(' ')
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/\s+([，。；！？、,.!?;:])/g, '$1')
+        .trim();
+
+    return truncateNotificationText(normalized || DEFAULT_NOTIFICATION_BODY, MAX_NOTIFICATION_BODY_LENGTH);
+}
+
 self.addEventListener('push', function(event) {
     if (!event.data) return;
 
     try {
         const data = event.data.json();
-        const charId = data.data?.charId || '';
-        const bubbleIndex = data.data?.bubbleIndex || 0;
+        const payloadData = data.data && typeof data.data === 'object' ? data.data : {};
+        const charId = payloadData.charId || '';
+        const bubbleIndex = payloadData.bubbleIndex || 0;
 
         const options = {
-            body: data.body || '',
+            body: formatNotificationBody(data.body),
             icon: data.icon || '/icons/icon-192.webp',
             badge: data.badge || '/icons/icon-96.webp',
             // 每个气泡用唯一 tag，保证消息轰炸效果（不会被折叠）
             tag: `msg-${charId}-${Date.now()}-${bubbleIndex}`,
-            data: { charId },
+            data: Object.assign({}, payloadData, { charId }),
             vibrate: [200, 100, 200],
             // requireInteraction: false → 自动消失（避免堆积太多）
             requireInteraction: false,
@@ -29,13 +117,13 @@ self.addEventListener('push', function(event) {
         };
 
         event.waitUntil(
-            self.registration.showNotification(data.title || 'CSY-Sully OS', options)
+            self.registration.showNotification(formatNotificationTitle(data.title), options)
         );
     } catch (err) {
         // Fallback: payload 不是 JSON
         event.waitUntil(
-            self.registration.showNotification('CSY-Sully OS', {
-                body: event.data.text(),
+            self.registration.showNotification(APP_NOTIFICATION_NAME, {
+                body: formatNotificationBody(event.data.text()),
                 icon: '/icons/icon-192.webp',
             })
         );

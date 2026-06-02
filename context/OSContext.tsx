@@ -6,6 +6,7 @@ import { onSystemLog } from '../utils/systemInterceptor';
 import { exportSystemData,importSystemData,ExportStateSnapshot,ImportCallbacks,SystemBackupMode,SystemBackupOptions } from '../utils/systemBackup';
 import { setHapticsEnabled as setHapticsEnabledGlobal } from '../utils/haptics';
 import { shouldHideLifeStreamLikeMessage } from '../utils/lifeStreamVisibility';
+import { formatNotificationBody, formatNotificationTitle } from '../utils/notificationPreview';
 import { preloadImages } from '../utils/preloadResources';
 import { useAutoBackup } from '../hooks/useAutoBackup';
 import { usePerformanceMode } from '../hooks/usePerformanceMode';
@@ -108,10 +109,12 @@ const defaultUserProfile: UserProfile = {
     bio: 'No description yet.'
 };
 
+const SULLY_AVATAR_URL = '/images/sully-avatar.png';
+
 const sullyV2: CharacterProfile = {
     id: 'preset-sully-v2',
     name: 'Sully',
-    avatar: 'https://sharkpan.xyz/f/BZ3VSa/head.png',
+    avatar: SULLY_AVATAR_URL,
     description: 'AI助理 / 电波系黑客猫猫',
 
     systemPrompt: `[Role Definition]
@@ -626,9 +629,9 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
                                 const isAutonomous = dueMessages.some(m => m.metadata?.source === 'autonomous');
                                 if (!isAutonomous && window.Notification && Notification.permission === 'granted') {
                                     try {
-                                        const notif = new Notification(char.name, {
-                                            body: firstAssistantContent,
-                                            icon: char.avatar,
+                                        const notif = new Notification(formatNotificationTitle(char.name), {
+                                            body: formatNotificationBody(firstAssistantContent),
+                                            icon: char.avatar || '/icons/icon-192.webp',
                                             silent: false
                                         });
 

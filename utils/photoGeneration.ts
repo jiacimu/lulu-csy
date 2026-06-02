@@ -40,6 +40,7 @@ import {
     normalizeOptionalNaiNoiseSchedule,
     normalizeOptionalNaiSampler,
 } from './runtimeConfig';
+import { getLoveShowImagePresetId, isLoveShowImageStylePreset } from './loveshowPrompts';
 import { trackedApiRequest } from './apiRequestLedger';
 import { safeTimeoutSignal } from './safeTimeout';
 import type { SecondaryFullContextOptions } from './mindSnapshotExtractor';
@@ -113,6 +114,8 @@ export interface PhotoPromptBuildOptions {
     userAppearancePrompt?: string;
     includeAppearance?: boolean;
     includeUserAppearance?: boolean;
+    characterAppearanceLabel?: string;
+    userAppearanceLabel?: string;
 }
 
 export function isNoPhotoStylePresetId(styleId: string | undefined | null): boolean {
@@ -145,9 +148,11 @@ function buildLockedAppearanceText(config: ImageGenerationConfig, options?: Phot
     if (options?.includeAppearance === false) return '';
     const characterAppearance = String(options?.appearancePrompt || '').trim();
     const userAppearance = options?.includeUserAppearance === false ? '' : String(options?.userAppearancePrompt || '').trim();
+    const characterLabel = options?.characterAppearanceLabel || '固定角色外貌';
+    const userLabel = options?.userAppearanceLabel || '固定用户外貌';
     return normalizeTextSections([
-        characterAppearance ? `固定角色外貌：${characterAppearance}` : '',
-        userAppearance ? `固定用户外貌：${userAppearance}` : '',
+        characterAppearance ? `${characterLabel}：${characterAppearance}` : '',
+        userAppearance ? `${userLabel}：${userAppearance}` : '',
     ]);
 }
 
@@ -656,11 +661,39 @@ export function resolvePhotoStylePreset(
         || DEFAULT_PHOTO_STYLE_PRESETS[0];
 }
 
+export function resolveImageStylePhotoPreset(
+    requestedId: string | undefined,
+    presets: PhotoStylePreset[],
+    char: CharacterProfile | undefined,
+    config: ImageGenerationConfig,
+    includeUserAppearance: boolean,
+    options: { allowUnboundRequested?: boolean } = {},
+): PhotoStylePreset {
+    if (config.activeProvider !== 'openai-compatible' || requestedId) {
+        return resolvePhotoStylePreset(requestedId, presets, char, config.activeProvider, options);
+    }
+    const mode = includeUserAppearance ? 'couple' : 'solo';
+    const imageStylePresetId = getLoveShowImagePresetId(mode, config.imageStyle);
+    return resolvePhotoStylePreset(imageStylePresetId, presets, char, config.activeProvider, {
+        ...options,
+        allowUnboundRequested: true,
+    });
+}
+
 function buildOpenAICompatibleFinalPrompt(positivePrompt: string, negativePrompt: string): string {
     return normalizeTextSections([
         positivePrompt,
         negativePrompt ? `避免出现：\n${negativePrompt}` : '',
     ]);
+}
+
+function buildOpenAILockedAppearanceOptions(style: PhotoStylePreset, options: PhotoPromptBuildOptions): PhotoPromptBuildOptions {
+    if (!isLoveShowImageStylePreset(style)) return options;
+    return {
+        ...options,
+        characterAppearanceLabel: options.characterAppearanceLabel || '男生外貌',
+        userAppearanceLabel: options.userAppearanceLabel || '女生外貌',
+    };
 }
 
 export function buildPhotoPromptFromDirector(
@@ -671,17 +704,29 @@ export function buildPhotoPromptFromDirector(
     options: PhotoPromptBuildOptions = {},
 ): PhotoPromptBundle {
     if (config.activeProvider === 'openai-compatible') {
-        const lockedAppearanceText = buildLockedAppearanceText(config, options);
-        const positivePrompt = normalizeTextSections([
-            lockedAppearanceText,
-            director.scene_zh,
-            director.camera,
-            director.mood,
-            hint?.anchor_text,
-            hint?.must_keep?.join('，'),
-            style.positivePrompt,
-            config.openaiCompatible.qualityTags,
-        ]);
+        const loveShowStyle = isLoveShowImageStylePreset(style);
+        const lockedAppearanceText = buildLockedAppearanceText(config, buildOpenAILockedAppearanceOptions(style, options));
+        const positivePrompt = normalizeTextSections(loveShowStyle
+            ? [
+                style.positivePrompt,
+                lockedAppearanceText,
+                director.scene_zh,
+                director.camera,
+                director.mood,
+                hint?.anchor_text,
+                hint?.must_keep?.join('，'),
+                config.openaiCompatible.qualityTags,
+            ]
+            : [
+                lockedAppearanceText,
+                director.scene_zh,
+                director.camera,
+                director.mood,
+                hint?.anchor_text,
+                hint?.must_keep?.join('，'),
+                style.positivePrompt,
+                config.openaiCompatible.qualityTags,
+            ]);
         const negativePrompt = normalizeTextSections([
             hint?.must_avoid?.join('；'),
             style.negativePrompt,
@@ -756,13 +801,21 @@ export function buildManualPhotoPrompt(
     options: PhotoPromptBuildOptions = {},
 ): PhotoPromptBundle {
     if (config.activeProvider === 'openai-compatible') {
-        const lockedAppearanceText = buildLockedAppearanceText(config, options);
-        const positivePrompt = normalizeTextSections([
-            prompt,
-            lockedAppearanceText,
-            style.positivePrompt,
-            config.openaiCompatible.qualityTags,
-        ]);
+        const loveShowStyle = isLoveShowImageStylePreset(style);
+        const lockedAppearanceText = buildLockedAppearanceText(config, buildOpenAILockedAppearanceOptions(style, options));
+        const positivePrompt = normalizeTextSections(loveShowStyle
+            ? [
+                style.positivePrompt,
+                lockedAppearanceText,
+                prompt,
+                config.openaiCompatible.qualityTags,
+            ]
+            : [
+                prompt,
+                lockedAppearanceText,
+                style.positivePrompt,
+                config.openaiCompatible.qualityTags,
+            ]);
         const negativePrompt = normalizeTextSections([
             style.negativePrompt,
             config.openaiCompatible.negativePrompt,

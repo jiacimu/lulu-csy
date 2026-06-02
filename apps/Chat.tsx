@@ -1,7 +1,7 @@
 import React,{ useState,useEffect,useRef,useLayoutEffect,useMemo,useCallback } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { Message,MessageType,MemoryFragment,Emoji,EmojiCategory,AppID,YesterdayNewspaperPeriodType,YesterdayNewspaperRecord,type ManualPhotoGenerationOptions,type PhotoDirectorResult,type PhotoHintTrigger,type PhotoMeta,type PhotoStylePreset,type SavedVibeEncoding,type SavedVibeReference,type VibeReferenceInput } from '../types';
+import { Message,MessageType,MemoryFragment,Emoji,EmojiCategory,AppID,YesterdayNewspaperPeriodType,YesterdayNewspaperRecord,type ImageGenerationConfig,type ManualPhotoGenerationOptions,type MemoryRecord,type PhotoDirectorResult,type PhotoHintTrigger,type PhotoMeta,type PhotoStylePreset,type SavedVibeEncoding,type SavedVibeReference,type VibeReferenceInput } from '../types';
 import { processImage } from '../utils/file';
 import { safeResponseJson } from '../utils/safeApi';
 import { parseBilingual } from '../utils/chatParser';
@@ -20,6 +20,7 @@ import {
 } from '../components/chat/newspaper/YesterdayNewspaper';
 import Modal from '../components/os/Modal';
 import { useChatAI } from '../hooks/useChatAI';
+import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { useVoiceTts } from '../hooks/useVoiceTts';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { CloudStt,SttNotConfiguredError } from '../utils/cloudStt';
@@ -51,6 +52,7 @@ import {
     isImageGenerationConfigured,
     NO_PHOTO_STYLE_PRESET,
     NO_PHOTO_STYLE_PRESET_ID,
+    resolveImageStylePhotoPreset,
     resolvePhotoStylePreset,
     runManualPhotoDirector,
     runPhotoDirector,
@@ -63,7 +65,7 @@ import {
     getSavedVibeEncoding,
     parseNaiv4VibeFile,
 } from '../utils/vibeReferences';
-import { prepareGeneratedImageStorage } from '../utils/generatedImageStorage';
+import { prepareGeneratedImageStorage,resolveOriginalImageUrl } from '../utils/generatedImageStorage';
 import type { SecondaryFullContextOptions } from '../utils/mindSnapshotExtractor';
 import { buildLifeProfileContextSnapshot } from '../utils/lifeProfileContextSnapshot';
 import { formatMemoryArchiveLine,selectMessagesForMemoryArchive } from '../utils/archiveMessageSelector';
@@ -78,6 +80,22 @@ import {
     getCurrentYesterdayNewspaper,
     markCurrentYesterdayNewspaperOpened,
 } from '../utils/yesterdayNewspaper';
+import {
+    buildQuickSongMaterialBundle,
+    buildQuickSongCoverPrompt,
+    chooseQuickSongCoverStyle,
+    generateQuickSongCoverScene,
+    generateQuickSongLyrics,
+    generateQuickSongStylePrompt,
+    generateQuickSongTitle,
+    rewriteQuickSongLyrics,
+    type QuickSongMaterialBundle,
+    type QuickSongCoverStyle,
+    type QuickSongCoverTone,
+} from '../utils/chatQuickSong';
+import { COVER_GRADIENTS,createRecordId,produceMemoryRecordAudio } from '../utils/memoryRecordService';
+import { selectMemoryRecordCover } from '../utils/memoryRecordCovers';
+import { hasPlayableMemoryRecordAudio,memoryRecordToPlayable } from '../utils/memoryRecordPlayable';
 
 const DATE_WORLDLINE_ORB_ENABLED: boolean = false;
 const DateWorldlineOrb = DATE_WORLDLINE_ORB_ENABLED
@@ -101,12 +119,219 @@ function isMainChatVisibleMessage(message: Message): boolean {
 }
 
 const CHAT_HISTORY_RAW_WINDOW_MAX = 1500;
+const QUICK_SONG_RECENT_MESSAGE_LIMIT = 300;
 const EMPTY_PHOTO_STYLE_PRESETS: PhotoStylePreset[] = [];
+const QUICK_SONG_COVER_STYLE_PRESET: PhotoStylePreset = {
+    id: 'quick-song-cover-image2',
+    name: '主题曲封面',
+    providerScope: 'openai-compatible',
+    positivePrompt: '',
+    negativePrompt: 'text, typography, logo, watermark, signature, extra text, low quality, blurry, distorted face, malformed hands, bad anatomy',
+    size: '1024x1024',
+    responseFormat: 'auto',
+    quality: 'high',
+};
+
+type QuickSongFlowStatus =
+    | 'idle'
+    | 'generating_lyrics'
+    | 'draft_ready'
+    | 'generating_song'
+    | 'ready'
+    | 'error';
+
+interface QuickSongDraft {
+    recordId: string;
+    title: string;
+    lyrics: string;
+    stylePrompt: string;
+    coverImageUrl?: string;
+    coverOriginalAssetId?: string;
+    coverPrompt?: string;
+    coverStyle?: QuickSongCoverStyle;
+    coverTone?: QuickSongCoverTone;
+    coverStatus?: 'pending' | 'generated' | 'fallback';
+    coverError?: string;
+    coverErrorDetail?: string;
+    materialText: string;
+    sourceMemoryIds: string[];
+    sourceMessageIds: number[];
+    note?: string;
+}
+
+interface QuickSongDiagnostic {
+    phase: string;
+    message: string;
+    detail: string;
+    model?: string;
+    baseUrl?: string;
+    elapsedMs?: number;
+    materialChars?: number;
+    sourceMessageCount?: number;
+    sourceMemoryCount?: number;
+    timestamp: number;
+}
+
+interface QuickSongCoverBuildResult {
+    coverImageUrl?: string;
+    coverOriginalAssetId?: string;
+    coverPrompt?: string;
+    coverStyle?: QuickSongCoverStyle;
+    coverTone?: QuickSongCoverTone;
+    coverStatus: 'generated' | 'fallback';
+    coverError?: string;
+    coverErrorDetail?: string;
+}
+
+function stringifyUnknownError(error: unknown): string {
+    if (error instanceof Error) {
+        const lines = [`${error.name || 'Error'}: ${error.message}`];
+        if (error.stack) lines.push(error.stack);
+        const cause = (error as Error & { cause?: unknown }).cause;
+        if (cause) lines.push(`cause: ${stringifyUnknownError(cause)}`);
+        return lines.join('\n\n');
+    }
+    if (typeof error === 'string') return error;
+    try {
+        return JSON.stringify(error, null, 2);
+    } catch {
+        return String(error);
+    }
+}
+
+function getQuickSongErrorInfo(error: unknown, fallback: string): { message: string; detail: string } {
+    if (error instanceof Error) {
+        return {
+            message: error.message || fallback,
+            detail: stringifyUnknownError(error),
+        };
+    }
+    if (typeof error === 'string') {
+        return { message: error || fallback, detail: error || fallback };
+    }
+    return {
+        message: fallback,
+        detail: stringifyUnknownError(error),
+    };
+}
+
+function formatQuickSongDiagnostic(diagnostic: QuickSongDiagnostic): string {
+    const lines = [
+        `阶段: ${diagnostic.phase}`,
+        `错误: ${diagnostic.message}`,
+        diagnostic.elapsedMs !== undefined ? `耗时: ${Math.round(diagnostic.elapsedMs / 1000)}s (${diagnostic.elapsedMs}ms)` : '',
+        diagnostic.model ? `模型: ${diagnostic.model}` : '',
+        diagnostic.baseUrl ? `Base URL: ${diagnostic.baseUrl}` : '',
+        diagnostic.materialChars !== undefined ? `素材/输入长度: ${diagnostic.materialChars} chars` : '',
+        diagnostic.sourceMessageCount !== undefined ? `消息数: ${diagnostic.sourceMessageCount}` : '',
+        diagnostic.sourceMemoryCount !== undefined ? `记忆数: ${diagnostic.sourceMemoryCount}` : '',
+        `时间: ${new Date(diagnostic.timestamp).toLocaleString()}`,
+        '',
+        '原始错误:',
+        diagnostic.detail || diagnostic.message,
+    ];
+    return lines.filter((line, index) => line || lines[index - 1]).join('\n');
+}
+
+function getQuickSongStyleChips(stylePrompt: string): string[] {
+    return stylePrompt
+        .split(/[,，、/\n]+/)
+        .map(item => item.trim())
+        .filter(Boolean)
+        .slice(0, 6);
+}
+
+interface QuickSongOpenConfirmDialogProps {
+    record: MemoryRecord;
+    coverUrl: string;
+    onCancel: () => void;
+    onOpenMusic: () => void;
+    onUnavailable: () => void;
+}
+
+const QuickSongOpenConfirmDialog: React.FC<QuickSongOpenConfirmDialogProps> = ({
+    record,
+    coverUrl,
+    onCancel,
+    onOpenMusic,
+    onUnavailable,
+}) => {
+    const { playSong } = useAudioPlayer();
+
+    const handleConfirm = useCallback(() => {
+        if (!hasPlayableMemoryRecordAudio(record)) {
+            onUnavailable();
+            onCancel();
+            return;
+        }
+
+        void playSong(memoryRecordToPlayable(record));
+        onCancel();
+        onOpenMusic();
+    }, [onCancel, onOpenMusic, onUnavailable, playSong, record]);
+
+    return (
+        <div
+            className="quick-song-confirm-layer"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="quick-song-confirm-title"
+        >
+            <button
+                type="button"
+                className="quick-song-confirm-backdrop"
+                onClick={onCancel}
+                aria-label="取消打开主题曲"
+            />
+            <section className="quick-song-confirm-card">
+                <div className="quick-song-confirm-cover">
+                    {coverUrl ? (
+                        <img src={coverUrl} alt={record.title} />
+                    ) : (
+                        <div className="quick-song-confirm-cover-fallback">
+                            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M9 18V5l10-2v13" />
+                                <circle cx="6" cy="18" r="3" />
+                                <circle cx="16" cy="16" r="3" />
+                            </svg>
+                        </div>
+                    )}
+                </div>
+                <div className="quick-song-confirm-kicker">主题曲已生成</div>
+                <h4 id="quick-song-confirm-title">{record.title}</h4>
+                <p>{record.artistName || record.charName} · {record.albumName || '聊天回声'}</p>
+                <div className="quick-song-confirm-actions">
+                    <button
+                        type="button"
+                        className="quick-song-confirm-primary"
+                        onClick={handleConfirm}
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M8 5v14l11-7z" />
+                        </svg>
+                        打开并播放
+                    </button>
+                    <button
+                        type="button"
+                        className="quick-song-confirm-secondary"
+                        onClick={onCancel}
+                    >
+                        先不打开
+                    </button>
+                </div>
+            </section>
+        </div>
+    );
+};
 
 function compareMessageDisplayOrder(a: Message, b: Message): number {
     const timestampDelta = (a.timestamp || 0) - (b.timestamp || 0);
     if (timestampDelta !== 0) return timestampDelta;
     return a.id - b.id;
+}
+
+function isPendingGeneratedImageMessage(message: Message | undefined): boolean {
+    return message?.type === 'image' && message.metadata?.status === 'generating';
 }
 
 function matchesCharacterId(character: { id: string; charInstanceId?: string }, id?: string | null): boolean {
@@ -256,6 +481,7 @@ const Chat: React.FC = () => {
     const pendingTargetScrollRef = useRef(false);
     const messagesRef = useRef<Message[]>(messages);
     const pendingGeneratedImageMessagesRef = useRef<Map<number, Message>>(new Map());
+    const deletedGeneratedImageMessageIdsRef = useRef<Set<number>>(new Set());
     const todayLifeEnsureSeqRef = useRef(0);
     const todayScheduleRequestSeqRef = useRef(0);
     const todayLifeSlowTimerRef = useRef<number | null>(null);
@@ -289,6 +515,15 @@ const Chat: React.FC = () => {
     const [transferActionMsg, setTransferActionMsg] = useState<Message | null>(null);
     const [manualPhotoGenerating, setManualPhotoGenerating] = useState(false);
     const [savedVibeReferences, setSavedVibeReferences] = useState<SavedVibeReference[]>([]);
+    const [showQuickSongPanel, setShowQuickSongPanel] = useState(false);
+    const [quickSongStatus, setQuickSongStatus] = useState<QuickSongFlowStatus>('idle');
+    const [quickSongDraft, setQuickSongDraft] = useState<QuickSongDraft | null>(null);
+    const [quickSongRecord, setQuickSongRecord] = useState<MemoryRecord | null>(null);
+    const [quickSongError, setQuickSongError] = useState('');
+    const [quickSongErrorDetail, setQuickSongErrorDetail] = useState<QuickSongDiagnostic | null>(null);
+    const [quickSongCoverGenerating, setQuickSongCoverGenerating] = useState(false);
+    const [quickSongCoverDisplayUrl, setQuickSongCoverDisplayUrl] = useState('');
+    const [quickSongOpenConfirmRecord, setQuickSongOpenConfirmRecord] = useState<MemoryRecord | null>(null);
 
     // Archive Prompts State
     const [archivePrompts, setArchivePrompts] = useState<{ id: string, name: string, content: string }[]>(DEFAULT_ARCHIVE_PROMPTS);
@@ -380,6 +615,54 @@ const Chat: React.FC = () => {
     }, [isDataLoaded, refreshSavedVibeReferences]);
 
     const activeTheme = useMemo(() => customThemes.find(t => t.id === currentThemeId) || PRESET_THEMES[currentThemeId] || PRESET_THEMES.default, [currentThemeId, customThemes]);
+    const quickSongGenerating = quickSongStatus === 'generating_lyrics' || quickSongStatus === 'generating_song' || quickSongCoverGenerating;
+    const quickSongStatusText = quickSongCoverGenerating
+        ? '封面生成中…'
+        : quickSongStatus === 'generating_lyrics'
+            ? '歌词生成中…'
+            : quickSongStatus === 'generating_song'
+                ? '谱曲中…'
+                : quickSongStatus === 'ready'
+                    ? '已收进唱片架'
+                    : '先写词，确认后谱曲';
+    const quickSongStatusTone = quickSongStatus === 'ready'
+        ? 'done'
+        : quickSongGenerating
+            ? 'live'
+            : quickSongStatus === 'error'
+                ? 'error'
+                : 'idle';
+    const quickSongCoverVisualState = !quickSongDraft
+        ? 'empty'
+        : quickSongCoverGenerating
+            ? 'loading'
+            : quickSongDraft.coverStatus === 'generated'
+                ? 'done'
+                : quickSongDraft.coverStatus === 'fallback'
+                    ? 'fallback'
+                    : 'empty';
+    const quickSongStyleChips = useMemo(
+        () => quickSongDraft ? getQuickSongStyleChips(quickSongDraft.stylePrompt) : [],
+        [quickSongDraft?.stylePrompt],
+    );
+    const quickSongConfirmCoverUrl = quickSongOpenConfirmRecord
+        ? quickSongOpenConfirmRecord.coverImageUrl || selectMemoryRecordCover(quickSongOpenConfirmRecord.id) || ''
+        : '';
+    useEffect(() => {
+        const fallbackUrl = quickSongDraft?.coverImageUrl || '';
+        setQuickSongCoverDisplayUrl(fallbackUrl);
+
+        if (!quickSongDraft?.coverOriginalAssetId || !fallbackUrl) return;
+
+        let cancelled = false;
+        void resolveOriginalImageUrl(quickSongDraft.coverOriginalAssetId, fallbackUrl).then(originalUrl => {
+            if (!cancelled) setQuickSongCoverDisplayUrl(originalUrl);
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [quickSongDraft?.coverImageUrl, quickSongDraft?.coverOriginalAssetId]);
     const characterTtsConfig = useMemo(
         () => ttsConfig && char ? withCharacterTtsVoice(ttsConfig, char) : ttsConfig,
         [ttsConfig, char?.id, char?.ttsVoiceId],
@@ -975,6 +1258,22 @@ const Chat: React.FC = () => {
     // How many messages to load per batch (initial load + each "load more" click)
     const LOAD_BATCH_SIZE = 30;
 
+    const markGeneratedImageMessagesDeleted = useCallback((messageIds: Iterable<number>) => {
+        for (const messageId of messageIds) {
+            if (typeof messageId !== 'number') continue;
+            pendingGeneratedImageMessagesRef.current.delete(messageId);
+            deletedGeneratedImageMessageIdsRef.current.add(messageId);
+        }
+    }, []);
+
+    const clearPendingGeneratedImageMessagesForChar = useCallback((charId: string) => {
+        for (const [messageId, message] of pendingGeneratedImageMessagesRef.current.entries()) {
+            if (message.charId !== charId) continue;
+            pendingGeneratedImageMessagesRef.current.delete(messageId);
+            deletedGeneratedImageMessageIdsRef.current.add(messageId);
+        }
+    }, []);
+
     const mergePendingGeneratedImageMessages = useCallback((baseMessages: Message[]) => {
         const pendingMessages = Array.from(pendingGeneratedImageMessagesRef.current.values());
         if (pendingMessages.length === 0) return baseMessages;
@@ -984,9 +1283,16 @@ const Chat: React.FC = () => {
         let mergedMessages = baseMessages;
 
         for (const pendingMessage of pendingMessages) {
+            if (
+                deletedGeneratedImageMessageIdsRef.current.has(pendingMessage.id)
+                || !isPendingGeneratedImageMessage(pendingMessage)
+            ) {
+                pendingGeneratedImageMessagesRef.current.delete(pendingMessage.id);
+                continue;
+            }
             if (existingIds.has(pendingMessage.id)) {
                 const persistedMessage = baseMessages.find(message => message.id === pendingMessage.id);
-                if (persistedMessage?.metadata?.status === 'ready') {
+                if (!isPendingGeneratedImageMessage(persistedMessage)) {
                     pendingGeneratedImageMessagesRef.current.delete(pendingMessage.id);
                 }
                 continue;
@@ -1005,8 +1311,17 @@ const Chat: React.FC = () => {
     const upsertGeneratedImageMessage = useCallback((imageMessage: Message, replacedMessageId?: number) => {
         if (replacedMessageId && replacedMessageId !== imageMessage.id) {
             pendingGeneratedImageMessagesRef.current.delete(replacedMessageId);
+            deletedGeneratedImageMessageIdsRef.current.add(replacedMessageId);
         }
-        pendingGeneratedImageMessagesRef.current.set(imageMessage.id, imageMessage);
+        if (deletedGeneratedImageMessageIdsRef.current.has(imageMessage.id)) {
+            pendingGeneratedImageMessagesRef.current.delete(imageMessage.id);
+            return;
+        }
+        if (isPendingGeneratedImageMessage(imageMessage)) {
+            pendingGeneratedImageMessagesRef.current.set(imageMessage.id, imageMessage);
+        } else {
+            pendingGeneratedImageMessagesRef.current.delete(imageMessage.id);
+        }
         setMessages(prev => {
             const baseMessages = replacedMessageId && replacedMessageId !== imageMessage.id
                 ? prev.filter(message => message.id !== replacedMessageId)
@@ -1031,13 +1346,13 @@ const Chat: React.FC = () => {
     }, []);
 
     const removeGeneratedImageMessage = useCallback((messageId: number) => {
-        pendingGeneratedImageMessagesRef.current.delete(messageId);
+        markGeneratedImageMessagesDeleted([messageId]);
         setMessages(prev => {
             const next = prev.filter(message => message.id !== messageId);
             messagesRef.current = next;
             return next;
         });
-    }, []);
+    }, [markGeneratedImageMessagesDeleted]);
 
     const reloadMessages = useCallback(async (requestedVisibleCount: number) => {
         if (!activeCharacterId) return;
@@ -1522,6 +1837,7 @@ const Chat: React.FC = () => {
 
         if (toDeleteIds.length === 0) return;
 
+        markGeneratedImageMessagesDeleted(toDeleteIds);
         await DB.deleteMessages(toDeleteIds);
         const newHistory = rerollableMessages.slice(0, index + 1);
         setMessages(newHistory);
@@ -1571,6 +1887,13 @@ const Chat: React.FC = () => {
     ) => {
         const timestamp = Date.now();
         const imageId = `photo-${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
+        if (pendingMessageId && deletedGeneratedImageMessageIdsRef.current.has(pendingMessageId)) {
+            console.info('[Photo] skipped saving generated image because its pending chat message was deleted', {
+                pendingMessageId,
+                imageId,
+            });
+            return;
+        }
         const contentCharId = await DB.resolveCharacterContentId(charId);
         const imageStorage = await prepareGeneratedImageStorage(imageId, dataUrl);
         const messageTimestamp = pendingMessageId
@@ -1934,7 +2257,7 @@ const Chat: React.FC = () => {
             const userAppearanceNegativeTags = includeUserAppearance && isNaiProvider ? (optionUserAppearanceNegativeTags ?? userProfile.naiAppearanceNegativeTags ?? '').trim() : '';
             const appearancePrompt = includeAppearance ? (optionAppearancePrompt ?? char.photoAppearancePrompt ?? '').trim() : '';
             const userAppearancePrompt = includeUserAppearance ? (optionUserAppearancePrompt ?? userProfile.photoAppearancePrompt ?? '').trim() : '';
-            const style = resolvePhotoStylePreset(stylePresetId, activePhotoStylePresets, char, effectiveImageGenerationConfig.activeProvider, {
+            const style = resolveImageStylePhotoPreset(stylePresetId, activePhotoStylePresets, char, effectiveImageGenerationConfig, includeUserAppearance, {
                 allowUnboundRequested: Boolean(stylePresetId),
             });
             const seed = Math.floor(Math.random() * 9999999999);
@@ -2153,15 +2476,17 @@ const Chat: React.FC = () => {
                         ...director,
                         shouldGeneratePhoto: true,
                     };
-                    const style = resolvePhotoStylePreset(finalDirector.stylePresetId, photoStylePresetsForJob, payload.char, imageConfigForJob.activeProvider);
+                    const includeAppearance = true;
+                    const includeUserAppearance = shouldIncludeUserAppearanceForPhoto(finalDirector, payload.aiReply, payload.hint);
+                    const style = imageConfigForJob.activeProvider === 'openai-compatible'
+                        ? resolveImageStylePhotoPreset(undefined, photoStylePresetsForJob, payload.char, imageConfigForJob, includeUserAppearance)
+                        : resolvePhotoStylePreset(finalDirector.stylePresetId, photoStylePresetsForJob, payload.char, imageConfigForJob.activeProvider);
                     console.info('[AutoPhoto] selected preset', {
                         selectedPresetId: style.id,
                         selectedPresetName: style.name,
                         providerScope: style.providerScope,
                         requestedPresetId: finalDirector.stylePresetId,
                     });
-                    const includeAppearance = true;
-                    const includeUserAppearance = shouldIncludeUserAppearanceForPhoto(finalDirector, payload.aiReply, payload.hint);
                     const prompts = buildPhotoPromptFromDirector(finalDirector, payload.hint, style, imageConfigForJob, {
                         appearanceTags: isNaiProvider ? payload.char.naiAppearanceTags : '',
                         appearanceNegativeTags: isNaiProvider ? payload.char.naiAppearanceNegativeTags : '',
@@ -2223,10 +2548,450 @@ const Chat: React.FC = () => {
     }, [addToast, buildDefaultVibeReferencesForChar, createPendingGeneratedImageMessage, effectiveImageGenerationConfig, effectivePhotoStylePresets, handleVibeReferenceEncoded, prepareVibeReferencesForGeneration, removeGeneratedImageMessage, saveGeneratedPhoto]);
     photoHintHandlerRef.current = handlePhotoHint;
 
+    const buildQuickSongCoverImageConfig = useCallback((): ImageGenerationConfig => ({
+        ...effectiveImageGenerationConfig,
+        activeProvider: 'openai-compatible',
+        openaiCompatible: {
+            ...effectiveImageGenerationConfig.openaiCompatible,
+            size: '1024x1024',
+        },
+    }), [effectiveImageGenerationConfig]);
+
+    const generateQuickSongCoverForRecord = useCallback(async (
+        recordId: string,
+        lyrics: string,
+        stylePrompt: string,
+    ): Promise<QuickSongCoverBuildResult> => {
+        const fallbackCover = selectMemoryRecordCover(recordId);
+        const imageConfig = buildQuickSongCoverImageConfig();
+        const directorConfig = selectSecondaryApiConfig() || apiConfig;
+
+        if (!isImageGenerationConfigured(imageConfig)) {
+            return {
+                coverImageUrl: fallbackCover,
+                coverStatus: 'fallback',
+                coverError: '封面暂时画不出来，已用默认封面。',
+                coverErrorDetail: 'image2 / OpenAI 兼容生图配置不可用：请检查生图 API Key、Base URL、模型和 activeProvider。',
+            };
+        }
+        if (!directorConfig?.apiKey || !directorConfig.baseUrl || !directorConfig.model) {
+            return {
+                coverImageUrl: fallbackCover,
+                coverStatus: 'fallback',
+                coverError: '封面画面暂时生成不了，已用默认封面。',
+                coverErrorDetail: '副模型配置不可用：缺少 API Key、Base URL 或 model，无法把歌词转成封面画面。',
+            };
+        }
+
+        try {
+            const sceneResult = await generateQuickSongCoverScene({
+                apiConfig: directorConfig,
+                lyrics,
+                stylePrompt,
+            });
+            const styleChoice = await chooseQuickSongCoverStyle({
+                apiConfig: directorConfig,
+                lockedMoment: sceneResult.lockedMoment,
+                stylePrompt,
+            });
+            const coverPrompt = buildQuickSongCoverPrompt({
+                scene: sceneResult.scene,
+                style: styleChoice.style,
+                tone: styleChoice.tone,
+                characterAppearancePrompt: char?.photoAppearancePrompt,
+            });
+            const prompts = buildManualPhotoPrompt(coverPrompt.prompt, QUICK_SONG_COVER_STYLE_PRESET, imageConfig, {
+                includeAppearance: false,
+                includeUserAppearance: false,
+            });
+            const meta = createPhotoMeta(
+                'manual',
+                imageConfig,
+                QUICK_SONG_COVER_STYLE_PRESET,
+                prompts,
+                Math.floor(Math.random() * 9999999999),
+            );
+            const result = await generatePhotoImage(imageConfig, meta);
+            const imageId = `quick-song-cover-${recordId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const storage = await prepareGeneratedImageStorage(imageId, result.dataUrl);
+
+            return {
+                coverImageUrl: storage.displayUrl,
+                coverOriginalAssetId: storage.originalAssetId,
+                coverPrompt: coverPrompt.prompt,
+                coverStyle: coverPrompt.style,
+                coverTone: coverPrompt.tone,
+                coverStatus: 'generated',
+            };
+        } catch (error) {
+            const info = getQuickSongErrorInfo(error, '封面生成失败');
+            console.warn('[QuickSong] cover generation fallback:', error);
+            return {
+                coverImageUrl: fallbackCover,
+                coverStatus: 'fallback',
+                coverError: info.message,
+                coverErrorDetail: info.detail,
+            };
+        }
+    }, [apiConfig, buildQuickSongCoverImageConfig, char?.photoAppearancePrompt]);
+
+    const resetQuickSongDraft = useCallback(() => {
+        setQuickSongStatus('idle');
+        setQuickSongDraft(null);
+        setQuickSongRecord(null);
+        setQuickSongError('');
+        setQuickSongErrorDetail(null);
+        setQuickSongCoverGenerating(false);
+        setQuickSongOpenConfirmRecord(null);
+    }, []);
+
+    const handleOpenQuickSong = useCallback(() => {
+        setShowPanel('none');
+        setShowQuickSongPanel(true);
+        if (!quickSongDraft && !quickSongGenerating) {
+            setQuickSongStatus('idle');
+            setQuickSongError('');
+            setQuickSongErrorDetail(null);
+        }
+        haptic.light();
+    }, [quickSongDraft, quickSongGenerating]);
+
+    const handleGenerateQuickSongDraft = useCallback(async () => {
+        if (!char) return;
+        if (!apiConfig.apiKey || !apiConfig.baseUrl || !apiConfig.model) {
+            addToast('请先配置主模型 API', 'error');
+            return;
+        }
+        if (quickSongGenerating) return;
+
+        setQuickSongStatus('generating_lyrics');
+        setQuickSongError('');
+        setQuickSongErrorDetail(null);
+        setQuickSongDraft(null);
+        setQuickSongRecord(null);
+
+        const startedAt = Date.now();
+        let phase = '取材';
+        let materialBundle: QuickSongMaterialBundle | null = null;
+
+        try {
+            const [recentWindow, memories] = await Promise.all([
+                DB.getRecentMessageWindow(char.id, QUICK_SONG_RECENT_MESSAGE_LIMIT),
+                DB.getVectorMemoryHeaders(char.id),
+            ]);
+            const visibleMessages = getDisplayableMainChatMessages(recentWindow.messages, {
+                hideBeforeMessageId: char.hideBeforeMessageId,
+                hideSystemLogs: char.hideSystemLogs,
+            }).slice(-QUICK_SONG_RECENT_MESSAGE_LIMIT);
+            materialBundle = buildQuickSongMaterialBundle({
+                messages: visibleMessages,
+                memories,
+                char,
+                userProfile,
+            });
+            phase = '写歌词';
+            const firstPass = await generateQuickSongLyrics({
+                apiConfig,
+                char,
+                userProfile,
+                materialText: materialBundle.materialText,
+            });
+            phase = '质检改写';
+            const rewritten = await rewriteQuickSongLyrics({
+                apiConfig,
+                char,
+                userProfile,
+                materialText: materialBundle.materialText,
+                lyrics: firstPass.lyrics,
+            });
+            phase = '生成歌名';
+            let generatedTitle = rewritten.title || firstPass.title;
+            try {
+                const titleResult = await generateQuickSongTitle({
+                    apiConfig: selectSecondaryApiConfig() || apiConfig,
+                    lyrics: rewritten.lyrics,
+                });
+                if (titleResult.title) generatedTitle = titleResult.title;
+            } catch (titleError) {
+                console.warn('[QuickSong] title generation fallback:', titleError);
+            }
+            phase = '生成曲风';
+            const styleResult = await generateQuickSongStylePrompt({
+                apiConfig: selectSecondaryApiConfig() || apiConfig,
+                lyrics: rewritten.lyrics,
+            });
+
+            phase = '保存草稿';
+            const now = Date.now();
+            const recordId = createRecordId();
+            const fallbackCover = selectMemoryRecordCover(recordId);
+            const record: MemoryRecord = {
+                id: recordId,
+                charId: char.id,
+                charName: char.name,
+                userName: userProfile.name || '你',
+                mode: 'relationship_theme',
+                status: 'draft',
+                title: generatedTitle,
+                albumName: '聊天回声',
+                artistName: char.name,
+                monologueText: '',
+                lyrics: rewritten.lyrics,
+                musicPrompt: styleResult.stylePrompt,
+                stylePrompt: styleResult.stylePrompt,
+                songRequest: {
+                    theme: '从当前聊天里挑一个具体瞬间写成歌',
+                    mood: '克制、具体、有人味',
+                    style: styleResult.stylePrompt,
+                    perspective: `${char.name}与${userProfile.name || '用户'}之间的这一刻`,
+                    extraRequirements: '不要写关系总结，不要空泛大词。',
+                },
+                inspirationReference: '聊天页快捷生歌',
+                coverImageUrl: fallbackCover,
+                coverGradient: COVER_GRADIENTS[Math.floor(Math.random() * COVER_GRADIENTS.length)],
+                seedMemoryIds: materialBundle.sourceMemoryIds,
+                createdAt: now,
+                updatedAt: now,
+            };
+
+            await DB.saveMemoryRecord(record);
+            setQuickSongRecord(record);
+            setQuickSongDraft({
+                recordId,
+                title: record.title,
+                lyrics: record.lyrics,
+                stylePrompt: record.musicPrompt,
+                coverImageUrl: fallbackCover,
+                coverStatus: 'pending',
+                materialText: materialBundle.materialText,
+                sourceMemoryIds: materialBundle.sourceMemoryIds,
+                sourceMessageIds: materialBundle.sourceMessageIds,
+                note: rewritten.note,
+            });
+            setQuickSongStatus('draft_ready');
+            addToast('歌词好了', 'success');
+        } catch (error) {
+            const info = getQuickSongErrorInfo(error, '主题曲生成失败');
+            const diagnostic: QuickSongDiagnostic = {
+                phase,
+                message: info.message,
+                detail: info.detail,
+                model: apiConfig.model,
+                baseUrl: apiConfig.baseUrl,
+                elapsedMs: Date.now() - startedAt,
+                materialChars: materialBundle?.materialText.length,
+                sourceMessageCount: materialBundle?.sourceMessageIds.length,
+                sourceMemoryCount: materialBundle?.sourceMemoryIds.length,
+                timestamp: Date.now(),
+            };
+            setQuickSongStatus('error');
+            setQuickSongError(`${phase}失败：${info.message}`);
+            setQuickSongErrorDetail(diagnostic);
+            addToast(`${phase}失败`, 'error');
+        }
+    }, [addToast, apiConfig, char, quickSongGenerating, userProfile]);
+
+    const updateQuickSongDraftField = useCallback((field: 'title' | 'lyrics' | 'stylePrompt', value: string) => {
+        setQuickSongDraft(previous => previous ? { ...previous, [field]: value } : previous);
+    }, []);
+
+    const handleRegenerateQuickSongCover = useCallback(async () => {
+        if (!quickSongDraft) return;
+        if (quickSongCoverGenerating) return;
+
+        setQuickSongCoverGenerating(true);
+        setQuickSongError('');
+        setQuickSongErrorDetail(null);
+        setQuickSongDraft(previous => previous ? { ...previous, coverError: undefined, coverErrorDetail: undefined } : previous);
+        const startedAt = Date.now();
+
+        try {
+            const storedRecord = quickSongRecord || await DB.getMemoryRecordById(quickSongDraft.recordId);
+            if (!storedRecord) throw new Error('没有找到这张主题曲草稿');
+
+            const coverResult = await generateQuickSongCoverForRecord(
+                quickSongDraft.recordId,
+                quickSongDraft.lyrics,
+                quickSongDraft.stylePrompt,
+            );
+            const nextRecord: MemoryRecord = {
+                ...storedRecord,
+                coverImageUrl: coverResult.coverImageUrl,
+                coverOriginalAssetId: coverResult.coverOriginalAssetId,
+                coverPrompt: coverResult.coverPrompt,
+                coverStyle: coverResult.coverStyle,
+                coverTone: coverResult.coverTone,
+                updatedAt: Date.now(),
+            };
+            await DB.saveMemoryRecord(nextRecord);
+            setQuickSongRecord(nextRecord);
+            setQuickSongDraft(previous => previous ? {
+                ...previous,
+                coverImageUrl: coverResult.coverImageUrl,
+                coverOriginalAssetId: coverResult.coverOriginalAssetId,
+                coverPrompt: coverResult.coverPrompt,
+                coverStyle: coverResult.coverStyle,
+                coverTone: coverResult.coverTone,
+                coverStatus: coverResult.coverStatus,
+                coverError: coverResult.coverError,
+                coverErrorDetail: coverResult.coverErrorDetail,
+            } : previous);
+            if (coverResult.coverStatus === 'fallback') {
+                const directorConfig = selectSecondaryApiConfig() || apiConfig;
+                setQuickSongErrorDetail({
+                    phase: '画封面',
+                    message: coverResult.coverError || '封面生成失败，已回退默认图',
+                    detail: coverResult.coverErrorDetail || coverResult.coverError || '没有更多错误细节',
+                    model: directorConfig.model,
+                    baseUrl: directorConfig.baseUrl,
+                    elapsedMs: Date.now() - startedAt,
+                    materialChars: quickSongDraft.lyrics.length + quickSongDraft.stylePrompt.length,
+                    sourceMessageCount: quickSongDraft.sourceMessageIds.length,
+                    sourceMemoryCount: quickSongDraft.sourceMemoryIds.length,
+                    timestamp: Date.now(),
+                });
+            }
+            addToast(coverResult.coverStatus === 'generated' ? '封面已换' : '封面暂时画不出来，已用默认图', coverResult.coverStatus === 'generated' ? 'success' : 'info');
+        } catch (error) {
+            const info = getQuickSongErrorInfo(error, '换封面失败');
+            setQuickSongError(`画封面失败：${info.message}`);
+            setQuickSongErrorDetail({
+                phase: '画封面',
+                message: info.message,
+                detail: info.detail,
+                model: (selectSecondaryApiConfig() || apiConfig).model,
+                baseUrl: (selectSecondaryApiConfig() || apiConfig).baseUrl,
+                elapsedMs: Date.now() - startedAt,
+                materialChars: quickSongDraft.lyrics.length + quickSongDraft.stylePrompt.length,
+                sourceMessageCount: quickSongDraft.sourceMessageIds.length,
+                sourceMemoryCount: quickSongDraft.sourceMemoryIds.length,
+                timestamp: Date.now(),
+            });
+            addToast(`画封面失败: ${info.message}`, 'error');
+        } finally {
+            setQuickSongCoverGenerating(false);
+        }
+    }, [addToast, apiConfig, generateQuickSongCoverForRecord, quickSongCoverGenerating, quickSongDraft, quickSongRecord]);
+
+    const handleConfirmQuickSong = useCallback(async () => {
+        if (!char || !quickSongDraft) return;
+        if (!ttsConfig?.apiKey) {
+            addToast('请先在全局设置中配置 MiniMax API Key', 'error');
+            return;
+        }
+        if (!quickSongDraft.title.trim() || !quickSongDraft.lyrics.trim() || !quickSongDraft.stylePrompt.trim()) {
+            addToast('歌名、歌词和曲风不能为空', 'info');
+            return;
+        }
+        if (quickSongGenerating) return;
+
+        setQuickSongStatus('generating_song');
+        setQuickSongError('');
+        setQuickSongErrorDetail(null);
+        const startedAt = Date.now();
+
+        try {
+            const storedRecord = quickSongRecord || await DB.getMemoryRecordById(quickSongDraft.recordId);
+            if (!storedRecord) throw new Error('没有找到这张主题曲草稿');
+
+            const nextRecord: MemoryRecord = {
+                ...storedRecord,
+                title: quickSongDraft.title.trim(),
+                lyrics: quickSongDraft.lyrics.trim(),
+                musicPrompt: quickSongDraft.stylePrompt.trim(),
+                stylePrompt: quickSongDraft.stylePrompt.trim(),
+                coverImageUrl: quickSongDraft.coverImageUrl || storedRecord.coverImageUrl,
+                coverOriginalAssetId: quickSongDraft.coverOriginalAssetId || storedRecord.coverOriginalAssetId,
+                coverPrompt: quickSongDraft.coverPrompt || storedRecord.coverPrompt,
+                coverStyle: quickSongDraft.coverStyle || storedRecord.coverStyle,
+                coverTone: quickSongDraft.coverTone || storedRecord.coverTone,
+                status: 'draft',
+                error: undefined,
+                updatedAt: Date.now(),
+            };
+            await DB.saveMemoryRecord(nextRecord);
+            setQuickSongRecord(nextRecord);
+
+            const finalRecord = await produceMemoryRecordAudio({
+                record: nextRecord,
+                char,
+                ttsConfig,
+                onRecordUpdate: setQuickSongRecord,
+            });
+            setQuickSongRecord(finalRecord);
+
+            if (finalRecord.status !== 'ready') {
+                const message = finalRecord.error || '歌曲还没生成完成，可以稍后在唱片架重试';
+                setQuickSongStatus('error');
+                setQuickSongError(message);
+                setQuickSongErrorDetail({
+                    phase: '谱曲',
+                    message,
+                    detail: finalRecord.error || `MiniMax 返回状态: ${finalRecord.status}`,
+                    model: 'music-2.6-free',
+                    elapsedMs: Date.now() - startedAt,
+                    materialChars: quickSongDraft.lyrics.trim().length + quickSongDraft.stylePrompt.trim().length,
+                    sourceMessageCount: quickSongDraft.sourceMessageIds.length,
+                    sourceMemoryCount: quickSongDraft.sourceMemoryIds.length,
+                    timestamp: Date.now(),
+                });
+                addToast(message, finalRecord.error ? 'error' : 'info');
+                return;
+            }
+
+            setQuickSongStatus('ready');
+            await DB.saveMessage({
+                charId: char.id,
+                role: 'system',
+                type: 'system',
+                content: `已生成聊天回声唱片《${finalRecord.title}》，可以去 Emo Cloud 播放，也会留在回声唱片里。`,
+                metadata: {
+                    source: 'chat_quick_song',
+                    memoryRecordId: finalRecord.id,
+                    title: finalRecord.title,
+                },
+            });
+            await reloadMessages(visibleCountRef.current);
+            setQuickSongOpenConfirmRecord(finalRecord);
+            addToast('已收进唱片架', 'success');
+        } catch (error) {
+            const info = getQuickSongErrorInfo(error, '歌曲生成失败');
+            setQuickSongStatus('error');
+            setQuickSongError(`谱曲失败：${info.message}`);
+            setQuickSongErrorDetail({
+                phase: '谱曲',
+                message: info.message,
+                detail: info.detail,
+                model: 'music-2.6-free',
+                elapsedMs: Date.now() - startedAt,
+                materialChars: quickSongDraft.lyrics.trim().length + quickSongDraft.stylePrompt.trim().length,
+                sourceMessageCount: quickSongDraft.sourceMessageIds.length,
+                sourceMemoryCount: quickSongDraft.sourceMemoryIds.length,
+                timestamp: Date.now(),
+            });
+            addToast(`谱曲失败: ${info.message}`, 'error');
+        }
+    }, [addToast, char, quickSongDraft, quickSongGenerating, quickSongRecord, reloadMessages, ttsConfig]);
+
+    const handleRequestOpenQuickSongRecord = useCallback(() => {
+        if (!quickSongRecord) {
+            addToast('没有找到这首主题曲', 'info');
+            return;
+        }
+        if (quickSongRecord.status !== 'ready' || !hasPlayableMemoryRecordAudio(quickSongRecord)) {
+            addToast('歌曲音频还没准备好', 'info');
+            return;
+        }
+
+        setQuickSongOpenConfirmRecord(quickSongRecord);
+        haptic.light();
+    }, [addToast, quickSongRecord]);
+
     const handlePanelAction = (type: string, payload?: any) => {
         switch (type) {
             case 'transfer': setModalType('transfer'); break;
             case 'manual-photo': setModalType('manual-photo'); break;
+            case 'quick-song': handleOpenQuickSong(); break;
             case 'poke': handleSendText('[戳一戳]', 'interaction'); break;
             case 'archive': setModalType('archive-settings'); break;
             case 'settings': setModalType('chat-settings'); break;
@@ -2517,8 +3282,10 @@ const Chat: React.FC = () => {
                 addToast('消息太少，无需清理', 'info');
                 return;
             }
-            await DB.deleteMessages(toDelete.map(m => m.id));
-            removeDeletedPhoneRecordLinks(toDelete.map(m => m.id));
+            const toDeleteIds = toDelete.map(m => m.id);
+            markGeneratedImageMessagesDeleted(toDeleteIds);
+            await DB.deleteMessages(toDeleteIds);
+            removeDeletedPhoneRecordLinks(toDeleteIds);
             setMessages(toKeep);
             setHasMoreHistory(false);
             setVisibleCount(LOAD_BATCH_SIZE);
@@ -2528,6 +3295,8 @@ const Chat: React.FC = () => {
             const linkedPhoneMessageIds = (char.phoneState?.records || [])
                 .map(record => record.systemMessageId)
                 .filter((id): id is number => typeof id === 'number');
+            markGeneratedImageMessagesDeleted(messages.map(m => m.id));
+            clearPendingGeneratedImageMessagesForChar(char.id);
             await DB.clearMessages(char.id);
             removeDeletedPhoneRecordLinks(linkedPhoneMessageIds);
             setMessages([]);
@@ -2639,6 +3408,7 @@ const Chat: React.FC = () => {
         if (selectedMessage.type === 'voice') {
             await DB.deleteVoiceAudio(selectedMessage.id);
         }
+        markGeneratedImageMessagesDeleted([selectedMessage.id]);
         await DB.deleteMessage(selectedMessage.id);
         removeDeletedPhoneRecordLinks([selectedMessage.id]);
         setMessages(prev => prev.filter(m => m.id !== selectedMessage.id));
@@ -2912,6 +3682,7 @@ const Chat: React.FC = () => {
         for (const vid of voiceMsgIds) {
             await DB.deleteVoiceAudio(vid);
         }
+        markGeneratedImageMessagesDeleted(selectedMsgIds);
         await DB.deleteMessages(Array.from(selectedMsgIds));
         removeDeletedPhoneRecordLinks(selectedMsgIds);
         setMessages(prev => prev.filter(m => !selectedMsgIds.has(m.id)));
@@ -3335,6 +4106,275 @@ const Chat: React.FC = () => {
                 onSaveNaiAppearance={handleSaveNaiAppearance}
             />
 
+            {showQuickSongPanel ? (
+                <div className="quick-song-overlay">
+                    <div
+                        className="quick-song-backdrop"
+                        onClick={() => {
+                            setQuickSongOpenConfirmRecord(null);
+                            setShowQuickSongPanel(false);
+                        }}
+                    />
+                    <section
+                        data-testid="quick-song-panel"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="主题曲"
+                        className="quick-song-sheet"
+                    >
+                        <div className="quick-song-grab" />
+                        <div className="quick-song-topbar">
+                            <h3>主题曲</h3>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setQuickSongOpenConfirmRecord(null);
+                                    setShowQuickSongPanel(false);
+                                }}
+                                className="quick-song-icon-btn"
+                                aria-label="关闭"
+                            >
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                                    <path d="M6 6l12 12M18 6L6 18" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className="quick-song-body no-scrollbar">
+                            <div className={`quick-song-status quick-song-status-${quickSongStatusTone}`}>
+                                <span className="quick-song-status-dot" />
+                                <span>{quickSongStatusText}</span>
+                            </div>
+
+                            {!quickSongDraft ? (
+                                <div className="quick-song-empty-note">
+                                    谱曲需要 MiniMax API Key。
+                                </div>
+                            ) : (
+                                <>
+                                    <section className="quick-song-cover-wrap">
+                                        <div className="quick-song-eyebrow"><span>封面</span></div>
+                                        <div className={`quick-song-cover quick-song-cover-${quickSongCoverVisualState}`}>
+                                            {(quickSongCoverVisualState === 'done' || quickSongCoverVisualState === 'fallback') && quickSongCoverDisplayUrl ? (
+                                                <img
+                                                    src={quickSongCoverDisplayUrl}
+                                                    alt={quickSongDraft.title || '主题曲封面'}
+                                                    className="quick-song-cover-img"
+                                                />
+                                            ) : null}
+                                            {quickSongCoverVisualState === 'loading' ? (
+                                                <div className="quick-song-cover-shimmer">
+                                                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                                                        <path d="M9 18V5l10-2v13" />
+                                                        <circle cx="6" cy="18" r="3" />
+                                                        <circle cx="16" cy="16" r="3" />
+                                                    </svg>
+                                                </div>
+                                            ) : null}
+                                            {quickSongCoverVisualState === 'empty' ? (
+                                                <div className="quick-song-cover-placeholder">
+                                                    <span>
+                                                        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                                                            <rect x="3" y="5" width="18" height="14" rx="2.5" />
+                                                            <path d="M3 16l4-4 3 3 4-5 7 7" />
+                                                            <circle cx="8.5" cy="9.5" r="1.3" />
+                                                        </svg>
+                                                    </span>
+                                                </div>
+                                            ) : null}
+                                            {(quickSongCoverVisualState === 'done' || quickSongCoverVisualState === 'fallback') && quickSongStatus !== 'ready' ? (
+                                                <button
+                                                    type="button"
+                                                    disabled={quickSongCoverGenerating || quickSongStatus === 'generating_song'}
+                                                    onClick={handleRegenerateQuickSongCover}
+                                                    className="quick-song-cover-reroll"
+                                                    aria-label={quickSongCoverGenerating ? '生成中…' : quickSongDraft.coverStatus === 'pending' ? '画封面' : '换一张封面'}
+                                                >
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M21 12a9 9 0 1 1-2.6-6.4" />
+                                                        <path d="M21 3v5h-5" />
+                                                    </svg>
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                        <div className="quick-song-cover-copy">
+                                            <span className={quickSongDraft.coverStatus === 'fallback' || quickSongDraft.coverError ? 'quick-song-cover-swatch' : undefined} />
+                                            <span>
+                                                {quickSongCoverGenerating
+                                                    ? '封面生成中…'
+                                                    : quickSongDraft.coverStatus === 'generated'
+                                                        ? '封面已生成。'
+                                                        : quickSongDraft.coverStatus === 'fallback'
+                                                            ? '封面暂时画不出来，已用默认图。'
+                                                            : '还没画封面。'}
+                                            </span>
+                                        </div>
+                                        {quickSongDraft.coverStyle || quickSongDraft.coverTone ? (
+                                            <div className="quick-song-cover-meta">
+                                                {quickSongDraft.coverStyle || 'cover'} / {quickSongDraft.coverTone || 'tone'}
+                                            </div>
+                                        ) : null}
+                                        {quickSongDraft.coverError ? (
+                                            <div className="quick-song-cover-error">
+                                                <span className="quick-song-cover-swatch" />
+                                                <span>{quickSongDraft.coverError}</span>
+                                            </div>
+                                        ) : null}
+                                    </section>
+
+                                    <label className="quick-song-field">
+                                        <span className="quick-song-eyebrow"><span>歌名</span></span>
+                                        <input
+                                            value={quickSongDraft.title}
+                                            onChange={event => updateQuickSongDraftField('title', event.target.value)}
+                                            className="quick-song-title-input"
+                                        />
+                                    </label>
+
+                                    <label className="quick-song-field">
+                                        <span className="quick-song-eyebrow"><span>歌词</span></span>
+                                        <textarea
+                                            value={quickSongDraft.lyrics}
+                                            onChange={event => updateQuickSongDraftField('lyrics', event.target.value)}
+                                            className="quick-song-lyrics-input"
+                                            spellCheck={false}
+                                        />
+                                    </label>
+
+                                    <label className="quick-song-field">
+                                        <span className="quick-song-eyebrow"><span>曲风</span></span>
+                                        {quickSongStyleChips.length > 0 ? (
+                                            <div className="quick-song-chips">
+                                                {quickSongStyleChips.map((chip, index) => (
+                                                    <span key={`${chip}-${index}`} className="quick-song-chip">{chip}</span>
+                                                ))}
+                                            </div>
+                                        ) : null}
+                                        <textarea
+                                            value={quickSongDraft.stylePrompt}
+                                            onChange={event => updateQuickSongDraftField('stylePrompt', event.target.value)}
+                                            className="quick-song-prompt-input"
+                                            spellCheck={false}
+                                        />
+                                    </label>
+
+                                    {quickSongDraft.note ? (
+                                        <div className="quick-song-empty-note">
+                                            {quickSongDraft.note}
+                                        </div>
+                                    ) : null}
+                                </>
+                            )}
+
+                            {quickSongError ? (
+                                <div className="quick-song-error-line">
+                                    <span className="quick-song-error-dot" />
+                                    <span>{quickSongError}</span>
+                                </div>
+                            ) : null}
+                            {quickSongErrorDetail ? (
+                                <details className="quick-song-debug">
+                                    <summary>
+                                        <span className="quick-song-debug-left">
+                                            <span className="quick-song-error-dot" />
+                                            <span>详细报错</span>
+                                        </span>
+                                        <svg className="quick-song-debug-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                                            <path d="M6 9l6 6 6-6" />
+                                        </svg>
+                                    </summary>
+                                    <pre>{formatQuickSongDiagnostic(quickSongErrorDetail)}</pre>
+                                </details>
+                            ) : null}
+                        </div>
+
+                        <div className="quick-song-actions">
+                            {quickSongDraft ? (
+                                <>
+                                    <div className="quick-song-row-2">
+                                        <button
+                                            type="button"
+                                            disabled={quickSongCoverGenerating || quickSongStatus === 'generating_song' || quickSongStatus === 'ready'}
+                                            onClick={handleRegenerateQuickSongCover}
+                                            className="quick-song-btn quick-song-btn-ghost"
+                                        >
+                                            {quickSongCoverGenerating ? '生成中…' : quickSongDraft.coverStatus === 'pending' ? '画封面' : '换一张封面'}
+                                        </button>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        disabled={quickSongGenerating}
+                                        onClick={quickSongStatus === 'ready' ? handleRequestOpenQuickSongRecord : handleConfirmQuickSong}
+                                        className="quick-song-btn quick-song-btn-primary"
+                                    >
+                                        {quickSongStatus === 'generating_song' ? '谱曲中…' : quickSongStatus === 'ready' ? '打开并播放' : '谱曲吧'}
+                                    </button>
+                                    <div className="quick-song-row-text">
+                                        <button
+                                            type="button"
+                                            disabled={quickSongGenerating}
+                                            onClick={resetQuickSongDraft}
+                                            className="quick-song-text-btn"
+                                        >
+                                            重新开始
+                                        </button>
+                                        <span className="quick-song-text-sep" />
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setQuickSongOpenConfirmRecord(null);
+                                                setShowQuickSongPanel(false);
+                                            }}
+                                            className="quick-song-text-btn"
+                                        >
+                                            关闭
+                                        </button>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <button
+                                        type="button"
+                                        disabled={quickSongGenerating}
+                                        onClick={handleGenerateQuickSongDraft}
+                                        className="quick-song-btn quick-song-btn-primary quick-song-btn-solo"
+                                    >
+                                        {quickSongStatus === 'generating_lyrics' ? '歌词生成中…' : '写歌词'}
+                                    </button>
+                                    <div className="quick-song-row-text">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setQuickSongOpenConfirmRecord(null);
+                                                setShowQuickSongPanel(false);
+                                            }}
+                                            className="quick-song-text-btn"
+                                        >
+                                            关闭
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </section>
+
+                    {quickSongOpenConfirmRecord ? (
+                        <QuickSongOpenConfirmDialog
+                            record={quickSongOpenConfirmRecord}
+                            coverUrl={quickSongConfirmCoverUrl}
+                            onCancel={() => setQuickSongOpenConfirmRecord(null)}
+                            onUnavailable={() => addToast('歌曲音频还没准备好', 'info')}
+                            onOpenMusic={() => {
+                                const recordId = quickSongOpenConfirmRecord.id;
+                                setQuickSongOpenConfirmRecord(null);
+                                setShowQuickSongPanel(false);
+                                openApp(AppID.Music, { autoShowPlayer: true, memoryRecordId: recordId });
+                            }}
+                        />
+                    ) : null}
+                </div>
+            ) : null}
+
             <ChatHeader
                 selectionMode={selectionMode}
                 selectedCount={selectedMsgIds.size}
@@ -3561,6 +4601,7 @@ const Chat: React.FC = () => {
                     onPanelAction={handlePanelAction}
                     onImageSelect={handleImageSelect}
                     manualPhotoEnabled={!!char.manualPhotoEnabled}
+                    quickSongGenerating={quickSongGenerating}
                     isSummarizing={isSummarizing}
                     categories={userVisibleCategories}
                     activeCategory={activeCategory}

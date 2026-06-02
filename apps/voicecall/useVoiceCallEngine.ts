@@ -39,7 +39,7 @@ import {
     splitVoiceCallForeignSentence,
     type VoiceCallTtsEmotionTagFormat,
 } from './voiceCallTextSanitizer';
-import type { VoiceCallMode } from './voiceCallTypes';
+import type { VoiceCallMode,VoiceCallReplyChannel } from './voiceCallTypes';
 import { VectorMemoryRetriever } from '../../utils/vectorMemoryRetriever';
 import { DB } from '../../utils/db';
 import { pcmChunksToWavBlob } from './pcmToWav';
@@ -238,6 +238,8 @@ export interface UseVoiceCallEngineOptions {
     onRetrying?: () => void;
     /** 通话模式 */
     callMode?: VoiceCallMode;
+    /** 角色回复通道：语音回复 or 只显示文字 */
+    replyChannel?: VoiceCallReplyChannel;
     /** 引擎启动后 AI 自动说开场白（incoming / outgoing 均可使用） */
     isIncoming?: boolean;
     // ─── 来电理由 (Call Reason) ───
@@ -583,7 +585,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
     const STT_DEBOUNCE_MS = 250; // VAD 300ms redemption + 250ms 去抖（从 400ms 压缩，加速 TTFV）
 
 
-    // ─── 核心处理：用户消息（文字）→ LLM → TTS 管线 ─────────────────────
+    // ─── 核心处理：用户消息 → LLM → 回复通道（TTS 或文字）────────────────
 
     const processUserMessage = useCallback(async (
         text: string,
@@ -607,8 +609,9 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                 pushSubtitle({ role: 'user', text, source });
             }
             setAiResponse('');
-            // 仅 TTS 可用时才重置 ttsDegraded，避免纯文字模式下每轮闪烁
-            if (ttsAvailableRef.current) {
+            const isTextReplyChannel = opts.replyChannel === 'text';
+            // 文字通道不是故障降级；TTS 可用的语音通道才重置降级状态。
+            if (isTextReplyChannel || ttsAvailableRef.current) {
                 setTtsDegraded(false);
             }
             // ─── 清空本轮音频缓存 ───
@@ -644,6 +647,111 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                 });
             }
 
+            const llm = llmRef.current;
+            const vcTtsConfig = buildVoiceCallTtsConfig(
+                opts.ttsConfig,
+                opts.foreignLang,
+                runtimeProfileRef.current.ttsSampleRate,
+            );
+
+            if (!llm) {
+                console.error('[Engine] Missing LLM ref');
+                setEngineState('listening');
+                engineStateRef.current = 'listening';
+                aiSpeakingStartedAtRef.current = 0;
+                opts.onAISpeakingChange(false);
+                return;
+            }
+
+            // ──── 文字通道 / TTS 不可用：LLM → 逐句文字展示 ────
+            if (isTextReplyChannel || !ttsAvailableRef.current) {
+                setTtsDegraded(!isTextReplyChannel);
+                opts.onAISpeakingChange(false);
+                aiSpeakingStartedAtRef.current = 0;
+                confirmedBargeInAudioUntilRef.current = 0;
+                if (bargeInTimerRef.current) {
+                    clearTimeout(bargeInTimerRef.current);
+                    bargeInTimerRef.current = null;
+                }
+                bargeInCandidateStartedAtRef.current = 0;
+                setEngineState('processing');
+                engineStateRef.current = 'processing';
+
+                const textSentenceQueue: VoiceCallQueuedSentence[] = [];
+                let textDisplaying = false;
+                let textLlmComplete = false;
+
+                const showNextTextSentence = () => {
+                    if (gen !== generationRef.current) return;
+                    if (textSentenceQueue.length === 0) {
+                        textDisplaying = false;
+                        if (textLlmComplete && engineActiveRef.current) {
+                            setEngineState('listening');
+                            engineStateRef.current = 'listening';
+                            aiSpeakingStartedAtRef.current = 0;
+                        }
+                        return;
+                    }
+
+                    textDisplaying = true;
+                    const sentence = textSentenceQueue.shift()!;
+                    setAiResponse(sentence.displayText);
+                    setAiTranslation(sentence.translationText);
+                    pushSubtitle({
+                        role: 'assistant',
+                        text: sentence.displayText,
+                        translation: sentence.translationText,
+                    });
+
+                    const displayMs = Math.max(2000, Math.min(6000, sentence.displayText.length * 120));
+                    setTimeout(() => {
+                        showNextTextSentence();
+                    }, displayMs);
+                };
+
+                const enqueueTextSentence = (sentence: VoiceCallQueuedSentence) => {
+                    textSentenceQueue.push(sentence);
+                    if (!textDisplaying) {
+                        showNextTextSentence();
+                    }
+                };
+
+                await llm.chat(text, {
+                    onSentence: (sentence) => {
+                        if (gen !== generationRef.current || !engineActiveRef.current) return;
+                        const queuedSentence = buildVoiceCallQueuedSentence(sentence, vcTtsConfig);
+                        if (!queuedSentence) return;
+                        console.log(`[Engine] LLM sentence (${isTextReplyChannel ? 'reply-channel:text' : 'text-only'}): "${queuedSentence.displayText}"${queuedSentence.translationText ? ` (翻译: ${queuedSentence.translationText})` : ''}`);
+                        enqueueTextSentence(queuedSentence);
+                    },
+                    onComplete: (full) => {
+                        if (gen !== generationRef.current) return;
+                        console.log(`[Engine] LLM complete (${isTextReplyChannel ? 'reply-channel:text' : 'text-only'}): "${full.slice(0, 80)}..."`);
+                        textLlmComplete = true;
+                        if (!textDisplaying && textSentenceQueue.length === 0 && engineActiveRef.current) {
+                            opts.onAISpeakingChange(false);
+                            setEngineState('listening');
+                            engineStateRef.current = 'listening';
+                            aiSpeakingStartedAtRef.current = 0;
+                        }
+                    },
+                    onError: (errMsg) => {
+                        if (gen !== generationRef.current) return;
+                        console.error('[Engine] LLM error (text-only):', errMsg);
+                        opts.onError?.(errMsg);
+                        opts.onAISpeakingChange(false);
+                        setEngineState('listening');
+                        engineStateRef.current = 'listening';
+                        aiSpeakingStartedAtRef.current = 0;
+                    },
+                    onRetrying: () => {
+                        if (gen !== generationRef.current) return;
+                        opts.onRetrying?.();
+                    },
+                }, { turnId: gen });
+                return;
+            }
+
             // ──── LLM + TTS ────
             setEngineState('speaking');
             engineStateRef.current = 'speaking';
@@ -660,10 +768,9 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             }
 
             const player = playerRef.current;
-            const llm = llmRef.current;
 
-            if (!player || !llm) {
-                console.error('[Engine] Missing module refs');
+            if (!player) {
+                console.error('[Engine] Missing audio player ref');
                 setEngineState('listening');
                 engineStateRef.current = 'listening';
                 aiSpeakingStartedAtRef.current = 0;
@@ -696,12 +803,6 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
                     engineStateRef.current = 'listening';
                 }
             };
-
-            const vcTtsConfig = buildVoiceCallTtsConfig(
-                opts.ttsConfig,
-                opts.foreignLang,
-                runtimeProfileRef.current.ttsSampleRate,
-            );
 
             let ttsReady = false;
             let ttsConnectFailed = false;
@@ -930,53 +1031,6 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
 
                 tryMarkTtsFinished();
             };
-
-            // ─── TTS 不可用：直接走纯文字降级路径，跳过所有 WS 操作 ───
-            if (!ttsAvailableRef.current) {
-                setTtsDegraded(true);
-                opts.onAISpeakingChange(false);
-                aiSpeakingStartedAtRef.current = 0;
-                setEngineState('processing');
-                engineStateRef.current = 'processing';
-
-                await llm.chat(text, {
-                    onSentence: (sentence) => {
-                        if (gen !== generationRef.current || !engineActiveRef.current) return;
-                        const queuedSentence = buildVoiceCallQueuedSentence(sentence, vcTtsConfig);
-                        if (!queuedSentence) {
-                            return;
-                        }
-                        console.log(`[Engine] LLM sentence (text-only): "${queuedSentence.spokenText}"${queuedSentence.translationText ? ` (翻译: ${queuedSentence.translationText})` : ''}`);
-                        sentenceQueue.push(queuedSentence);
-                        enqueueDegradedSentence(queuedSentence);
-                    },
-                    onComplete: (full) => {
-                        if (gen !== generationRef.current) return;
-                        console.log(`[Engine] LLM complete (text-only): "${full.slice(0, 80)}..."`);
-                        llmComplete = true;
-                        if (!degradedDisplaying && degradedSentenceQueue.length === 0 && engineActiveRef.current) {
-                            opts.onAISpeakingChange(false);
-                            setEngineState('listening');
-                            engineStateRef.current = 'listening';
-                            aiSpeakingStartedAtRef.current = 0;
-                        }
-                    },
-                    onError: (errMsg) => {
-                        if (gen !== generationRef.current) return;
-                        console.error('[Engine] LLM error (text-only):', errMsg);
-                        opts.onError?.(errMsg);
-                        opts.onAISpeakingChange(false);
-                        setEngineState('listening');
-                        engineStateRef.current = 'listening';
-                        aiSpeakingStartedAtRef.current = 0;
-                    },
-                    onRetrying: () => {
-                        if (gen !== generationRef.current) return;
-                        opts.onRetrying?.();
-                    },
-                }, { turnId: gen });
-                return;
-            }
 
             let ttsWs = createVoiceCallTtsClient(vcTtsConfig, {
                 onAudioChunk: handleAudioChunk,
@@ -1288,7 +1342,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
 
     /**
      * sendTextMessage — 文字输入入口
-     * 跳过 VAD/STT，直接进入 LLM→TTS 管线
+     * 跳过 VAD/STT，直接进入 LLM→回复通道管线
      */
     const sendTextMessage = useCallback((text: string) => {
         const trimmed = text.trim();
@@ -1310,10 +1364,13 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
 
         const opts = optionsRef.current;
 
-        // 检查配置：TTS 不可用时进入纯文字降级模式（不阻断引擎启动）
-        const ttsAvailable = isVoiceCallTtsConfigured(opts.ttsConfig);
+        // 检查配置：文字通道主动跳过 TTS；语音通道 TTS 不可用时进入纯文字降级模式。
+        const isTextReplyChannel = opts.replyChannel === 'text';
+        const ttsAvailable = !isTextReplyChannel && isVoiceCallTtsConfigured(opts.ttsConfig);
         ttsAvailableRef.current = ttsAvailable;
-        if (!ttsAvailable) {
+        if (isTextReplyChannel) {
+            console.log('[Engine] Reply channel is text — TTS client and audio player will be skipped');
+        } else if (!ttsAvailable) {
             console.log(`[Engine] ${getVoiceCallTtsProviderName(opts.ttsConfig)} TTS not configured — starting in text-only degraded mode`);
         }
         if (!opts.apiConfig.baseUrl) {
@@ -1402,17 +1459,25 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             };
             llmRef.current = new VoiceCallLlm(llmConfig, opts.char, opts.userProfile);
 
-            // 3. 初始化 PCM 音频播放器（采样率与通话 TTS 配置一致）
-            playerRef.current = new VoiceCallAudioPlayer({
-                sampleRate: runtime.ttsSampleRate,
-            });
-            playerRef.current.init();
+            // 3. 初始化 PCM 音频播放器（仅语音通道且 TTS 可用时需要）
+            if (ttsAvailableRef.current) {
+                playerRef.current = new VoiceCallAudioPlayer({
+                    sampleRate: runtime.ttsSampleRate,
+                });
+                playerRef.current.init();
 
-            // ── 闸门模式：dialing 预热时锁定播放 ──
-            if (gated) {
-                gatedRef.current = true;
-                playerRef.current.setGated(true);
-                console.log('[Engine] Gated mode: audio will buffer until gate release');
+                // ── 闸门模式：dialing 预热时锁定播放 ──
+                if (gated) {
+                    gatedRef.current = true;
+                    playerRef.current.setGated(true);
+                    console.log('[Engine] Gated mode: audio will buffer until gate release');
+                }
+            } else {
+                playerRef.current = null;
+                if (gated) {
+                    gatedRef.current = true;
+                    console.log('[Engine] Gated mode: text reply will wait for active call UI');
+                }
             }
 
             // 4. TTS WebSocket 实例在每轮 handleVoiceEnd 里按需创建

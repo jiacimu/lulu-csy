@@ -1,5 +1,5 @@
-import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { render,screen,waitFor } from '@testing-library/react';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import ChatBubble from '../components/chat/ChatBubble';
 import { renderMarkdown } from '../utils/markdownLite';
 import { ChatParser } from '../utils/chatParser';
@@ -12,7 +12,37 @@ const styleConfig: BubbleStyle = {
     opacity: 1,
 };
 
+const imageLoadResults = new Map<string, 'load' | 'error'>();
+
+class MockImage {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    private _src = '';
+
+    get src() {
+        return this._src;
+    }
+
+    set src(value: string) {
+        this._src = value;
+        const result = imageLoadResults.get(value) || 'load';
+        queueMicrotask(() => {
+            if (result === 'error') this.onerror?.();
+            else this.onload?.();
+        });
+    }
+}
+
 describe('chat bubble theme stability', () => {
+    beforeEach(() => {
+        imageLoadResults.clear();
+        vi.stubGlobal('Image', MockImage);
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
     it('keeps CJK spaces as display spaces instead of synthetic display line breaks', () => {
         const { container } = render(<div>{renderMarkdown('难 得')}</div>);
         expect(container.firstElementChild?.childElementCount).toBe(1);
@@ -83,5 +113,54 @@ describe('chat bubble theme stability', () => {
         expect(bubbleShell).not.toBeNull();
         expect(bubbleShell?.style.getPropertyPriority('background')).toBe('');
         expect(bubbleShell?.style.getPropertyPriority('border-top-left-radius')).toBe('');
+    });
+
+    it('renders image reply thumbnails only after preload succeeds', async () => {
+        const imageUrl = 'https://cdn.example.com/reply.webp';
+        render(
+            <ChatBubble
+                isUser={false}
+                styleConfig={styleConfig}
+                displayContent="看到了。"
+                replyTo={{
+                    id: 9,
+                    name: 'Sully',
+                    content: imageUrl,
+                    type: 'image',
+                    thumbnailUrl: imageUrl,
+                }}
+            />
+        );
+
+        await waitFor(() => {
+            expect(screen.getByTestId('reply-image-thumbnail')).toHaveAttribute('src', imageUrl);
+        });
+        expect(screen.getByText('[图片]')).toBeInTheDocument();
+    });
+
+    it('hides broken image reply thumbnails without exposing a broken img node', async () => {
+        const imageUrl = 'https://cdn.example.com/broken-reply.webp';
+        imageLoadResults.set(imageUrl, 'error');
+
+        render(
+            <ChatBubble
+                isUser={false}
+                styleConfig={styleConfig}
+                displayContent="这条引用还在。"
+                replyTo={{
+                    id: 10,
+                    name: 'Sully',
+                    content: imageUrl,
+                    type: 'image',
+                    thumbnailUrl: imageUrl,
+                }}
+            />
+        );
+
+        await waitFor(() => {
+            expect(screen.queryByTestId('reply-image-thumbnail')).not.toBeInTheDocument();
+        });
+        expect(screen.getByText('[图片]')).toBeInTheDocument();
+        expect(screen.queryByText(imageUrl)).not.toBeInTheDocument();
     });
 });

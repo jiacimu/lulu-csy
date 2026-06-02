@@ -86,7 +86,7 @@ export const ContextBuilder = {
         context += '\n';
 
         if (char.softDevotionChatMode === true) {
-            context += buildSoftDevotionChatModePrompt(char.name, user.name);
+            context += buildSoftDevotionChatModePrompt(char.name, user.name, user.healthGender);
         }
 
         // 4. 印象档案 (Private Impression)

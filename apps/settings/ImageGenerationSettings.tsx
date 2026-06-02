@@ -3,6 +3,7 @@ import { useOS } from '../../context/OSContext';
 import type {
     ImageApiPreset,
     ImageGenerationConfig,
+    ImageGenerationStyle,
     ImageProviderType,
     NaiImageModel,
     OpenAIImageBackground,
@@ -33,6 +34,12 @@ import { getImageProviderLabel,testOpenAICompatibleImageConnection,type OpenAICo
 const providerOptions: Array<{ id: ImageProviderType; label: string; hint: string }> = [
     { id: 'novelai', label: 'NovelAI', hint: 'Persistent API Token' },
     { id: 'openai-compatible', label: 'OpenAI 兼容', hint: '/images/generations 接口' },
+];
+
+const imageStyleOptions: Array<{ id: ImageGenerationStyle; label: string; hint: string }> = [
+    { id: 'guoman', label: '国漫', hint: '清透插画' },
+    { id: 'cg', label: 'CG', hint: '游戏立绘' },
+    { id: 'real', label: '真人', hint: '相机写真' },
 ];
 
 type StylePresetDraft = {
@@ -222,6 +229,10 @@ const ImageGenerationSettings: React.FC = () => {
         updateLocalConfig(prev => ({ ...prev, activeProvider: provider }));
     };
 
+    const updateImageStyle = (imageStyle: ImageGenerationStyle) => {
+        updateLocalConfig(prev => ({ ...prev, imageStyle }));
+    };
+
     const updateNovelAI = <K extends keyof ImageGenerationConfig['novelai']>(key: K, value: ImageGenerationConfig['novelai'][K]) => {
         updateLocalConfig(prev => ({ ...prev, novelai: { ...prev.novelai, [key]: value } }));
     };
@@ -362,6 +373,31 @@ const ImageGenerationSettings: React.FC = () => {
                             </button>
                         );
                     })}
+                </div>
+
+                <div className="mb-4 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                            <h3 className="truncate text-xs font-bold text-slate-600">恋综生图风格</h3>
+                            <p className="mt-0.5 truncate text-[10px] text-slate-400">单人照和合照会按这里选择内置预设。</p>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 min-w-0">
+                        {imageStyleOptions.map(option => {
+                            const active = localConfig.imageStyle === option.id;
+                            return (
+                                <button
+                                    key={option.id}
+                                    type="button"
+                                    onClick={() => updateImageStyle(option.id)}
+                                    className={`min-w-0 rounded-2xl border px-3 py-2 text-left transition-colors ${active ? 'bg-primary text-white border-primary' : 'bg-white/60 text-slate-500 border-slate-100'}`}
+                                >
+                                    <div className="truncate text-xs font-bold">{option.label}</div>
+                                    <div className={`mt-0.5 truncate text-[9px] ${active ? 'text-white/70' : 'text-slate-400'}`}>{option.hint}</div>
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
 
                 <div className="mb-4 space-y-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
@@ -535,7 +571,7 @@ const ImageGenerationSettings: React.FC = () => {
                                 <input
                                     value={localConfig.openaiCompatible.model}
                                     onChange={e => updateOpenAICompatible('model', e.target.value)}
-                                    placeholder="gpt-image-1"
+                                    placeholder="gpt-image-2"
                                     className="min-w-0 flex-1 bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono"
                                 />
                                 <button

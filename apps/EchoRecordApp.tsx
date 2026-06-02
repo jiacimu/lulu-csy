@@ -104,6 +104,7 @@ interface NeedleDropFormDraft {
 }
 
 const NEEDLE_DROP_FORM_DRAFT_KEY = 'echo_record_needle_drop_form_v1';
+const ACTIVE_RECORD_DRAFT_KEY = 'echo_record_active_record_id_v1';
 
 const SINGABILITY_SEVERITY_COPY: Record<'low' | 'medium' | 'high', string> = {
     low: '轻微',
@@ -179,6 +180,37 @@ function clearNeedleDropFormDraft(): void {
 
     try {
         window.localStorage.removeItem(NEEDLE_DROP_FORM_DRAFT_KEY);
+    } catch {
+        // Ignore storage failures.
+    }
+}
+
+function readActiveRecordDraftId(): string | null {
+    if (typeof window === 'undefined') return null;
+
+    try {
+        const value = window.localStorage.getItem(ACTIVE_RECORD_DRAFT_KEY);
+        return value && value.trim() ? value : null;
+    } catch {
+        return null;
+    }
+}
+
+function writeActiveRecordDraftId(recordId: string): void {
+    if (typeof window === 'undefined') return;
+
+    try {
+        window.localStorage.setItem(ACTIVE_RECORD_DRAFT_KEY, recordId);
+    } catch {
+        // Ignore storage failures; IndexedDB remains the source of truth.
+    }
+}
+
+function clearActiveRecordDraftId(): void {
+    if (typeof window === 'undefined') return;
+
+    try {
+        window.localStorage.removeItem(ACTIVE_RECORD_DRAFT_KEY);
     } catch {
         // Ignore storage failures.
     }
@@ -347,9 +379,12 @@ const EchoRecordApp: React.FC = () => {
     const { closeApp, addToast, characters, userProfile, apiConfig, ttsConfig } = useOS();
     const { playSong } = useAudioPlayer();
     const initialNeedleDropDraft = useMemo(() => readNeedleDropFormDraft(), []);
+    const initialActiveRecordDraftId = useMemo(() => readActiveRecordDraftId(), []);
+    const restoredActiveRecordDraftRef = useRef(false);
     const [activeTab, setActiveTab] = useState<EchoRecordTab>('records');
     const [records, setRecords] = useState<MemoryRecord[]>([]);
     const [recordsLoading, setRecordsLoading] = useState(false);
+    const [recordsHydrated, setRecordsHydrated] = useState(false);
     const [selectedCharId, setSelectedCharId] = useState<string | null>(() => initialNeedleDropDraft?.charId || characters[0]?.id || null);
     const [recordMode, setRecordMode] = useState<MemoryRecordMode>(() => initialNeedleDropDraft?.mode || 'blind_box');
     const [recordReference, setRecordReference] = useState(() => initialNeedleDropDraft?.recordReference || '');
@@ -361,9 +396,10 @@ const EchoRecordApp: React.FC = () => {
     const [recordStatusText, setRecordStatusText] = useState('');
     const [recordFlowStatus, setRecordFlowStatus] = useState<MemoryRecordFlowStatus>('idle');
     const [recordSongRequest, setRecordSongRequest] = useState<MemoryRecordSongRequest>(() => initialNeedleDropDraft?.songRequest || createEmptySongRequest());
-    const [activeDraftRecordId, setActiveDraftRecordId] = useState<string | null>(null);
+    const [activeDraftRecordId, setActiveDraftRecordId] = useState<string | null>(() => initialActiveRecordDraftId);
     const [suppressedAutoResumeCharId, setSuppressedAutoResumeCharId] = useState<string | null>(() => initialNeedleDropDraft?.charId || null);
     const [lyricsDraft, setLyricsDraft] = useState<LyricsEditorDraft>(() => createEmptyLyricsDraft());
+    const lyricsDraftRef = useRef<LyricsEditorDraft>(lyricsDraft);
     const [recordFlowError, setRecordFlowError] = useState('');
     const [singabilityResult, setSingabilityResult] = useState<SingabilityCheckResult | null>(null);
     const [stylePromptResult, setStylePromptResult] = useState<StylePromptResult | null>(null);
@@ -403,6 +439,10 @@ const EchoRecordApp: React.FC = () => {
         [records],
     );
 
+    useEffect(() => {
+        lyricsDraftRef.current = lyricsDraft;
+    }, [lyricsDraft]);
+
     const refreshRecords = useCallback(async () => {
         setRecordsLoading(true);
         try {
@@ -411,6 +451,7 @@ const EchoRecordApp: React.FC = () => {
         } catch (error) {
             addToast(error instanceof Error ? `唱片载入失败: ${error.message}` : '唱片载入失败', 'error');
         } finally {
+            setRecordsHydrated(true);
             setRecordsLoading(false);
         }
     }, [addToast]);
@@ -444,19 +485,22 @@ const EchoRecordApp: React.FC = () => {
     const loadRecordIntoLyricsEditor = useCallback((record: MemoryRecord, status: MemoryRecordFlowStatus = inferFlowStatus(record), switchToStudio = true) => {
         setSuppressedAutoResumeCharId(null);
         clearNeedleDropFormDraft();
+        writeActiveRecordDraftId(record.id);
         setSelectedCharId(record.charId);
         setRecordMode(record.mode);
         setRecordReference(record.inspirationReference || '');
         setSelectedRecordMemoryIds(record.selectedMemoryIds || []);
         setActiveDraftRecordId(record.id);
-        setLyricsDraft({
+        const nextLyricsDraft = {
             title: record.title,
             lyrics: record.lyrics,
             stylePrompt: record.stylePrompt || record.musicPrompt || '',
             negativeStylePrompt: record.negativeStylePrompt || '',
             revisionInstruction: '',
             lyricistReference: '',
-        });
+        };
+        lyricsDraftRef.current = nextLyricsDraft;
+        setLyricsDraft(nextLyricsDraft);
         setRecordSongRequest({
             ...createEmptySongRequest(),
             ...(record.songRequest || {}),
@@ -484,7 +528,23 @@ const EchoRecordApp: React.FC = () => {
     }, []);
 
     useEffect(() => {
+        if (restoredActiveRecordDraftRef.current || !recordsHydrated || !initialActiveRecordDraftId) return;
+
+        restoredActiveRecordDraftRef.current = true;
+        const record = records.find(item => item.id === initialActiveRecordDraftId);
+        if (record) {
+            loadRecordIntoLyricsEditor(record, inferFlowStatus(record), true);
+        } else {
+            clearActiveRecordDraftId();
+            setActiveDraftRecordId(null);
+        }
+    }, [initialActiveRecordDraftId, loadRecordIntoLyricsEditor, records, recordsHydrated]);
+
+    useEffect(() => {
+        if (!recordsHydrated) return;
+
         if (!selectedCharId) {
+            clearActiveRecordDraftId();
             setActiveDraftRecordId(null);
             setLyricsDraft(createEmptyLyricsDraft());
             setRecordSongRequest(createEmptySongRequest());
@@ -494,9 +554,18 @@ const EchoRecordApp: React.FC = () => {
         }
 
         const currentDraft = activeDraftRecordId ? records.find(record => record.id === activeDraftRecordId) : null;
-        if (currentDraft?.charId === selectedCharId) return;
+        if (currentDraft) {
+            if (currentDraft.charId !== selectedCharId) {
+                setSelectedCharId(currentDraft.charId);
+            }
+            return;
+        }
+        if (activeDraftRecordId && !currentDraft) {
+            clearActiveRecordDraftId();
+        }
 
         if (suppressedAutoResumeCharId === selectedCharId) {
+            clearActiveRecordDraftId();
             setActiveDraftRecordId(null);
             setLyricsDraft(createEmptyLyricsDraft());
             setRecordFlowStatus('idle');
@@ -516,6 +585,7 @@ const EchoRecordApp: React.FC = () => {
         if (latestDraft) {
             loadRecordIntoLyricsEditor(latestDraft, inferFlowStatus(latestDraft), false);
         } else {
+            clearActiveRecordDraftId();
             setActiveDraftRecordId(null);
             setLyricsDraft(createEmptyLyricsDraft());
             setRecordSongRequest(createEmptySongRequest());
@@ -525,10 +595,10 @@ const EchoRecordApp: React.FC = () => {
             setStylePromptResult(null);
             setShowOptimizedLyrics(false);
         }
-    }, [activeDraftRecordId, loadRecordIntoLyricsEditor, records, selectedCharId, suppressedAutoResumeCharId]);
+    }, [activeDraftRecordId, loadRecordIntoLyricsEditor, records, recordsHydrated, selectedCharId, suppressedAutoResumeCharId]);
 
     useEffect(() => {
-        if (activeDraftRecord) return;
+        if (!recordsHydrated || activeDraftRecord || activeDraftRecordId) return;
 
         writeNeedleDropFormDraft({
             version: 1,
@@ -539,7 +609,7 @@ const EchoRecordApp: React.FC = () => {
             songRequest: recordSongRequest,
             updatedAt: Date.now(),
         });
-    }, [activeDraftRecord, recordMode, recordReference, recordSongRequest, selectedCharId, selectedRecordMemoryIds]);
+    }, [activeDraftRecord, activeDraftRecordId, recordMode, recordReference, recordSongRequest, recordsHydrated, selectedCharId, selectedRecordMemoryIds]);
 
     useEffect(() => {
         setSelectedRecordMemoryIds([]);
@@ -654,20 +724,19 @@ const EchoRecordApp: React.FC = () => {
     }, [activeDraftRecord, lyricsDraft.lyrics, lyricsDraft.negativeStylePrompt, lyricsDraft.stylePrompt, lyricsDraft.title, persistMemoryRecord, recordSongRequest]);
 
     const handleLyricsFieldChange = useCallback((field: keyof Pick<LyricsEditorDraft, 'title' | 'stylePrompt' | 'negativeStylePrompt' | 'lyrics' | 'revisionInstruction' | 'lyricistReference'>, value: string) => {
-        setLyricsDraft(previous => ({ ...previous, [field]: value }));
+        const nextDraft = { ...lyricsDraftRef.current, [field]: value };
+        lyricsDraftRef.current = nextDraft;
+        setLyricsDraft(nextDraft);
         if (!activeDraftRecord || field === 'revisionInstruction' || field === 'lyricistReference') return;
-
-        const patch: Partial<MemoryRecord> = field === 'title'
-            ? { title: value }
-            : field === 'stylePrompt'
-                ? { musicPrompt: value, stylePrompt: value }
-                : field === 'negativeStylePrompt'
-                    ? { negativeStylePrompt: value }
-                    : { lyrics: value };
 
         const next: MemoryRecord = {
             ...activeDraftRecord,
-            ...patch,
+            title: nextDraft.title,
+            lyrics: nextDraft.lyrics,
+            musicPrompt: nextDraft.stylePrompt,
+            stylePrompt: nextDraft.stylePrompt || undefined,
+            negativeStylePrompt: nextDraft.negativeStylePrompt || undefined,
+            musicDirectorNotes: stylePromptResult?.musicDirectorNotes || activeDraftRecord.musicDirectorNotes,
             songRequest: normalizeSongRequest(recordSongRequest),
             updatedAt: Date.now(),
         };
@@ -675,14 +744,21 @@ const EchoRecordApp: React.FC = () => {
         void DB.saveMemoryRecord(next).catch((error) => {
             addToast(error instanceof Error ? `歌词草稿保存失败: ${error.message}` : '歌词草稿保存失败', 'error');
         });
-    }, [activeDraftRecord, addToast, recordSongRequest, upsertMemoryRecord]);
+    }, [activeDraftRecord, addToast, recordSongRequest, stylePromptResult, upsertMemoryRecord]);
 
     const handleSongRequestChange = useCallback((field: keyof MemoryRecordSongRequest, value: string) => {
         setRecordSongRequest(previous => {
             const nextRequest = { ...previous, [field]: value };
             if (activeDraftRecord) {
+                const draft = lyricsDraftRef.current;
                 const nextRecord: MemoryRecord = {
                     ...activeDraftRecord,
+                    title: draft.title,
+                    lyrics: draft.lyrics,
+                    musicPrompt: draft.stylePrompt,
+                    stylePrompt: draft.stylePrompt || undefined,
+                    negativeStylePrompt: draft.negativeStylePrompt || undefined,
+                    musicDirectorNotes: stylePromptResult?.musicDirectorNotes || activeDraftRecord.musicDirectorNotes,
                     songRequest: normalizeSongRequest(nextRequest),
                     updatedAt: Date.now(),
                 };
@@ -693,7 +769,7 @@ const EchoRecordApp: React.FC = () => {
             }
             return nextRequest;
         });
-    }, [activeDraftRecord, addToast, upsertMemoryRecord]);
+    }, [activeDraftRecord, addToast, stylePromptResult, upsertMemoryRecord]);
 
     const removeGeneratedMusicArtifacts = useCallback(async (record: MemoryRecord): Promise<void> => {
         const ids = [record.musicAudioId, record.masterAudioId].filter((id): id is string => Boolean(id));
@@ -772,15 +848,18 @@ const EchoRecordApp: React.FC = () => {
             };
 
             await persistMemoryRecord(draft);
-            setLyricsDraft({
+            const nextDraft = {
                 title: result.title,
                 lyrics: result.lyrics,
                 stylePrompt: '',
                 negativeStylePrompt: '',
                 revisionInstruction: '',
                 lyricistReference: '',
-            });
+            };
+            lyricsDraftRef.current = nextDraft;
+            setLyricsDraft(nextDraft);
             setActiveDraftRecordId(recordId);
+            writeActiveRecordDraftId(recordId);
             setSuppressedAutoResumeCharId(null);
             clearNeedleDropFormDraft();
             setRecordFlowStatus('lyrics_ready');
@@ -862,12 +941,14 @@ const EchoRecordApp: React.FC = () => {
                 },
             );
 
-            setLyricsDraft(previous => ({
-                ...previous,
+            const nextDraft = {
+                ...lyricsDraftRef.current,
                 optimizedTitle: result.title,
                 optimizedLyrics: result.lyrics,
                 optimizationNotes: result.optimizationNotes,
-            }));
+            };
+            lyricsDraftRef.current = nextDraft;
+            setLyricsDraft(nextDraft);
             setShowOptimizedLyrics(true);
             setRecordFlowStatus('lyrics_optimized');
             await persistMemoryRecord({
@@ -888,14 +969,16 @@ const EchoRecordApp: React.FC = () => {
 
     const handleAdoptOptimizedLyrics = useCallback(() => {
         if (!lyricsDraft.optimizedLyrics) return;
-        setLyricsDraft(previous => ({
-            ...previous,
-            title: previous.optimizedTitle || previous.title,
-            lyrics: previous.optimizedLyrics || previous.lyrics,
+        const nextDraft = {
+            ...lyricsDraftRef.current,
+            title: lyricsDraftRef.current.optimizedTitle || lyricsDraftRef.current.title,
+            lyrics: lyricsDraftRef.current.optimizedLyrics || lyricsDraftRef.current.lyrics,
             optimizedLyrics: undefined,
             optimizedTitle: undefined,
             revisionInstruction: '',
-        }));
+        };
+        lyricsDraftRef.current = nextDraft;
+        setLyricsDraft(nextDraft);
         setShowOptimizedLyrics(false);
         setRecordFlowStatus('lyrics_ready');
         addToast('已采用优化版歌词', 'success');
@@ -951,11 +1034,13 @@ const EchoRecordApp: React.FC = () => {
             );
 
             setStylePromptResult(result);
-            setLyricsDraft(previous => ({
-                ...previous,
+            const nextDraft = {
+                ...lyricsDraftRef.current,
                 stylePrompt: result.stylePrompt,
                 negativeStylePrompt: result.negativeStylePrompt,
-            }));
+            };
+            lyricsDraftRef.current = nextDraft;
+            setLyricsDraft(nextDraft);
             setRecordFlowStatus('style_ready');
             await persistMemoryRecord({
                 ...current,
@@ -1104,6 +1189,7 @@ const EchoRecordApp: React.FC = () => {
             await DB.deleteMemoryRecord(record.id);
             setRecords(previous => previous.filter(item => item.id !== record.id));
             if (activeDraftRecordId === record.id) {
+                clearActiveRecordDraftId();
                 setActiveDraftRecordId(null);
                 setLyricsDraft(createEmptyLyricsDraft());
                 setRecordFlowStatus('idle');
@@ -1117,6 +1203,7 @@ const EchoRecordApp: React.FC = () => {
 
     const startFreshDraft = useCallback(() => {
         setSuppressedAutoResumeCharId(selectedCharId);
+        clearActiveRecordDraftId();
         setActiveDraftRecordId(null);
         setLyricsDraft(createEmptyLyricsDraft());
         setRecordSongRequest(createEmptySongRequest());
@@ -1160,6 +1247,7 @@ const EchoRecordApp: React.FC = () => {
         }
 
         setSuppressedAutoResumeCharId(nextCharId);
+        clearActiveRecordDraftId();
         setActiveDraftRecordId(null);
         setLyricsDraft(createEmptyLyricsDraft());
         setRecordFlowStatus('idle');
@@ -1248,7 +1336,7 @@ const EchoRecordApp: React.FC = () => {
     ];
 
     return (
-        <div className="fixed inset-0 flex flex-col overflow-hidden bg-[#08070b] text-[#f7efe4]">
+        <div className="fixed inset-0 flex flex-col overflow-hidden bg-[#08070b] text-[#f7efe4]" style={{ fontFamily: 'var(--app-font, "Quicksand", sans-serif)' }}>
             <div className="pointer-events-none absolute inset-0 overflow-hidden">
                 <img src="/music-skins/skin-ribbon.jpg" alt="" className="absolute inset-0 h-full w-full object-cover opacity-[0.26]" />
                 <img src="/images/paper-texture.jpg" alt="" className="absolute inset-0 h-full w-full object-cover opacity-[0.06] mix-blend-soft-light" />
@@ -1265,7 +1353,7 @@ const EchoRecordApp: React.FC = () => {
                         <div className="relative flex items-start justify-between gap-3 pr-0 sm:pr-28">
                             <div className="min-w-0">
                                 <div className="text-[9px] font-bold uppercase tracking-[0.34em] text-[#f2d290]/58">Echo Record</div>
-                                <h1 className="mt-1 text-[28px] font-bold tracking-[0.14em] text-[#fff1bd] sm:text-[32px]" style={{ fontFamily: "'Noto Serif SC', serif" }}>回声唱片</h1>
+                                <h1 className="mt-1 text-[28px] font-bold tracking-[0.14em] text-[#fff1bd] sm:text-[32px]">回声唱片</h1>
                                 <p className="mt-2 max-w-[33rem] text-[11px] leading-relaxed text-white/46">
                                     把聊天里的回声压成歌，唱片、制作、草稿分开放。
                                 </p>
@@ -1577,7 +1665,7 @@ const EchoRecordApp: React.FC = () => {
                                     <textarea
                                         value={lyricsDraft.lyrics}
                                         onChange={event => handleLyricsFieldChange('lyrics', event.target.value)}
-                                        className="min-h-[280px] w-full resize-y rounded-md border border-white/[0.08] bg-black/28 px-3 py-3 font-mono text-[12px] leading-6 text-[#fff6d8] outline-none focus:border-[#f2d290]/40"
+                                        className="min-h-[280px] w-full resize-y rounded-md border border-white/[0.08] bg-black/28 px-3 py-3 text-[12px] leading-6 text-[#fff6d8] outline-none focus:border-[#f2d290]/40"
                                         spellCheck={false}
                                     />
                                 </label>
@@ -1637,7 +1725,7 @@ const EchoRecordApp: React.FC = () => {
                                                 </button>
                                             </div>
                                         </div>
-                                        <pre className="max-h-[220px] overflow-y-auto whitespace-pre-wrap rounded-md bg-black/22 p-3 font-mono text-[11px] leading-5 text-[#dce9ff]/80">
+                                        <pre className="max-h-[220px] overflow-y-auto whitespace-pre-wrap rounded-md bg-black/22 p-3 text-[11px] leading-5 text-[#dce9ff]/80" style={{ fontFamily: 'inherit' }}>
                                             {lyricsDraft.optimizedLyrics}
                                         </pre>
                                     </div>

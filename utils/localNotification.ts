@@ -1,5 +1,12 @@
+import { formatNotificationBody, formatNotificationTitle } from './notificationPreview';
+
 const PUSH_SW_URL = '/push-sw.js';
 const PUSH_SW_SCOPE = '/';
+
+type BrowserNotificationOptions = NotificationOptions & {
+    renotify?: boolean;
+    vibrate?: VibratePattern;
+};
 
 export interface LocalNotificationPayload {
     title: string;
@@ -21,9 +28,9 @@ function isNotificationReady(): boolean {
         && Notification.permission === 'granted';
 }
 
-function buildNotificationOptions(payload: LocalNotificationPayload): NotificationOptions {
+function buildNotificationOptions(payload: LocalNotificationPayload): BrowserNotificationOptions {
     return {
-        body: payload.body || '',
+        body: formatNotificationBody(payload.body),
         icon: payload.icon || '/icons/icon-192.webp',
         badge: payload.badge || '/icons/icon-96.webp',
         tag: payload.tag,
@@ -55,11 +62,12 @@ export async function showLocalNotification(payload: LocalNotificationPayload): 
     if (!isNotificationReady()) return false;
 
     const options = buildNotificationOptions(payload);
+    const title = formatNotificationTitle(payload.title);
 
     try {
         const registration = await getLocalNotificationRegistration();
         if (registration && typeof registration.showNotification === 'function') {
-            await registration.showNotification(payload.title, options);
+            await registration.showNotification(title, options);
             return true;
         }
     } catch (error) {
@@ -67,7 +75,7 @@ export async function showLocalNotification(payload: LocalNotificationPayload): 
     }
 
     try {
-        const notification = new Notification(payload.title, options);
+        const notification = new Notification(title, options);
         if (payload.onClick) {
             notification.onclick = () => {
                 notification.close();

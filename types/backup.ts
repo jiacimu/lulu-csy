@@ -61,7 +61,6 @@ export interface FullBackupData {
     imageGenerationDraftConfig?: ImageGenerationConfig;
     imageApiPresets?: ImageApiPreset[];
     photoStylePresets?: PhotoStylePreset[];
-    memoryPalaceConfig?: any;         // Upstream SullyOS Memory Palace config
     customIcons?: Record<string, string>;
     appearancePresets?: AppearancePreset[];
     characters?: CharacterProfile[];
@@ -86,7 +85,6 @@ export interface FullBackupData {
     roomCustomAssets?: { id?: string; name: string; image: string; defaultScale: number; description?: string; visibility?: 'public' | 'character'; assignedCharIds?: string[] }[];
 
     novels?: NovelBook[];
-    songs?: any[];                  // Songwriting app / upstream SullyOS songs
 
     // Bank Data
     bankState?: BankFullState;
@@ -121,20 +119,6 @@ export interface FullBackupData {
     musicAssets?: BackupMusicAssets;
     halfSugarData?: BackupExternalIndexedDbData;
 
-    // Upstream SullyOS Memory Palace / Pixel Home stores
-    memoryNodes?: any[];
-    memoryVectors?: any[];
-    memoryLinks?: any[];
-    topicBoxes?: any[];
-    anticipations?: any[];
-    eventBoxes?: any[];
-    memoryPalaceHighWaterMarks?: Record<string, number>;
-    memoryPalaceFlags?: Record<string, string>;
-    dailySchedules?: any[];
-    memoryBatches?: any[];
-    pixelHomeAssets?: any[];
-    pixelHomeLayouts?: any[];
-
     // Scheduled Messages (delayed send)
     scheduledMessages?: {
         id: string;
@@ -151,26 +135,4 @@ export interface FullBackupData {
     // Extra localStorage config (sub API, embedding, agent, zhaixinglou, etc.)
     extraLocalStorageConfig?: Record<string, string>;
     graphData?: BackupGraphData;
-
-    // ─── Original SullyOS compatibility fields ───
-    studyApiConfig?: any;           // Study room API config
-    studyTutorPresets?: any[];      // Study tutor presets
-    quizSessions?: any[];           // Quiz / Practice book
-    guidebookSessions?: any[];      // 攻略本 sessions
-    lifeSimState?: any;             // 模拟人生 state
-    cloudBackupConfig?: any;         // Upstream WebDAV cloud backup config
-    remoteVectorConfig?: any;        // Upstream Supabase vector config
-    chatTranslateSourceLang?: string;
-    chatTranslateTargetLang?: string;
-    chatTranslateEnabledByChar?: Record<string, boolean>;
-    chatArchivePrompts?: any;
-    chatActiveArchivePromptId?: string;
-    characterRefinePrompts?: any;
-    characterActiveRefinePromptId?: string;
-    scheduleAppTheme?: string;
-    groupchatContextLimit?: number;
-    browserConfig?: { braveKey?: string; useRealSearch?: boolean };
-    bm25Mode?: string;
-    lastActiveCharId?: string;
-    eventNotifFlags?: Record<string, string>;
 }

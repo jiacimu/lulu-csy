@@ -19,6 +19,7 @@ export const PERFORMANCE_MODE_STORAGE_KEY = 'sullyos_performance_mode';
 export const PERFORMANCE_MODE_CHANGE_EVENT = 'sullyos-performance-mode-change';
 
 const VALID_PREFERENCES = new Set<PerformanceModePreference>(['auto', 'on', 'off']);
+const DEFAULT_PERFORMANCE_MODE_PREFERENCE: PerformanceModePreference = 'off';
 const SMALL_SCREEN_WIDTH = 430;
 
 interface NavigatorWithPerformanceHints extends Navigator {
@@ -33,16 +34,16 @@ interface NavigatorWithPerformanceHints extends Navigator {
 export function normalizePerformanceModePreference(value: unknown): PerformanceModePreference {
   return typeof value === 'string' && VALID_PREFERENCES.has(value as PerformanceModePreference)
     ? value as PerformanceModePreference
-    : 'auto';
+    : DEFAULT_PERFORMANCE_MODE_PREFERENCE;
 }
 
 export function readPerformanceModePreference(): PerformanceModePreference {
-  if (typeof window === 'undefined') return 'auto';
+  if (typeof window === 'undefined') return DEFAULT_PERFORMANCE_MODE_PREFERENCE;
 
   try {
     return normalizePerformanceModePreference(window.localStorage.getItem(PERFORMANCE_MODE_STORAGE_KEY));
   } catch {
-    return 'auto';
+    return DEFAULT_PERFORMANCE_MODE_PREFERENCE;
   }
 }
 

@@ -19,6 +19,8 @@
 .music-app {
   width: 100%;
   height: 100%;
+  min-height: 0;
+  --music-safe-bottom: var(--safe-bottom, env(safe-area-inset-bottom, 0px));
   background: var(--wy-bg);
   display: flex;
   flex-direction: column;
@@ -163,6 +165,7 @@
 /* ─── 搜索页面 ────────────────────────────── */
 .music-search-page {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0 16px;
   -webkit-overflow-scrolling: touch;
@@ -443,6 +446,9 @@
 
 /* ─── 全屏播放器（沉浸式重构） ─────────────── */
 .music-player-page {
+  --music-player-disc-size: clamp(200px, 34vh, 260px);
+  --music-player-disc-inset: 20px;
+  --music-player-lyrics-height: clamp(120px, 22vh, 200px);
   position: absolute;
   inset: 0;
   z-index: 50;
@@ -514,6 +520,15 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@supports (height: 100svh) {
+  .music-player-page {
+    --music-player-disc-size: clamp(200px, 34svh, 260px);
+    --music-player-lyrics-height: clamp(120px, 22svh, 200px);
+  }
 }
 
 /* 顶部导航 */
@@ -578,15 +593,21 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px 40px 20px;
+  padding: clamp(8px, 2vh, 16px) 40px clamp(10px, 2.4vh, 20px);
   flex-shrink: 0;
+}
+
+@supports (height: 100svh) {
+  .music-player-cover-area {
+    padding: clamp(8px, 2svh, 16px) 40px clamp(10px, 2.4svh, 20px);
+  }
 }
 
 /* 头像框容器 — 包含装饰环 + 旋转封面 */
 .music-player-vinyl-halo {
   position: relative;
-  width: 260px;
-  height: 260px;
+  width: var(--music-player-disc-size);
+  height: var(--music-player-disc-size);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -659,8 +680,8 @@
 
 /* 旋转封面主体 — 大圆形封面，无黑胶 */
 .music-player-disc {
-  width: 240px;
-  height: 240px;
+  width: calc(var(--music-player-disc-size) - var(--music-player-disc-inset));
+  height: calc(var(--music-player-disc-size) - var(--music-player-disc-inset));
   border-radius: 50%;
   position: relative;
   overflow: hidden;
@@ -940,7 +961,7 @@
 
 .music-player-lyrics-viewport {
   position: relative;
-  height: 200px;
+  height: var(--music-player-lyrics-height);
   margin-top: 4px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -1110,8 +1131,15 @@
 
 /* ─── 进度条（胶囊触感） ───────────────────── */
 .music-player-progress {
-  padding: 16px 28px 8px;
+  margin-top: auto;
+  padding: clamp(8px, 2vh, 16px) 28px 8px;
   flex-shrink: 0;
+}
+
+@supports (height: 100svh) {
+  .music-player-progress {
+    padding: clamp(8px, 2svh, 16px) 28px 8px;
+  }
 }
 
 .music-player-progress-bar {
@@ -1281,8 +1309,14 @@
   align-items: center;
   justify-content: center;
   gap: 48px;
-  padding: 12px 28px 36px;
+  padding: clamp(8px, 1.8vh, 12px) 28px max(18px, var(--music-safe-bottom));
   flex-shrink: 0;
+}
+
+@supports (height: 100svh) {
+  .music-player-controls {
+    padding: clamp(8px, 1.8svh, 12px) 28px max(18px, var(--music-safe-bottom));
+  }
 }
 
 .music-ctrl-btn {
@@ -1319,6 +1353,124 @@
 .music-ctrl-play:active {
   transform: scale(0.92);
   box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
+
+@media (max-height: 700px) {
+  .music-player-page {
+    --music-player-disc-size: clamp(176px, 31vh, 226px);
+    --music-player-lyrics-height: clamp(82px, 18vh, 140px);
+  }
+
+  .music-player-header {
+    padding: 8px 16px;
+  }
+
+  .music-player-cover-area {
+    padding-top: 6px;
+    padding-bottom: 10px;
+  }
+
+  .music-player-song-name {
+    font-size: 20px;
+  }
+
+  .music-player-lyrics-card {
+    margin-top: 8px;
+  }
+
+  .music-player-progress {
+    padding-top: 8px;
+  }
+
+  .music-player-controls {
+    gap: 40px;
+    padding-top: 6px;
+  }
+
+  .music-ctrl-play {
+    width: 58px;
+    height: 58px;
+  }
+}
+
+@supports (height: 100svh) {
+  @media (max-height: 700px) {
+    .music-player-page {
+      --music-player-disc-size: clamp(176px, 31svh, 226px);
+      --music-player-lyrics-height: clamp(82px, 18svh, 140px);
+    }
+  }
+}
+
+@media (max-height: 620px) {
+  .music-player-page {
+    --music-player-disc-size: clamp(148px, 27vh, 176px);
+    --music-player-disc-inset: 16px;
+    --music-player-lyrics-height: 72px;
+  }
+
+  .music-player-header {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .music-player-cover-area {
+    padding-top: 4px;
+    padding-bottom: 6px;
+  }
+
+  .music-player-song-info {
+    padding: 0 24px;
+  }
+
+  .music-player-song-name {
+    font-size: 18px;
+  }
+
+  .music-player-song-artist {
+    margin-top: 2px;
+    font-size: 12px;
+  }
+
+  .music-player-lyrics-toolbar {
+    display: none;
+  }
+
+  .music-player-lyrics-card {
+    margin-top: 6px;
+  }
+
+  .music-player-progress {
+    padding-top: 6px;
+    padding-bottom: 4px;
+  }
+
+  .music-player-progress-bar {
+    height: 24px;
+  }
+
+  .music-player-time {
+    margin-top: 2px;
+  }
+
+  .music-player-controls {
+    gap: 34px;
+    padding-top: 4px;
+    padding-bottom: max(12px, var(--music-safe-bottom));
+  }
+
+  .music-ctrl-play {
+    width: 52px;
+    height: 52px;
+  }
+}
+
+@supports (height: 100svh) {
+  @media (max-height: 620px) {
+    .music-player-page {
+      --music-player-disc-size: clamp(148px, 27svh, 176px);
+    }
+  }
 }
 
 /* --- 保留旧类名兼容 (隐藏不再使用的元素) --- */
@@ -1468,6 +1620,7 @@
 /* ─── 发现页面 ────────────────────────────── */
 .music-discover-page {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -1531,6 +1684,7 @@
   --mp-border: rgba(0,0,0,0.05);
 
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   background: var(--mp-bg);

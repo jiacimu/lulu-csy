@@ -5,7 +5,7 @@ import { CharacterProfile,SpriteConfig,SkinSet } from '../../types';
 import { processImage } from '../../utils/file';
 import { getGuardedInputProps } from '../../utils/inputGuards';
 import { DEFAULT_DATE_SUMMARY_PROMPT } from '../../utils/dateSummaryPrompts';
-import { DATE_WRITING_STYLE_PRESETS, DATE_DEFAULT_WORD_COUNT } from '../../utils/datePrompts';
+import { DATE_WRITING_STYLE_PRESETS, DATE_DEFAULT_WORD_COUNT, resolveDateWritingStylePreset } from '../../utils/datePrompts';
 import WritingStyleSheet, { isPresetKey } from './WritingStyleSheet';
 
 // 标准情绪列表
@@ -34,9 +34,10 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
     const [tempTemperature, setTempTemperature] = useState<string>(
         (char.dateTemperature !== undefined && char.dateTemperature !== null) ? String(char.dateTemperature) : ''
     );
-    const isPresetStyle = DATE_WRITING_STYLE_PRESETS.some(p => p.key === (char.dateWritingStyle || ''));
+    const resolvedWritingStylePreset = resolveDateWritingStylePreset(char.dateWritingStyle);
+    const isPresetStyle = !!resolvedWritingStylePreset;
     const [selectedStyleKey, setSelectedStyleKey] = useState<string | null>(
-        isPresetStyle ? (char.dateWritingStyle || null) : (char.dateWritingStyle ? '__custom__' : null)
+        isPresetStyle ? (resolvedWritingStylePreset?.key || null) : (char.dateWritingStyle ? '__custom__' : null)
     );
     const [customStyleText, setCustomStyleText] = useState<string>(
         (!isPresetStyle && char.dateWritingStyle) ? char.dateWritingStyle : ''
@@ -69,9 +70,9 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
         setTempTemperature(
             (char.dateTemperature !== undefined && char.dateTemperature !== null) ? String(char.dateTemperature) : ''
         );
-        const isPre = DATE_WRITING_STYLE_PRESETS.some(p => p.key === (char.dateWritingStyle || ''));
-        setSelectedStyleKey(isPre ? (char.dateWritingStyle || null) : (char.dateWritingStyle ? '__custom__' : null));
-        setCustomStyleText((!isPre && char.dateWritingStyle) ? char.dateWritingStyle : '');
+        const preset = resolveDateWritingStylePreset(char.dateWritingStyle);
+        setSelectedStyleKey(preset ? preset.key : (char.dateWritingStyle ? '__custom__' : null));
+        setCustomStyleText((!preset && char.dateWritingStyle) ? char.dateWritingStyle : '');
     }, [char.id, char.dateOutputWordCount, char.dateWritingStyle]);
 
     const sprites = char.sprites || {};

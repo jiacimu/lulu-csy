@@ -53,6 +53,7 @@ import { shouldInjectPlaybackContextFromState } from '../utils/playbackContextRu
 import { showLocalNotification } from '../utils/localNotification';
 import { getChatBackgroundNotificationsEnabled } from '../utils/chatBackgroundNotifications';
 import { saveChatContextMirror } from '../utils/chatContextMirror';
+import { formatNotificationBody } from '../utils/notificationPreview';
 
 interface UseChatAIProps {
     char: CharacterProfile | undefined;
@@ -253,15 +254,6 @@ async function fetchStreamingChatCompletion(
 
     if (trace) return trackedApiRequest({ ...trace, url }, () => run());
     return run();
-}
-
-function buildChatNotificationBody(content: string, fallback = '发来了一条新消息'): string {
-    const normalized = (content || '')
-        .replace(new RegExp(BILINGUAL_MARKER, 'g'), '\n')
-        .replace(/\r\n?/g, '\n')
-        .trim();
-
-    return (normalized || fallback).slice(0, 500);
 }
 
 function getPreviousAssistantThinking(messages: Message[], maxLength = 1200): string | undefined {
@@ -1035,7 +1027,7 @@ export const useChatAI = ({
 
                     void showLocalNotification({
                         title: char.name,
-                        body: buildChatNotificationBody(content, fallback),
+                        body: formatNotificationBody(content, { fallback }),
                         icon: char.avatar || '/icons/icon-192.webp',
                         badge: '/icons/icon-96.webp',
                         tag: `chat-${char.id}-${savedId}-${Date.now()}`,

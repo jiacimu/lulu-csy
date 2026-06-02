@@ -124,6 +124,7 @@ export interface CharacterProfile {
     /** Original template/preset ID used for compatibility, e.g. preset-sully-v2. */
     templateCharId?: string;
     name: string;
+    gender?: 'male' | 'female';
     avatar: string;
     description: string;
     systemPrompt: string;

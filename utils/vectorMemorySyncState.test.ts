@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { VectorMemory } from '../types';
 import {
-    rebaseImportedVectorMemories,
-    rebaseImportedVectorMemory,
+    getVectorMemorySyncState,
+    isPendingCloudSync,
+    markVectorMemoryAsBackendGenerated,
+    markVectorMemoryAsPendingSync,
+    resolveLocalFallbackSyncState,
 } from './vectorMemorySyncState';
 
 function makeMemory(overrides: Partial<VectorMemory> = {}): VectorMemory {
@@ -16,42 +19,35 @@ function makeMemory(overrides: Partial<VectorMemory> = {}): VectorMemory {
         lastMentioned: 0,
         createdAt: 1,
         vector: [0.1, 0.2],
-        source: 'sync',
-        syncState: 'backend_generated',
-        cloudSynced: true,
+        source: 'manual',
+        syncState: 'local_only',
+        cloudSynced: false,
         ...overrides,
     };
 }
 
-describe('vectorMemorySyncState import rebasing', () => {
-    it('rebases imported backup memories to pending_sync when a cloud target exists', () => {
-        const result = rebaseImportedVectorMemory(makeMemory(), true);
+describe('vectorMemorySyncState', () => {
+    it('derives sync state from current memory fields', () => {
+        expect(getVectorMemorySyncState(makeMemory({ syncState: 'synced' }))).toBe('synced');
+        expect(getVectorMemorySyncState(makeMemory({ syncState: undefined, source: 'sync' }))).toBe('backend_generated');
+        expect(getVectorMemorySyncState(makeMemory({ syncState: undefined, cloudSynced: true }))).toBe('synced');
+        expect(getVectorMemorySyncState(makeMemory({ syncState: undefined, cloudSynced: false }))).toBe('pending_sync');
+    });
 
-        expect(result).toMatchObject({
-            source: 'import',
+    it('marks pending and backend-generated memories with matching cloud flags', () => {
+        expect(markVectorMemoryAsPendingSync(makeMemory())).toMatchObject({
             syncState: 'pending_sync',
             cloudSynced: false,
         });
-    });
-
-    it('rebases imported backup memories to local_only when no cloud target exists', () => {
-        const result = rebaseImportedVectorMemory(makeMemory(), false);
-
-        expect(result).toMatchObject({
-            source: 'import',
-            syncState: 'local_only',
-            cloudSynced: false,
+        expect(markVectorMemoryAsBackendGenerated(makeMemory())).toMatchObject({
+            syncState: 'backend_generated',
+            cloudSynced: true,
         });
     });
 
-    it('rebases arrays without dropping records', () => {
-        const result = rebaseImportedVectorMemories([
-            makeMemory({ id: 'mem-1' }),
-            makeMemory({ id: 'mem-2', source: 'import' }),
-        ], true);
-
-        expect(result).toHaveLength(2);
-        expect(result.map((memory) => memory.id)).toEqual(['mem-1', 'mem-2']);
-        expect(result.every((memory) => memory.syncState === 'pending_sync')).toBe(true);
+    it('keeps cloud fallback decisions for local writes', () => {
+        expect(resolveLocalFallbackSyncState(true)).toBe('pending_sync');
+        expect(resolveLocalFallbackSyncState(false)).toBe('local_only');
+        expect(isPendingCloudSync(makeMemory({ syncState: 'pending_sync' }))).toBe(true);
     });
 });

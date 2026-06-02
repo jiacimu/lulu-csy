@@ -9,6 +9,7 @@ import { TIME_SLOT_LABELS } from '../types/theater';
 import { ContextBuilder } from './context';
 import { buildTheaterSceneInjection, build520ConfessionHint } from './theaterPrompts';
 import { RealtimeContextManager } from './realtimeContext';
+import { pronoun } from './genderWords';
 
 // ====== Date/Theater Time Context ======
 
@@ -41,106 +42,180 @@ export interface DateWritingStylePreset {
 /** Built-in writing style presets for Date mode */
 export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
     {
-        key: 'natural',
-        label: '不期而遇',
-        desc: '没有预设的剧本，就是碰巧在一起',
-        prompt: `【文风：自然】
-像两个人真的在一起时那样——
-- 不需要每一刻都有戏剧性，大部分时间就是普通的、松弛的相处
-- 对话节奏像真人：有时候一句话说完就没了，有时候突然想起什么又接一句
-- 动作不需要特别有画面感，就是日常的小动作：掏手机、喝水、发呆
-- 沉默是正常的，不需要填满每一秒
-- 不要刻意制造氛围，让场景自己说话`,
-    },
-    {
-        key: 'cinematic',
-        label: '光影浮生',
-        desc: '每一行都有景别，光落在该落的地方',
-        prompt: `【文风：分镜】
-每一行都是一个镜头——
-- 有景别意识：远景交代环境，中景捕捉互动，特写放大细节
-- 光线、声音、空气的变化是叙事的一部分
-- 动作之间留出呼吸的间隔，不要一口气做完三个动作
-- 台词克制，对白节奏接近真实对话——会有停顿、打断、说了一半不说了
-- 让环境参与叙事：风吹动了什么、光落在了哪里、远处传来了什么声音`,
-    },
-    {
-        key: 'literary',
-        label: '细水长文',
-        desc: '把感官铺开，让情绪慢慢转弯',
-        prompt: `【文风：细腻】
-叙述可以更深、更慢、更有层次——
-- 允许铺陈感官细节：触感、气味、温度、光线的质地
-- 情绪转折不要一步到位，写出犹豫、反复、自己都没意识到的变化
-- 善用比喻，但每个修辞都要服务于当下的情绪，不要为了华丽而华丽
-- 语言节奏随场景呼吸：紧张时短句急促，温柔时长句绵延
-- 不要堆砌辞藻，克制比华丽更难`,
-    },
-    {
-        key: 'minimal',
-        label: '留白克制',
-        desc: '说三分藏七分，沉默比语言重',
-        prompt: `【文风：克制】
-少即是多——
-- 每一行尽可能短：一个动作、一句话、一个表情
-- 删掉所有可有可无的形容词和副词
-- 用「做了什么」代替「感觉到了什么」
-- 台词像真人说话——三五个字能说清的不要用一整句
-- 沉默和留白是最好的叙事工具：不说比说了更有力
-- 保持紧凑，但如果场景需要更多篇幅，可以适当放开`,
+        key: 'cozy',
+        label: '松弛日常',
+        desc: '什么都不用发生，共处一室就好',
+        prompt: `【文风：松弛日常】
+重心是两个人共处同一空间的细碎感，不需要发生什么大事。
+- 句长 / 节奏：中短句为主，松散，不赶。
+- 动作 : 内心 ≈ 7 : 3。多写看得见的小动作和环境，少挖情绪。
+- 对白：高密度，可以碎、跑题、说废话、说一半忘了。
+- 感官：低，点到为止。
+- 环境 / 留白：高——光线移动、外面的声音、舒服的沉默都算内容。
+- 推进 vs 停留：偏停留。不刻意找事发生，让普通的时刻自己流。`,
     },
     {
         key: 'sweet',
-        label: '怦然刹那',
-        desc: '放大心跳加速的那 0.5 秒',
-        prompt: `【文风：心动】
-放大所有微妙的情绪细节——
-- 捕捉那些一闪而过的瞬间：不经意的触碰、视线的交汇、呼吸的变化
-- 角色的小动作要多且自然：揪衣角、别过脸、用手背碰嘴唇掩饰表情
-- 台词可以更口语化：结巴、说到一半改口、假装没说
-- 写出身体的本能反应：心跳变化、掌心出汗、耳尖发烫
-- 甜蜜感来自真实的情绪反应——克制的心动比直白的表白更动人`,
+        label: '心动放大',
+        desc: '放慢心跳加速的那 0.5 秒',
+        prompt: `【文风：心动放大】
+放大那些一闪而过、没说出口的瞬间。
+- 句长 / 节奏：长短交错，关键的那 0.5 秒切成短句、放慢。
+- 动作 : 内心 ≈ 5 : 5。重心在没说出口的心思，和身体的本能反应（呼吸、心跳、想躲）。
+- 对白：中等，口语化——结巴、说到一半改口、假装没说。
+- 感官：只聚焦接触的那一点（指尖、视线、距离），不铺全景。
+- 环境 / 留白：中，用来反衬两人之间的张力。
+- 推进 vs 停留：停留在一个微小信号上，慢慢把它放大。`,
     },
     {
-        key: 'hardcore',
-        label: '入木三分',
-        desc: '不修饰、不讨好，每一刻都带着重量',
-        prompt: `【文风：沉浸】
-完全活在角色里——
-- 动作描写具体、有重量感：不是「走过来」而是「拖着步子蹭过来」
-- 允许犯错、做出不讨好的反应：闹别扭、冷暴力、说话不过脑子
-- 对白要有角色个性：用词、语气、断句方式都能区分身份
-- 不刻意制造浪漫：如果场景本身不浪漫，就写当下真实的氛围
-- 不回避冲突和尴尬：真实的互动包含误解、沉默和不知道该说什么的瞬间
-- 把所有「像」「仿佛」「好似」这类旁观视角的词删掉`,
+        key: 'minimal',
+        label: '极简快切',
+        desc: '说三分藏七分，沉默比语言重',
+        prompt: `【文风：极简快切】
+少即是多。
+- 句长 / 节奏：极短，一行一个动作或一句话；节奏快、利落。
+- 动作 : 内心 ≈ 9 : 1。几乎只写做了什么，用行为代替感受。
+- 对白：高密度，三五个字一句，像真人快聊。
+- 感官：近零。
+- 环境 / 留白：留白是主力工具，不说 > 说了。
+- 推进 vs 停留：紧凑、不拖；场景真需要时可短暂放开。`,
     },
     {
-        key: 'poetic',
-        label: '浮光掠影',
-        desc: '不讲故事，只留感觉在空气里',
-        prompt: `【文风：散文】
-用感受代替叙述——
-- 感官通感：光可以有温度、声音可以有形状、沉默可以有颜色
-- 叙述节奏像呼吸：有快有慢，有长有短
-- 从一个细节跳到一种情绪，不需要逻辑桥梁
-- 台词可以更像自言自语：说给自己听的、半句话、意味不明的片段
-- 整体氛围是安静的、沉浸的
-- 但每一行仍然要有可以被读懂的具体内容，不要变成纯抽象的意象堆砌`,
+        key: 'immersive',
+        label: '细腻沉浸',
+        desc: '把感官铺开，让情绪慢慢转弯',
+        prompt: `【文风：细腻沉浸】
+叙述更深、更慢、更有层次。
+- 句长 / 节奏：长句为主，绵延，跟着情绪呼吸。
+- 动作 : 内心与感官 ≈ 4 : 6。允许铺陈触感、气味、温度、光的质地。
+- 对白：低密度，台词少而准。
+- 感官：高——但"高"指多写几行感官，不是堆形容词；比喻 / 修饰配额仍按 base，不解禁。
+- 环境 / 留白：中。
+- 推进 vs 停留：情绪一步步转，不一步到位；写出犹豫、反复、自己都没察觉的变化。`,
     },
     {
-        key: 'daily',
-        label: '岁月静好',
-        desc: '什么都不用发生，窝在一起就好',
-        prompt: `【文风：日常】
-不需要发生什么大事——
-- 重心不在剧情推进，而在两个人共处同一空间的细碎感
-- 写正在做的小事：整理桌面、翻手机、倒水、看窗外、打哈欠
-- 对话可以很碎：聊到一半跑题、突然想起什么、说了句废话
-- 沉默不是尴尬，是舒服的——不需要找话题填满每一秒
-- 环境细节比情节重要：阳光移动了位置、外面开始下雨、隔壁传来声音
-- 像一段被摄影机安静记录下来的普通午后`,
+        key: 'cinematic',
+        label: '分镜光影',
+        desc: '每一行都有景别，光落在该落的地方',
+        prompt: `【文风：分镜光影】
+每一行都是一个镜头。
+- 句长 / 节奏：中句为主，动作之间留呼吸的间隔，不一口气做完三件事。
+- 动作 : 内心 ≈ 6 : 4，外部偏重景别、光、声。
+- 对白：中低，克制，留停顿和打断。
+- 感官：中高，偏视听（光、影、声、空气的变化），不偏触觉内心。
+- 环境 / 留白：高——让环境主动参与叙事：风吹动了什么、光落在哪、远处传来什么声音。
+- 推进 vs 停留：中，靠镜头切换推进，而不是靠堆事件。`,
+    },
+    {
+        key: 'desolate',
+        label: '浮世苍凉',
+        desc: '冷眼看人世，再热闹底下也落灰',
+        prompt: `【文风：浮世苍凉】
+
+- 叙述姿态：视角比当下情绪清醒半步，冷眼，带一丝讥诮——看得见人心里的算计和不甘。
+- 情感底色：苍凉。越是热闹、亲密的场面，越要在底下留一点凉意和虚无。
+- 取喻：只从眼前的日常物件取喻——布料、镜子、灯光、颜色、旧物——而且每个比喻都得用来戳破心理，不是装饰。
+- 动作 / 内心：内心略多于动作，但内心戏要冷，不许自怜自伤。
+- 情绪：禁止直接命名（不写"很难过""很心动"），用一个物件、一束光、一个动作替它说。
+- 配额特批：本轮比喻可放宽到 ≤ 2 个，仅限满足上面"日常取喻 + 戳破心理"的；不满足仍按底线 ≤ 1。
+手感参照：
+他低头笑了一下，台灯的光映着，像一张搁久了、边角卷起的旧照片。你忽然想，再热闹的夜，原来也是会落灰的。`,
+    },
+    {
+        key: 'restrained',
+        label: '机锋暗涌',
+        desc: '深情藏在不说里，对白带刃',
+        prompt: `【文风：机锋暗涌】
+
+- 克制：深情全藏在不说里。角色几乎不直接表白情绪，靠岔开话题、动作、沉默露出来；该动情的地方往回收。
+- 对白：前置、密度高、有来有回、带冷幽默和机锋。角色清醒、有脑子、自持，不轻易失态。
+- 文字：利落干净，修饰极低（沿用底线即可，不上调配额）；意象克制、有目的。
+- 节奏：情绪长久压着，最后用一个精准的小动作或一句轻描淡写引爆——一个克制的动作 > 一整段描写。
+- 动作 / 内心：偏外部行为与对白，内心点到即止，让人从行为里自己读出情绪。
+手感参照：
+"我没事。" 他把烟按灭，伸手把你那杯凉掉的茶换成热的，整个过程没看你一眼。`,
+    },
+    {
+        key: 'lyrical',
+        label: '繁花缱绻',
+        desc: '浓墨重彩，草木皆有情，长句里铺感官',
+        prompt: `【文风：密丽抒情】
+
+- 语言：散文诗式，密度高、抒情浓；古典词与现代口语交融，但用字要准，不是堆典故。
+- 句长 / 节奏：长句为主，善用铺排、排比、回环；句子内部要有推进和呼吸，不是把分句硬堆在一起。
+- 意象 / 通感：放开——草木、水、季节、光、身体的意象层层叠加，允许通感（光有温度、声音有形状）。
+- 动作 : 内心与感官 ≈ 3 : 7。重心在丰沛的内在感受和感官，最后落在某个情绪或领悟的转弯上。
+- 情感：浓烈，但有节制的智性——抒情不许失控滥情，每一段铺陈都要收束到一个真实的情绪 / 体悟。
+- 配额特批：比喻 / 修饰大幅放开、远超 base 底线，但换一条更严的纪律——意象必须新鲜、具体、取自自然 / 古典 / 身体，禁用一切言情通用素材（眸光、砂纸嗓、危险气息那一整套），且每个意象都要服务于情绪推进，不许只为华丽。
+- 与在场视角衔接：所有抒情都要长在"你"此刻真实的感知和内心里，不能飘成上帝视角的散文随笔。
+手感参照：
+雨是后半夜才下的。你听着它一声一声落在铁皮棚上，像谁在很远的地方数着不肯说出口的话；屋里那盏灯把两个人的影子叠在墙上，叠了很久，久到你一时分不清哪一道是自己的。`,
+    },
+    {
+        key: 'tender',
+        label: '冰雪暖光',
+        desc: '苦寒里也照得见体温，哀而不伤',
+        prompt: `【文风：冰雪暖光】
+内核是"哪怕在苦寒和失去里，也照得见人的体温"。
+- 叙述姿态：温厚、体恤，对人和万物都怀着善意——这跟"浮世苍凉"那种冷眼讥诮正相反，别写成世故。
+- 环境 / 自然：把当前场景的环境当成有体温、有性格的活物来写（不限于雪原——可以是这间屋的光、窗外的天气、桌上的热气）；环境是叙事的一部分，不是背景板。
+- 语言：质朴但有光——用平实的词，靠具体、有温度的细节发亮，不靠华丽辞藻。（跟"繁花缱绻"相反：比喻仍按 base 底线 ≤ 1，力气下在白描的体温上。）
+- 情绪基调：哀而不伤，苦中有暖。就算写难过、写失去，也用从容、克制、带一点光的笔触，绝不煽情、不卖惨。
+- 动作 : 内心与感官 ≈ 5 : 5，落点在朴素的善意和体恤上。
+- 节奏：慢、从容，有讲故事人的耐心和一点民间气；小日子、小动作也写得有尊严。
+- 纪律：温暖必须靠具体细节挣来（一双手、一口热的、呵出的白气、落在谁身上的光），不许直接告诉读者"很温暖""很心疼"。
+手感参照：
+他进门时带进来一身寒气，搓着手往炉子边凑。你把自己那杯还烫着的递过去，他没推辞，捧着，先焐手，过了好一会儿才喝。屋里那点光不亮，可落在他冻红的耳朵上，竟也是暖的。`,
+    },
+    {
+        key: 'artisan',
+        label: '工笔水乡',
+        desc: '工笔细描器物与手艺，温润有人情',
+        prompt: `【文风：工笔水乡】
+长项是对器物、手艺、劳作的工笔凝视，把材质和细节描到生出情来。
+- 地域 / 质感：江南水乡的温润底子（雨、水、丝、茶、旧木、季节），但不限定地点——核心是那种湿润、细腻、有时间纵深的质感。
+- 工笔凝视：对眼前的物、材质、手上正做的事，做细密、有触感的写实——一双手怎么动、料子什么手感、一个动作的工序和节奏。这是这一档的灵魂。
+- 语言：细腻典雅，比"冰雪暖光"放得开、比"繁花缱绻"收得紧，介于两者之间。比喻 ≤ 2，但修饰必须是精确的材质 / 触感词，不是空泛的漂亮话。
+- 情绪：温润、有人情味，是一种被文化和审美养出来的、克制的温柔（区别于迟子建那种朴素的乡野暖意）。
+- 动作 : 内心与感官 ≈ 4 : 6，感官重点压在"物与手"上。
+- 节奏：慢、静，凝在一个小物件或一个动作上，让时间慢下来。
+- 纪律（最关键）：工笔写物不能写成静物图录——所有对器物 / 工序的凝视，最后都要接回此刻的人、关系或情绪，物是用来盛情的；也始终长在"你"的在场感知里，不许飘成一篇讲手艺的散文。
+手感参照：
+
+他剥橘子的样子很慢，指甲先沿着蒂口掐进去，再一瓣一瓣把白丝撕干净，才递过来。你接的时候碰到他指尖，凉的，大概在外头等了很久。可那一整瓣橘子是温的——是他一直攥在手心里捂着的。`,
+    },
+    {
+        key: 'quiet',
+        label: '静水深流',
+        desc: '极克制的透明文字，写人和人之间没说出口的',
+        prompt: `【文风：静水深流】
+体会崔恩荣的文笔，写她那套机制——内核是用极克制、透明的文字，写人与人之间细微的情感和没说出口的东西。
+- 语言：极度克制、干净、透明，几乎不修饰——力气全下在心理精确，不在意象。
+- 真正的主题：两个人之间的距离和靠近。把"空隙"当正文——谁先开口、谁没接话、谁多停了一拍、哪句话咽了回去。
+- 情感精确：抓最细微的情绪起伏——一点点别扭、一点点亲近、一点点被冒犯又算了的瞬间。要写得准，不写得多。
+- 动作 : 内心与感官 ≈ 4 : 6，内心偏重在"关系里的感受"，不是孤立的自我抒情。
+- 情绪基调：静水深流的温柔忧伤——共情那些受过伤、有点疏离的人，暖，但绝不煽情、不替人物哭。
+- 节奏：慢、安静，留白多；很多意味落在沉默和没说完的话里。
+- 纪律（最关键）：太克制太内向，最容易写空、或写成"直接报情绪"。所以情绪必须靠*具体的小动作*和*具体那句没说出口的话*来扛，禁止"她感到一阵孤独"这种抽象内心；让"没发生的事"和"没说的话"承担分量。
+手感参照：
+你问他那天为什么没来，他说临时有事。你"嗯"了一声，没再追问——其实你们都清楚那不是真的，只是拆穿它好像比那个谎本身更让人难堪，所以谁都没拆。他低头喝汤，你看着窗外，那个话题就这么轻轻地放下了，谁也没再去碰它。`,
     },
 ];
+
+const DATE_WRITING_STYLE_PRESET_ALIASES: Record<string, string> = {
+    natural: 'cozy',
+    daily: 'cozy',
+    literary: 'immersive',
+    hardcore: 'immersive',
+    poetic: 'cinematic',
+};
+
+export const resolveDateWritingStylePreset = (style?: string): DateWritingStylePreset | undefined => {
+    const key = style?.trim();
+    if (!key) return undefined;
+    const resolvedKey = DATE_WRITING_STYLE_PRESET_ALIASES[key] || key;
+    return DATE_WRITING_STYLE_PRESETS.find(p => p.key === resolvedKey);
+};
 
 // ====== Anti-Cliché Base Layer (always-on, invisible to user) ======
 const ANTI_CLICHE_BASE = `【文风底线 · 系统级】
@@ -278,7 +353,7 @@ export const buildDateOutputTuning = (
     // --- Writing Style (user-selected, layered on top) ---
     if (writingStyle && writingStyle.trim()) {
         // Check if it matches a preset key
-        const preset = DATE_WRITING_STYLE_PRESETS.find(p => p.key === writingStyle);
+        const preset = resolveDateWritingStylePreset(writingStyle);
         if (preset) {
             parts.push(`\n${preset.prompt}`);
         } else {
@@ -314,14 +389,17 @@ export type CharPerspective = 'first' | 'third';
 
 /**
  * Generate the perspective instruction block that tells the AI how to refer to both user and char.
- * charPov only has 'first' (我) and 'third' (名字/他). Char is always male.
+ * charPov only has 'first' (我) and 'third' (名字/性别代词).
+ * Character pronoun follows char.gender; unset defaults to male.
  */
 export const getDualPerspectivePrompt = (
     userPov: DatePerspective,
     charPov: CharPerspective,
     charName: string,
-    userName: string
+    userName: string,
+    charGender?: 'male' | 'female',
 ) => {
+    const charPronoun = pronoun(charGender ?? 'male');
     // Build the user referral rule
     let userRule: string;
     switch (userPov) {
@@ -345,7 +423,7 @@ export const getDualPerspectivePrompt = (
             break;
         case 'third':
         default:
-            charRule = `${charName} 在叙述行中用名字或「他」指代`;
+            charRule = `${charName} 在叙述行中用名字或「${charPronoun}」指代`;
             break;
     }
 
@@ -355,7 +433,7 @@ export const getDualPerspectivePrompt = (
     if (charPov === 'first') {
         example = `[normal] 我的视线落在${userRef}身上，停了一拍才移开。`;
     } else {
-        example = `[normal] 他的视线落在${userRef}身上，停了一拍才移开。`;
+        example = `[normal] ${charPronoun}的视线落在${userRef}身上，停了一拍才移开。`;
     }
 
     return `### 叙述视角
@@ -373,10 +451,12 @@ export const getDualPerspectiveLabel = (
     userPov: DatePerspective,
     charPov: CharPerspective,
     charName: string,
-    userName: string
+    userName: string,
+    charGender?: 'male' | 'female',
 ) => {
+    const charPronoun = pronoun(charGender ?? 'male');
     const userLabels = { first: `${userName}=我`, second: `${userName}=你`, third: `${userName}=名字` };
-    const charLabels = { first: `${charName}=我`, third: `${charName}=他/名字` };
+    const charLabels = { first: `${charName}=我`, third: `${charName}=${charPronoun}/名字` };
     return `${userLabels[userPov]}，${charLabels[charPov]}`;
 };
 
@@ -387,8 +467,10 @@ export const getDualPerspectiveReminder = (
     userPov: DatePerspective,
     charPov: CharPerspective,
     charName: string,
-    userName: string
+    userName: string,
+    charGender?: 'male' | 'female',
 ) => {
+    const charPronoun = pronoun(charGender ?? 'male');
     const parts: string[] = [];
 
     switch (userPov) {
@@ -411,7 +493,7 @@ export const getDualPerspectiveReminder = (
             }
             break;
         default:
-            parts.push(`用名字或「他」指代${charName}`);
+            parts.push(`用名字或「${charPronoun}」指代${charName}`);
             break;
     }
 
@@ -603,7 +685,9 @@ export const buildDatePreamble = (charName: string, userName: string) =>
     DREAMWEAVER + '\n\n' + buildIdentityIntro(charName, userName);
 
 // ====== Inner Whispers (内心低语) prompt instruction ======
-const buildInnerWhisperInstruction = (userName: string) => `
+const buildInnerWhisperInstruction = (userName: string, charGender?: 'male' | 'female') => {
+    const charPronoun = pronoun(charGender ?? 'male');
+    return `
 ### 💭 内心低语 (Inner Whispers) — 可选交互系统
 当你感知到当前对话来到了一个**情感转折点**（暧昧升温、心动瞬间、欲言又止、紧张对峙、身体距离变化），你**可以**（但不是必须）在回复的**最末尾**附加一个 <inner_whispers> 块。
 
@@ -621,7 +705,7 @@ const buildInnerWhisperInstruction = (userName: string) => `
 **格式**（严格遵守，放在所有正文行之后）：
 <inner_whispers>
 [
-  {"whisper": "悄悄握紧他的手…", "tone": "大胆", "secret": "${userName}终于勇敢了，你要表现出意外但嘴角忍不住上扬，用力回握"},
+  {"whisper": "悄悄握紧${charPronoun}的手…", "tone": "大胆", "secret": "${userName}终于勇敢了，你要表现出意外但嘴角忍不住上扬，用力回握"},
   {"whisper": "假装没注意到，低头看地面", "tone": "退缩", "secret": "${userName}在逃避，你要主动打破距离，比如侧头凑近看ta在看什么"}
 ]
 </inner_whispers>
@@ -633,6 +717,7 @@ const buildInnerWhisperInstruction = (userName: string) => `
 4. 提供 2-3 个选项，确保至少有一个「大胆」和一个「克制」方向
 5. 不要每一轮都生成 whispers，只在真正的转折点出现
 `;
+};
 
 /** Build the immersive theater scene block (perspective + VN rules + scene context) */
 export const buildTheaterScene = (
@@ -644,11 +729,12 @@ export const buildTheaterScene = (
     timeSlot?: TimeSlot,
     wordCount?: number,
     writingStyle?: string,
+    charGender?: 'male' | 'female',
 ) => {
     const timeContext = timeSlot
         ? `\n3. **Time**: 当前时段 — ${TIME_SLOT_LABELS[timeSlot].zh}。请让描写自然反映这个时间的光线、氛围和节奏。`
         : '';
-    const perspectivePrompt = getDualPerspectivePrompt(userPov, charPov, charName, userName);
+    const perspectivePrompt = getDualPerspectivePrompt(userPov, charPov, charName, userName, charGender);
     const outputTuning = buildDateOutputTuning(wordCount, writingStyle);
 
     return `
@@ -682,7 +768,7 @@ ${perspectivePrompt}
 [shy] "……你一直在看我吗？"
 [happy] 嘴角的弧度藏不住，像是被戳中了什么小心思。
 
-${buildInnerWhisperInstruction(userName)}
+${buildInnerWhisperInstruction(userName, charGender)}
 
 ### 场景上下文
 1. **Location**: 你们现在**面对面**。
@@ -695,9 +781,9 @@ ${outputTuning}
  * Build the full tail block: rp_core_live + cot + output format + 卡CoT
  * 卡CoT (CoT forcing) is at the VERY END — forces the model's first token to be <thinking>
  */
-export const buildDateTail = (charName: string, userName: string, userPov: DatePerspective, charPov: CharPerspective) => {
-    const pLabel = getDualPerspectiveLabel(userPov, charPov, charName, userName);
-    const pReminder = getDualPerspectiveReminder(userPov, charPov, charName, userName);
+export const buildDateTail = (charName: string, userName: string, userPov: DatePerspective, charPov: CharPerspective, charGender?: 'male' | 'female') => {
+    const pLabel = getDualPerspectiveLabel(userPov, charPov, charName, userName, charGender);
+    const pReminder = getDualPerspectiveReminder(userPov, charPov, charName, userName, charGender);
     return buildRpCoreLive(charName, userName) + buildCotLive(charName, userName, pLabel, pReminder) + OUTPUT_FORMAT_AND_COT_TRIGGER;
 };
 
@@ -763,10 +849,10 @@ export function buildFullDateSystemPrompt(opts: DateSystemPromptOpts): string {
     const dateEmotions = [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])];
     const userPov = (char.datePerspective || 'second') as DatePerspective;
     const charPov = (char.dateCharPerspective || 'third') as CharPerspective;
-    prompt += buildTheaterScene(charName, userName, dateEmotions, userPov, charPov, opts.timeSlot, char.dateOutputWordCount, char.dateWritingStyle);
+    prompt += buildTheaterScene(charName, userName, dateEmotions, userPov, charPov, opts.timeSlot, char.dateOutputWordCount, char.dateWritingStyle, char.gender ?? 'male');
 
     // 8. Tail (rp_core_live + CoT + output format)
-    prompt += buildDateTail(charName, userName, userPov, charPov);
+    prompt += buildDateTail(charName, userName, userPov, charPov, char.gender ?? 'male');
 
     return prompt;
 }

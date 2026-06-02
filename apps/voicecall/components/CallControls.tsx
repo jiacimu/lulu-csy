@@ -12,6 +12,8 @@ interface CallControlsProps {
     onVolumeChange?: (v: number) => void;
     voiceInputDisabled?: boolean;
     voiceInputFallbackReason?: string;
+    audioOutputDisabled?: boolean;
+    audioOutputDisabledReason?: string;
 }
 
 const CallControls: React.FC<CallControlsProps> = ({
@@ -24,6 +26,8 @@ const CallControls: React.FC<CallControlsProps> = ({
     onVolumeChange,
     voiceInputDisabled = false,
     voiceInputFallbackReason = '',
+    audioOutputDisabled = false,
+    audioOutputDisabledReason = '',
 }) => {
     const [ripples, setRipples] = useState<number[]>([]);
     const [showVolumeSlider, setShowVolumeSlider] = useState(false);
@@ -85,9 +89,10 @@ const CallControls: React.FC<CallControlsProps> = ({
             {/* 音量 */}
             <div className="relative">
                 <button
-                    onClick={() => setShowVolumeSlider(prev => !prev)}
-                    className={`vc-dock-btn ${showVolumeSlider ? 'vc-dock-btn--active' : ''}`}
-                    title="音量"
+                    onClick={audioOutputDisabled ? undefined : () => setShowVolumeSlider(prev => !prev)}
+                    disabled={audioOutputDisabled}
+                    className={`vc-dock-btn ${showVolumeSlider ? 'vc-dock-btn--active' : ''} ${audioOutputDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title={audioOutputDisabled ? (audioOutputDisabledReason || '当前通道不播放角色语音') : '音量'}
                 >
                     {volume <= 0 ? (
                         <SpeakerSlash weight="fill" className="w-6 h-6" />

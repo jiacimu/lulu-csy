@@ -3,6 +3,7 @@ import type { CharacterProfile } from './character';
 import type { UserProfile } from './core';
 
 export type ImageProviderType = 'novelai' | 'openai-compatible';
+export type ImageGenerationStyle = 'guoman' | 'cg' | 'real';
 export type PhotoStyleProviderScope = 'all' | ImageProviderType;
 export type OpenAIImageResponseFormat = 'auto' | 'b64_json' | 'url';
 export type OpenAIImageQuality = '' | 'auto' | 'low' | 'medium' | 'high' | 'standard' | 'hd';
@@ -57,6 +58,7 @@ export interface OpenAICompatibleImageProviderConfig {
 
 export interface ImageGenerationConfig {
     activeProvider: ImageProviderType;
+    imageStyle: ImageGenerationStyle;
     novelai: NovelAIImageProviderConfig;
     openaiCompatible: OpenAICompatibleImageProviderConfig;
 }

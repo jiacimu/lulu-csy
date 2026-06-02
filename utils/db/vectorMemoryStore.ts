@@ -29,7 +29,7 @@ export const getAllVectorMemories = async (charId: string): Promise<VectorMemory
  * Get lightweight headers (no vector data) for extraction prompt building & keyword pre-filtering.
  * Uses cursor to avoid loading the full vector arrays into memory.
  */
-export const getVectorMemoryHeaders = async (charId: string): Promise<{ id: string; title: string; content: string; emotionalJourney?: string; importance: number; createdAt: number; deprecated?: boolean; salienceScore?: number; mentionCount?: number; lastMentioned?: number }[]> => {
+export const getVectorMemoryHeaders = async (charId: string): Promise<{ id: string; title: string; content: string; emotionalJourney?: string; importance: number; createdAt: number; updatedAt?: number; deprecated?: boolean; salienceScore?: number; mentionCount?: number; lastMentioned?: number; level?: number; source?: string }[]> => {
     const contentCharId = await resolveCharacterContentId(charId);
     const db = await openDB();
     if (!db.objectStoreNames.contains(STORE_VECTOR_MEMORIES)) return [];
@@ -37,7 +37,7 @@ export const getVectorMemoryHeaders = async (charId: string): Promise<{ id: stri
         const tx = db.transaction(STORE_VECTOR_MEMORIES, 'readonly');
         const index = tx.objectStore(STORE_VECTOR_MEMORIES).index('charId');
         const request = index.openCursor(contentCharId);
-        const headers: { id: string; title: string; content: string; emotionalJourney?: string; importance: number; createdAt: number; deprecated?: boolean; salienceScore?: number; mentionCount?: number; lastMentioned?: number }[] = [];
+        const headers: { id: string; title: string; content: string; emotionalJourney?: string; importance: number; createdAt: number; updatedAt?: number; deprecated?: boolean; salienceScore?: number; mentionCount?: number; lastMentioned?: number; level?: number; source?: string }[] = [];
         request.onsuccess = () => {
             const cursor = request.result;
             if (cursor) {
@@ -49,10 +49,13 @@ export const getVectorMemoryHeaders = async (charId: string): Promise<{ id: stri
                     emotionalJourney: v.emotionalJourney,
                     importance: v.importance,
                     createdAt: v.createdAt,
+                    updatedAt: v.updatedAt,
                     deprecated: v.deprecated,
                     salienceScore: v.salienceScore,
                     mentionCount: v.mentionCount,
                     lastMentioned: v.lastMentioned,
+                    level: v.level,
+                    source: v.source,
                 });
                 cursor.continue();
             } else {

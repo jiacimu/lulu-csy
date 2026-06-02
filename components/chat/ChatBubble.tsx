@@ -1,6 +1,7 @@
 import React,{ useRef,useEffect,useState } from 'react';
 import { renderMarkdown } from '../../utils/markdownLite';
 import type { BubbleStyle,Message } from '../../types/chat';
+import { useSafeImageLoad } from './useSafeImageLoad';
 
 /**
  * ChatBubble — 可主题化气泡壳组件
@@ -69,6 +70,17 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
     const showTail = !styleConfig.hideTail;
     const bubbleRef = useRef<HTMLDivElement>(null);
     const [thinkingExpanded, setThinkingExpanded] = useState(false);
+    const isImageReply = !!replyTo && (
+        replyTo.type === 'image'
+        || !!replyTo.thumbnailUrl
+        || !!replyTo.imageUrl
+        || looksLikeImageReplyContent(replyTo.content)
+    );
+    const imageReply = isImageReply && replyTo ? getImageReplyDisplay(replyTo) : null;
+    const safeReplyImage = useSafeImageLoad(
+        imageReply?.src,
+        imageReply?.src ? `reply:${replyTo?.id}:${imageReply.src}` : undefined,
+    );
 
     // Apply Workshop-customizable properties via inline styles.
     // Default mode keeps visual-editor values above preset theme CSS. When an
@@ -245,36 +257,29 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
                 )}
 
                 {/* Layer 3: Reply/Quote Block */}
-                {replyTo && (() => {
-                    const isImageReply = replyTo.type === 'image'
-                        || !!replyTo.thumbnailUrl
-                        || !!replyTo.imageUrl
-                        || looksLikeImageReplyContent(replyTo.content);
-                    const imageReply = isImageReply ? getImageReplyDisplay(replyTo) : null;
-
-                    return (
-                        <div className="relative z-10 mb-1 text-[10px] bg-black/5 p-1.5 rounded-md border-l-2 border-black/20 opacity-60 flex flex-col gap-0.5 max-w-full overflow-hidden">
-                            <span className="font-bold opacity-90 truncate">{replyTo.name}</span>
-                            {imageReply ? (
-                                <span className="flex items-center gap-1.5 min-w-0">
-                                    {imageReply.src && (
-                                        <img
-                                            src={imageReply.src}
-                                            data-testid="reply-image-thumbnail"
-                                            className="h-9 w-9 shrink-0 rounded object-cover bg-black/10"
-                                            alt="引用图片"
-                                            loading="lazy"
-                                            decoding="async"
-                                        />
-                                    )}
-                                    <span className="truncate italic">{imageReply.text}</span>
-                                </span>
-                            ) : (
-                                <span className="truncate italic">"{replyTo.content}"</span>
-                            )}
-                        </div>
-                    );
-                })()}
+                {replyTo && (
+                    <div className="relative z-10 mb-1 text-[10px] bg-black/5 p-1.5 rounded-md border-l-2 border-black/20 opacity-60 flex flex-col gap-0.5 max-w-full overflow-hidden">
+                        <span className="font-bold opacity-90 truncate">{replyTo.name}</span>
+                        {imageReply ? (
+                            <span className="flex items-center gap-1.5 min-w-0">
+                                {safeReplyImage.isLoaded && (
+                                    <img
+                                        src={safeReplyImage.src}
+                                        data-testid="reply-image-thumbnail"
+                                        className="h-9 w-9 shrink-0 rounded object-cover bg-black/10"
+                                        alt="引用图片"
+                                        loading="lazy"
+                                        decoding="async"
+                                        onError={safeReplyImage.markFailed}
+                                    />
+                                )}
+                                <span className="truncate italic">{imageReply.text}</span>
+                            </span>
+                        ) : (
+                            <span className="truncate italic">"{replyTo.content}"</span>
+                        )}
+                    </div>
+                )}
 
                 {/* Layer 4: Text Content */}
                 <div

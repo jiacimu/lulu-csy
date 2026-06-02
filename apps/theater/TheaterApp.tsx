@@ -624,8 +624,8 @@ const TheaterApp: React.FC = () => {
                 const dateEmotions = [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])];
                 const userPov = char.datePerspective || 'second';
                 const charPov = char.dateCharPerspective || 'third';
-                systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov, updatedSession.timeSlot);
-                systemPrompt += buildDateTail(char.name, userProfile.name, userPov, charPov);
+                systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov, updatedSession.timeSlot, undefined, undefined, char.gender ?? 'male');
+                systemPrompt += buildDateTail(char.name, userProfile.name, userPov, charPov, char.gender ?? 'male');
 
                 const theaterMsgs = allMsgs
                     .filter(m => isTheaterMessage(m, tlId || undefined))
@@ -740,7 +740,7 @@ const TheaterApp: React.FC = () => {
             const dateEmotions = [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])];
             const userPov = char.datePerspective || 'second';
             const charPov = char.dateCharPerspective || 'third';
-            systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov, sess.timeSlot);
+            systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov, sess.timeSlot, undefined, undefined, char.gender ?? 'male');
 
             const response = await fetchTheaterChatCompletion(
                 apiConfig,
@@ -966,8 +966,8 @@ const TheaterApp: React.FC = () => {
             const dateEmotions = [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])];
             const userPov = char.datePerspective || 'second';
             const charPov = char.dateCharPerspective || 'third';
-            systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov, session.timeSlot);
-            systemPrompt += buildDateTail(char.name, userProfile.name, userPov, charPov);
+            systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov, session.timeSlot, undefined, undefined, char.gender ?? 'male');
+            systemPrompt += buildDateTail(char.name, userProfile.name, userPov, charPov, char.gender ?? 'male');
 
             // Build history
             allMsgs = await DB.getMessagesByCharId(char.id);
@@ -1755,6 +1755,7 @@ ${exitPromptContent}
 
         const prompt = buildMetaLetterPrompt(char.name, userProfile.name, sessionContext, {
             isFirstMetaLetter: !hasPreviousMetaLetter,
+            charGender: char.gender ?? 'male',
         });
 
         const response = await fetchTheaterChatCompletion(

@@ -13,7 +13,7 @@ import ErrorOverlay from './components/ErrorOverlay';
 import type { VoiceCallError } from './components/ErrorOverlay';
 import { unlockAudio } from './unlockAudio';
 import { formatDuration } from './utils';
-import { MODE_LABELS } from './voiceCallTypes';
+import { DEFAULT_REPLY_CHANNEL,MODE_LABELS,REPLY_CHANNEL_LABELS } from './voiceCallTypes';
 import dialToneSrc from './assets/dial-tone.mp3';
 import ringtoneWechatSrc from './assets/ringtone-wechat.mp3';
 import vcBgSrc from './assets/vc-bg.jpg';
@@ -25,7 +25,7 @@ import vcBgModeSelectSrc from './assets/vc-bg-modeselect.jpg';
 import type { TtsConfig } from '../../types/tts';
 import type { SttConfig } from '../../types/stt';
 import type { CharacterProfile,UserProfile } from '../../types';
-import type { VoiceCallMode } from './voiceCallTypes';
+import type { VoiceCallMode,VoiceCallModeSelection,VoiceCallReplyChannel } from './voiceCallTypes';
 import type { MessageType } from '../../types';
 import { getEmbeddingConfig,getSecondaryApiConfig } from '../../utils/runtimeConfig';
 import { withCharacterVoiceCallTtsConfig } from '../../utils/characterTts';
@@ -54,12 +54,13 @@ interface VoiceCallScreenProps {
     apiConfig: { baseUrl: string; apiKey: string; model: string; useGeminiJailbreak?: boolean;[key: string]: any };
     addToast: (message: string, type?: 'info' | 'success' | 'error') => void;
     incomingMode?: VoiceCallMode;
+    incomingReplyChannel?: VoiceCallReplyChannel;
     callReason?: string;
 }
 
 const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
     avatarUrl, name, char, userProfile, direction, onCloseApp, onRegisterEndCall,
-    ttsConfig, sttConfig, apiConfig, addToast, incomingMode, callReason,
+    ttsConfig, sttConfig, apiConfig, addToast, incomingMode, incomingReplyChannel, callReason,
 }) => {
     const characterTtsConfig = useMemo(
         () => withCharacterVoiceCallTtsConfig(ttsConfig, char),
@@ -83,6 +84,9 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
     const [selectedMode, setSelectedMode] = useState<VoiceCallMode | null>(
         direction === 'incoming' ? (incomingMode ?? 'daily') : null
     );
+    const [selectedReplyChannel, setSelectedReplyChannel] = useState<VoiceCallReplyChannel>(
+        direction === 'incoming' ? (incomingReplyChannel ?? DEFAULT_REPLY_CHANNEL) : DEFAULT_REPLY_CHANNEL
+    );
 
     // ─── 外语模式 (Foreign Language) ───
     const [foreignLang, setForeignLangState] = useState<VoiceCallForeignLangConfig | null>(() => (
@@ -96,10 +100,12 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
     // ─── 向量记忆 (Vector Memory) ───
     const embeddingApiKey = useMemo(() => getEmbeddingConfig().apiKey || undefined, []);
 
-    const handleSelectMode = useCallback((mode: VoiceCallMode) => {
+    const handleSelectMode = useCallback((selection: VoiceCallModeSelection) => {
         unlockAudio(); // Fix E: iOS Safari 音频解锁（必须在用户手势同步链中）
+        const { mode, replyChannel } = selection;
         console.log(`[VoiceCall] Mode selected: ${mode}`);
         setSelectedMode(mode);
+        setSelectedReplyChannel(replyChannel);
         confirmMode();
     }, [confirmMode]);
 
@@ -183,6 +189,7 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
             });
         }, []),
         callMode: selectedMode ?? undefined,
+        replyChannel: selectedReplyChannel,
         isIncoming: direction === 'incoming',
         // ─── 来电理由 (Call Reason) ───
         callReason,
@@ -220,7 +227,8 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
 
             // ── 持久化通话记录 ──
             const history = lastCallHistory.current;
-            const persistedHistory = lowMemoryMode
+            const isTextReplyChannel = selectedReplyChannel === 'text';
+            const persistedHistory = lowMemoryMode || isTextReplyChannel
                 ? history.map(({ role, content }) => ({ role, content }))
                 : history;
 
@@ -228,17 +236,21 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                 const mode = selectedMode || 'daily';
                 const duration = callDurationRef.current;
                 const modeText = MODE_LABELS[mode] || mode;
+                const replyChannelText = REPLY_CHANNEL_LABELS[selectedReplyChannel];
 
                 // 过滤掉系统自动发送的开场白提示词，避免出现在通话记录卡片中
                 const filteredHistory = filterPersistedCallHistory(persistedHistory);
-                const persistedConversation = buildPersistedCallConversation(persistedHistory);
+                const persistedConversation = buildPersistedCallConversation(persistedHistory, selectedReplyChannel);
 
                 // 拼接给模型读 + 卡片展示的文本版
                 const lines = filteredHistory.map(h =>
                     `${h.role === 'user' ? userProfile.name : name}: ${getVoiceCallVisibleText(h.role, h.content)}`
                 );
+                const callHeader = selectedReplyChannel === 'text'
+                    ? `[电话记录 | ${modeText} | ${replyChannelText} | ${formatDuration(duration)}]`
+                    : `[电话记录 | ${modeText} | ${formatDuration(duration)}]`;
                 const content = [
-                    `[电话记录 | ${modeText} | ${formatDuration(duration)}]`,
+                    callHeader,
                     ...lines,
                     `[通话结束]`,
                 ].join('\n');
@@ -255,13 +267,14 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                         turns: filteredHistory.length,
                         // 剥离 audioBlob，防止撑爆主存
                         conversation: persistedConversation,
-                        hasCallAudio: persistedConversation.some(h => h.hasAudio === true),
+                        hasCallAudio: selectedReplyChannel === 'voice' && persistedConversation.some(h => h.hasAudio === true),
                         lowMemoryMode,
                         voiceInputMode,
+                        replyChannel: selectedReplyChannel,
                     },
                 }).then(async (savedMsgId) => {
                     // ── 将音频 Blob 存入专用的 STORE_VOICE_AUDIO ──
-                    const audioEntries = lowMemoryMode ? [] : buildPersistedCallAudioEntries(savedMsgId, persistedHistory);
+                    const audioEntries = lowMemoryMode ? [] : buildPersistedCallAudioEntries(savedMsgId, persistedHistory, selectedReplyChannel);
                     for (const [i, entry] of audioEntries.entries()) {
                         try {
                             await saveVoiceAudio(entry.key, entry.blob);
@@ -304,12 +317,12 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                     role: 'system' as const,
                     type: 'call_log' as MessageType,
                     content: `[未接来电 | ${modeLabel} | 0:00]`,
-                    metadata: { source: 'voicecall', duration: 0, mode: selectedMode || 'daily', turns: 0, missed: true },
+                    metadata: { source: 'voicecall', duration: 0, mode: selectedMode || 'daily', turns: 0, missed: true, replyChannel: selectedReplyChannel },
                 }).catch(err => console.error('[VoiceCall] Failed to save missed call:', err));
             }
             setTimeout(() => onCloseApp(), 3000);
         }
-    }, [callState, direction, startEngine, stopEngine, releaseGate, char.id, name, userProfile.name, selectedMode, addToast]);
+    }, [callState, direction, startEngine, stopEngine, releaseGate, char.id, name, userProfile.name, selectedMode, selectedReplyChannel, addToast]);
 
     // 组件卸载时确保引擎停止
     useEffect(() => {
@@ -449,7 +462,7 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                 role: 'system' as const,
                 type: 'call_log' as MessageType,
                 content: `[未接来电 | ${modeLabel} | 0:00]`,
-                metadata: { source: 'voicecall', duration: 0, mode: selectedMode || 'daily', turns: 0, missed: true },
+                metadata: { source: 'voicecall', duration: 0, mode: selectedMode || 'daily', turns: 0, missed: true, replyChannel: selectedReplyChannel },
             });
         }
         endCall();
@@ -505,6 +518,7 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                         charName={name}
                         onSelectMode={handleSelectMode}
                         onCancel={handleCancelModeSelect}
+                        initialReplyChannel={selectedReplyChannel}
                         foreignLang={foreignLang}
                         onForeignLangChange={setForeignLang}
                     />
@@ -556,6 +570,7 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                         engineState={engineState}
                         isUserSpeaking={isUserSpeaking}
                         ttsDegraded={ttsDegraded}
+                        replyChannel={selectedReplyChannel}
                         transcriptSource={transcriptSource}
                         callMode={selectedMode ?? undefined}
                         aiTranslation={aiTranslation}

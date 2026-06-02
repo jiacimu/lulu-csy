@@ -42,11 +42,23 @@ describe('performanceMode', () => {
     document.documentElement.classList.remove('sully-perf-lite');
   });
 
-  it('normalizes invalid stored values to auto', () => {
+  it('defaults to off when no preference is stored', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+
+    expect(readPerformanceModePreference()).toBe('off');
+    expect(resolvePerformanceMode(readPerformanceModePreference(), {
+      width: window.innerWidth,
+      reducedMotion: false,
+      saveData: false,
+      hardwareConcurrency: 8,
+    })).toBe('full');
+  });
+
+  it('normalizes invalid stored values to off', () => {
     localStorage.setItem(PERFORMANCE_MODE_STORAGE_KEY, 'turbo');
 
-    expect(normalizePerformanceModePreference('turbo')).toBe('auto');
-    expect(readPerformanceModePreference()).toBe('auto');
+    expect(normalizePerformanceModePreference('turbo')).toBe('off');
+    expect(readPerformanceModePreference()).toBe('off');
   });
 
   it('lets manual on and off override device signals', () => {

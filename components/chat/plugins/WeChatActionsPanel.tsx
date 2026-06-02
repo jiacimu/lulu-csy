@@ -1,5 +1,5 @@
 import React from 'react';
-import { Money,BookOpenText,GearSix,Image,ArrowsClockwise,HandTap,Phone,Sparkle } from '@phosphor-icons/react';
+import { Money,BookOpenText,GearSix,Image,ArrowsClockwise,HandTap,Phone,Sparkle,VinylRecord } from '@phosphor-icons/react';
 
 export interface ActionsPanelProps {
     onPanelAction: (action: string) => void;
@@ -7,6 +7,7 @@ export interface ActionsPanelProps {
     onReroll: () => void;
     canReroll: boolean;
     manualPhotoEnabled?: boolean;
+    quickSongGenerating?: boolean;
     chatImageInputRef: React.RefObject<HTMLInputElement | null>;
 }
 
@@ -16,6 +17,7 @@ const WeChatActionsPanel: React.FC<ActionsPanelProps> = ({
     onReroll,
     canReroll,
     manualPhotoEnabled = false,
+    quickSongGenerating = false,
     chatImageInputRef,
 }) => {
     // WeChat actions panel typically has a light grey background and white rounded rect icons
@@ -38,6 +40,13 @@ const WeChatActionsPanel: React.FC<ActionsPanelProps> = ({
                     <span className="text-[12px] text-[#888888]">生图</span>
                 </button>
             )}
+
+            <button onClick={() => onPanelAction('quick-song')} disabled={quickSongGenerating} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${quickSongGenerating ? 'opacity-50' : ''}`}>
+                <div className="w-[60px] h-[60px] bg-white rounded-[16px] flex items-center justify-center text-[#333333] shadow-[0_1px_3px_rgba(0,0,0,0.05)] border border-slate-100">
+                    <VinylRecord className="w-7 h-7" weight="fill" />
+                </div>
+                <span className="text-[12px] text-[#888888]">{quickSongGenerating ? '写歌中…' : '主题曲'}</span>
+            </button>
 
             {/* 转账 */}
             <button onClick={() => onPanelAction('transfer')} className="flex flex-col items-center gap-2 active:scale-95 transition-transform">

@@ -692,7 +692,7 @@ describe('system backup coverage', () => {
         expect(localStorage.getItem('music_profile_bg_setting')).toBe('{"type":"custom"}');
     });
 
-    it('deduplicates exported asset files and omits raw appearance compatibility rows', async () => {
+    it('deduplicates exported asset files and omits raw appearance and dropped compatibility rows', async () => {
         const sharedImage = 'data:image/png;base64,c2hhcmVkLWltYWdl';
         const customFont = 'data:font/ttf;base64,Zm9udC1ieXRlcw==';
         const state = makeStateSnapshot();
@@ -707,7 +707,7 @@ describe('system backup coverage', () => {
         await DB.saveAsset('custom_font_data', customFont);
         await DB.saveAsset('icon_Chat', sharedImage);
         await DB.saveAsset('sullyos_upstream_compat_payload', JSON.stringify({
-            pixelHomeAssets: [{ id: 'pixel-home-old', image: sharedImage }],
+            oldPayload: [{ id: 'dropped-old-asset', image: sharedImage }],
         }));
         await DB.saveAsset('appearance_preset_ap_dup', JSON.stringify({
             id: 'ap_dup',
@@ -757,7 +757,7 @@ describe('system backup coverage', () => {
         expect(await DB.getAsset('custom_font_data')).toBe(customFont);
         expect(await DB.getAsset('icon_Chat')).toBe(sharedImage);
         expect(await DB.getAsset('appearance_preset_ap_dup')).toContain('SULLY');
-        expect(await DB.getAsset('sullyos_upstream_compat_payload')).toContain('pixel-home-old');
+        expect(await DB.getAsset('sullyos_upstream_compat_payload')).toBeNull();
     }, 15000);
 
     it('declares every primary IndexedDB store in the backup coverage map', () => {
@@ -788,80 +788,4 @@ describe('system backup coverage', () => {
         });
     });
 
-    it('roundtrips upstream SullyOS backup fields that do not have local stores', async () => {
-        await importWithoutReload(JSON.stringify({
-            timestamp: Date.now(),
-            version: 3,
-            customIcons: {
-                Browser: 'data:image/png;base64,aWNvbg==',
-            },
-            appearancePresets: [
-                { id: 'preset-a', name: '夜色', createdAt: 2, wallpaper: 'data:image/png;base64,cHJlc2V0' },
-            ],
-            memoryPalaceConfig: { enabled: true, digestInterval: 12 },
-            studyApiConfig: { model: 'study-model' },
-            studyTutorPresets: [{ id: 'tutor-a', name: '老师' }],
-            cloudBackupConfig: { enabled: true, webdavUrl: 'https://dav.example', username: 'u', password: 'p', remotePath: '/SullyBackup/' },
-            remoteVectorConfig: { enabled: true, supabaseUrl: 'https://supabase.example', supabaseAnonKey: 'anon', initialized: true },
-            memoryPalaceHighWaterMarks: { 'char-a': 88 },
-            memoryPalaceFlags: { 'mp_personality_tried_char-a': 'true' },
-            chatTranslateSourceLang: 'ja',
-            chatTranslateTargetLang: 'zh',
-            chatTranslateEnabledByChar: { 'char-a': true },
-            chatArchivePrompts: [{ id: 'archive-a' }],
-            chatActiveArchivePromptId: 'archive-a',
-            characterRefinePrompts: ['更细腻'],
-            characterActiveRefinePromptId: 'refine-a',
-            scheduleAppTheme: 'midnight',
-            groupchatContextLimit: 13,
-            browserConfig: { braveKey: 'brave-secret', useRealSearch: true },
-            bm25Mode: 'hybrid',
-            lastActiveCharId: 'char-a',
-            eventNotifFlags: { sullyos_event_seen: '1' },
-            songs: [{ id: 'song-a', title: '旧歌' }],
-            quizSessions: [{ id: 'quiz-a' }],
-            guidebookSessions: [{ id: 'guide-a' }],
-            lifeSimState: { id: 'life-a' },
-            memoryNodes: [{ id: 'node-a' }],
-            memoryVectors: [{ id: 'vector-a' }],
-            memoryLinks: [{ id: 'link-a' }],
-            topicBoxes: [{ id: 'topic-a' }],
-            anticipations: [{ id: 'anticipation-a' }],
-            eventBoxes: [{ id: 'event-a' }],
-            dailySchedules: [{ id: 'schedule-a' }],
-            memoryBatches: [{ id: 'batch-a' }],
-            pixelHomeAssets: [{ id: 'pixel-asset-a', image: 'data:image/png;base64,cGl4ZWw=' }],
-            pixelHomeLayouts: [{ id: 'pixel-layout-a' }],
-        }));
-
-        expect(localStorage.getItem('os_memory_palace_config')).toBe('{"enabled":true,"digestInterval":12}');
-        expect(localStorage.getItem('study_api_config')).toBe('{"model":"study-model"}');
-        expect(localStorage.getItem('os_cloud_backup_config')).toContain('dav.example');
-        expect(localStorage.getItem('mp_lastMsgId_char-a')).toBe('88');
-        expect(localStorage.getItem('chat_translate_enabled_char-a')).toBe('true');
-        expect(localStorage.getItem('browser_brave_key')).toBe('brave-secret');
-        expect(localStorage.getItem('sullyos_event_seen')).toBe('1');
-        expect(await DB.getAsset('icon_Browser')).toBe('data:image/png;base64,aWNvbg==');
-        expect(await DB.getAsset('appearance_preset_preset-a')).toContain('夜色');
-
-        const exported = await readBackupData(await exportSystemData('full', makeStateSnapshot(), noopProgress));
-
-        expect(exported.customIcons?.Browser).toContain('assets/');
-        expect(exported.appearancePresets?.[0].id).toBe('preset-a');
-        expect(exported.memoryPalaceConfig).toEqual({ enabled: true, digestInterval: 12 });
-        expect(exported.studyApiConfig).toEqual({ model: 'study-model' });
-        expect(exported.cloudBackupConfig?.remotePath).toBe('/SullyBackup/');
-        expect(exported.remoteVectorConfig?.initialized).toBe(true);
-        expect(exported.memoryPalaceHighWaterMarks?.['char-a']).toBe(88);
-        expect(exported.chatTranslateEnabledByChar?.['char-a']).toBe(true);
-        expect(exported.browserConfig).toEqual({ braveKey: 'brave-secret', useRealSearch: true });
-        expect(exported.eventNotifFlags?.sullyos_event_seen).toBe('1');
-        expect(exported.songs?.[0].id).toBe('song-a');
-        expect(exported.quizSessions?.[0].id).toBe('quiz-a');
-        expect(exported.guidebookSessions?.[0].id).toBe('guide-a');
-        expect(exported.lifeSimState?.id).toBe('life-a');
-        expect(exported.memoryNodes?.[0].id).toBe('node-a');
-        expect(exported.pixelHomeAssets?.[0].id).toBe('pixel-asset-a');
-        expect(exported.pixelHomeLayouts?.[0].id).toBe('pixel-layout-a');
-    });
 });

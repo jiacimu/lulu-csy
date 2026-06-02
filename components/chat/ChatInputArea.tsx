@@ -1,6 +1,6 @@
 
 import React,{ useEffect,useRef,useState,useMemo } from 'react';
-import { ShareNetwork,Trash,Plus,Smiley,PaperPlaneTilt,Money,BookOpenText,GearSix,Image,Lock,ArrowsClockwise,Sparkle,CheckSquare,Square,X } from '@phosphor-icons/react';
+import { ShareNetwork,Trash,Plus,Smiley,PaperPlaneTilt,Money,BookOpenText,GearSix,Image,Lock,ArrowsClockwise,Sparkle,CheckSquare,Square,X,VinylRecord } from '@phosphor-icons/react';
 import { CharacterProfile,ChatTheme,EmojiCategory,Emoji } from '../../types';
 import { PRESET_THEMES } from './ChatConstants';
 import { THEME_PLUGINS } from './ThemeRegistry';
@@ -35,6 +35,7 @@ interface ChatInputAreaProps {
     onPanelAction: (type: string, payload?: any) => void;
     onImageSelect: (file: File) => void;
     manualPhotoEnabled?: boolean;
+    quickSongGenerating?: boolean;
     isSummarizing: boolean;
     // Categories Support
     categories?: EmojiCategory[];
@@ -62,7 +63,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     showPanel, setShowPanel, onSend, onDeleteSelected, onForwardSelected, onSoulReflection, charName, selectedCount,
     emojis, allVisibleEmojis = [], characters, activeCharacterId, onCharSelect,
     customThemes, onUpdateTheme, onRemoveTheme, activeThemeId,
-    onPanelAction, onImageSelect, manualPhotoEnabled = false, isSummarizing,
+    onPanelAction, onImageSelect, manualPhotoEnabled = false, quickSongGenerating = false, isSummarizing,
     categories = [], activeCategory = 'default',
     onReroll, canReroll,
     onVoiceMessage, voiceRecorderState = 'idle', voiceRecordingDuration = 0,
@@ -547,6 +548,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                         onReroll,
                                         canReroll,
                                         manualPhotoEnabled,
+                                        quickSongGenerating,
                                         chatImageInputRef
                                     })
                                 ) : (
@@ -591,6 +593,13 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                                 <span className="text-xs font-bold">生图</span>
                                             </button>
                                         )}
+
+                                        <button onClick={() => onPanelAction('quick-song')} disabled={quickSongGenerating} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${quickSongGenerating ? 'text-slate-300 opacity-60' : 'text-slate-600'}`}>
+                                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${quickSongGenerating ? 'bg-slate-50 text-slate-300 border-slate-100' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                                                <VinylRecord className="w-6 h-6" weight="bold" />
+                                            </div>
+                                            <span className="text-xs font-bold">{quickSongGenerating ? '写歌中…' : '主题曲'}</span>
+                                        </button>
 
                                         {/* Regenerate Button */}
                                         <button onClick={onReroll} disabled={!canReroll} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${canReroll ? 'text-slate-600' : 'text-slate-300 opacity-50'}`}>

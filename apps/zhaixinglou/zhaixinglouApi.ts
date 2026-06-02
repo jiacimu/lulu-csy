@@ -36,7 +36,7 @@ export async function fetchSecondaryApi(
         },
         body: JSON.stringify(body),
     }, 2, {
-        feature: 'loveshow',
+        feature: 'zhaixinglou',
         reason: '摘星楼内容生成',
         model: config.model,
         userInitiated: true,
@@ -105,7 +105,7 @@ export async function testSecondaryConnection(config: SecondaryAPIConfig): Promi
             max_tokens: 5,
         }),
     }, 2, {
-        feature: 'loveshow',
+        feature: 'zhaixinglou',
         reason: '摘星楼 API 连接测试',
         model: config.model,
         userInitiated: true,

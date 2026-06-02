@@ -18,6 +18,7 @@ import {
     NO_PHOTO_STYLE_PRESET_ID,
     parsePhotoStylePaste,
     PHOTO_DIRECTOR_TIMEOUT_MS,
+    resolveImageStylePhotoPreset,
     resolvePhotoStylePreset,
     runManualPhotoDirector,
     runPhotoDirector,
@@ -34,6 +35,7 @@ import type { APIConfig, CharacterProfile, ImageGenerationConfig, PhotoMeta, Pho
 
 const baseConfig: ImageGenerationConfig = {
     activeProvider: 'novelai',
+    imageStyle: 'guoman',
     novelai: {
         apiUrl: 'https://image.novelai.net',
         apiToken: 'token',
@@ -291,10 +293,25 @@ describe('photoGeneration helpers', () => {
         const config = getImageGenerationConfig();
 
         expect(config.activeProvider).toBe('novelai');
+        expect(config.imageStyle).toBe('guoman');
         expect(config.novelai.apiUrl).toBe('https://legacy.example');
         expect(config.novelai.apiToken).toBe('legacy-token');
         expect(config.novelai.model).toBe('nai-diffusion-4-full');
         expect(config.openaiCompatible.size).toBe('1024x1024');
+    });
+
+    it('normalizes the global image style setting', () => {
+        localStorage.setItem(IMAGE_GENERATION_CONFIG_KEY, JSON.stringify({
+            imageStyle: 'real',
+        }));
+
+        expect(getImageGenerationConfig().imageStyle).toBe('real');
+
+        localStorage.setItem(IMAGE_GENERATION_CONFIG_KEY, JSON.stringify({
+            imageStyle: 'unknown',
+        }));
+
+        expect(getImageGenerationConfig().imageStyle).toBe('guoman');
     });
 
     it('normalizes NovelAI sampler and schedule aliases', () => {
@@ -431,6 +448,8 @@ describe('photoGeneration helpers', () => {
 
         expect(ids).not.toContain('soft-polaroid');
         expect(ids).toContain('custom-openai');
+        expect(ids).toContain('loveshow-solo-guoman');
+        expect(ids).toContain('loveshow-couple-real');
         expect(ids).toContain('style-openai-compatible-1779814872010');
         expect(ids).toContain('style-openai-compatible-mature-male-real-couple');
     });
@@ -484,6 +503,23 @@ describe('photoGeneration helpers', () => {
 
         expect(resolvePhotoStylePreset(undefined, presets, char, 'novelai').id).toBe('bound-style');
         expect(resolvePhotoStylePreset(undefined, presets, undefined, 'novelai').id).toBe('first-style');
+    });
+
+    it('uses the global LoveShow image style preset for OpenAI-compatible generation without an explicit style', () => {
+        const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible', imageStyle: 'cg' };
+        const presets = getPhotoStylePresets();
+
+        expect(resolveImageStylePhotoPreset(undefined, presets, undefined, config, false).id).toBe('loveshow-solo-cg');
+        expect(resolveImageStylePhotoPreset(undefined, presets, undefined, config, true).id).toBe('loveshow-couple-cg');
+        expect(resolveImageStylePhotoPreset('custom-style', [
+            {
+                id: 'custom-style',
+                name: 'Custom',
+                providerScope: 'openai-compatible',
+                positivePrompt: 'custom',
+                negativePrompt: '',
+            },
+        ], undefined, config, true, { allowUnboundRequested: true }).id).toBe('custom-style');
     });
 
     it('combines manual NovelAI prompt, style preset, and config prompts with de-duplication', () => {
@@ -635,6 +671,23 @@ describe('photoGeneration helpers', () => {
         expect(prompts.positivePrompt).toContain('固定用户外貌：用户固定为黑色中长发');
         expect(prompts.finalPrompt).toContain('固定角色外貌');
         expect(prompts.finalPrompt).toContain('雨夜合照');
+    });
+
+    it('puts LoveShow style presets before labeled male/female appearances', () => {
+        const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible', imageStyle: 'real' };
+        const loveShowStyle = getPhotoStylePresets().find(preset => preset.id === 'loveshow-couple-real')!;
+
+        const prompts = buildManualPhotoPrompt('雨夜阳台合照', loveShowStyle, config, {
+            appearancePrompt: '黑色短发，方脸，高鼻梁，身形高大',
+            userAppearancePrompt: '黑色中长发，圆眼，浅色针织衫',
+            includeUserAppearance: true,
+        });
+
+        expect(prompts.positivePrompt.startsWith('双人同框真人感合照')).toBe(true);
+        expect(prompts.positivePrompt).toContain('男生外貌：黑色短发');
+        expect(prompts.positivePrompt).toContain('女生外貌：黑色中长发');
+        expect(prompts.finalPrompt).toContain('避免出现：');
+        expect(prompts.negativePrompt).toContain('人物融合');
     });
 
     it('detects when user appearance should be included for two-person photos', () => {

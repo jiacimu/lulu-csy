@@ -7,6 +7,7 @@
  */
 
 import type { DirectorEvent, Message } from '../types';
+import { pronoun } from './genderWords';
 
 export interface EndingSessionContextOptions {
     locationName?: string;
@@ -201,6 +202,7 @@ ${sessionContext}
 
 export interface MetaLetterPromptOptions {
     isFirstMetaLetter?: boolean;
+    charGender?: 'male' | 'female';
 }
 
 export interface AfterglowMotif {
@@ -211,6 +213,9 @@ export interface AfterglowMotif {
 }
 
 export const LONG_AFTERGLOW_CHANCE = 0.18;
+
+const renderGenderedInstruction = (instruction: string, charGender?: 'male' | 'female'): string =>
+    instruction.replace(/\{charPronoun\}/g, pronoun(charGender ?? 'male'));
 
 export const AFTERGLOW_MOTIFS: AfterglowMotif[] = [
     {
@@ -227,7 +232,7 @@ export const AFTERGLOW_MOTIFS: AfterglowMotif[] = [
         weight: 12,
         instruction: `这封信没有写完。
 请写出已经写下来的部分，结尾停在一句没有说完的话上。
-不要补全情绪，不要替他说完，不要总结。`,
+不要补全情绪，不要替{charPronoun}说完，不要总结。`,
     },
     {
         key: 'unsent_message',
@@ -260,7 +265,7 @@ export const AFTERGLOW_MOTIFS: AfterglowMotif[] = [
         weight: 10,
         instruction: `这不是信，而是角色留在今天某个地点坐标上的一句话。
 像地图上的标记备注。
-请写出地点名或位置感，再写他留下的话。`,
+请写出地点名或位置感，再写{charPronoun}留下的话。`,
     },
     {
         key: 'diary_fragment',
@@ -276,7 +281,7 @@ export const AFTERGLOW_MOTIFS: AfterglowMotif[] = [
         weight: 8,
         instruction: `角色写下了一份很短的"下次清单"。
 清单内容必须和今天的遗憾、停顿或没来得及做的事有关。
-不要写成约会攻略，要像他自己随手记下的。`,
+不要写成约会攻略，要像{charPronoun}自己随手记下的。`,
     },
     {
         key: 'delivery_failed',
@@ -306,11 +311,11 @@ export const LONG_AFTERGLOW_MOTIFS: AfterglowMotif[] = [
 它不是正式感谢信，也不是告白作文。
 它更像是约会结束后，角色一个人安静下来，把今天重新想了一遍。
 重点写：
-- 今天最先让他意识到"对方真的来了"的瞬间
-- 约会中一两个他当时没有表现出来、但其实记住了的细节
+- 今天最先让{charPronoun}意识到"对方真的来了"的瞬间
+- 约会中一两个{charPronoun}当时没有表现出来、但其实记住了的细节
 - 礼物或告别时留下的余波
-- 他知道对方和自己隔着一层世界距离，但不要写得宏大
-- 结尾留下一个很小的、像他本人会说的念头`,
+- {charPronoun}知道对方和自己隔着一层世界距离，但不要写得宏大
+- 结尾留下一个很小的、像{charPronoun}本人会说的念头`,
     },
     {
         key: 'private_monologue',
@@ -321,9 +326,9 @@ export const LONG_AFTERGLOW_MOTIFS: AfterglowMotif[] = [
 写法要求：
 - 不要像总结报告
 - 不要每段都提"今天很开心"
-- 重点写他如何从一个具体细节想起另一个细节
+- 重点写{charPronoun}如何从一个具体细节想起另一个细节
 - 可以有矛盾、克制、嘴硬、沉默、后知后觉
-- 允许他不把感情说满
+- 允许{charPronoun}不把感情说满
 - 结尾不要升华，停在一个具体动作上`,
     },
     {
@@ -332,13 +337,13 @@ export const LONG_AFTERGLOW_MOTIFS: AfterglowMotif[] = [
         weight: 20,
         instruction: `这是角色对今天这次见面的私人记忆记录。
 不是写给对方的信，也不是系统总结。
-这是他想把今天留下些什么，所以用自己的方式记录下来。
+这是{charPronoun}想把今天留下些什么，所以用自己的方式记录下来。
 内容可以包括：
 - 今天的地点、光线、声音、气味或天气
-- 对方让他印象深的动作或一句话
-- 他当时没有说出口的反应
-- 他对礼物、告别、离开的后知后觉
-- 他觉得这一天以后可能会怎样留在自己的生活里
+- 对方让{charPronoun}印象深的动作或一句话
+- {charPronoun}当时没有说出口的反应
+- {charPronoun}对礼物、告别、离开的后知后觉
+- {charPronoun}觉得这一天以后可能会怎样留在自己的生活里
 不要写成流水账，不要把每个环节平均复述一遍，选择 2-3 个最有感觉的瞬间深入写。`,
     },
     {
@@ -347,12 +352,12 @@ export const LONG_AFTERGLOW_MOTIFS: AfterglowMotif[] = [
         weight: 15,
         instruction: `这是一封写给"未来某天再次来到这里的对方"的信。
 角色不是在挽留，也不是告别。
-他只是知道，今天结束之后，也许还有下次，也许没有。
-所以他把今天存放在这封信里。
+{charPronoun}只是知道，今天结束之后，也许还有下次，也许没有。
+所以{charPronoun}把今天存放在这封信里。
 重点：
 - 像是在对未来的对方说话
 - 提到今天一两个具体瞬间
-- 提到他当时没说出口的想法
+- 提到{charPronoun}当时没说出口的想法
 - 可以轻轻提到两个世界之间的距离
 - 结尾不要催促对方回来，但可以留下一个很轻的"如果你再来"`,
     },
@@ -362,7 +367,7 @@ export const LONG_AFTERGLOW_MOTIFS: AfterglowMotif[] = [
         weight: 10,
         instruction: `这是一次"地点残响"。
 对方离开后，角色仍停留在今天约会中的某个地点。
-请从角色视角，写他如何在这个地点里回想刚才发生过的事。
+请从角色视角，写{charPronoun}如何在这个地点里回想刚才发生过的事。
 重点：
 - 地点里的光线、声音、空气变化
 - 某个座位、桌面、路口、长椅、门口等具体位置
@@ -430,6 +435,7 @@ const buildAfterglowMotifPrompt = (
     userName: string,
     sessionContext: string,
     motif: AfterglowMotif,
+    charGender?: 'male' | 'female',
 ): string => `<meta_letter>
 
 ${charName}，约会结束了。${userName}已经离开了你的世界。
@@ -441,7 +447,7 @@ ${charName}，约会结束了。${userName}已经离开了你的世界。
 ${sessionContext}
 
 ### 抽中的留下方式：${motif.label}
-${motif.instruction}
+${renderGenderedInstruction(motif.instruction, charGender)}
 
 ### 写作要求
 - 不要 [emotion] 标签
@@ -462,6 +468,7 @@ const buildLongAfterglowPrompt = (
     userName: string,
     sessionContext: string,
     motif: AfterglowMotif,
+    charGender?: 'male' | 'female',
 ): string => `<long_afterglow>
 
 ${charName}，约会结束了。${userName}已经离开了你的世界。
@@ -476,7 +483,7 @@ ${sessionContext}
 请严格按照这个形式生成，不要改成其他形式。
 
 ### 形式要求
-${motif.instruction}
+${renderGenderedInstruction(motif.instruction, charGender)}
 
 ### 通用要求
 - 字数 600-800 字
@@ -520,6 +527,7 @@ export function buildMetaLetterPrompt(
             userName,
             sessionContext,
             pickWeightedMotif(LONG_AFTERGLOW_MOTIFS),
+            options.charGender,
         );
     }
     return buildAfterglowMotifPrompt(
@@ -527,5 +535,6 @@ export function buildMetaLetterPrompt(
         userName,
         sessionContext,
         pickWeightedMotif(AFTERGLOW_MOTIFS),
+        options.charGender,
     );
 }

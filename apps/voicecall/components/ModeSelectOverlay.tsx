@@ -1,12 +1,19 @@
 import React,{ useState } from 'react';
-import { X,Sun,Moon,ChatCircleDots,Heart,Translate } from '@phosphor-icons/react';
-import { getVoiceCallModeOptions,type VoiceCallMode } from '../voiceCallTypes';
+import { X,Sun,Moon,ChatCircleDots,Heart,Translate,SpeakerHigh,ChatCircle } from '@phosphor-icons/react';
+import {
+    DEFAULT_REPLY_CHANNEL,
+    getVoiceCallModeOptions,
+    REPLY_CHANNEL_LABELS,
+    type VoiceCallModeSelection,
+    type VoiceCallReplyChannel,
+} from '../voiceCallTypes';
 import { getVoiceCallForeignLangDraft,type VoiceCallForeignLangConfig } from '../voiceCallForeignLangSettings';
 
 interface ModeSelectOverlayProps {
     charName: string;
-    onSelectMode: (mode: VoiceCallMode) => void;
+    onSelectMode: (selection: VoiceCallModeSelection) => void;
     onCancel: () => void;
+    initialReplyChannel?: VoiceCallReplyChannel;
     // ─── 外语模式 (Foreign Language) ───
     foreignLang?: VoiceCallForeignLangConfig | null;
     onForeignLangChange?: (config: VoiceCallForeignLangConfig | null) => void;
@@ -24,11 +31,13 @@ const ModeSelectOverlay: React.FC<ModeSelectOverlayProps> = ({
     charName,
     onSelectMode,
     onCancel,
+    initialReplyChannel = DEFAULT_REPLY_CHANNEL,
     // ─── 外语模式 (Foreign Language) ───
     foreignLang,
     onForeignLangChange,
 }) => {
     const options = getVoiceCallModeOptions(charName);
+    const [replyChannel, setReplyChannel] = useState<VoiceCallReplyChannel>(initialReplyChannel);
 
     // ─── 外语模式 (Foreign Language): 本地状态 ───
     const LANG_OPTIONS = ['中文', 'English', '日本語', '한국어', 'Français', 'Español'];
@@ -65,12 +74,43 @@ const ModeSelectOverlay: React.FC<ModeSelectOverlayProps> = ({
                 </p>
             </div>
 
+            {/* 角色回复通道 */}
+            <div className="w-full max-w-sm mb-5 vc-animate-slide-up" style={{ animationDelay: '0.08s' }}>
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/[0.08] bg-black/20 px-4 py-3 backdrop-blur-xl">
+                    <span className="text-[12px] font-medium tracking-wider text-white/55">
+                        角色回复
+                    </span>
+                    <div className="grid grid-cols-2 gap-1 rounded-full bg-white/[0.06] p-1">
+                        {(['voice', 'text'] as VoiceCallReplyChannel[]).map(channel => {
+                            const isActive = replyChannel === channel;
+                            const Icon = channel === 'voice' ? SpeakerHigh : ChatCircle;
+                            return (
+                                <button
+                                    key={channel}
+                                    type="button"
+                                    aria-pressed={isActive}
+                                    onClick={() => setReplyChannel(channel)}
+                                    className={`flex items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition-all ${
+                                        isActive
+                                            ? 'bg-white/20 text-white shadow-[0_8px_20px_rgba(0,0,0,0.16)]'
+                                            : 'text-white/45 hover:text-white/70'
+                                    }`}
+                                >
+                                    <Icon weight={isActive ? 'fill' : 'regular'} className="h-3.5 w-3.5" />
+                                    {REPLY_CHANNEL_LABELS[channel]}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+
             {/* 模式列表 */}
             <div className="w-full max-w-sm flex flex-col gap-3.5" style={{ scrollbarWidth: 'none' }}>
                 {options.map((opt, i) => (
                     <button
                         key={opt.id}
-                        onClick={() => onSelectMode(opt.id)}
+                        onClick={() => onSelectMode({ mode: opt.id, replyChannel })}
                         className="vc-mode-item px-5 py-5 text-left transition-all duration-300 vc-animate-slide-up flex items-center gap-4"
                         style={{ animationDelay: `${0.12 + i * 0.08}s` }}
                     >

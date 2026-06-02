@@ -1,10 +1,10 @@
 import React,{ useState,useRef,useCallback,useEffect } from 'react';
 import { Message } from '../../../types';
 import { formatDuration } from '../../../apps/voicecall/utils';
-import { MODE_LABELS } from '../../../apps/voicecall/voiceCallTypes';
+import { MODE_LABELS,REPLY_CHANNEL_LABELS } from '../../../apps/voicecall/voiceCallTypes';
 import { buildVoiceCallAudioLookupKeys } from '../../../apps/voicecall/callLogPersistence';
 import { getVoiceCallVisibleText } from '../../../apps/voicecall/voiceCallTextSanitizer';
-import type { VoiceCallMode } from '../../../apps/voicecall/voiceCallTypes';
+import type { VoiceCallMode,VoiceCallReplyChannel } from '../../../apps/voicecall/voiceCallTypes';
 import { getVoiceAudio } from '../../../utils/db/contentStore';
 
 /**
@@ -31,8 +31,10 @@ const VoiceCallSummaryCard: React.FC<VoiceCallSummaryCardProps> = ({ message }) 
 
     const duration = message.metadata?.duration ?? 0;
     const mode = message.metadata?.mode as string | undefined;
+    const replyChannel: VoiceCallReplyChannel = message.metadata?.replyChannel === 'text' ? 'text' : 'voice';
+    const isTextReplyChannel = replyChannel === 'text';
     const conversation = message.metadata?.conversation as { role: string; content: string; hasAudio?: boolean }[] | undefined;
-    const hasCallAudio = message.metadata?.hasCallAudio === true;
+    const hasCallAudio = !isTextReplyChannel && message.metadata?.hasCallAudio === true;
     const isLegacyConversation = hasCallAudio
         && (conversation?.length ?? 0) > 0
         && conversation!.every((entry) => entry.hasAudio === undefined);
@@ -171,6 +173,11 @@ const VoiceCallSummaryCard: React.FC<VoiceCallSummaryCardProps> = ({ message }) 
                                 {modeText}
                             </span>
                         )}
+                        {isTextReplyChannel && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-sky-50 text-sky-600 rounded-full font-medium">
+                                {REPLY_CHANNEL_LABELS[replyChannel]}
+                            </span>
+                        )}
                     </div>
                     <div className="text-[11px] text-slate-400 mt-0.5">
                         {durationText} · {turnCount} 条消息
@@ -193,7 +200,7 @@ const VoiceCallSummaryCard: React.FC<VoiceCallSummaryCardProps> = ({ message }) 
                         const isAssistant = msg.role === 'assistant';
                         const isPlaying = playingIndex === i;
                         const isLoading = loadingIndex === i;
-                        const showAudioBtn = isAssistant && (msg.hasAudio ?? hasCallAudio);
+                        const showAudioBtn = !isTextReplyChannel && isAssistant && (msg.hasAudio ?? hasCallAudio);
                         const displayContent = getVoiceCallVisibleText(msg.role, msg.content);
 
                         return (

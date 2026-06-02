@@ -20,6 +20,12 @@ vi.mock('../utils/db', () => ({
         initializeEmojiData: vi.fn(() => Promise.resolve()),
         getEmojis: vi.fn(() => Promise.resolve([])),
         getEmojiCategories: vi.fn(() => Promise.resolve([])),
+        deleteMessage: vi.fn(() => Promise.resolve()),
+        deleteMessages: vi.fn(() => Promise.resolve()),
+        deleteVoiceAudio: vi.fn(() => Promise.resolve()),
+        clearMessages: vi.fn(() => Promise.resolve()),
+        resolveCharacterContentId: vi.fn((charId: string) => Promise.resolve(charId)),
+        saveGalleryImage: vi.fn(() => Promise.resolve()),
     },
 }));
 
@@ -53,6 +59,7 @@ vi.mock('../components/chat/ChatModals', () => ({
             {props.modalType === 'message-options' && (
                 <div data-testid="message-options-modal">
                     <button type="button" onClick={props.onReplyMessage}>引用 / 回复</button>
+                    <button type="button" onClick={props.onDeleteMessage}>删除消息</button>
                     <button type="button" onClick={props.onCloseMessageOptions}>关闭消息操作</button>
                 </div>
             )}
@@ -520,6 +527,68 @@ describe('Chat active character fallback', () => {
         expect(screen.getByTestId('chat-modals-state')).toHaveTextContent('selected:none');
         expect(screen.getAllByText('第一条可引用')).toHaveLength(1);
         expect(screen.getAllByText('第二条可引用')).toHaveLength(2);
+    });
+
+    it('keeps a deleted image message deleted across current-chat reloads', async () => {
+        const clearUnread = vi.fn();
+        let storedMessages: Message[] = [
+            {
+                id: 77,
+                charId: 'char-1',
+                role: 'assistant',
+                type: 'image',
+                content: 'https://cdn.example.com/broken-generated.webp',
+                timestamp: 1000,
+                metadata: {
+                    status: 'ready',
+                    imageId: 'photo-77',
+                    thumbnailUrl: 'https://cdn.example.com/broken-generated.webp',
+                },
+            },
+        ];
+        mockedUseOS.mockReturnValue(buildOsContext({
+            characters: [{ id: 'char-1', name: 'Sully', avatar: 'sully.png' }],
+            activeCharacterId: 'char-1',
+            clearUnread,
+        }));
+        mockedDB.getRecentMessageWindow.mockImplementation(() => Promise.resolve({
+            messages: storedMessages,
+            hasMore: false,
+        }));
+        mockedDB.deleteMessage.mockImplementation(async (id: number) => {
+            storedMessages = storedMessages.filter(message => message.id !== id);
+        });
+
+        render(<Chat />);
+
+        await waitFor(() => {
+            expect(screen.getByTestId('message-item-77')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByTestId('message-item-77'));
+        fireEvent.click(screen.getByRole('button', { name: '删除消息' }));
+
+        await waitFor(() => {
+            expect(mockedDB.deleteMessage).toHaveBeenCalledWith(77);
+        });
+        expect(screen.queryByTestId('message-item-77')).not.toBeInTheDocument();
+
+        mockedDB.getRecentMessageWindow.mockClear();
+        window.dispatchEvent(new CustomEvent(AGENT_MESSAGE_SAVED_EVENT_NAME, {
+            detail: {
+                charId: 'char-1',
+                contentCharId: 'char-1',
+                messageId: 78,
+                backendMessageId: 'backend-msg-78',
+                role: 'assistant',
+                source: 'autonomous',
+            },
+        }));
+
+        await waitFor(() => {
+            expect(mockedDB.getRecentMessageWindow).toHaveBeenCalledWith('char-1', 30);
+        });
+        expect(screen.queryByTestId('message-item-77')).not.toBeInTheDocument();
     });
 
     it('reloads the current chat when a backend agent message is saved for the active character', async () => {

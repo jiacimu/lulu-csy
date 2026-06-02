@@ -111,16 +111,15 @@ const DataSettings: React.FC = () => {
                 <div className="grid grid-cols-1 gap-3 mb-4">
                     <div onClick={() => importInputRef.current?.click()} className="py-4 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 shadow-sm active:scale-95 transition-all flex flex-col items-center gap-2 cursor-pointer hover:bg-emerald-50 hover:border-emerald-200">
                         <div className="p-2 bg-emerald-100 rounded-full text-emerald-600"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></div>
-                        <span>导入备份 (.zip / .json)</span>
+                        <span>导入备份 (.zip)</span>
                     </div>
-                    <input type="file" ref={importInputRef} className="hidden" accept=".json,.zip" onChange={handleImport} />
+                    <input type="file" ref={importInputRef} className="hidden" accept=".zip" onChange={handleImport} />
                 </div>
 
                 <p className="text-[10px] text-slate-400 px-1 mb-4 leading-relaxed">
                     • <b>整合导出</b>: 一次性导出所有数据（文字+媒体），适合设备性能充足的用户。<br />
                     • <b>纯文字备份</b>: 包含所有聊天记录、角色设定、剧情数据。所有图片会被移除（减小体积）。<br />
-                    • <b>媒体与美化素材</b>: 导出相册、表情包、聊天图片、头像、主题气泡、壁纸、图标等图片资源和外观配置。<br />
-                    • 兼容旧版 JSON 备份文件的导入。
+                    • <b>媒体与美化素材</b>: 导出相册、表情包、聊天图片、头像、主题气泡、壁纸、图标等图片资源和外观配置。
                 </p>
 
                 <button onClick={() => setShowResetConfirm(true)} className="w-full py-3 bg-red-50 border border-red-100 text-red-500 rounded-xl text-xs font-bold flex items-center justify-center gap-2">

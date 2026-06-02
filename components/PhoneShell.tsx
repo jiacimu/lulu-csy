@@ -71,6 +71,7 @@ import {
 import { haptic } from '../utils/haptics';
 import UpdatePopup from './os/UpdatePopup';
 import { attemptChunkAutoReload,isChunkLoadError,reloadApplication } from '../utils/runtimeRecovery';
+import { clearImportRecoveryMarker, readImportRecoveryMarker, type ImportRecoveryMarker } from '../utils/systemBackup';
 
 const DynamicIsland = React.lazy(() => import('./os/DynamicIsland'));
 const FloatingLyrics = React.lazy(() => import('./os/FloatingLyrics'));
@@ -211,6 +212,87 @@ const DisclaimerPopup: React.FC<{ onAccept: () => void }> = ({ onAccept }) => (
   </div>
 );
 
+function formatImportBytes(bytes?: number): string {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function getImportPhaseLabel(phase?: string): string {
+  switch (phase) {
+    case 'parsing': return '解析备份文件';
+    case 'assets': return '恢复备份素材';
+    case 'database': return '写入数据库';
+    case 'settings': return '恢复系统设置';
+    case 'error': return '导入报错';
+    default: return '导入流程';
+  }
+}
+
+const ImportRecoveryPopup: React.FC<{
+  marker: ImportRecoveryMarker;
+  onDismiss: () => void;
+  onReimport: () => void;
+}> = ({ marker, onDismiss, onReimport }) => {
+  const hasError = !!marker.error;
+  const startedAt = marker.startedAt ? new Date(marker.startedAt).toLocaleString('zh-CN') : '';
+  const updatedAt = marker.updatedAt ? new Date(marker.updatedAt).toLocaleString('zh-CN') : '';
+  const sourceSize = formatImportBytes(marker.sourceSize);
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-5 animate-fade-in">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-md" />
+      <div className="relative w-full max-w-sm bg-white/95 backdrop-blur-xl rounded-[2rem] shadow-2xl border border-white/30 overflow-hidden animate-slide-up">
+        <div className="pt-7 pb-3 px-6 text-center">
+          <h2 className="text-lg font-extrabold text-slate-800">{hasError ? '上次导入失败了' : '上次导入被中断了'}</h2>
+          <p className="text-[11px] text-slate-400 mt-1">{hasError ? '错误信息已记录在本机' : '数据可能只恢复了一部分'}</p>
+        </div>
+
+        <div className="px-6 pb-4 space-y-3 max-h-[58vh] overflow-y-auto no-scrollbar">
+          <p className="text-[13px] text-slate-600 leading-relaxed">
+            {hasError
+              ? '系统检测到上一次导入过程中发生了错误。建议重新导入同一个备份文件，避免数据处在半恢复状态。'
+              : '系统检测到上一次导入没有走到完成步骤，可能是浏览器或系统在导入过程中强制重启了。建议重新导入同一个备份文件。'}
+          </p>
+
+          {hasError && (
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-3 text-[12px] text-red-700 leading-relaxed whitespace-pre-wrap break-words select-text">
+              {marker.error}
+            </div>
+          )}
+
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[12px] text-amber-700 leading-relaxed">
+            <div>阶段：{getImportPhaseLabel(marker.phase)}</div>
+            {marker.current && <div>进度：{marker.current}</div>}
+            {startedAt && <div>开始：{startedAt}</div>}
+            {updatedAt && <div>最后更新：{updatedAt}</div>}
+            {marker.source && <div className="break-all">文件：{marker.source}{sourceSize ? ` · ${sourceSize}` : ''}</div>}
+          </div>
+        </div>
+
+        <div className="px-6 pb-7 pt-2 grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="py-3 bg-slate-100 text-slate-600 font-bold rounded-2xl active:scale-95 transition-transform text-sm"
+          >
+            知道了
+          </button>
+          <button
+            type="button"
+            onClick={onReimport}
+            className="py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold rounded-2xl shadow-lg shadow-emerald-200 active:scale-95 transition-transform text-sm"
+          >
+            去重新导入
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 interface LockScreenProps {
   bgImageValue: string;
   characters: Array<{ id: string; name: string }>;
@@ -349,7 +431,7 @@ const ActiveAppContainer = memo(function ActiveAppContainer({
 });
 
 const PhoneShell: React.FC = () => {
-  const { theme, isLocked, unlock, activeApp, closeApp, isDataLoaded, toasts, unreadMessages, characters, handleBack } = useOS();
+  const { theme, isLocked, unlock, activeApp, closeApp, openApp, isDataLoaded, toasts, unreadMessages, characters, handleBack } = useOS();
   const useIOSStandaloneLayout = isIOSStandaloneWebApp();
   const { isLite } = usePerformanceMode();
   const [showIdleOverlays, setShowIdleOverlays] = useState(false);
@@ -384,6 +466,33 @@ const PhoneShell: React.FC = () => {
     } catch { /* ignore */ }
     setShowDisclaimer(false);
   };
+
+  const [importRecoveryMarker, setImportRecoveryMarker] = useState<ImportRecoveryMarker | null>(() => {
+    try {
+      if (!localStorage.getItem(DISCLAIMER_KEY)) return null;
+      return readImportRecoveryMarker();
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    if (showDisclaimer) return;
+    setImportRecoveryMarker(readImportRecoveryMarker());
+  }, [showDisclaimer]);
+
+  const showImportRecoveryPrompt = !showDisclaimer && !!importRecoveryMarker;
+
+  const handleDismissImportRecovery = React.useCallback(() => {
+    clearImportRecoveryMarker();
+    setImportRecoveryMarker(null);
+  }, []);
+
+  const handleReimportFromRecovery = React.useCallback(() => {
+    clearImportRecoveryMarker();
+    setImportRecoveryMarker(null);
+    openApp(AppID.Settings);
+  }, [openApp]);
 
   // Special-event popup state. Valentine currently uses the shared event helper.
   const [showValentine, setShowValentine] = useState(() => {
@@ -676,11 +785,19 @@ const PhoneShell: React.FC = () => {
       {/* First-time disclaimer popup */}
       {showDisclaimer && <DisclaimerPopup onAccept={handleAcceptDisclaimer} />}
 
+      {!showDisclaimer && showImportRecoveryPrompt && importRecoveryMarker && (
+        <ImportRecoveryPopup
+          marker={importRecoveryMarker}
+          onDismiss={handleDismissImportRecovery}
+          onReimport={handleReimportFromRecovery}
+        />
+      )}
+
       {/* Special-event popup */}
-      {!showDisclaimer && showValentine && <Suspense fallback={null}><LazyValentineController onClose={() => setShowValentine(false)} /></Suspense>}
+      {!showDisclaimer && !showImportRecoveryPrompt && showValentine && <Suspense fallback={null}><LazyValentineController onClose={() => setShowValentine(false)} /></Suspense>}
 
       {/* Update Changelog Popup */}
-      <UpdatePopup canShow={!showDisclaimer && !showValentine} />
+      <UpdatePopup canShow={!showDisclaimer && !showImportRecoveryPrompt && !showValentine} />
     </div>
   );
 };

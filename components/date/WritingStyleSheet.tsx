@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { DATE_WRITING_STYLE_PRESETS, type DateWritingStylePreset } from '../../utils/datePrompts';
+import { DATE_WRITING_STYLE_PRESETS, resolveDateWritingStylePreset, type DateWritingStylePreset } from '../../utils/datePrompts';
 
 export interface WritingStyleSheetProps {
     isOpen: boolean;
@@ -20,14 +20,13 @@ export interface WritingStyleSheetProps {
 
 /** Check if a style string is a preset key */
 const isPresetKey = (s?: string): boolean => {
-    if (!s) return false;
-    return DATE_WRITING_STYLE_PRESETS.some(p => p.key === s);
+    return !!resolveDateWritingStylePreset(s);
 };
 
 /** Get display label for current style */
 const getStyleDisplayLabel = (style?: string): string => {
     if (!style) return '未选择';
-    const preset = DATE_WRITING_STYLE_PRESETS.find(p => p.key === style);
+    const preset = resolveDateWritingStylePreset(style);
     if (preset) return preset.label;
     return '自定义';
 };
@@ -46,6 +45,7 @@ const WritingStyleSheet: React.FC<WritingStyleSheetProps> = ({
     const [showCustomInput, setShowCustomInput] = useState(false);
     // Whether custom card is "active" (selected & saved)
     const isCustomActive = !!currentStyle && !isPresetKey(currentStyle);
+    const activePresetKey = resolveDateWritingStylePreset(currentStyle)?.key;
 
     // Sync custom text from currentStyle on open
     useEffect(() => {
@@ -66,14 +66,14 @@ const WritingStyleSheet: React.FC<WritingStyleSheetProps> = ({
     }, [isOpen, isCustomActive]);
 
     const handlePresetClick = useCallback((key: string) => {
-        if (currentStyle === key) {
+        if (activePresetKey === key) {
             onSelect(undefined);
         } else {
             onSelect(key);
             // Deactivate custom input when selecting a preset
             setShowCustomInput(false);
         }
-    }, [currentStyle, onSelect]);
+    }, [activePresetKey, onSelect]);
 
     const handleExpandToggle = useCallback((key: string) => {
         setExpandedKey(prev => prev === key ? null : key);
@@ -206,7 +206,7 @@ const WritingStyleSheet: React.FC<WritingStyleSheetProps> = ({
                                 <PresetCard
                                     key={preset.key}
                                     preset={preset}
-                                    isActive={currentStyle === preset.key}
+                                    isActive={activePresetKey === preset.key}
                                     isExpanded={expandedKey === preset.key}
                                     onSelect={() => handlePresetClick(preset.key)}
                                     onToggleExpand={() => handleExpandToggle(preset.key)}

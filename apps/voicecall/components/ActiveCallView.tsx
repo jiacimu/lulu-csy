@@ -5,7 +5,7 @@ import AvatarPulse from './AvatarPulse';
 import { formatDuration } from '../utils';
 import { sanitizeVoiceCallAssistantText } from '../voiceCallTextSanitizer';
 import type { EngineState,VoiceCallSubtitleEntry } from '../useVoiceCallEngine';
-import type { VoiceCallMode } from '../voiceCallTypes';
+import type { VoiceCallMode,VoiceCallReplyChannel } from '../voiceCallTypes';
 
 // ─── 打字机效果组件 ────────────────────────────────────────────
 const TypewriterText: React.FC<{ text: string; speed?: number }> = ({ text, speed = 40 }) => {
@@ -80,6 +80,8 @@ interface ActiveCallViewProps {
     isUserSpeaking?: boolean;
     /** TTS 合成失败，已降级为纯文字 */
     ttsDegraded?: boolean;
+    /** 角色回复通道 */
+    replyChannel?: VoiceCallReplyChannel;
     /** 当前 transcript 来源：语音识别 or 文字输入 */
     transcriptSource?: 'voice' | 'text';
     /** 当前通话模式 */
@@ -116,6 +118,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
     engineState = 'idle',
     isUserSpeaking = false,
     ttsDegraded = false,
+    replyChannel = 'voice',
     transcriptSource = 'voice',
     // ─── 外语模式 (Foreign Language) ───
     aiTranslation = '',
@@ -128,6 +131,8 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
     voiceInputDisabled = false,
     voiceInputFallbackReason = '',
 }) => {
+    const isTextReplyChannel = replyChannel === 'text';
+
     // 接通闪光效果
     const [showFlash, setShowFlash] = useState(true);
     useEffect(() => {
@@ -191,6 +196,17 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
     const [isTextInputVisible, setIsTextInputVisible] = useState(false);
     const [inputValue, setInputValue] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
+    const textInputOpenedForReplyChannelRef = useRef(false);
+
+    useEffect(() => {
+        if (isTextReplyChannel && !textInputOpenedForReplyChannelRef.current) {
+            textInputOpenedForReplyChannelRef.current = true;
+            setIsTextInputVisible(true);
+            setTimeout(() => inputRef.current?.focus(), 200);
+        } else if (!isTextReplyChannel) {
+            textInputOpenedForReplyChannelRef.current = false;
+        }
+    }, [isTextReplyChannel]);
 
     // 追踪文字框是否由静音自动打开（取消静音时仅关闭自动打开的，保留用户手动打开的）
     const textInputAutoOpenedByMuteRef = useRef(false);
@@ -274,10 +290,13 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                             </span>
                         ) : formatDuration(duration)}
                     </span>
-                    {ttsDegraded && (
+                    {isTextReplyChannel && (
+                        <span className="text-[10px] text-amber-300/60 tracking-wider">· 文字通道</span>
+                    )}
+                    {!isTextReplyChannel && ttsDegraded && (
                         <span className="text-[10px] text-amber-300/60 tracking-wider">· 文字模式</span>
                     )}
-                    {voiceInputDisabled && !ttsDegraded && (
+                    {voiceInputDisabled && !ttsDegraded && !isTextReplyChannel && (
                         <span
                             className="inline-block max-w-[140px] truncate text-[10px] text-amber-300/60 tracking-wider sm:max-w-[180px]"
                             title={voiceInputFallbackReason || '当前设备使用文字输入'}
@@ -307,7 +326,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
             <div className="flex-[3] flex flex-col items-center justify-start w-full min-h-0 pt-2 overflow-y-auto overflow-x-hidden pb-2" style={{ scrollbarWidth: 'none' }}>
 
                 {/* ── TTS 降级 — 魅魔沉浸文字区 ── */}
-                {ttsDegraded && visibleAiResponse ? (
+                {ttsDegraded && !isTextReplyChannel && visibleAiResponse ? (
                     <div className="vc-degraded-zone" ref={degradedScrollRef}>
                         {/* 酒红→黑渐变背景 */}
                         <div className="vc-degraded-bg" />
@@ -455,6 +474,8 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                     onVolumeChange={onVolumeChange}
                     voiceInputDisabled={voiceInputDisabled}
                     voiceInputFallbackReason={voiceInputFallbackReason}
+                    audioOutputDisabled={isTextReplyChannel}
+                    audioOutputDisabledReason="文字通道不播放角色语音"
                 />
             </div>
         </div>

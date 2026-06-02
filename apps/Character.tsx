@@ -1284,6 +1284,18 @@ ${isInitialGeneration ? `
                                     <div className="flex-1 space-y-3">
                                         <input value={formData.name} onChange={(e) => handleChange('name', e.target.value)} className="w-full bg-transparent py-1 text-xl font-medium text-slate-800 border-b border-slate-200" placeholder="名称" />
                                         <input value={formData.description} onChange={(e) => handleChange('description', e.target.value)} className="w-full bg-transparent py-1 text-sm text-slate-500 border-b border-slate-200" placeholder="描述" />
+                                        <div className="inline-flex rounded-2xl bg-white/70 p-1 shadow-sm border border-slate-100">
+                                            {(['male', 'female'] as const).map(gender => (
+                                                <button
+                                                    key={gender}
+                                                    type="button"
+                                                    onClick={() => handleChange('gender', gender)}
+                                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${((formData.gender ?? 'male') === gender) ? 'bg-primary text-white shadow-sm shadow-primary/20' : 'text-slate-400 hover:text-slate-600'}`}
+                                                >
+                                                    {gender === 'male' ? '男' : '女'}
+                                                </button>
+                                            ))}
+                                        </div>
                                         <input value={formData.ttsVoiceId || ''} onChange={(e) => handleChange('ttsVoiceId', e.target.value)} className="w-full bg-transparent py-1 text-xs text-slate-500 border-b border-slate-200" placeholder="MiniMax 角色声线 Voice ID（可选）" />
                                         <input value={formData.elevenLabsVoiceId || ''} onChange={(e) => handleChange('elevenLabsVoiceId', e.target.value)} className="w-full bg-transparent py-1 text-xs text-slate-500 border-b border-slate-200" placeholder="ElevenLabs 语音通话 Voice ID（可选）" />
                                     </div>

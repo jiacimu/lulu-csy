@@ -8,6 +8,7 @@ import {
 } from '../utils/autonomousAgent';
 import { didCharacterContextRelevantFieldsChange } from '../utils/agentContextSnapshot';
 import { showLocalNotification } from '../utils/localNotification';
+import { APP_NOTIFICATION_NAME, formatNotificationBody } from '../utils/notificationPreview';
 import { disablePushSubscription,getPushDebugInfo,initPushSubscription } from '../utils/pushSubscription';
 import { selectSecondaryApiConfig } from '../utils/runtimeConfig';
 import { consumeCharacterUpdateOptions,useCharacter } from './CharacterContext';
@@ -194,11 +195,11 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 || char.id === detail.contentCharId
                 || char.charInstanceId === detail.contentCharId,
             );
-            const title = character?.name || 'CSY-Sully OS';
+            const title = character?.name || APP_NOTIFICATION_NAME;
 
             void showLocalNotification({
                 title,
-                body: detail.contentPreview || '发来了一条新消息',
+                body: formatNotificationBody(detail.contentPreview),
                 icon: character?.avatar || '/icons/icon-192.webp',
                 badge: '/icons/icon-96.webp',
                 tag: `agent-${detail.backendMessageId}`,

@@ -7,6 +7,14 @@
 /** 通话模式标识 */
 export type VoiceCallMode = 'daily' | 'confide' | 'truth' | 'sleep';
 
+/** 角色回复通道：语音回复 or 只显示文字 */
+export type VoiceCallReplyChannel = 'voice' | 'text';
+
+export interface VoiceCallModeSelection {
+    mode: VoiceCallMode;
+    replyChannel: VoiceCallReplyChannel;
+}
+
 /** 模式 → 中文标签映射（UI 展示用） */
 export const MODE_LABELS: Record<VoiceCallMode, string> = {
     daily: '日常',
@@ -14,6 +22,18 @@ export const MODE_LABELS: Record<VoiceCallMode, string> = {
     truth: '真心话',
     sleep: '哄睡',
 };
+
+/** 回复通道 → 中文标签映射（UI 展示用） */
+export const REPLY_CHANNEL_LABELS: Record<VoiceCallReplyChannel, string> = {
+    voice: '语音回复',
+    text: '文字通道',
+};
+
+export const DEFAULT_REPLY_CHANNEL: VoiceCallReplyChannel = 'voice';
+
+export function isVoiceCallReplyChannel(value: unknown): value is VoiceCallReplyChannel {
+    return value === 'voice' || value === 'text';
+}
 
 /** 模式选项（UI 渲染用） */
 export interface VoiceCallModeOption {

@@ -105,16 +105,24 @@ export const deleteEmojiCategory = async (id: string): Promise<void> => {
 
 export const initializeEmojiData = async (): Promise<void> => {
     const cats = await getEmojiCategories();
-    if (!cats.some(c => c.id === 'default')) {
+    if (cats.length === 0) {
         await saveEmojiCategory({ id: 'default', name: '默认', isSystem: true });
-    }
-    if (!cats.some(c => c.id === SULLY_CATEGORY_ID)) {
-        await saveEmojiCategory({ id: SULLY_CATEGORY_ID, name: 'Sully 专属', isSystem: true });
+        await saveEmojiCategory({ id: SULLY_CATEGORY_ID, name: 'Sully 专属', isSystem: false });
         const db = await openDB();
         const tx = db.transaction(STORE_EMOJIS, 'readwrite');
         const store = tx.objectStore(STORE_EMOJIS);
         SULLY_PRESET_EMOJIS.forEach(emoji => store.put(emoji));
         await new Promise(resolve => { tx.oncomplete = resolve; });
+        return;
+    }
+
+    if (!cats.some(c => c.id === 'default')) {
+        await saveEmojiCategory({ id: 'default', name: '默认', isSystem: true });
+    }
+
+    const sullyCategory = cats.find(c => c.id === SULLY_CATEGORY_ID);
+    if (sullyCategory?.isSystem) {
+        await saveEmojiCategory({ ...sullyCategory, isSystem: false });
     }
 };
 
