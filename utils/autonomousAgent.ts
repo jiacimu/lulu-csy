@@ -116,6 +116,18 @@ export interface AgentMessageSavedEventDetail {
     contentPreview: string;
 }
 
+interface IngestBackendAgentMessageInput {
+    message: AgentBackendMessage;
+    contentCharId: string;
+    uiCharId?: string;
+}
+
+export interface SyncPendingAgentMessagesResult {
+    received: number;
+    saved: number;
+    acked: number;
+}
+
 type MemorySummary = Pick<
     VectorMemory,
     'title' | 'content' | 'importance' | 'createdAt' | 'deprecated' | 'salienceScore'
@@ -244,6 +256,109 @@ function getBackendMessageTargetClientId(
 function buildAgentMessagePreview(content: unknown): string {
     if (typeof content !== 'string') return '';
     return content.replace(/\s+/g, ' ').trim().slice(0, 160);
+}
+
+export async function ingestBackendAgentMessageToLocal({
+    message,
+    contentCharId,
+    uiCharId,
+}: IngestBackendAgentMessageInput): Promise<{ saved: boolean; id?: number }> {
+    const now = Date.now();
+    const metadata = parseBackendMetadata(message.metadata);
+    const role = message.role || 'assistant';
+    const source = (metadata.source as string) || 'autonomous';
+    const targetClientId = getBackendMessageTargetClientId(message, metadata);
+
+    if (source === 'weixin') {
+        const currentClientId = getClientId();
+        if (!targetClientId) {
+            console.warn('[Agent] Rejected Weixin backend message without target client id', {
+                backendMessageId: message.id,
+            });
+            return { saved: false };
+        }
+        if (targetClientId !== currentClientId) {
+            console.warn('[Agent] Rejected Weixin backend message for a different client', {
+                backendMessageId: message.id,
+                targetClientId,
+                currentClientId,
+            });
+            return { saved: false };
+        }
+    }
+
+    const backendMessageId = String(message.id);
+    const msgMeta = {
+        source,
+        reason: metadata.reason,
+        backendMessageId,
+        fromBackend: true,
+        ...(targetClientId ? { targetClientId } : {}),
+        ...(metadata.originalTimestamp ? { originalTimestamp: metadata.originalTimestamp } : {}),
+        ...(metadata.fromWeixinId ? { fromWeixinId: metadata.fromWeixinId } : {}),
+        ...(metadata.bubbleIndex !== undefined ? { bubbleIndex: metadata.bubbleIndex } : {}),
+    };
+    const hideAsLifeStream = shouldHideLifeStreamLikeMessage({
+        role,
+        type: 'text',
+        content: message.content,
+        metadata: msgMeta,
+    });
+    const savedType = hideAsLifeStream ? 'lifestream' as any : 'text';
+    const savedMetadata = hideAsLifeStream
+        ? { ...msgMeta, hiddenFromUser: true, lifeStreamHidden: true }
+        : msgMeta;
+
+    const saveResult = await DB.saveMessageOnceByBackendId({
+        charId: contentCharId,
+        role,
+        type: savedType,
+        content: message.content,
+        timestamp: message.createdAt || message.created_at || now,
+        metadata: savedMetadata,
+    });
+
+    if (!hideAsLifeStream && saveResult.saved && typeof saveResult.id === 'number' && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent<AgentMessageSavedEventDetail>(AGENT_MESSAGE_SAVED_EVENT_NAME, {
+            detail: {
+                charId: uiCharId || contentCharId,
+                contentCharId,
+                messageId: saveResult.id,
+                backendMessageId,
+                role,
+                source,
+                contentPreview: buildAgentMessagePreview(message.content),
+            },
+        }));
+    }
+
+    return {
+        saved: saveResult.saved,
+        id: typeof saveResult.id === 'number' ? saveResult.id : undefined,
+    };
+}
+
+export async function syncPendingAgentMessagesForCharacter(charId: string): Promise<SyncPendingAgentMessagesResult> {
+    const contentCharId = await DB.resolveCharacterContentId(charId);
+    const messages = await fetchPendingAgentMessages(contentCharId, { includeDelivered: true });
+
+    let saved = 0;
+    for (const message of messages) {
+        const result = await ingestBackendAgentMessageToLocal({
+            message,
+            contentCharId,
+            uiCharId: charId,
+        });
+        if (result.saved) saved++;
+    }
+
+    await ackAgentMessages(messages.map(message => message.id));
+
+    return {
+        received: messages.length,
+        saved,
+        acked: messages.length,
+    };
 }
 
 function pickTopMemory(memories: MemorySummary[]): MemorySummary | undefined {
@@ -642,75 +757,12 @@ export class BackendAgentManager {
         message: AgentBackendMessage,
         _options: { delayMs?: number } = {},
     ): Promise<void> {
-        const now = Date.now();
-        const metadata = parseBackendMetadata(message.metadata);
-        const role = message.role || 'assistant';
-        const source = (metadata.source as string) || 'autonomous';
-        const targetClientId = getBackendMessageTargetClientId(message, metadata);
-
-        if (source === 'weixin') {
-            const currentClientId = getClientId();
-            if (!targetClientId) {
-                console.warn('[Agent] Rejected Weixin backend message without target client id', {
-                    backendMessageId: message.id,
-                });
-                return;
-            }
-            if (targetClientId !== currentClientId) {
-                console.warn('[Agent] Rejected Weixin backend message for a different client', {
-                    backendMessageId: message.id,
-                    targetClientId,
-                    currentClientId,
-                });
-                return;
-            }
-        }
-
-        const backendMessageId = String(message.id);
-        const msgMeta = {
-            source,
-            reason: metadata.reason,
-            backendMessageId,
-            fromBackend: true,
-            ...(targetClientId ? { targetClientId } : {}),
-            ...(metadata.originalTimestamp ? { originalTimestamp: metadata.originalTimestamp } : {}),
-            ...(metadata.fromWeixinId ? { fromWeixinId: metadata.fromWeixinId } : {}),
-            ...(metadata.bubbleIndex !== undefined ? { bubbleIndex: metadata.bubbleIndex } : {}),
-        };
-        const hideAsLifeStream = shouldHideLifeStreamLikeMessage({
-            role,
-            type: 'text',
-            content: message.content,
-            metadata: msgMeta,
+        // Save directly to messages store (bypass scheduled queue to avoid lost messages).
+        await ingestBackendAgentMessageToLocal({
+            message,
+            contentCharId: this.charId,
+            uiCharId: this.uiCharId || this.charId,
         });
-        const savedType = hideAsLifeStream ? 'lifestream' as any : 'text';
-        const savedMetadata = hideAsLifeStream
-            ? { ...msgMeta, hiddenFromUser: true, lifeStreamHidden: true }
-            : msgMeta;
-
-        // Save directly to messages store (bypass scheduled queue to avoid lost messages)
-        const saveResult = await DB.saveMessageOnceByBackendId({
-            charId: this.charId,
-            role,
-            type: savedType,
-            content: message.content,
-            timestamp: message.createdAt || message.created_at || now,
-            metadata: savedMetadata,
-        });
-
-        if (!hideAsLifeStream && saveResult.saved && typeof saveResult.id === 'number' && typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent<AgentMessageSavedEventDetail>(AGENT_MESSAGE_SAVED_EVENT_NAME, {
-                detail: {
-                    charId: this.uiCharId || this.charId,
-                    contentCharId: this.charId,
-                    messageId: saveResult.id,
-                    backendMessageId,
-                    role,
-                    source,
-                    contentPreview: buildAgentMessagePreview(message.content),
-                },
-            }));
-        }
     }
 
     private async acknowledgeMessages(

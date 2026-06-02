@@ -10,12 +10,14 @@ const {
     mockGetWeixinReadiness,
     mockListWeixinBindings,
     mockRepairWeixinClientBinding,
+    mockSyncPendingAgentMessagesForCharacter,
 } = vi.hoisted(() => ({
     mockCheckWeixinQrStatus: vi.fn(),
     mockGenerateWeixinQr: vi.fn(),
     mockGetWeixinReadiness: vi.fn(),
     mockListWeixinBindings: vi.fn(),
     mockRepairWeixinClientBinding: vi.fn(),
+    mockSyncPendingAgentMessagesForCharacter: vi.fn(),
 }));
 
 vi.mock('../../utils/backendClient', async () => {
@@ -30,6 +32,10 @@ vi.mock('../../utils/backendClient', async () => {
     };
 });
 
+vi.mock('../../utils/autonomousAgent', () => ({
+    syncPendingAgentMessagesForCharacter: mockSyncPendingAgentMessagesForCharacter,
+}));
+
 const mockAddToast = vi.fn();
 
 describe('CharacterWeixinBindingCard', () => {
@@ -43,6 +49,11 @@ describe('CharacterWeixinBindingCard', () => {
         });
         mockRepairWeixinClientBinding.mockResolvedValue({
             repaired: true,
+        });
+        mockSyncPendingAgentMessagesForCharacter.mockResolvedValue({
+            received: 0,
+            saved: 0,
+            acked: 0,
         });
     });
 
@@ -80,6 +91,7 @@ describe('CharacterWeixinBindingCard', () => {
         expect(screen.getByText('已连接')).toBeInTheDocument();
         expect(mockListWeixinBindings).toHaveBeenCalledTimes(1);
         expect(mockGetWeixinReadiness).toHaveBeenCalledWith('char-1');
+        expect(mockSyncPendingAgentMessagesForCharacter).toHaveBeenCalledWith('char-1');
     });
 
     it('automatically repairs an active binding that needs the current client id', async () => {
@@ -130,6 +142,7 @@ describe('CharacterWeixinBindingCard', () => {
         });
 
         expect(mockListWeixinBindings).toHaveBeenCalledTimes(2);
+        expect(mockSyncPendingAgentMessagesForCharacter).toHaveBeenCalledWith('char-1');
         expect(mockAddToast).toHaveBeenCalledWith(
             '已把最近微信记录同步到这台小手机',
             'success',
@@ -172,6 +185,7 @@ describe('CharacterWeixinBindingCard', () => {
         });
 
         expect(mockRepairWeixinClientBinding).not.toHaveBeenCalled();
+        expect(mockSyncPendingAgentMessagesForCharacter).not.toHaveBeenCalled();
         expect(mockAddToast).toHaveBeenCalledWith(
             '这条微信绑定已属于另一台设备，重新扫码可切换到当前设备',
             'info',
@@ -220,6 +234,7 @@ describe('CharacterWeixinBindingCard', () => {
         });
 
         expect(mockListWeixinBindings).toHaveBeenCalledTimes(1);
+        expect(mockSyncPendingAgentMessagesForCharacter).not.toHaveBeenCalled();
         expect(mockAddToast).toHaveBeenCalledWith(
             '这条微信绑定已属于另一台设备，重新扫码可切换到当前设备',
             'info',
@@ -362,6 +377,7 @@ describe('CharacterWeixinBindingCard', () => {
 
         expect(mockCheckWeixinQrStatus).toHaveBeenCalledWith('qr-123');
         expect(mockRepairWeixinClientBinding).toHaveBeenCalledWith('char-1', 7);
+        expect(mockSyncPendingAgentMessagesForCharacter).toHaveBeenCalledWith('char-1');
         expect(mockAddToast).toHaveBeenCalledWith(
             '已把最近微信记录同步到这台小手机',
             'success',

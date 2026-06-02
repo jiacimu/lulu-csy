@@ -11,6 +11,7 @@ import {
     type WeixinQrResponse,
     type WeixinQrStatus,
 } from '../../utils/backendClient';
+import { syncPendingAgentMessagesForCharacter } from '../../utils/autonomousAgent';
 import { DB } from '../../utils/db';
 
 interface CharacterWeixinBindingCardProps {
@@ -257,6 +258,17 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
                 return false;
             }
 
+            const syncPendingMessages = async (required: boolean) => {
+                try {
+                    await syncPendingAgentMessagesForCharacter(charId);
+                } catch (syncError) {
+                    console.warn('[Weixin] Pending message sync failed', syncError);
+                    if (required) {
+                        throw syncError;
+                    }
+                }
+            };
+
             if (repair?.needed && repair.available) {
                 setRepairState('repairing');
                 const repairResult = await repairWeixinClientBinding(charId, DEFAULT_REPAIR_LOOKBACK_DAYS);
@@ -267,11 +279,13 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
                     return false;
                 }
 
+                await syncPendingMessages(true);
                 setRepairState('repaired');
                 addToast(WEIXIN_REPAIR_SUCCESS_MESSAGE, 'success');
                 return true;
             }
 
+            await syncPendingMessages(false);
             setRepairState('idle');
             return false;
         } catch (error) {

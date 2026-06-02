@@ -52,6 +52,7 @@ vi.mock('./db', () => ({
         getUserProfile: vi.fn(),
         getEmojis: vi.fn(),
         getVectorMemoryHeaders: vi.fn(),
+        resolveCharacterContentId: vi.fn(),
         saveMessage: vi.fn(),
         saveMessageOnceByBackendId: mocks.saveMessageOnceByBackendId,
     },
@@ -61,10 +62,14 @@ import {
     AGENT_MESSAGE_SAVED_EVENT_NAME,
     type AgentMessageSavedEventDetail,
     BackendAgentManager,
+    syncPendingAgentMessagesForCharacter,
 } from './autonomousAgent';
+import { ackAgentMessages, fetchPendingAgentMessages } from './agentBackendClient';
 import { DB } from './db';
 
 const mockedDB = vi.mocked(DB);
+const mockAckAgentMessages = vi.mocked(ackAgentMessages);
+const mockFetchPendingAgentMessages = vi.mocked(fetchPendingAgentMessages);
 
 function createManager() {
     const manager = new BackendAgentManager();
@@ -88,6 +93,9 @@ function listenForAgentMessageSaved() {
 describe('BackendAgentManager agent message saved event', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mockedDB.resolveCharacterContentId.mockResolvedValue('content-char-1');
+        mockFetchPendingAgentMessages.mockResolvedValue([]);
+        mockAckAgentMessages.mockResolvedValue(undefined);
     });
 
     it('dispatches an event with message details after saving a new backend message', async () => {
@@ -177,5 +185,47 @@ describe('BackendAgentManager agent message saved event', () => {
         } finally {
             listener.cleanup();
         }
+    });
+
+    it('pulls pending Weixin messages by content char id and saves them locally', async () => {
+        mockedDB.resolveCharacterContentId.mockResolvedValue('content-char-1');
+        mockedDB.saveMessageOnceByBackendId.mockResolvedValue({ saved: true, id: 44 });
+        mockFetchPendingAgentMessages.mockResolvedValue([
+            {
+                id: 232217,
+                role: 'user',
+                content: '同步过来的微信消息',
+                createdAt: 1780401203025,
+                targetClientId: 'client-1',
+                metadata: {
+                    source: 'weixin',
+                    targetClientId: 'client-1',
+                    originalTimestamp: 1780401203025,
+                    fromWeixinId: 'wx-user-1',
+                },
+            },
+        ]);
+
+        await expect(syncPendingAgentMessagesForCharacter('chinst-1')).resolves.toEqual({
+            received: 1,
+            saved: 1,
+            acked: 1,
+        });
+
+        expect(mockFetchPendingAgentMessages).toHaveBeenCalledWith('content-char-1', {
+            includeDelivered: true,
+        });
+        expect(mockedDB.saveMessageOnceByBackendId).toHaveBeenCalledWith(expect.objectContaining({
+            charId: 'content-char-1',
+            role: 'user',
+            content: '同步过来的微信消息',
+            metadata: expect.objectContaining({
+                source: 'weixin',
+                targetClientId: 'client-1',
+                fromBackend: true,
+                backendMessageId: '232217',
+            }),
+        }));
+        expect(mockAckAgentMessages).toHaveBeenCalledWith([232217]);
     });
 });
