@@ -39,6 +39,54 @@ describe('StoryPhoneScreen home UI', () => {
         });
     });
 
+    it('renders generated clock clues with readable system colors', () => {
+        const clockApp = PHONE_APPS.find(app => app.id === 'clock') || PHONE_APPS[0];
+        render(
+            <StoryPhoneScreen
+                charName="陈步青"
+                activeAppId="clock"
+                spotlightApp={clockApp}
+                apps={[clockApp]}
+                currentTime="01:42"
+                clue={{
+                    appId: 'clock',
+                    appName: '时钟',
+                    title: '时钟',
+                    subtitle: '屏幕亮起中',
+                    timestamp: '22:52',
+                    items: [
+                        {
+                            label: '醒来前别关',
+                            value: '06:30 · 每天',
+                            detail: '起床前再响一次',
+                        },
+                        {
+                            label: '异常倒计时',
+                            value: '剩余 00:07',
+                            detail: '刚刚被暂停过',
+                        },
+                    ],
+                    evidenceText: '时钟里有一组异常提醒。',
+                    insertSummary: '用户看见了时钟里的异常提醒。',
+                }}
+            />,
+        );
+
+        expect(screen.getByText('异常提醒')).toBeInTheDocument();
+        expect(screen.getByText('醒来前别关')).toBeInTheDocument();
+        expect(screen.getByText(/06:30 · 每天/)).toBeInTheDocument();
+        expect(screen.getByText(/起床前再响一次/)).toBeInTheDocument();
+
+        const clockTime = screen.getAllByText('22:52').find(element => element.className.includes('text-5xl'));
+        expect(clockTime).toBeTruthy();
+        expect(clockTime?.className).not.toContain('text-white');
+        expect(clockTime?.getAttribute('style')).toContain('var(--story-phone-text)');
+
+        const alarmLabel = screen.getByText('醒来前别关');
+        expect(alarmLabel.className).not.toContain('text-white');
+        expect(alarmLabel.getAttribute('style')).toContain('var(--story-phone-text)');
+    });
+
     it('opens a WeChat secondary chat screen from the generated clue list', () => {
         const wechatApp = PHONE_APPS.find(app => app.id === 'wechat') || PHONE_APPS[0];
         render(

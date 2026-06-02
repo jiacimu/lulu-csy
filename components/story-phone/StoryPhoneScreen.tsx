@@ -1597,22 +1597,29 @@ const MapsScreen: React.FC<Omit<AppContentProps, 'app' | 'charAvatar'>> = ({ clu
 
 const ClockScreen: React.FC<Omit<AppContentProps, 'app' | 'charAvatar'>> = ({ clue, charName, compact, theme }) => {
     const items = getClueItems(clue);
+    const cardStyle: React.CSSProperties = { background: 'var(--story-phone-card)' };
+    const softCardStyle: React.CSSProperties = { background: 'var(--story-phone-card-soft)' };
+    const textStyle: React.CSSProperties = { color: 'var(--story-phone-text)' };
+    const mutedStyle: React.CSSProperties = { color: 'var(--story-phone-muted)' };
     return (
         <div className="space-y-3">
-            <div className={`rounded-[1.5rem] border ${theme.border} bg-white/10 p-4 text-center shadow-sm`}>
-                <div className={`${compact ? 'text-[10px]' : 'text-xs'} ${theme.muted}`}>异常提醒</div>
-                <div className={`${compact ? 'text-4xl' : 'text-5xl'} mt-1 font-extralight tracking-normal text-white`}>{clue.timestamp || '02:17'}</div>
-                <div className={`${compact ? 'text-[9px]' : 'text-[11px]'} mt-2 text-white/50`}>{clue.subtitle || `${charName} 没删掉的时间点`}</div>
+            <div className={`rounded-[1.5rem] border ${theme.border} p-4 text-center shadow-sm`} style={cardStyle}>
+                <div className={compact ? 'text-[10px]' : 'text-xs'} style={mutedStyle}>异常提醒</div>
+                <div className={`${compact ? 'text-4xl' : 'text-5xl'} mt-1 font-extralight tracking-normal`} style={textStyle}>{clue.timestamp || '02:17'}</div>
+                <div className={`${compact ? 'text-[9px]' : 'text-[11px]'} mt-2`} style={mutedStyle}>{clue.subtitle || `${charName} 没删掉的时间点`}</div>
             </div>
             <div className="space-y-2">
                 {items.map((item, index) => (
-                    <div key={`${item.label}-${index}`} className={`flex items-center gap-3 rounded-[1.15rem] border ${theme.border} bg-white/10 p-3`}>
-                        <BellSimple className="h-5 w-5 text-[#9ec7ff]" />
+                    <div key={`${item.label}-${index}`} className={`flex items-center gap-3 rounded-[1.15rem] border ${theme.border} p-3`} style={softCardStyle}>
+                        <BellSimple className="h-5 w-5" style={{ color: theme.accentHex }} />
                         <span className="min-w-0 flex-1">
-                            <span className={`${compact ? 'text-[11px]' : 'text-sm'} block truncate font-semibold text-white`}>{item.label}</span>
-                            <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} block truncate text-white/55`}>{previewText(itemText(item), 68)}</span>
+                            <span className={`${compact ? 'text-[11px]' : 'text-sm'} block truncate font-semibold`} style={textStyle}>{item.label}</span>
+                            <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} block truncate`} style={mutedStyle}>{previewText(itemText(item), 68)}</span>
                         </span>
-                        <span className={`h-6 w-10 rounded-full ${index === 0 ? 'bg-[#8bbcff]' : 'bg-white/15'} p-1`}>
+                        <span
+                            className="h-6 w-10 rounded-full p-1"
+                            style={{ background: index === 0 ? theme.accentHex : 'color-mix(in srgb, var(--story-phone-muted) 18%, transparent)' }}
+                        >
                             <span className={`block h-4 w-4 rounded-full bg-white ${index === 0 ? 'translate-x-4' : ''}`} />
                         </span>
                     </div>
