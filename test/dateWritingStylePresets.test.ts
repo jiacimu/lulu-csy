@@ -27,6 +27,24 @@ describe('date writing style presets', () => {
         ]);
     });
 
+    it('exposes picker metadata for each style', () => {
+        DATE_WRITING_STYLE_PRESETS.forEach(preset => {
+            expect(preset.group).toMatch(/\S/);
+            expect(preset.accent.light).toMatch(/^#[0-9A-F]{6}$/i);
+            expect(preset.accent.dark).toMatch(/^#[0-9A-F]{6}$/i);
+            expect(preset.sample).toMatch(/\S/);
+            expect(preset.ref).toMatch(/\S/);
+        });
+    });
+
+    it('merges the premium picker copy by stable key', () => {
+        expect(resolveDateWritingStylePreset('cozy')?.label).toBe('相对忘言');
+        expect(resolveDateWritingStylePreset('cozy')?.sample).toContain('他剥着橘子');
+        expect(resolveDateWritingStylePreset('cozy')?.ref).toContain('步履不停');
+        expect(resolveDateWritingStylePreset('danger')?.label).toBe('危光微醺');
+        expect(resolveDateWritingStylePreset('minimal')?.label).toBe('不着一字');
+    });
+
     it('maps legacy saved preset keys to the new presets', () => {
         expect(resolveDateWritingStylePreset('daily')?.key).toBe('cozy');
         expect(resolveDateWritingStylePreset('natural')?.key).toBe('cozy');

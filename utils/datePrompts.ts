@@ -36,6 +36,13 @@ export interface DateWritingStylePreset {
     key: string;
     label: string;
     desc: string;
+    group: string;
+    accent: {
+        light: string;
+        dark: string;
+    };
+    sample: string;
+    ref: string;
     prompt: string;
 }
 
@@ -43,8 +50,12 @@ export interface DateWritingStylePreset {
 export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
     {
         key: 'cozy',
-        label: '松弛日常',
+        label: '相对忘言',
         desc: '什么都不用发生，共处一室就好',
+        group: '轻 · 日常',
+        accent: { light: '#B4892F', dark: '#E7BF66' },
+        sample: '他剥着橘子，剥好一半递过来，眼睛没离开电视；她接住，也没说谢。天慢慢暗下去，屋里谁都没起身去开灯。',
+        ref: '汪曾祺《受戒》、是枝裕和《步履不停》',
         prompt: `【文风：松弛日常】
 
 ▍一句话定位
@@ -79,8 +90,12 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
     },
     {
         key: 'sweet',
-        label: '心动放大',
+        label: '乍见之欢',
         desc: '放慢心跳加速的那一瞬间',
+        group: '浓 · 重彩',
+        accent: { light: '#C75A7C', dark: '#F08BAA' },
+        sample: '他抬眼看过来，不过一瞬。可那一瞬里，周遭的人声忽然退得很远，只剩她自己的心跳，一下，一下，被拉得极慢。',
+        ref: '川端康成《伊豆的舞女》、岩井俊二《情书》',
         prompt: `【文风：心动放大】
 
 ▍一句话定位
@@ -115,8 +130,12 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
     },
     {
         key: 'minimal',
-        label: '极简快切',
+        label: '不着一字',
         desc: '说三分藏七分，沉默比语言重',
+        group: '清 · 疏冷',
+        accent: { light: '#8C8D8A', dark: '#C8CAC4' },
+        sample: '他来了。她没问为什么。两杯酒，一句“还好吗”。然后是很长的沉默。该懂的，都在沉默里懂了。',
+        ref: '杜拉斯《情人》、海明威',
         prompt: `【文风：极简快切】
 
 ▍一句话定位
@@ -169,8 +188,12 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
     },
     {
         key: 'immersive',
-        label: '细腻沉浸',
+        label: '五感氤氲',
         desc: '把感官铺开，让情绪慢慢转弯',
+        group: '润 · 工写',
+        accent: { light: '#8F6E50', dark: '#D1A57F' },
+        sample: '先是茶汤的热气漫上来，模糊了眼前；接着是他袖口若有若无的皂角气、窗外被雨泡软的桂花香，一层层把人裹进去；直到很久以后她才惊觉——原来自己的目光，从头到尾就没从他身上挪开过。',
+        ref: '弗吉尼亚·伍尔夫《达洛维夫人》、费兰特《我的天才女友》',
         prompt: `【文风：细腻沉浸】
 
 ▍一句话定位
@@ -205,8 +228,12 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
     },
     {
         key: 'cinematic',
-        label: '分镜光影',
+        label: '光影成景',
         desc: '每一行都有景别，光落在该落的地方',
+        group: '润 · 工写',
+        accent: { light: '#D68A3A', dark: '#F0BA71' },
+        sample: '镜头压得很低：先是他无意识叩着桌面的指节，再缓缓摇上她欲言又止的侧脸；最后整间咖啡馆的光都斜下来，只落在两人之间那一方空着的桌布上——谁也没有去填满它。',
+        ref: '王家卫《花样年华》、村上春树',
         prompt: `【文风：分镜光影】
 
 ▍一句话定位
@@ -267,6 +294,10 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
         key: 'desolate',
         label: '浮世苍凉',
         desc: '冷眼看人世，再热闹底下也落灰',
+        group: '清 · 疏冷',
+        accent: { light: '#6E665C', dark: '#B2A79B' },
+        sample: '满席的笑声烫人，酒一巡一巡地敬。她隔着这片热闹望过去，只觉得再亮的灯，也照不化两个人之间那层薄薄的、擦不掉的灰。',
+        ref: '张爱玲《金锁记》、曹雪芹《红楼梦》',
         prompt: `【文风：浮世苍凉】
 
 ▍一句话定位
@@ -303,6 +334,10 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
         key: 'restrained',
         label: '机锋暗涌',
         desc: '深情藏在不说里，对白带刃',
+        group: '锋 · 暗涌',
+        accent: { light: '#534AB7', dark: '#8B84F2' },
+        sample: '“谁等你了。” 她头也没抬。只是桌上那杯替他多点的咖啡，早已凉透。',
+        ref: '海明威《白象似的群山》、张爱玲《倾城之恋》',
         prompt: `【文风：机锋暗涌】
 
 - 克制：深情全藏在不说里。角色几乎不直接表白情绪，靠岔开话题、动作、沉默露出来；该动情的地方往回收。
@@ -317,6 +352,10 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
         key: 'lyrical',
         label: '繁花缱绻',
         desc: '浓墨重彩，草木皆有情，长句里铺感官',
+        group: '浓 · 重彩',
+        accent: { light: '#993556', dark: '#D85F85' },
+        sample: '晚风是温的，裹着满院栀子开到极盛的甜香，一层层漫过来，沾上她的发梢、睫毛、和微微发烫的耳尖；而当他的指尖若有似无地擦过她手背的那一瞬，连这满院流动的空气，都仿佛软成了一片片将落未落的花瓣。',
+        ref: '普鲁斯特《追忆似水年华》、曹雪芹《红楼梦》',
         prompt: `【文风：繁花缱绻 · 密丽抒情】
 
 ▍一句话定位
@@ -363,8 +402,12 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
     },
     {
         key: 'tender',
-        label: '冰雪暖光',
+        label: '冷处偏佳',
         desc: '苦寒里也照得见体温，哀而不伤',
+        group: '清 · 疏冷',
+        accent: { light: '#185FA5', dark: '#5AA8F0' },
+        sample: '雪一直下着。他默默解下围巾，绕上她的脖子，指尖很凉，围巾却还留着他的温度——有些话他大概永远不会说，可她，都懂了。',
+        ref: '川端康成《雪国》、史铁生《我与地坛》',
         prompt: `【文风：冰雪暖光】
 内核是"哪怕在苦寒和失去里，也照得见人的体温"。
 - 叙述姿态：温厚、体恤，对人和万物都怀着善意——这跟"浮世苍凉"那种冷眼讥诮正相反，别写成世故。
@@ -381,6 +424,10 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
         key: 'artisan',
         label: '工笔水乡',
         desc: '工笔细描器物与手艺，温润有人情',
+        group: '润 · 工写',
+        accent: { light: '#0F6E56', dark: '#35B892' },
+        sample: '她指腹顺着旧青瓷杯上的冰裂纹，一道一道地描——釉是温的，纹细得像发丝。描到第三道她才记起，这只杯子，是当年他一件件挑过来、单留给她的那一只。',
+        ref: '汪曾祺《受戒》、谷崎润一郎《阴翳礼赞》',
         prompt: `【文风：工笔水乡】
 长项是对器物、手艺、劳作的工笔凝视，把材质和细节描到生出情来。
 - 地域 / 质感：江南水乡的温润底子（雨、水、丝、茶、旧木、季节），但不限定地点——核心是那种湿润、细腻、有时间纵深的质感。
@@ -398,6 +445,10 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
         key: 'quiet',
         label: '静水深流',
         desc: '极克制的透明文字，写人和人之间没说出口的',
+        group: '锋 · 暗涌',
+        accent: { light: '#5F5E5A', dark: '#A4A29A' },
+        sample: '“还好吗？” “还好。” 谁也没再追问。可这一句“还好”，两个人心里都清楚，是假的。',
+        ref: '契诃夫、雷蒙德·卡佛',
         prompt: `【文风：静水深流（崔恩荣特化）】
 
 ▍一句话定位
@@ -436,6 +487,10 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
         key: 'banter',
         label: '机锋暗许',
         desc: '势均力敌的斗嘴，越斗越在意',
+        group: '锋 · 暗涌',
+        accent: { light: '#8A5A21', dark: '#D29A4C' },
+        sample: '“幼稚。”“你先笑的。”“我笑你幼稚。” 两个人针锋相对，谁也不让；可话头一停，谁也没急着起身。',
+        ref: '莎士比亚《无事生非》、简·奥斯汀《傲慢与偏见》',
         prompt: `【文风：机锋暗许】
 
 ▍一句话定位
@@ -468,8 +523,12 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
     },
     {
         key: 'angst',
-        label: '求而不得',
+        label: '咫尺天涯',
         desc: '钝刀子,疼也疼得克制',
+        group: '锋 · 暗涌',
+        accent: { light: '#7A4C63', dark: '#C07A9D' },
+        sample: '“做朋友，也挺好。” 他说得轻描淡写。“嗯。” 她应得也轻。只是回家那一路，那个“嗯”字，在喉咙里钝钝地疼了很久。',
+        ref: '石黑一雄《长日将尽》、沈从文《边城》',
         prompt: `【文风：求而不得】
 
 ▍一句话定位
@@ -501,8 +560,12 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
     },
     {
         key: 'danger',
-        label: '暗涌危情',
+        label: '危光微醺',
         desc: '危险与心动并存，越靠近越不安',
+        group: '浓 · 重彩',
+        accent: { light: '#6F2A38', dark: '#C65368' },
+        sample: '他一手撑在她身后的墙上，慢慢欺近，声音低下来：“别躲。” 她心跳得厉害，却辨不清——这是警告，还是邀请。',
+        ref: '艾米莉·勃朗特《呼啸山庄》、《蝴蝶梦》',
         prompt: `【文风：暗涌危情】
 
 ▍一句话定位
@@ -534,8 +597,12 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
     },
     {
         key: 'comedy',
-        label: '俏皮欢脱',
+        label: '谑而不虐',
         desc: '轻快好笑不端着，笑里塞点心动',
+        group: '轻 · 日常',
+        accent: { light: '#E08B3E', dark: '#F4B36A' },
+        sample: '“你脸红了。”“——辣的。”“可我们点的是冰淇淋。” 空气静了一秒，她决定，假装刚才那句没人听见。',
+        ref: '简·奥斯汀《爱玛》、钱锺书《围城》',
         prompt: `【文风：俏皮欢脱】
 
 ▍一句话定位
@@ -568,8 +635,12 @@ export const DATE_WRITING_STYLE_PRESETS: DateWritingStylePreset[] = [
     },
     {
         key: 'fluffy',
-        label: '暖甜如糖',
+        label: '蜜里调油',
         desc: '被偏爱的踏实甜，双向奔赴',
+        group: '轻 · 日常',
+        accent: { light: '#D57389', dark: '#F09AAA' },
+        sample: '他把最后一颗草莓拨到她碗里，“我不爱吃。” 她没拆穿——上礼拜同样一颗，可是他抢着吃的。',
+        ref: '《诗经·木瓜》、丰子恺',
         prompt: `【文风：暖甜如糖】
 
 ▍一句话定位

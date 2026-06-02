@@ -1,22 +1,42 @@
 /**
- * WritingStyleSheet — 文风选择器二级弹窗
- * 
- * 从底部滑出的半屏 Sheet，展示所有内置文风预设和自定义文风入口。
- * 每个文风以卡片形式呈现：标签 + 一句话描述 + 可展开的完整提示词预览。
- * 用于 SummaryFloatingBall（悬浮球）和 DateSettings（设置页）复用。
+ * WritingStyleSheet - Premium writing style picker for Date mode.
+ *
+ * Bottom sheet with grouped style rows, CSS color swatches, and one-at-a-time
+ * sample previews. Used by SummaryFloatingBall and DateSettings.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { DATE_WRITING_STYLE_PRESETS, resolveDateWritingStylePreset, type DateWritingStylePreset } from '../../utils/datePrompts';
 
 export interface WritingStyleSheetProps {
     isOpen: boolean;
-    /** Current style: a preset key (e.g. 'natural') or custom text, or undefined */
+    /** Current style: a preset key (e.g. 'cozy') or custom text, or undefined */
     currentStyle?: string;
     onSelect: (style: string | undefined) => void;
     onClose: () => void;
 }
+
+type GroupedWritingStyles = {
+    group: string;
+    presets: DateWritingStylePreset[];
+};
+
+type AccentVars = React.CSSProperties & {
+    '--wsp-accent-light'?: string;
+    '--wsp-accent-dark'?: string;
+};
+
+const CUSTOM_KEY = '__custom__';
+const CUSTOM_ACCENT = { light: '#888780', dark: '#B8B6AE' };
+
+const springTransition = {
+    type: 'spring' as const,
+    stiffness: 260,
+    damping: 34,
+    mass: 0.9,
+};
 
 /** Check if a style string is a preset key */
 const isPresetKey = (s?: string): boolean => {
@@ -31,371 +51,719 @@ const getStyleDisplayLabel = (style?: string): string => {
     return '自定义';
 };
 
+const groupWritingStyles = (presets: DateWritingStylePreset[]): GroupedWritingStyles[] => {
+    const groups = new Map<string, DateWritingStylePreset[]>();
+    presets.forEach(preset => {
+        const existing = groups.get(preset.group);
+        if (existing) existing.push(preset);
+        else groups.set(preset.group, [preset]);
+    });
+    return Array.from(groups, ([group, groupedPresets]) => ({ group, presets: groupedPresets }));
+};
+
+const getAccentVars = (accent: { light: string; dark: string }): AccentVars => ({
+    '--wsp-accent-light': accent.light,
+    '--wsp-accent-dark': accent.dark,
+});
+
+const isKeyboardActivation = (event: React.KeyboardEvent) => (
+    event.key === 'Enter' || event.key === ' '
+);
+
 const WritingStyleSheet: React.FC<WritingStyleSheetProps> = ({
     isOpen,
     currentStyle,
     onSelect,
     onClose,
 }) => {
-    // Which card's prompt is expanded
+    const prefersReducedMotion = useReducedMotion() ?? false;
+    const groupedStyles = useMemo(() => groupWritingStyles(DATE_WRITING_STYLE_PRESETS), []);
+    const activePreset = resolveDateWritingStylePreset(currentStyle);
+    const activePresetKey = activePreset?.key;
+    const isCustomActive = !!currentStyle && !activePreset;
     const [expandedKey, setExpandedKey] = useState<string | null>(null);
-    // Custom style text (local draft)
     const [customText, setCustomText] = useState<string>('');
-    // Whether custom input textarea is shown (independent of active state)
-    const [showCustomInput, setShowCustomInput] = useState(false);
-    // Whether custom card is "active" (selected & saved)
-    const isCustomActive = !!currentStyle && !isPresetKey(currentStyle);
-    const activePresetKey = resolveDateWritingStylePreset(currentStyle)?.key;
+    const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+    const customTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-    // Sync custom text from currentStyle on open
     useEffect(() => {
-        if (isOpen && currentStyle && !isPresetKey(currentStyle)) {
+        if (!isOpen) return;
+        if (isCustomActive && currentStyle) {
             setCustomText(currentStyle);
-            setShowCustomInput(true);
+            setExpandedKey(CUSTOM_KEY);
+            return;
         }
-    }, [isOpen, currentStyle]);
+        setExpandedKey(activePresetKey || null);
+    }, [activePresetKey, currentStyle, isCustomActive, isOpen]);
 
-    // Reset state when closing
     useEffect(() => {
-        if (!isOpen) {
-            setExpandedKey(null);
-            if (!isCustomActive) {
-                setShowCustomInput(false);
-            }
-        }
-    }, [isOpen, isCustomActive]);
+        if (!isOpen) return;
+        const targetKey = activePresetKey || (isCustomActive ? CUSTOM_KEY : null);
+        if (!targetKey) return;
 
-    const handlePresetClick = useCallback((key: string) => {
-        if (activePresetKey === key) {
-            onSelect(undefined);
-        } else {
-            onSelect(key);
-            // Deactivate custom input when selecting a preset
-            setShowCustomInput(false);
-        }
-    }, [activePresetKey, onSelect]);
+        const timer = window.setTimeout(() => {
+            rowRefs.current[targetKey]?.scrollIntoView({
+                block: 'center',
+                behavior: prefersReducedMotion ? 'auto' : 'smooth',
+            });
+        }, 80);
 
-    const handleExpandToggle = useCallback((key: string) => {
-        setExpandedKey(prev => prev === key ? null : key);
+        return () => window.clearTimeout(timer);
+    }, [activePresetKey, isCustomActive, isOpen, prefersReducedMotion]);
+
+    useEffect(() => {
+        const textarea = customTextareaRef.current;
+        if (!textarea || expandedKey !== CUSTOM_KEY) return;
+        textarea.style.height = 'auto';
+        textarea.style.height = `${Math.max(62, textarea.scrollHeight)}px`;
+    }, [customText, expandedKey]);
+
+    const registerRow = useCallback((key: string, node: HTMLDivElement | null) => {
+        rowRefs.current[key] = node;
     }, []);
 
-    const handleCustomToggle = useCallback(() => {
-        if (isCustomActive || showCustomInput) {
-            // Deselect custom
-            onSelect(undefined);
-            setShowCustomInput(false);
-            setCustomText('');
-        } else {
-            // Open custom input area (don't select yet — let user type first)
-            setShowCustomInput(true);
-        }
-    }, [isCustomActive, showCustomInput, onSelect]);
-
-    const handleCustomTextChange = useCallback((text: string) => {
-        setCustomText(text);
-        // Live-save as user types
-        if (text.trim()) {
-            onSelect(text.trim());
-        }
+    const handlePresetSelect = useCallback((preset: DateWritingStylePreset) => {
+        setExpandedKey(preset.key);
+        onSelect(preset.key);
     }, [onSelect]);
 
-    const handleCustomTextBlur = useCallback(() => {
+    const handleCustomOpen = useCallback(() => {
+        setExpandedKey(CUSTOM_KEY);
         if (customText.trim()) {
             onSelect(customText.trim());
-        } else {
-            // Empty text on blur — deactivate
-            onSelect(undefined);
-            setShowCustomInput(false);
         }
     }, [customText, onSelect]);
 
-    return (
+    const handleCustomTextChange = useCallback((text: string) => {
+        setCustomText(text);
+        const trimmed = text.trim();
+        if (trimmed) {
+            onSelect(trimmed);
+        } else if (isCustomActive) {
+            onSelect(undefined);
+        }
+    }, [isCustomActive, onSelect]);
+
+    const currentAccent = activePreset?.accent || (isCustomActive ? CUSTOM_ACCENT : undefined);
+
+    const sheetTransition = prefersReducedMotion
+        ? { duration: 0 }
+        : springTransition;
+
+    const sheet = (
         <AnimatePresence>
             {isOpen && (
                 <motion.div
                     key="writing-style-sheet-overlay"
-                    initial={{ opacity: 0 }}
+                    initial={prefersReducedMotion ? false : { opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="fixed inset-0 z-[500]"
-                    style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', pointerEvents: 'auto' }}
+                    exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0 }}
+                    transition={{ duration: prefersReducedMotion ? 0 : 0.2 }}
+                    className="writing-style-sheet-overlay"
                     onClick={onClose}
                 >
-                    {/* Backdrop */}
-                    <div className="absolute inset-0 bg-black/45" style={{ backdropFilter: 'blur(4px)' }} />
+                    <style>{WRITING_STYLE_SHEET_CSS}</style>
+                    <div className="writing-style-sheet-backdrop" />
 
-                    {/* Sheet */}
-                    <motion.div
+                    <motion.section
                         key="writing-style-sheet"
-                        initial={{ y: '100%' }}
+                        initial={prefersReducedMotion ? false : { y: '100%' }}
                         animate={{ y: 0 }}
-                        exit={{ y: '100%' }}
-                        transition={{ type: 'spring', stiffness: 340, damping: 34 }}
-                        className="relative w-full"
-                        style={{
-                            maxWidth: 420,
-                            maxHeight: '78vh',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            borderTopLeftRadius: 24,
-                            borderTopRightRadius: 24,
-                            background: 'linear-gradient(180deg, rgba(20,20,28,0.97) 0%, rgba(12,12,18,0.99) 100%)',
-                            boxShadow: '0 -8px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08)',
-                        }}
-                        onClick={e => e.stopPropagation()}
+                        exit={prefersReducedMotion ? { y: 0 } : { y: '100%' }}
+                        transition={sheetTransition}
+                        className="writing-style-sheet"
+                        aria-label="文风选择"
+                        onClick={event => event.stopPropagation()}
                     >
-                        {/* Handle bar */}
-                        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 12, paddingBottom: 4 }}>
-                            <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.2)' }} />
-                        </div>
+                        <div className="wsp-content">
+                            <button type="button" className="wsp-grab-button" onClick={onClose} aria-label="收起文风选择">
+                                <span className="wsp-grab" aria-hidden="true" />
+                            </button>
 
-                        {/* Header — fixed, not scrollable */}
-                        <div style={{ padding: '4px 20px 12px', flexShrink: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div className="wsp-header">
                                 <div>
-                                    <div style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.9)', letterSpacing: 0.5 }}>文风选择</div>
-                                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>选择一种内置文风，或自定义叙述风格</div>
+                                    <h2 className="wsp-title">文风</h2>
+                                    <p className="wsp-subtitle">为这场见面，选一种叙述的声音</p>
                                 </div>
-                                <div
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={onClose}
-                                    style={{
-                                        width: 32, height: 32, borderRadius: 16,
-                                        background: 'rgba(255,255,255,0.08)',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        cursor: 'pointer', color: 'rgba(255,255,255,0.5)',
-                                    }}
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" width={14} height={14}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-                                    </svg>
-                                </div>
+                                <button type="button" className="wsp-close" onClick={onClose} aria-label="关闭文风选择">关闭</button>
                             </div>
 
-                            {/* Current status bar */}
-                            <div style={{
-                                marginTop: 10, padding: '8px 12px', borderRadius: 12,
-                                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            }}>
-                                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontWeight: 500 }}>当前文风</span>
-                                <span style={{ fontSize: 12, fontWeight: 700, color: 'rgba(110,231,183,0.8)' }}>
-                                    {getStyleDisplayLabel(currentStyle)}
-                                </span>
+                            <div className="wsp-current" style={currentAccent ? getAccentVars(currentAccent) : undefined}>
+                                <span className="wsp-current-label">当前</span>
+                                <span className="wsp-current-spacer" />
+                                <span className={`wsp-current-swatch ${currentAccent ? '' : 'is-empty'}`} aria-hidden="true" />
+                                <span className="wsp-current-name">{getStyleDisplayLabel(currentStyle)}</span>
                             </div>
-
-                            {/* Divider */}
-                            <div style={{
-                                height: 1, marginTop: 12,
-                                background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent)',
-                            }} />
                         </div>
 
-                        {/* Scrollable card list */}
-                        <div style={{
-                            flex: 1,
-                            overflowY: 'auto',
-                            overscrollBehavior: 'contain',
-                            WebkitOverflowScrolling: 'touch',
-                            padding: '4px 16px 24px',
-                        }}>
-                            {/* Preset cards */}
-                            {DATE_WRITING_STYLE_PRESETS.map(preset => (
-                                <PresetCard
-                                    key={preset.key}
-                                    preset={preset}
-                                    isActive={activePresetKey === preset.key}
-                                    isExpanded={expandedKey === preset.key}
-                                    onSelect={() => handlePresetClick(preset.key)}
-                                    onToggleExpand={() => handleExpandToggle(preset.key)}
+                        <div className="wsp-scroll">
+                            <div className="wsp-list">
+                                {groupedStyles.map(group => (
+                                    <React.Fragment key={group.group}>
+                                        <SectionLabel label={group.group} />
+                                        {group.presets.map(preset => (
+                                            <PresetStyleRow
+                                                key={preset.key}
+                                                preset={preset}
+                                                isActive={activePresetKey === preset.key}
+                                                isExpanded={expandedKey === preset.key}
+                                                prefersReducedMotion={prefersReducedMotion}
+                                                onSelect={() => handlePresetSelect(preset)}
+                                                registerRow={registerRow}
+                                            />
+                                        ))}
+                                    </React.Fragment>
+                                ))}
+
+                                <SectionLabel label="自定义" />
+                                <CustomStyleRow
+                                    isActive={isCustomActive}
+                                    isExpanded={expandedKey === CUSTOM_KEY}
+                                    value={customText}
+                                    prefersReducedMotion={prefersReducedMotion}
+                                    onOpen={handleCustomOpen}
+                                    onChange={handleCustomTextChange}
+                                    registerRow={registerRow}
+                                    textareaRef={customTextareaRef}
                                 />
-                            ))}
-
-                            {/* Custom style card */}
-                            <div style={{
-                                borderRadius: 16, marginTop: 8,
-                                border: (isCustomActive || showCustomInput) ? '1px solid rgba(168,85,247,0.3)' : '1px solid rgba(255,255,255,0.06)',
-                                background: (isCustomActive || showCustomInput) ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.02)',
-                                transition: 'all 0.2s',
-                            }}>
-                                <div
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={handleCustomToggle}
-                                    style={{
-                                        display: 'flex', alignItems: 'center', gap: 12,
-                                        padding: '14px 16px', cursor: 'pointer',
-                                    }}
-                                >
-                                    {/* Checkbox */}
-                                    <div style={{
-                                        width: 20, height: 20, borderRadius: 10, flexShrink: 0,
-                                        border: (isCustomActive || showCustomInput) ? '2px solid rgb(168,85,247)' : '2px solid rgba(255,255,255,0.2)',
-                                        background: isCustomActive ? 'rgb(168,85,247)' : (showCustomInput ? 'rgba(168,85,247,0.3)' : 'transparent'),
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        transition: 'all 0.2s',
-                                    }}>
-                                        {isCustomActive && (
-                                            <svg width={10} height={10} viewBox="0 0 12 12" fill="none">
-                                                <path d="M2.5 6L5 8.5L9.5 3.5" stroke="#fff" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-                                            </svg>
-                                        )}
-                                    </div>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>✏️ 自定义文风</div>
-                                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2, lineHeight: 1.4 }}>用你自己的话描述想要的叙述风格</div>
-                                    </div>
-                                </div>
-
-                                {/* Custom textarea — visible when input is open OR style is active */}
-                                {(isCustomActive || showCustomInput) && (
-                                    <div style={{ padding: '0 16px 14px' }}>
-                                        <textarea
-                                            value={customText}
-                                            onChange={e => handleCustomTextChange(e.target.value)}
-                                            onBlur={handleCustomTextBlur}
-                                            rows={3}
-                                            placeholder="例如：用短句，少用形容词，台词口语化，像聊天记录一样自然…"
-                                            onClick={e => e.stopPropagation()}
-                                            style={{
-                                                width: '100%', resize: 'none', borderRadius: 12,
-                                                border: '1px solid rgba(255,255,255,0.08)',
-                                                background: 'rgba(255,255,255,0.04)',
-                                                padding: 12, fontSize: 12, lineHeight: 1.6,
-                                                color: 'rgba(255,255,255,0.7)', outline: 'none',
-                                                boxSizing: 'border-box',
-                                            }}
-                                        />
-                                    </div>
-                                )}
                             </div>
-
-                            {/* Bottom safe area */}
-                            <div style={{ height: 20 }} />
                         </div>
-                    </motion.div>
+                    </motion.section>
                 </motion.div>
             )}
         </AnimatePresence>
     );
+
+    return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body);
 };
 
-// ─── Preset Card Sub-component ───
-// Uses <div role="button"> instead of <button> to avoid nested-button issues
+interface SectionLabelProps {
+    label: string;
+}
 
-interface PresetCardProps {
+const SectionLabel: React.FC<SectionLabelProps> = React.memo(({ label }) => (
+    <div className="wsp-section-label">
+        <span>{label}</span>
+        <i aria-hidden="true" />
+    </div>
+));
+
+SectionLabel.displayName = 'SectionLabel';
+
+interface PresetStyleRowProps {
     preset: DateWritingStylePreset;
     isActive: boolean;
     isExpanded: boolean;
+    prefersReducedMotion: boolean;
     onSelect: () => void;
-    onToggleExpand: () => void;
+    registerRow: (key: string, node: HTMLDivElement | null) => void;
 }
 
-const PresetCard: React.FC<PresetCardProps> = React.memo(({ preset, isActive, isExpanded, onSelect, onToggleExpand }) => {
+const PresetStyleRow: React.FC<PresetStyleRowProps> = React.memo(({
+    preset,
+    isActive,
+    isExpanded,
+    prefersReducedMotion,
+    onSelect,
+    registerRow,
+}) => (
+    <motion.div
+        layout={!prefersReducedMotion}
+        ref={node => registerRow(preset.key, node)}
+        className={`wsp-row ${isActive ? 'is-active' : ''}`}
+        style={getAccentVars(preset.accent)}
+    >
+        <button
+            type="button"
+            className="wsp-row-main"
+            onClick={onSelect}
+            aria-expanded={isExpanded}
+            aria-label={`选择${preset.label}`}
+        >
+            <span className="wsp-swatch" aria-hidden="true" />
+            <span className="wsp-name">{preset.label}</span>
+            <span className="wsp-ref">{preset.ref}</span>
+        </button>
+        <SamplePreview
+            isOpen={isExpanded}
+            sample={preset.sample}
+            prefersReducedMotion={prefersReducedMotion}
+        />
+    </motion.div>
+));
+
+PresetStyleRow.displayName = 'PresetStyleRow';
+
+interface SamplePreviewProps {
+    isOpen: boolean;
+    sample: string;
+    prefersReducedMotion: boolean;
+}
+
+const SamplePreview: React.FC<SamplePreviewProps> = React.memo(({ isOpen, sample, prefersReducedMotion }) => (
+    <AnimatePresence initial={false}>
+        {isOpen && (
+            <motion.div
+                layout={!prefersReducedMotion}
+                className="wsp-row-extra"
+                initial={prefersReducedMotion ? false : { height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={prefersReducedMotion ? { height: 0, opacity: 0 } : { height: 0, opacity: 0 }}
+                transition={prefersReducedMotion ? { duration: 0 } : springTransition}
+            >
+                <motion.div
+                    className="wsp-read"
+                    initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.2, delay: 0.08 }}
+                >
+                    「{sample}」
+                </motion.div>
+            </motion.div>
+        )}
+    </AnimatePresence>
+));
+
+SamplePreview.displayName = 'SamplePreview';
+
+interface CustomStyleRowProps {
+    isActive: boolean;
+    isExpanded: boolean;
+    value: string;
+    prefersReducedMotion: boolean;
+    onOpen: () => void;
+    onChange: (text: string) => void;
+    registerRow: (key: string, node: HTMLDivElement | null) => void;
+    textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+}
+
+const CustomStyleRow: React.FC<CustomStyleRowProps> = React.memo(({
+    isActive,
+    isExpanded,
+    value,
+    prefersReducedMotion,
+    onOpen,
+    onChange,
+    registerRow,
+    textareaRef,
+}) => {
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (!isKeyboardActivation(event)) return;
+        event.preventDefault();
+        onOpen();
+    };
+
     return (
-        <div style={{
-            borderRadius: 16, marginBottom: 8,
-            border: isActive ? '1px solid rgba(52,211,153,0.3)' : '1px solid rgba(255,255,255,0.06)',
-            background: isActive ? 'rgba(52,211,153,0.08)' : 'rgba(255,255,255,0.02)',
-            transition: 'all 0.2s',
-        }}>
-            {/* Card header: clickable row */}
-            <div style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '14px 16px', cursor: 'pointer',
-            }}>
-                {/* Checkbox — click to select */}
-                <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={onSelect}
-                    style={{
-                        width: 20, height: 20, borderRadius: 10, flexShrink: 0,
-                        border: isActive ? '2px solid rgb(52,211,153)' : '2px solid rgba(255,255,255,0.2)',
-                        background: isActive ? 'rgb(52,211,153)' : 'transparent',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        transition: 'all 0.2s', cursor: 'pointer',
-                    }}
-                >
-                    {isActive && (
-                        <svg width={10} height={10} viewBox="0 0 12 12" fill="none">
-                            <path d="M2.5 6L5 8.5L9.5 3.5" stroke="#fff" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                    )}
-                </div>
-
-                {/* Text content — click to select */}
-                <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={onSelect}
-                    style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
-                >
-                    <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>{preset.label}</div>
-                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2, lineHeight: 1.4 }}>{preset.desc}</div>
-                </div>
-
-                {/* Expand arrow — separate click target */}
-                <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={onToggleExpand}
-                    style={{
-                        width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-                        background: 'rgba(255,255,255,0.04)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: 'rgba(255,255,255,0.3)', cursor: 'pointer',
-                        transition: 'all 0.15s',
-                    }}
-                >
-                    <svg
-                        width={12} height={12} viewBox="0 0 12 12" fill="none"
-                        stroke="currentColor" strokeWidth={1.8}
-                        style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
-                    >
-                        <path d="M2.5 4.5L6 8L9.5 4.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                </div>
+        <motion.div
+            layout={!prefersReducedMotion}
+            ref={node => registerRow(CUSTOM_KEY, node)}
+            className={`wsp-row wsp-custom-row ${isActive ? 'is-active' : ''}`}
+            style={getAccentVars(CUSTOM_ACCENT)}
+        >
+            <div
+                role="button"
+                tabIndex={0}
+                className="wsp-row-main"
+                aria-expanded={isExpanded}
+                aria-label="选择自定义文风"
+                onClick={onOpen}
+                onKeyDown={handleKeyDown}
+            >
+                <span className="wsp-swatch is-custom" aria-hidden="true" />
+                <span className="wsp-name">自定义文风</span>
+                <span className="wsp-ref">用你的话写</span>
             </div>
 
-            {/* Expandable prompt preview */}
-            <AnimatePresence>
+            <AnimatePresence initial={false}>
                 {isExpanded && (
                     <motion.div
-                        key={`prompt-${preset.key}`}
-                        initial={{ height: 0, opacity: 0 }}
+                        layout={!prefersReducedMotion}
+                        className="wsp-row-extra"
+                        initial={prefersReducedMotion ? false : { height: 0, opacity: 0 }}
                         animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2, ease: 'easeInOut' }}
-                        style={{ overflow: 'hidden' }}
+                        exit={prefersReducedMotion ? { height: 0, opacity: 0 } : { height: 0, opacity: 0 }}
+                        transition={prefersReducedMotion ? { duration: 0 } : springTransition}
                     >
-                        <div style={{ padding: '0 16px 14px' }}>
-                            <div style={{
-                                borderRadius: 12, padding: 12,
-                                background: 'rgba(255,255,255,0.03)',
-                                border: '1px solid rgba(255,255,255,0.05)',
-                            }}>
-                                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)', fontWeight: 700, letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' as const }}>
-                                    内置提示词
-                                </div>
-                                <div style={{
-                                    fontSize: 11, color: 'rgba(255,255,255,0.45)', lineHeight: 1.6,
-                                    whiteSpace: 'pre-wrap', fontFamily: 'inherit',
-                                }}>
-                                    {preset.prompt.trim()}
-                                </div>
-                            </div>
-                        </div>
+                        <textarea
+                            ref={textareaRef}
+                            value={value}
+                            onChange={event => onChange(event.target.value)}
+                            onClick={event => event.stopPropagation()}
+                            className="wsp-textarea"
+                            rows={2}
+                            placeholder="例：像深夜电台，语速慢，多用第二人称，句子短，留白多..."
+                        />
                     </motion.div>
                 )}
             </AnimatePresence>
-        </div>
+        </motion.div>
     );
 });
 
-PresetCard.displayName = 'PresetCard';
+CustomStyleRow.displayName = 'CustomStyleRow';
+
+const WRITING_STYLE_SHEET_CSS = `
+.writing-style-sheet-overlay {
+    --wsp-font-serif: "HuiwenMingchao", "Songti SC", "Noto Serif SC", SimSun, serif;
+    --wsp-bg-primary: var(--color-background-primary, #FCFBF8);
+    --wsp-bg-secondary: var(--color-background-secondary, #F3F1EC);
+    --wsp-text-primary: var(--color-text-primary, #1E1D1A);
+    --wsp-text-secondary: var(--color-text-secondary, #68625A);
+    --wsp-text-tertiary: var(--color-text-tertiary, #A09A91);
+    --wsp-border-secondary: var(--color-border-secondary, #E1DDD4);
+    --wsp-border-tertiary: var(--color-border-tertiary, #ECE8DF);
+    --wsp-radius-md: var(--border-radius-md, 12px);
+    --wsp-radius-lg: var(--border-radius-lg, 18px);
+    --wsp-radius-xl: var(--border-radius-xl, 28px);
+    --wsp-top-gap: max(76px, calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 16px));
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    color: var(--wsp-text-primary);
+    font-family: var(--app-font), -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    pointer-events: auto;
+}
+
+.writing-style-sheet-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(20, 18, 16, 0.42);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+}
+
+.writing-style-sheet {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+    max-height: calc(var(--visual-viewport-height, 100dvh) - var(--wsp-top-gap));
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 0.5px solid var(--wsp-border-secondary);
+    border-bottom: 0;
+    border-radius: 28px 28px 0 0;
+    background: var(--wsp-bg-primary);
+    box-shadow: 0 -18px 44px rgba(20, 18, 16, 0.22);
+}
+
+.wsp-content {
+    flex: none;
+    padding: 8px 16px 0;
+}
+
+.wsp-grab-button {
+    display: flex;
+    width: 100%;
+    height: 30px;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+}
+
+.wsp-grab {
+    width: 34px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--wsp-border-secondary);
+}
+
+.wsp-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 0 0;
+}
+
+.wsp-title {
+    margin: 0;
+    color: var(--wsp-text-primary);
+    font-family: var(--wsp-font-serif);
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: 1px;
+    line-height: 1.22;
+}
+
+.wsp-subtitle {
+    margin: 3px 0 0;
+    color: var(--wsp-text-secondary);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.wsp-close {
+    min-width: 54px;
+    height: 36px;
+    flex: none;
+    border: 0.5px solid var(--wsp-border-secondary);
+    border-radius: 999px;
+    background: var(--wsp-bg-secondary);
+    color: var(--wsp-text-secondary);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    line-height: 1;
+    padding: 0 14px;
+}
+
+.wsp-current,
+.writing-style-sheet .wsp-row,
+.writing-style-sheet .wsp-current-swatch,
+.writing-style-sheet .wsp-swatch {
+    --wsp-accent: var(--wsp-accent-light);
+}
+
+.wsp-current {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    margin: 14px 0 10px;
+    border-radius: var(--wsp-radius-md);
+    background: var(--wsp-bg-secondary);
+    padding: 9px 14px;
+}
+
+.wsp-current-label {
+    color: var(--wsp-text-tertiary);
+    font-size: 12px;
+    line-height: 1;
+}
+
+.wsp-current-spacer,
+.wsp-row-spacer {
+    flex: 1;
+    min-width: 8px;
+}
+
+.wsp-current-swatch,
+.wsp-swatch {
+    display: inline-flex;
+    width: 14px;
+    height: 14px;
+    flex: none;
+    border: 0.5px solid var(--wsp-border-tertiary);
+    border-radius: 3px;
+    background: var(--wsp-accent);
+}
+
+.wsp-current-swatch {
+    width: 12px;
+    height: 12px;
+}
+
+.wsp-current-swatch.is-empty {
+    border-style: dashed;
+    background: transparent;
+}
+
+.wsp-current-name {
+    max-width: 176px;
+    overflow: hidden;
+    color: var(--wsp-text-primary);
+    font-family: var(--wsp-font-serif);
+    font-size: 14px;
+    letter-spacing: 0.5px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wsp-scroll {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 16px calc(16px + var(--safe-bottom, env(safe-area-inset-bottom, 0px)));
+}
+
+.wsp-list {
+    overflow: hidden;
+    border: 0.5px solid var(--wsp-border-tertiary);
+    border-radius: var(--wsp-radius-lg);
+    background: var(--wsp-bg-primary);
+    padding: 0 6px 4px;
+}
+
+.wsp-section-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 8px 8px;
+}
+
+.wsp-section-label span {
+    color: var(--wsp-text-tertiary);
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: 3px;
+    line-height: 1;
+}
+
+.wsp-section-label i {
+    height: 0.5px;
+    flex: 1;
+    background: var(--wsp-border-tertiary);
+}
+
+.wsp-row {
+    overflow: hidden;
+    border-bottom: 0.5px solid var(--wsp-border-tertiary);
+    border-left: 3px solid transparent;
+    transition: border-left-color 0.18s ease, background 0.18s ease;
+}
+
+.wsp-row.is-active {
+    border-left-color: var(--wsp-accent);
+}
+
+.wsp-custom-row {
+    border-bottom: 0;
+}
+
+.wsp-row-main {
+    display: grid;
+    grid-template-columns: 18px minmax(78px, max-content) minmax(0, 1fr);
+    width: 100%;
+    min-height: 37px;
+    align-items: start;
+    column-gap: 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    padding: 11px 12px 11px 8px;
+    text-align: left;
+}
+
+.wsp-name {
+    min-width: 0;
+    color: var(--wsp-text-primary);
+    font-family: var(--wsp-font-serif);
+    font-size: 16px;
+    font-weight: 400;
+    letter-spacing: 0.5px;
+    line-height: 1.25;
+    white-space: nowrap;
+}
+
+.wsp-row.is-active .wsp-name {
+    font-weight: 500;
+}
+
+.wsp-ref {
+    color: var(--wsp-text-tertiary);
+    font-size: 11.5px;
+    letter-spacing: 0.2px;
+    line-height: 1.42;
+    overflow-wrap: anywhere;
+    text-align: right;
+    white-space: normal;
+}
+
+.wsp-swatch.is-custom {
+    border-style: dashed;
+    background: transparent;
+}
+
+.wsp-row-extra {
+    overflow: hidden;
+}
+
+.wsp-read {
+    color: var(--wsp-text-secondary);
+    font-family: var(--wsp-font-serif);
+    font-size: 14px;
+    font-style: normal;
+    letter-spacing: 0.15px;
+    line-height: 1.7;
+    padding: 9px 4px 3px 24px;
+}
+
+.wsp-textarea {
+    width: calc(100% - 24px);
+    min-height: 62px;
+    max-height: 180px;
+    resize: none;
+    overflow: hidden;
+    border: 0.5px solid var(--wsp-border-tertiary);
+    border-radius: 12px;
+    background: var(--wsp-bg-secondary);
+    color: var(--wsp-text-primary);
+    font-family: var(--wsp-font-serif);
+    font-size: 14px;
+    font-style: normal;
+    line-height: 1.7;
+    margin: 10px 12px 4px;
+    padding: 10px 12px;
+}
+
+.wsp-textarea::placeholder {
+    color: var(--wsp-text-tertiary);
+}
+
+@media (hover: hover) {
+    .wsp-row:hover {
+        background: var(--wsp-bg-secondary);
+    }
+
+    .wsp-close:hover {
+        color: var(--wsp-text-secondary);
+        background: var(--wsp-bg-secondary);
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .writing-style-sheet-overlay {
+        --wsp-bg-primary: var(--color-background-primary, #17171D);
+        --wsp-bg-secondary: var(--color-background-secondary, #22222A);
+        --wsp-text-primary: var(--color-text-primary, #F3F0EA);
+        --wsp-text-secondary: var(--color-text-secondary, #BDB5AA);
+        --wsp-text-tertiary: var(--color-text-tertiary, #807C74);
+        --wsp-border-secondary: var(--color-border-secondary, #393943);
+        --wsp-border-tertiary: var(--color-border-tertiary, #2F2F38);
+    }
+
+    .wsp-current,
+    .writing-style-sheet .wsp-row,
+    .writing-style-sheet .wsp-current-swatch,
+    .writing-style-sheet .wsp-swatch {
+        --wsp-accent: var(--wsp-accent-dark);
+    }
+}
+
+@media (max-width: 360px) {
+    .wsp-row-main {
+        grid-template-columns: 16px minmax(72px, max-content) minmax(0, 1fr);
+        column-gap: 8px;
+        padding-right: 8px;
+    }
+
+    .wsp-name {
+        font-size: 15px;
+    }
+
+    .wsp-ref {
+        font-size: 11px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .wsp-row,
+    .wsp-close {
+        transition: none;
+    }
+}
+`;
 
 export default WritingStyleSheet;
 export { getStyleDisplayLabel, isPresetKey };
