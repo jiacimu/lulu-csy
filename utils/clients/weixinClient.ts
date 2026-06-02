@@ -8,6 +8,7 @@ export interface WeixinBinding {
     id: number;
     userId: string;
     charId: string;
+    clientId?: string | null;
     weixinBotName: string | null;
     bridgeSessionId: string | null;
     status: WeixinBindingStatus;
@@ -26,6 +27,36 @@ export interface WeixinQrResponse {
 
 export interface WeixinQrStatusResponse {
     status: WeixinQrStatus;
+}
+
+export interface WeixinClientRepairStatus {
+    needed?: boolean;
+    available?: boolean;
+    conflict?: boolean;
+    repaired?: boolean;
+    reason?: string | null;
+    message?: string | null;
+}
+
+export interface WeixinReadinessResponse {
+    ready?: boolean;
+    charId?: string;
+    clientId?: string | null;
+    binding?: WeixinBinding | null;
+    repair?: WeixinClientRepairStatus;
+}
+
+export interface WeixinRepairClientResponse {
+    ok?: boolean;
+    repaired?: boolean;
+    conflict?: boolean;
+    imported?: number;
+    importedCount?: number;
+    synced?: number;
+    syncedCount?: number;
+    message?: string | null;
+    binding?: WeixinBinding | null;
+    repair?: WeixinClientRepairStatus;
 }
 
 function getRequiredBackendUrl(path: string, query?: Record<string, string>): string {
@@ -57,6 +88,11 @@ async function requestWeixin<T>(
     return (payload || {}) as T;
 }
 
+function isClientIdConflictError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error || '');
+    return /client_id_conflict|另一台设备|another client|another device/i.test(message);
+}
+
 export async function listWeixinBindings(): Promise<WeixinBinding[]> {
     const payload = await requestWeixin<WeixinBindingsResponse>('/api/weixin/bindings');
     return Array.isArray(payload.bindings) ? payload.bindings : [];
@@ -76,4 +112,39 @@ export async function checkWeixinQrStatus(qrcode: string): Promise<WeixinQrStatu
         {},
         { qrcode },
     );
+}
+
+export async function getWeixinReadiness(charId: string): Promise<WeixinReadinessResponse> {
+    const contentCharId = await resolveCharacterContentId(charId);
+    return requestWeixin<WeixinReadinessResponse>(
+        `/api/weixin/readiness/${encodeURIComponent(contentCharId)}`,
+    );
+}
+
+export async function repairWeixinClientBinding(
+    charId: string,
+    lookbackDays = 7,
+): Promise<WeixinRepairClientResponse> {
+    const contentCharId = await resolveCharacterContentId(charId);
+    try {
+        return await requestWeixin<WeixinRepairClientResponse>('/api/weixin/bindings/repair-client', {
+            method: 'POST',
+            body: JSON.stringify({ charId: contentCharId, lookbackDays }),
+        });
+    } catch (error) {
+        if (isClientIdConflictError(error)) {
+            return {
+                ok: false,
+                conflict: true,
+                repair: {
+                    needed: true,
+                    available: false,
+                    conflict: true,
+                    message: error instanceof Error ? error.message : null,
+                },
+            };
+        }
+
+        throw error;
+    }
 }

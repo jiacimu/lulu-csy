@@ -100,6 +100,7 @@ import {
     buildPrivateChatSecretInstruction,
     buildSceneContext,
     type DirectorBeatCharacterBrief,
+    type SocialPostsGuestBrief,
 } from '../../utils/loveshowPrompts';
 import { selectSecondaryApiConfig } from '../../utils/runtimeConfig';
 import { hasCompleteApiConfig } from '../../utils/apiValidation';
@@ -138,7 +139,6 @@ import { LOVE_SHOW_COPY } from '../../utils/loveshowCopy';
 import { createLoveShowWindItems, getLoveShowWindEffectHint } from '../../utils/loveshowWind';
 import {
     createLoveShowTheaterEcho,
-    createLoveShowTheaterHotPost,
     createLoveShowTheaterResult,
     createLoveShowTheaterScene,
     createLoveShowTheaterTicket,
@@ -153,13 +153,9 @@ import {
 import { getLoveShowTheaterLocations, pickLoveShowTheaterLocationId } from '../../utils/loveshowTheaterLocations';
 import {
     canUseLoveShowSocialImage2,
-    createLoveShowAltPostFromSecret,
     createLoveShowFeedImage,
-    createLoveShowGuestScenePosts,
     createLoveShowMissionProgramPost,
     createLoveShowSocialSignal,
-    ensureLoveShowPostCommentFloor,
-    ensureLoveShowPostsCommentFloor,
     getLoveShowSocialImagePlan,
     getUnconsumedLoveShowSocialSignals,
     mergeLoveShowSocialPosts,
@@ -562,40 +558,6 @@ function cleanLoveShowPublicOutput(raw: string): string {
     return cleaned || raw.trim();
 }
 
-function createFallbackSocialPosts(day: number, charNames: string[], summary: string, userName: string): LoveShowSocialPost[] {
-    const first = charNames[0] || '神秘嘉宾';
-    return [
-        normalizeLoveShowSocialPost({
-            id: createId('post'),
-            platform: 'weibo',
-            username: '今天也在追心动',
-            authorType: 'audience',
-            authorId: 'audience_today_heart',
-            authorName: '今天也在追心动',
-            content: summary ? `Day${day} 今日风向有点微妙，${summary}` : `Day${day} 心动放送开播了，${first}看${userName}的眼神感觉藏了很多话。`,
-            dayNumber: day,
-            source: 'system',
-            likeCount: 96,
-            likes: 96,
-            createdAt: Date.now(),
-        }, day),
-        normalizeLoveShowSocialPost({
-            id: createId('post'),
-            platform: 'xhs',
-            username: '恋综观察样本',
-            authorType: 'audience',
-            authorId: 'audience_observer_sample',
-            authorName: '恋综观察样本',
-            content: `观众正在起哄，但别急着替${userName}做决定。嘉宾之间那点火药味，本质上还是都在观察${userName}怎么选。`,
-            likes: 128,
-            likeCount: 128,
-            dayNumber: day,
-            source: 'system',
-            createdAt: Date.now() + 1,
-        }, day),
-    ];
-}
-
 function createWaitingScene(season: SeasonState, charIds: string[]): LoveShowSceneModel {
     return {
         id: createId('scene_waiting'),
@@ -767,6 +729,36 @@ function applyNpcEditorDraft(npc: NpcProfile, draft: NpcEditorDraft): NpcProfile
     };
 }
 
+function redactCastingErrorText(text: string): string {
+    return text
+        .replace(/(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+/g, '$1...[redacted]')
+        .replace(/((?:api[_-]?key|authorization|bearer|token|secret)["'\s:=]+)([^"'\s,;]{6,})/gi, '$1[redacted]');
+}
+
+function formatCastingErrorDetail(error: unknown): string {
+    let detail = '';
+    if (error instanceof Error) {
+        const parts = [`${error.name || 'Error'}: ${error.message || 'unknown error'}`];
+        const cause = (error as Error & { cause?: unknown }).cause;
+        if (cause) parts.push(`cause=${typeof cause === 'string' ? cause : JSON.stringify(cause)}`);
+        detail = parts.join(' | ');
+    } else if (typeof error === 'string') {
+        detail = error;
+    } else {
+        try {
+            detail = JSON.stringify(error);
+        } catch {
+            detail = String(error);
+        }
+    }
+    return redactCastingErrorText(detail || 'unknown error').slice(0, 1500);
+}
+
+function buildCastingGenerationNotice(summary: string, error?: unknown): string {
+    const detail = error === undefined ? '' : formatCastingErrorDetail(error);
+    return detail ? `${summary}\n详细报错：${detail}` : summary;
+}
+
 const LoveShowApp: React.FC = () => {
     const {
         activeCharacterId,
@@ -793,6 +785,7 @@ const LoveShowApp: React.FC = () => {
     const [editingNpcId, setEditingNpcId] = useState<string | null>(null);
     const [npcEditorDraft, setNpcEditorDraft] = useState<NpcEditorDraft | null>(null);
     const [castingGenerationNotice, setCastingGenerationNotice] = useState<string | null>(null);
+    const [isGeneratingCastingDraft, setIsGeneratingCastingDraft] = useState(false);
     const [guestRoster, setGuestRoster] = useState<LoveShowGuest[]>([]);
     const characterById = useMemo(() => new Map(characters.map(char => [char.id, char])), [characters]);
     const castProfiles = useMemo(
@@ -929,30 +922,6 @@ const LoveShowApp: React.FC = () => {
             : [],
         [castProfiles, season?.charIds, season?.eliminations],
     );
-    const socialGuestBriefs = useMemo(
-        () => guestRoster.map(guest => ({
-            id: guest.id,
-            name: guest.name,
-            avatar: guest.avatar,
-            appearance: guest.appearance,
-            roleInShow: guest.roleInShow,
-        })),
-        [guestRoster],
-    );
-    const enrichSocialPost = useCallback(
-        (post: LoveShowSocialPost) => ensureLoveShowPostCommentFloor(post, {
-            userName,
-            guests: socialGuestBriefs,
-        }),
-        [socialGuestBriefs, userName],
-    );
-    const enrichSocialPosts = useCallback(
-        (posts: LoveShowSocialPost[]) => ensureLoveShowPostsCommentFloor(posts, {
-            userName,
-            guests: socialGuestBriefs,
-        }),
-        [socialGuestBriefs, userName],
-    );
     const castCharacterBriefs = useMemo<DirectorBeatCharacterBrief[]>(() => {
         if (!season) return [];
         const states = getAllCharacterStates(season.seasonId);
@@ -971,6 +940,43 @@ const LoveShowApp: React.FC = () => {
             privateSecrets: seasonPrivateSecrets.filter(secret => secret.guestId === char.id).slice(-3),
         }));
     }, [chatCharacters, guestById, lastSummary, phoneRevision, season?.seasonId, seasonPrivateSecrets]);
+    const socialGuestBriefs = useMemo<SocialPostsGuestBrief[]>(() => {
+        const compact = (value: string | undefined, maxLength: number) => {
+            const text = String(value || '').replace(/\s+/g, ' ').trim();
+            return text.length > maxLength ? text.slice(0, maxLength) : text;
+        };
+
+        return castCharacterBriefs.map(brief => {
+            const state = brief.state;
+            const impression = brief.impression;
+            const stateText = state
+                ? [
+                    `好感${state.affection}/100`,
+                    `心情：${state.mood}`,
+                    `策略：${state.strategy}`,
+                    state.innerThought ? `内心：${state.innerThought}` : '',
+                    state.publicPosture?.cameraPersona ? `镜头前：${state.publicPosture.cameraPersona}` : '',
+                    state.privateTruth?.emotionalTruth ? `镜头外：${state.privateTruth.emotionalTruth}` : '',
+                ].filter(Boolean).join('；')
+                : '初次入场，节目组还没有足够观察记录';
+            const impressionText = impression
+                ? [
+                    impression.impression,
+                    impression.perceivedTraits.length ? `看见的特质：${impression.perceivedTraits.slice(0, 3).join('、')}` : '',
+                    impression.knownFacts.length ? `知道的事：${impression.knownFacts.slice(-2).join('；')}` : '',
+                    impression.tentativeReads.length ? `暂时判断：${impression.tentativeReads.slice(-2).join('；')}` : '',
+                ].filter(Boolean).join('；')
+                : '';
+
+            return {
+                id: brief.id,
+                name: brief.name,
+                profile: compact(brief.profile, 420),
+                state: compact(stateText, 260),
+                impression: compact(impressionText, 260),
+            };
+        });
+    }, [castCharacterBriefs]);
     useEffect(() => {
         if (chatCharacters.length === 0) return;
         if (chatCharacters.some(char => char.id === selectedChatCharacterId)) return;
@@ -1004,18 +1010,9 @@ const LoveShowApp: React.FC = () => {
 
     const saveCurrentDaySocialPosts = useCallback((posts: LoveShowSocialPost[]) => {
         if (!season) return;
-        saveSocialPosts(season.seasonId, season.day, enrichSocialPosts(posts));
+        saveSocialPosts(season.seasonId, season.day, posts);
         setPhoneRevision(prev => prev + 1);
-    }, [enrichSocialPosts, season]);
-
-    useEffect(() => {
-        if (!season) return;
-        const currentPosts = getSocialPosts(season.seasonId, season.day);
-        if (currentPosts.length === 0) return;
-        if (currentPosts.every(post => post.comments.filter(comment => comment.content.trim()).length >= 15)) return;
-        saveSocialPosts(season.seasonId, season.day, enrichSocialPosts(currentPosts));
-        setPhoneRevision(prev => prev + 1);
-    }, [enrichSocialPosts, season?.day, season?.seasonId]);
+    }, [season]);
 
     useEffect(() => {
         phoneVisibilityRef.current = {
@@ -1083,7 +1080,10 @@ const LoveShowApp: React.FC = () => {
     }): Promise<NpcProfile[]> => {
         const subApi = getBestSubApi() || normalizeApiConfig(apiConfig);
         if (!subApi) {
-            setCastingGenerationNotice('副模型和主模型都未配置完整，节目组先用本地兜底嘉宾补位。打开人设卡后可以继续改。');
+            setCastingGenerationNotice(buildCastingGenerationNotice(
+                '副模型和主模型都未配置完整，节目组先用本地兜底嘉宾补位。打开人设卡后可以继续改。',
+                'selectSecondaryApiConfig() 与当前主 API 配置均未通过 hasCompleteApiConfig()',
+            ));
             return Array.from({ length: neededCount }, (_, index) => createFallbackLoveShowNpc(index, existingGuests));
         }
 
@@ -1093,7 +1093,10 @@ const LoveShowApp: React.FC = () => {
             skeletons = await generateNpcSkeletons(subApi, neededCount, summaries);
         } catch (err) {
             console.warn('[LoveShow] NPC skeleton batch failed; using local fallback roster.', err);
-            setCastingGenerationNotice('模型选角返回失败，节目组先用本地兜底嘉宾补位。打开人设卡后可以继续改。');
+            setCastingGenerationNotice(buildCastingGenerationNotice(
+                '模型选角返回失败，节目组先用本地兜底嘉宾补位。打开人设卡后可以继续改。',
+                err,
+            ));
             return Array.from({ length: neededCount }, (_, index) => createFallbackLoveShowNpc(index, existingGuests));
         }
 
@@ -1102,7 +1105,10 @@ const LoveShowApp: React.FC = () => {
             prompts = await expandNpcPrompts(subApi, skeletons);
         } catch (err) {
             console.warn('[LoveShow] NPC prompt batch expansion failed; keeping generated skeletons.', err);
-            setCastingGenerationNotice('新嘉宾骨架已生成，但完整人设展开失败，已用骨架内容补全。');
+            setCastingGenerationNotice(buildCastingGenerationNotice(
+                '新嘉宾骨架已生成，但完整人设展开失败，已用骨架内容补全。',
+                err,
+            ));
             prompts = skeletons.map(skeleton => [
                 `${skeleton.name}是《唯一心动线》的节目组邀请嘉宾，${skeleton.age}岁，职业是${skeleton.job}。`,
                 skeleton.appearance ? `固定外貌：${skeleton.appearance}。` : '',
@@ -2023,26 +2029,36 @@ const LoveShowApp: React.FC = () => {
         const summary = sceneSummaries.slice(-3).join('；');
         setIsGeneratingBuzz(true);
         try {
-            const subApi = getBestSubApi();
-            const audiencePosts = subApi
-                ? await generateSocialPosts(subApi, season.day, summary || '心动放送刚刚开始，嘉宾还在围绕用户互相试探', charNames, userName)
-                : createFallbackSocialPosts(season.day, charNames, summary, userName);
+            const generationApi = getBestSubApi() || normalizeApiConfig(apiConfig);
+            if (!generationApi) {
+                addToast?.('请先配置 API。心动广场不会再使用本地兜底帖。', 'error');
+                return;
+            }
+            const audiencePosts = await generateSocialPosts(
+                generationApi,
+                season.day,
+                summary || '心动放送刚刚开始，嘉宾还在围绕用户互相试探',
+                charNames,
+                userName,
+                socialGuestBriefs,
+            );
+            if (audiencePosts.length === 0) {
+                addToast?.('这次没有解析到有效帖子，已跳过兜底。', 'info');
+                return;
+            }
             const preservedPosts = getSocialPosts(season.seasonId, season.day)
                 .filter(post => !(post.authorType === 'audience' && post.source === 'system'));
-            saveSocialPosts(season.seasonId, season.day, mergeLoveShowSocialPosts(preservedPosts, enrichSocialPosts(audiencePosts)));
+            saveSocialPosts(season.seasonId, season.day, mergeLoveShowSocialPosts(preservedPosts, audiencePosts));
             setPhoneRevision(prev => prev + 1);
             markPhoneTabUnread('buzz');
-        } catch {
-            const fallbackPosts = createFallbackSocialPosts(season.day, charNames, summary, userName);
-            const preservedPosts = getSocialPosts(season.seasonId, season.day)
-                .filter(post => !(post.authorType === 'audience' && post.source === 'system'));
-            saveSocialPosts(season.seasonId, season.day, mergeLoveShowSocialPosts(preservedPosts, enrichSocialPosts(fallbackPosts)));
-            setPhoneRevision(prev => prev + 1);
-            markPhoneTabUnread('buzz');
+        } catch (err) {
+            console.warn('[LoveShow] Social post generation failed; no local fallback will be inserted.', err);
+            const message = err instanceof Error ? err.message : '未知错误';
+            addToast?.(`心动广场生成失败，已跳过兜底：${message.slice(0, 80)}`, 'error');
         } finally {
             setIsGeneratingBuzz(false);
         }
-    }, [castProfiles, enrichSocialPosts, isGeneratingBuzz, markPhoneTabUnread, sceneSummaries, season, userName]);
+    }, [addToast, apiConfig, castProfiles, isGeneratingBuzz, markPhoneTabUnread, sceneSummaries, season, socialGuestBriefs, userName]);
 
     const maybeSaveMission = useCallback(async (nextSeason: SeasonState, selectedOption?: string) => {
         if (!choice || choice.type !== 'daily_mission' || selectedOption === 'reject') return;
@@ -2051,7 +2067,7 @@ const LoveShowApp: React.FC = () => {
         const publishMissionPost = (mission: DirectorMission) => {
             const currentPosts = getSocialPosts(nextSeason.seasonId, nextSeason.day);
             saveSocialPosts(nextSeason.seasonId, nextSeason.day, mergeLoveShowSocialPosts(currentPosts, [
-                enrichSocialPost(createLoveShowMissionProgramPost({ mission, day: nextSeason.day })),
+                createLoveShowMissionProgramPost({ mission, day: nextSeason.day }),
             ]));
             markPhoneTabUnread('buzz');
         };
@@ -2091,7 +2107,7 @@ const LoveShowApp: React.FC = () => {
             setPhoneRevision(prev => prev + 1);
             markPhoneTabUnread('mission');
         }
-    }, [castProfiles, choice, enrichSocialPost, markPhoneTabUnread, sceneSummaries]);
+    }, [castProfiles, choice, markPhoneTabUnread, sceneSummaries]);
 
     const handleChoiceSubmit = useCallback(() => {
         if (!season || !choice) return;
@@ -2426,16 +2442,6 @@ const LoveShowApp: React.FC = () => {
                     timestamp: Date.now(),
                 });
                 appendHighlightMemories(season.seasonId, theaterHighlights);
-                const theaterHotPost = createLoveShowTheaterHotPost({
-                    result,
-                    userName,
-                    id: createId('post_theater'),
-                });
-                saveSocialPosts(
-                    season.seasonId,
-                    season.day,
-                    mergeLoveShowSocialPosts(getSocialPosts(season.seasonId, season.day), [enrichSocialPost(theaterHotPost)]),
-                );
                 if (settlementSocialSignals.length > 0) {
                     consumeSocialSignals(season.seasonId, settlementSocialSignals.map(signal => signal.id));
                 }
@@ -2465,7 +2471,7 @@ const LoveShowApp: React.FC = () => {
                 setPhoneOpen(false);
                 markPhoneTabUnread('buzz');
                 setPhoneRevision(prev => prev + 1);
-                addToast?.('心动片段已收束，回声已进入心动广场', 'success');
+                addToast?.('心动片段已收束，回声已保存', 'success');
             } catch (err) {
                 const message = err instanceof Error ? `心动片段收束失败：${err.message}` : '心动片段收束失败';
                 setError(message);
@@ -2647,76 +2653,8 @@ const LoveShowApp: React.FC = () => {
                     existingDayEntries: theaterDayEntries,
                 })
                 : null;
-            const socialImageEnabled = canUseLoveShowSocialImage2(imageGenerationConfig);
-            const sceneSocialGuestBriefs = windGuests.map(guest => ({
-                id: guest.id,
-                name: guest.name,
-                avatar: guest.avatar,
-                appearance: guest.appearance,
-                roleInShow: guest.roleInShow,
-            }));
-            const guestScenePosts = createLoveShowGuestScenePosts({
-                day: season.day,
-                sceneSummary: summary,
-                userName,
-                guests: sceneSocialGuestBriefs,
-                preferredGuestId: directorBeat?.cameraFocus[0]?.charId || presentCharacters[0]?.id,
-                imageStyle: imageGenerationConfig.imageStyle,
-                enableImage: socialImageEnabled,
-            });
-            const latestSecretForAlt = seasonPrivateSecrets
-                .filter(secret => presentCharacters.some(char => char.id === secret.guestId))
-                .slice(-1)[0];
-            const altGuest = latestSecretForAlt
-                ? sceneSocialGuestBriefs.find(guest => guest.id === latestSecretForAlt.guestId)
-                : null;
-            const altPosts = latestSecretForAlt && altGuest && completedChoiceIds.length % 2 === 1
-                ? [createLoveShowAltPostFromSecret({
-                    secret: latestSecretForAlt,
-                    guest: altGuest,
-                    day: season.day,
-                    imageStyle: imageGenerationConfig.imageStyle,
-                    enableImage: socialImageEnabled,
-                })]
-                : [];
-            const socialAdditions = ensureLoveShowPostsCommentFloor([...guestScenePosts, ...altPosts], {
-                userName,
-                guests: sceneSocialGuestBriefs,
-            });
-            const socialSignalsToAppend = socialAdditions.flatMap(post => {
-                const targetGuestId = post.authorGuestId || post.hiddenOwnerGuestId || post.guestRefs?.[0]?.guestId;
-                const postSignal = post.authorType === 'program' || post.authorType === 'audience'
-                    ? []
-                    : [createLoveShowSocialSignal({
-                        sourcePostId: post.id,
-                        actorId: post.authorId,
-                        actorType: post.authorType,
-                        targetGuestId,
-                        action: 'post',
-                        emotion: post.authorType === 'guest_alt' ? '压住秘密' : '想被看见',
-                        intensity: post.authorType === 'guest_alt' ? 'strong' : 'medium',
-                    })];
-                const commentSignals = post.comments.map(comment => createLoveShowSocialSignal({
-                    sourcePostId: post.id,
-                    sourceCommentId: comment.id,
-                    actorId: comment.authorId,
-                    actorType: comment.authorType,
-                    targetGuestId: post.authorGuestId,
-                    action: 'reply',
-                    emotion: '围绕用户较劲',
-                    intensity: 'weak',
-                }));
-                return [...postSignal, ...commentSignals];
-            });
-            if (socialAdditions.length > 0) {
-                const currentPosts = getSocialPosts(season.seasonId, season.day);
-                saveSocialPosts(season.seasonId, season.day, mergeLoveShowSocialPosts(currentPosts, socialAdditions));
-            }
             if (settlementSocialSignals.length > 0) {
                 consumeSocialSignals(season.seasonId, settlementSocialSignals.map(signal => signal.id));
-            }
-            if (socialSignalsToAppend.length > 0) {
-                appendSocialSignals(season.seasonId, socialSignalsToAppend);
             }
             const activeProgressedIds = progressedSeason.charIds.filter(id => !progressedSeason.eliminations.includes(id));
             const nextSceneBase = createWaitingScene(progressedSeason, activeProgressedIds);
@@ -2744,10 +2682,7 @@ const LoveShowApp: React.FC = () => {
                 setPhoneOpen(true);
             }
             markPhoneTabUnread('notice');
-            if (socialAdditions.length > 0) {
-                markPhoneTabUnread('buzz');
-            }
-            if (socialAdditions.length > 0 || settlementSocialSignals.length > 0 || socialSignalsToAppend.length > 0) {
+            if (settlementSocialSignals.length > 0) {
                 setPhoneRevision(prev => prev + 1);
             }
             setNeedsOpening(!pauseForChoice);  // Date-card flow should wait for the user's choice.
@@ -2761,7 +2696,7 @@ const LoveShowApp: React.FC = () => {
             setIsClosingScene(false);
             setClosingStatus(null);
         }
-    }, [activeTheaterTicket, addToast, castProfiles, charState, completedChoiceIds, directorBeat, enrichSocialPost, guestRoster, imageGenerationConfig, impression, loveShowTheaterLocations, markPhoneTabUnread, resolveNextChoice, resolveTheaterLocation, scene, season, seasonPrivateSecrets, selectedTheaterGuestIds, selectedTheaterLocation, targetCharacter, theaterEchoArchive, theaterResults, theaterTicket, theaterTicketHistory, transcript, userName]);
+    }, [activeTheaterTicket, addToast, castProfiles, charState, completedChoiceIds, directorBeat, guestRoster, imageGenerationConfig, impression, loveShowTheaterLocations, markPhoneTabUnread, resolveNextChoice, resolveTheaterLocation, scene, season, seasonPrivateSecrets, selectedTheaterGuestIds, selectedTheaterLocation, targetCharacter, theaterEchoArchive, theaterResults, theaterTicket, theaterTicketHistory, transcript, userName]);
 
     const currentOptions = choice?.options || [];
     const selectedChatCharacter = chatCharacters.find(char => char.id === selectedChatCharacterId) || targetCharacter;
@@ -2840,7 +2775,7 @@ const LoveShowApp: React.FC = () => {
                 ].join('\n'),
             )
             : undefined;
-        const post = enrichSocialPost(normalizeLoveShowSocialPost({
+        const post = normalizeLoveShowSocialPost({
             id: createId('user_post'),
             platform: 'weibo',
             username: userName,
@@ -2852,7 +2787,7 @@ const LoveShowApp: React.FC = () => {
             dayNumber: season.day,
             source: 'user_action',
             createdAt: Date.now(),
-        }, season.day));
+        }, season.day);
         saveCurrentDaySocialPosts(mergeLoveShowSocialPosts(socialPosts, [post]));
         recordSocialSignals([
             createLoveShowSocialSignal({
@@ -2880,7 +2815,6 @@ const LoveShowApp: React.FC = () => {
     }, [
         buzzDraft,
         buzzDraftWithImage,
-        enrichSocialPost,
         imageGenerationConfig,
         markPhoneTabUnread,
         recordSocialSignals,
@@ -2979,6 +2913,7 @@ const LoveShowApp: React.FC = () => {
         setEditingNpcId(null);
         setNpcEditorDraft(null);
         setCastingGenerationNotice(null);
+        setIsGeneratingCastingDraft(false);
     }, [castingDraft, castingTargetGuestCount, isCastingOpen, selectedCharacterGuests]);
 
     useEffect(() => {
@@ -3010,14 +2945,13 @@ const LoveShowApp: React.FC = () => {
 
     const saveNpcEditorDraft = useCallback((options: { close?: boolean; toast?: boolean } = {}): NpcProfile | null => {
         if (!castingDraft || !editingNpcId || !npcEditorDraft) return null;
-        let savedNpc: NpcProfile | null = null;
+        const nextNpcs = castingDraft.npcs.map(npc => (
+            npc.id === editingNpcId ? applyNpcEditorDraft(npc, npcEditorDraft) : npc
+        ));
+        const savedNpc = nextNpcs.find(npc => npc.id === editingNpcId) || null;
         const nextDraft: LoveShowCastingDraft = {
             ...castingDraft,
-            npcs: castingDraft.npcs.map(npc => {
-                if (npc.id !== editingNpcId) return npc;
-                savedNpc = applyNpcEditorDraft(npc, npcEditorDraft);
-                return savedNpc as NpcProfile;
-            }),
+            npcs: nextNpcs,
             updatedAt: Date.now(),
         };
         if (!savedNpc) return null;
@@ -3061,11 +2995,12 @@ const LoveShowApp: React.FC = () => {
     }, [activeCharacterId, addToast, castingTargetGuestCount, characters, targetCharacter?.id]);
 
     const handleStartSeason = useCallback(async () => {
+        if (isGeneratingCastingDraft) return;
         if (!targetCharacter) {
             setError('心动放送需要先选定当前聊天角色');
             return;
         }
-        setIsStartingSeason(true);
+        setIsGeneratingCastingDraft(true);
         setError(null);
         setCastingGenerationNotice(null);
         try {
@@ -3098,12 +3033,13 @@ const LoveShowApp: React.FC = () => {
             addToast?.('选角预览已生成，可以确认或重抽空降嘉宾', 'success');
         } catch (err) {
             const message = err instanceof Error ? `生成选角预览失败：${err.message}` : '生成选角预览失败';
+            setCastingGenerationNotice(buildCastingGenerationNotice('生成选角预览失败。', err));
             setError(message);
             addToast?.(message, 'error');
         } finally {
-            setIsStartingSeason(false);
+            setIsGeneratingCastingDraft(false);
         }
-    }, [activeCharacterId, addToast, castingDraft?.createdAt, castingDraft?.draftId, castingTargetGuestCount, characters, createRosterNpcs, forceFreshSeason, lockedGuestIds, openNpcEditor, persistCastingDraft, targetCharacter]);
+    }, [activeCharacterId, addToast, castingDraft?.createdAt, castingDraft?.draftId, castingTargetGuestCount, characters, createRosterNpcs, forceFreshSeason, isGeneratingCastingDraft, lockedGuestIds, openNpcEditor, persistCastingDraft, targetCharacter]);
 
     const handleConfirmCastingDraft = useCallback(() => {
         if (!castingDraft) {
@@ -3127,6 +3063,7 @@ const LoveShowApp: React.FC = () => {
         setEditingNpcId(null);
         setNpcEditorDraft(null);
         setCastingGenerationNotice(null);
+        setIsGeneratingCastingDraft(false);
         addToast?.('已回到本季选角页，确认后会开启新赛季', 'info');
     }, [addToast]);
 
@@ -3136,6 +3073,7 @@ const LoveShowApp: React.FC = () => {
         if (!oldNpc) return;
         setRerollingNpcId(npcId);
         setError(null);
+        setCastingGenerationNotice(null);
         try {
             const otherNpcs = castingDraft.npcs.filter(npc => npc.id !== npcId);
             const existingGuests = [
@@ -3157,6 +3095,7 @@ const LoveShowApp: React.FC = () => {
             addToast?.(`${oldNpc.name} 的空降位已重抽`, 'success');
         } catch (err) {
             const message = err instanceof Error ? `重抽失败：${err.message}` : '重抽失败';
+            setCastingGenerationNotice(buildCastingGenerationNotice(`${oldNpc.name} 的空降位重抽失败。`, err));
             setError(message);
             addToast?.(message, 'error');
         } finally {
@@ -3350,7 +3289,7 @@ const LoveShowApp: React.FC = () => {
     );
 
     const renderCastingGeneratingPanel = () => {
-        if (!isStartingSeason || castingDraft) return null;
+        if (!isGeneratingCastingDraft || castingDraft) return null;
         const npcSlots = Math.max(0, castingTargetGuestCount - selectedCharacterGuests.length);
         return (
             <section className="ls-casting-generating-panel" aria-live="polite">
@@ -3604,7 +3543,7 @@ const LoveShowApp: React.FC = () => {
                                 type="button"
                                 className={castingTargetGuestCount === count ? 'is-active' : ''}
                                 onClick={() => handleCastingTargetChange(count)}
-                                disabled={isStartingSeason}
+                                disabled={isGeneratingCastingDraft || isStartingSeason}
                             >
                                 {count}位
                             </button>
@@ -3657,7 +3596,7 @@ const LoveShowApp: React.FC = () => {
                                         type="button"
                                         className={isSelected ? 'is-selected' : ''}
                                         onClick={() => handleToggleLockedGuest(char.id)}
-                                        disabled={disabled}
+                                        disabled={disabled || isGeneratingCastingDraft || isStartingSeason}
                                     >
                                         {renderCastingAvatar(char, 28)}
                                         <span>{char.name}</span>
@@ -3684,6 +3623,13 @@ const LoveShowApp: React.FC = () => {
                 </section>
 
                 {renderCastingGeneratingPanel()}
+
+                {!castingDraft && castingGenerationNotice && (
+                    <div className="ls-casting-generation-notice">
+                        <Sparkle size={15} weight="fill" />
+                        <span>{castingGenerationNotice}</span>
+                    </div>
+                )}
 
                 {castingDraft && (
                     <section className="ls-precast-section">
@@ -3784,10 +3730,14 @@ const LoveShowApp: React.FC = () => {
                     type="button"
                     className="ls-start-season-button"
                     onClick={castingDraft ? handleConfirmCastingDraft : () => void handleStartSeason()}
-                    disabled={isStartingSeason}
+                    disabled={isGeneratingCastingDraft || isStartingSeason}
                 >
-                    <Heart size={18} weight="fill" />
-                    {isStartingSeason
+                    {isGeneratingCastingDraft
+                        ? <ArrowCounterClockwise size={18} weight="bold" className="ls-casting-spin" />
+                        : <Heart size={18} weight="fill" />}
+                    {isGeneratingCastingDraft
+                        ? '选角生成中'
+                        : isStartingSeason
                         ? (castingDraft ? '确认入组中' : '选角生成中')
                         : (castingDraft ? '确认本季正式开播' : '生成开播阵容预览')}
                 </button>

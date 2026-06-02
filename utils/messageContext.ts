@@ -167,7 +167,9 @@ function formatReplyPrefix(message: ContextMessage): string {
     const content = isImageReply
         ? (safeImageReplySummary(reply.visualSummary) || (looksLikeImageReplyContent(reply.content) ? '图片' : safeImageReplySummary(reply.content) || '图片'))
         : reply.content;
-    return `[回复 "${content.substring(0, 50)}..."]: `;
+    const replyName = compactText(reply.name || '对方');
+    const replyContent = truncateInline(content, 80);
+    return `引用回复上下文：这条消息正在回复${replyName}的消息「${replyContent}」。本条消息正文：`;
 }
 
 function formatTransfer(message: ContextMessage, options: FormatMessageContextOptions): string {

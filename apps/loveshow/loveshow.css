@@ -617,6 +617,11 @@
     line-height: 1.55;
 }
 
+.ls-casting-generation-notice span {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .ls-casting-preview-list {
     display: grid;
     gap: 12px;
@@ -1152,6 +1157,8 @@
     color: #a56b73;
     font-size: 12px;
     line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .ls-npc-editor-grid {

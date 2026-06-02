@@ -119,6 +119,36 @@ function appendTextToLastUserMessage(messages: any[], text: string): boolean {
     return true;
 }
 
+function compareMessagesByTimeline(a: Message, b: Message): number {
+    return (a.timestamp || 0) - (b.timestamp || 0) || (a.id || 0) - (b.id || 0);
+}
+
+function isSameContextMessage(a: Message, b: Message): boolean {
+    return a.id === b.id || (
+        a.charId === b.charId
+        && a.role === b.role
+        && a.type === b.type
+        && a.timestamp === b.timestamp
+        && a.content === b.content
+    );
+}
+
+function mergeDbHistoryWithLiveUserMessages(dbHistory: Message[], liveMessages: Message[], limit: number): Message[] {
+    if (dbHistory.length === 0) return liveMessages.slice(-limit);
+
+    const latestDbTimestamp = dbHistory.reduce((latest, message) => Math.max(latest, message.timestamp || 0), 0);
+    const missingLiveUserMessages = liveMessages.filter(message => (
+        message.role === 'user'
+        && (message.timestamp || 0) >= latestDbTimestamp
+        && !dbHistory.some(dbMessage => isSameContextMessage(dbMessage, message))
+    ));
+
+    if (missingLiveUserMessages.length === 0) return dbHistory;
+    return [...dbHistory, ...missingLiveUserMessages]
+        .sort(compareMessagesByTimeline)
+        .slice(-limit);
+}
+
 function cloneChatMessageForRetry(message: any): any {
     if (!Array.isArray(message?.content)) return { ...message };
     return {
@@ -426,7 +456,11 @@ export const useChatAI = ({
                     const fullHistory = await DB.getRecentMessagesByCharId(char.id, limit);
                     if (fullHistory.length > 0) {
                         console.log(`📊 [Context] Loaded ${fullHistory.length} msgs from DB (React state had ${currentMsgs.length}, contextLimit=${limit})`);
-                        contextMsgs = fullHistory;
+                        const mergedHistory = mergeDbHistoryWithLiveUserMessages(fullHistory, currentMsgs, limit);
+                        if (mergedHistory.length > fullHistory.length) {
+                            console.log(`📊 [Context] Merged ${mergedHistory.length - fullHistory.length} live user msg(s) not yet visible in DB history`);
+                        }
+                        contextMsgs = mergedHistory;
                     }
                 } catch (e) {
                     console.error('Failed to load full history from DB, using React state:', e);

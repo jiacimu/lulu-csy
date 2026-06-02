@@ -243,7 +243,9 @@ describe('LoveShow user-centered copy and prompts', () => {
         expect(npcPrompt).toContain('打法明显铺开');
         expect(npcPrompt).toContain('JSON 里加 "appearance" 字段');
         expect(socialPrompt).toContain('唯一主角：小雨');
-        expect(socialPrompt).toContain('投票或风向只能围绕小雨');
+        expect(socialPrompt).toContain('没有可发言嘉宾档案');
+        expect(socialPrompt).toContain('风向只能围绕小雨');
+        expect(socialPrompt).toContain('不允许生成 authorType=guest');
         expect(socialPrompt).toContain('不要生成“谁和谁最配”');
         expect(missionPrompt).toContain('任务必须围绕用户与嘉宾');
         expect(missionPrompt).toContain('不会替用户决定心动归属');

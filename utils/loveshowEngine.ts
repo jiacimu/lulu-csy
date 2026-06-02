@@ -25,6 +25,7 @@ import {
   buildSceneSummaryPrompt,
   buildSocialPostsPrompt,
   type DirectorBeatCharacterBrief,
+  type SocialPostsGuestBrief,
 } from './loveshowPrompts';
 import { trackedApiRequest } from './apiRequestLedger';
 import { normalizeLoveShowSocialPost } from './loveshowSocial';
@@ -1697,12 +1698,25 @@ const SUB_MODEL_MAX_TOKENS = 65536;
 const NPC_SKELETON_MAX_TOKENS = SUB_MODEL_MAX_TOKENS;
 const NPC_EXPAND_MAX_TOKENS = SUB_MODEL_MAX_TOKENS;
 const GUEST_GUEST_CP_RISK_RE = /(谁和谁最配|嘉宾\s*CP|CP\s*排名|互选心动|嘉宾互选|恋爱线投票|互相心动|锁死|在一起|最配)/i;
+const SOCIAL_POLL_TEMPLATE_RE = /(单独约会投票|本轮最想看的单独约会|温柔庇护组|真迹拆穿组|宿命拉扯组|推倒重来组|A[\.、].*B[\.、].*C[\.、])/i;
+const SOCIAL_STOCK_COMMENT_RE = /(遗憾留给|心动留给|被看见|留给昨天|我选[ABCDＡＢＣＤ]|大家怎么看|呼声最高|心动风向标|Day\s*\d+\s*总结|总结：|温柔庇护组|真迹拆穿组|宿命拉扯组|推倒重来组|投票|^[^，。！？]{0,8}留给[^，。！？]{0,12}[，,][^，。！？]{0,12}留给)/i;
 
-function sanitizeUserCenteredAudienceText(text: string, userName: string, fallback: string): string {
+function sanitizeUserCenteredAudienceText(
+  text: unknown,
+  userName: string,
+  kind: 'post' | 'comment' = 'post',
+): string | null {
   const content = typeof text === 'string' ? text.trim() : '';
-  if (!content) return fallback;
+  if (!content) return null;
   if (GUEST_GUEST_CP_RISK_RE.test(content) && !content.includes(userName)) {
-    return fallback;
+    return null;
+  }
+  if (SOCIAL_POLL_TEMPLATE_RE.test(content)) {
+    return null;
+  }
+  if (kind === 'comment') {
+    if (content.length < 8 || content.length > 120) return null;
+    if (SOCIAL_STOCK_COMMENT_RE.test(content)) return null;
   }
   return content;
 }
@@ -1824,6 +1838,151 @@ function safeParseJson<T>(raw: string): T {
       throw new Error(`Failed to parse JSON from sub-model response: ${raw.slice(0, 200)}`);
     }
   }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function unwrapSocialPostRecords(parsed: unknown): Record<string, unknown>[] {
+  if (Array.isArray(parsed)) {
+    return parsed.filter(isPlainRecord);
+  }
+  if (!isPlainRecord(parsed)) return [];
+  const candidates = [
+    parsed.posts,
+    parsed.items,
+    parsed.data,
+    parsed.result,
+    parsed.results,
+    parsed.socialPosts,
+  ];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate.filter(isPlainRecord);
+    }
+  }
+  return [];
+}
+
+function readStringField(record: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function normalizeSocialGuestLookupKey(value: string): string {
+  return value.replace(/\s+/g, '').trim().toLocaleLowerCase();
+}
+
+function resolveGeneratedSocialGuest(
+  record: Record<string, unknown>,
+  guestBriefs: SocialPostsGuestBrief[],
+): SocialPostsGuestBrief | null {
+  if (guestBriefs.length === 0) return null;
+  const id = normalizeSocialGuestLookupKey(readStringField(record, [
+    'authorGuestId',
+    'guestId',
+    'guest_id',
+    'authorId',
+  ]));
+  const name = normalizeSocialGuestLookupKey(readStringField(record, [
+    'authorName',
+    'username',
+    'name',
+    'nickname',
+  ]));
+
+  return guestBriefs.find(guest => {
+    const guestId = normalizeSocialGuestLookupKey(guest.id);
+    const guestName = normalizeSocialGuestLookupKey(guest.name);
+    return (id && id === guestId) || (name && name === guestName);
+  }) || null;
+}
+
+function isGeneratedGuestSocialRecord(
+  record: Record<string, unknown>,
+  guestBriefs: SocialPostsGuestBrief[],
+): boolean {
+  const authorType = readStringField(record, ['authorType', 'type', 'role']);
+  if (/guest|嘉宾/i.test(authorType)) return true;
+  if (readStringField(record, ['authorGuestId', 'guestId', 'guest_id'])) return true;
+  return Boolean(resolveGeneratedSocialGuest(record, guestBriefs));
+}
+
+function isSocialGuestDisplayName(authorName: string, guestBriefs: SocialPostsGuestBrief[]): boolean {
+  const normalized = normalizeSocialGuestLookupKey(authorName);
+  if (!normalized) return false;
+  return guestBriefs.some(guest => normalizeSocialGuestLookupKey(guest.name) === normalized);
+}
+
+function sanitizeGeneratedGuestSocialText(
+  text: unknown,
+  userName: string,
+  kind: 'post' | 'comment' = 'post',
+): string | null {
+  const content = sanitizeUserCenteredAudienceText(text, userName, kind);
+  if (!content) return null;
+  if (content.includes('心动风向标')) return null;
+  const minLength = kind === 'comment' ? 4 : 8;
+  const maxLength = kind === 'comment' ? 120 : 220;
+  if (content.length < minLength || content.length > maxLength) return null;
+  return content;
+}
+
+function normalizeGeneratedSocialComments(
+  rawComments: unknown,
+  postId: string,
+  userName: string,
+  createdAt: number,
+  guestBriefs: SocialPostsGuestBrief[] = [],
+): LoveShowSocialPost['comments'] {
+  if (!Array.isArray(rawComments)) return [];
+  return rawComments
+    .map((comment, index): LoveShowSocialPost['comments'][number] | null => {
+      const record = typeof comment === 'string'
+        ? { content: comment }
+        : isPlainRecord(comment)
+          ? comment
+          : null;
+      if (!record) return null;
+      const rawContent = readStringField(record, ['content', 'text', 'body', 'comment']);
+      const wantsGuestVoice = isGeneratedGuestSocialRecord(record, guestBriefs);
+      const guest = wantsGuestVoice ? resolveGeneratedSocialGuest(record, guestBriefs) : null;
+      if (wantsGuestVoice && !guest) return null;
+
+      if (guest) {
+        const content = sanitizeGeneratedGuestSocialText(rawContent, userName, 'comment');
+        if (!content) return null;
+        return {
+          id: uid('comment_ai'),
+          postId,
+          authorType: 'guest',
+          authorId: guest.id,
+          authorName: guest.name,
+          authorGuestId: guest.id,
+          content,
+          createdAt: createdAt + index + 1,
+        };
+      }
+
+      const content = sanitizeUserCenteredAudienceText(rawContent, userName, 'comment');
+      if (!content) return null;
+      const authorName = readStringField(record, ['authorName', 'username', 'name', 'nickname']) || '心动观众';
+      if (isSocialGuestDisplayName(authorName, guestBriefs)) return null;
+      return {
+        id: readStringField(record, ['id']) || uid('comment_ai'),
+        postId,
+        authorType: 'audience',
+        authorId: readStringField(record, ['authorId']) || `audience_${index}`,
+        authorName,
+        content,
+        createdAt: createdAt + index + 1,
+      };
+    })
+    .filter((comment): comment is LoveShowSocialPost['comments'][number] => Boolean(comment));
 }
 
 export async function evaluateLoveShowPrivateSecretWithMeta(
@@ -2220,35 +2379,54 @@ export async function generateSocialPosts(
   seasonSummary: string,
   charNames: string[],
   userName?: string,
+  guestBriefs: SocialPostsGuestBrief[] = [],
 ): Promise<LoveShowSocialPost[]> {
   const safeUserName = userName || '用户';
-  const userPrompt = buildSocialPostsPrompt(day, seasonSummary, charNames, safeUserName);
+  const userPrompt = buildSocialPostsPrompt(day, seasonSummary, charNames, safeUserName, guestBriefs);
 
   const raw = await callSubModel(apiConfig, SUB_MODEL_SYSTEM_PROMPT, userPrompt, 0.8, '热搜生成');
-  const parsed = safeParseJson<Record<string, unknown>[]>(raw);
+  const parsed = safeParseJson<unknown>(raw);
+  const posts = unwrapSocialPostRecords(parsed);
 
-  return parsed.map((post, i): LoveShowSocialPost => {
-    const username = (post.username as string) || charNames[i % charNames.length] || '心动观众';
+  return posts.map((post, i): LoveShowSocialPost | null => {
+    const wantsGuestVoice = isGeneratedGuestSocialRecord(post, guestBriefs);
+    const guest = wantsGuestVoice ? resolveGeneratedSocialGuest(post, guestBriefs) : null;
+    if (wantsGuestVoice && !guest) return null;
+    const authorType: LoveShowSocialPost['authorType'] = guest ? 'guest' : 'audience';
+    const fallbackAudienceName = `心动观众${i + 1}`;
+    const username = guest
+      ? guest.name
+      : readStringField(post, ['username', 'authorName', 'name', 'nickname']) || fallbackAudienceName;
+    const authorName = guest
+      ? guest.name
+      : readStringField(post, ['authorName', 'username', 'name', 'nickname']) || username;
+    if (`${username} ${authorName}`.includes('心动风向标')) return null;
     const likes = typeof post.likes === 'number' ? post.likes : undefined;
+    if (!guest && isSocialGuestDisplayName(authorName, guestBriefs)) return null;
+    const rawContent = readStringField(post, ['content', 'text', 'body']);
+    const content = guest
+      ? sanitizeGeneratedGuestSocialText(rawContent, safeUserName, 'post')
+      : sanitizeUserCenteredAudienceText(rawContent, safeUserName);
+    if (!content) return null;
+    const id = readStringField(post, ['id']) || uid('post');
+    const createdAt = Date.now() + i * 100;
     return normalizeLoveShowSocialPost({
-      id: (post.id as string) || uid('post'),
+      id,
       dayNumber: day,
       platform: (post.platform as LoveShowSocialPost['platform']) || 'weibo',
       username,
-      authorType: 'audience',
-      authorId: `audience_${i}`,
-      authorName: username,
-      content: sanitizeUserCenteredAudienceText(
-        post.content as string,
-        safeUserName,
-        `${safeUserName}今天的心动风向又被观众起哄了，大家最想看TA下一步靠近谁。`,
-      ),
+      authorType,
+      authorId: guest ? guest.id : `audience_${i}`,
+      authorName,
+      authorGuestId: guest?.id,
+      content,
+      comments: normalizeGeneratedSocialComments(post.comments, id, safeUserName, createdAt, guestBriefs),
       likes,
       likeCount: likes,
-      source: 'system',
-      createdAt: Date.now() + i,
+      source: guest ? 'scene_end' : 'system',
+      createdAt,
     }, day);
-  });
+  }).filter((post): post is LoveShowSocialPost => Boolean(post));
 }
 
 /** 生成 NPC 骨架 */

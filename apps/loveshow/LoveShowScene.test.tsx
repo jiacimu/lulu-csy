@@ -101,6 +101,23 @@ describe('LoveShowScene', () => {
         expect(screen.queryByText(/CP/)).toBeNull();
     });
 
+    it('uses theater location visuals instead of falling back to the default living room', () => {
+        const { container } = renderScene([], {
+            scene: {
+                ...scene,
+                id: 'theater_scene_arcade',
+                locationId: 'ls_arcade_corner',
+                locationName: '街机角落',
+            },
+        });
+
+        const wallpaper = container.querySelector<HTMLElement>('.ls-scene-wallpaper');
+
+        expect(screen.getByText('街机角落')).toBeTruthy();
+        expect(wallpaper?.style.getPropertyValue('--ls-location-image')).toContain('theater-arcade-corner.jpg');
+        expect(wallpaper?.style.getPropertyValue('--ls-location-image')).not.toContain('house-living-room.jpg');
+    });
+
     it('cleans internal direction from historical assistant text', () => {
         renderScene([
             {

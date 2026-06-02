@@ -12,7 +12,7 @@ import {
 import type { CharacterProfile, UserProfile } from '../../types';
 import type { LoveShowScene as LoveShowSceneModel } from '../../types/loveshow';
 import { LOVE_SHOW_COPY } from '../../utils/loveshowCopy';
-import { getLoveShowLocationGradient, getLoveShowLocationWallpaper } from '../../utils/loveshowLocations';
+import { getLoveShowSceneLocationGradient, getLoveShowSceneLocationWallpaper } from '../../utils/loveshowSceneVisuals';
 import { parseLoveShowScript, stripQuotes } from '../../utils/loveshowScriptParser';
 
 export interface LoveShowTurn {
@@ -371,8 +371,8 @@ const LoveShowScene: React.FC<LoveShowSceneProps> = ({
         [characterByName, userProfile, userName],
     );
     const sceneVisualStyle = {
-        '--ls-location-gradient': getLoveShowLocationGradient(scene.locationId),
-        '--ls-location-image': `url("${getLoveShowLocationWallpaper(scene.locationId)}")`,
+        '--ls-location-gradient': getLoveShowSceneLocationGradient(scene.locationId),
+        '--ls-location-image': `url("${getLoveShowSceneLocationWallpaper(scene.locationId)}")`,
     } as React.CSSProperties;
 
     useEffect(() => {

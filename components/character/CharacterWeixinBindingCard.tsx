@@ -3,7 +3,9 @@ import Modal from '../os/Modal';
 import {
     checkWeixinQrStatus,
     generateWeixinQr,
+    getWeixinReadiness,
     listWeixinBindings,
+    repairWeixinClientBinding,
     type WeixinBinding,
     type WeixinBindingStatus,
     type WeixinQrResponse,
@@ -18,6 +20,11 @@ interface CharacterWeixinBindingCardProps {
 }
 
 type BindingLoadState = 'loading' | 'ready' | 'error';
+type RepairState = 'idle' | 'checking' | 'repairing' | 'repaired' | 'conflict' | 'error';
+
+const DEFAULT_REPAIR_LOOKBACK_DAYS = 7;
+const WEIXIN_REPAIR_SUCCESS_MESSAGE = '已把最近微信记录同步到这台小手机';
+const WEIXIN_REPAIR_CONFLICT_MESSAGE = '这条微信绑定已属于另一台设备，重新扫码可切换到当前设备';
 
 function buildQrCodeServiceCandidates(rawValue: string): string[] {
     const encoded = encodeURIComponent(rawValue);
@@ -169,6 +176,36 @@ function getQrStatusText(status: WeixinQrStatus | 'idle' | 'generating' | 'error
     }
 }
 
+function getRepairStateText(repairState: RepairState): string {
+    switch (repairState) {
+        case 'checking':
+            return '正在确认这台小手机的微信同步状态。';
+        case 'repairing':
+            return '正在自动同步最近微信记录。';
+        case 'repaired':
+            return WEIXIN_REPAIR_SUCCESS_MESSAGE;
+        case 'conflict':
+            return WEIXIN_REPAIR_CONFLICT_MESSAGE;
+        case 'error':
+            return '微信历史同步暂时没完成，稍后打开这里会再试一次。';
+        case 'idle':
+        default:
+            return '';
+    }
+}
+
+function getRepairStateClassName(repairState: RepairState): string {
+    if (repairState === 'conflict') {
+        return 'bg-amber-50/80 border-amber-100 text-amber-700';
+    }
+
+    if (repairState === 'error') {
+        return 'bg-rose-50/80 border-rose-100 text-rose-600';
+    }
+
+    return 'bg-emerald-50/70 border-emerald-100 text-emerald-700';
+}
+
 const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = memo(({
     charId,
     charName,
@@ -177,6 +214,7 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
     const [binding, setBinding] = useState<WeixinBinding | null>(null);
     const [loadState, setLoadState] = useState<BindingLoadState>('loading');
     const [loadError, setLoadError] = useState('');
+    const [repairState, setRepairState] = useState<RepairState>('idle');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [qrPayload, setQrPayload] = useState<WeixinQrResponse | null>(null);
     const [qrStatus, setQrStatus] = useState<WeixinQrStatus | 'idle' | 'generating' | 'error'>('idle');
@@ -201,6 +239,48 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
         setQrImageLoadError(false);
     }, [clearPollTimer]);
 
+    const runAutoRepairIfNeeded = useCallback(async (nextBinding: WeixinBinding | null): Promise<boolean> => {
+        if (nextBinding?.status !== 'active') {
+            setRepairState('idle');
+            return false;
+        }
+
+        setRepairState('checking');
+
+        try {
+            const readiness = await getWeixinReadiness(charId);
+            const repair = readiness.repair;
+
+            if (repair?.conflict) {
+                setRepairState('conflict');
+                addToast(WEIXIN_REPAIR_CONFLICT_MESSAGE, 'info');
+                return false;
+            }
+
+            if (repair?.needed && repair.available) {
+                setRepairState('repairing');
+                const repairResult = await repairWeixinClientBinding(charId, DEFAULT_REPAIR_LOOKBACK_DAYS);
+
+                if (repairResult.conflict || repairResult.repair?.conflict) {
+                    setRepairState('conflict');
+                    addToast(WEIXIN_REPAIR_CONFLICT_MESSAGE, 'info');
+                    return false;
+                }
+
+                setRepairState('repaired');
+                addToast(WEIXIN_REPAIR_SUCCESS_MESSAGE, 'success');
+                return true;
+            }
+
+            setRepairState('idle');
+            return false;
+        } catch (error) {
+            console.warn('[Weixin] Auto repair failed', error);
+            setRepairState('error');
+            return false;
+        }
+    }, [addToast, charId]);
+
     const refreshBinding = useCallback(async (options?: { silent?: boolean }) => {
         if (!options?.silent) {
             setLoadState('loading');
@@ -214,13 +294,27 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
             setBinding(nextBinding);
             setLoadState('ready');
             setLoadError('');
+
+            const repaired = await runAutoRepairIfNeeded(nextBinding);
+            if (repaired) {
+                try {
+                    const refreshedBindings = await listWeixinBindings();
+                    const refreshedBinding = refreshedBindings.find(
+                        item => item.charId === contentCharId || item.charId === charId,
+                    ) || null;
+                    setBinding(refreshedBinding);
+                } catch (error) {
+                    console.warn('[Weixin] Binding refresh after repair failed', error);
+                }
+            }
         } catch (error) {
             const message = error instanceof Error ? error.message : '微信状态读取失败';
             setBinding(null);
             setLoadState('error');
             setLoadError(message);
+            setRepairState('idle');
         }
-    }, [charId]);
+    }, [charId, runAutoRepairIfNeeded]);
 
     const startQrFlow = useCallback(async () => {
         setIsModalOpen(true);
@@ -259,6 +353,7 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
 
     useEffect(() => {
         setIsModalOpen(false);
+        setRepairState('idle');
         resetQrState();
         void refreshBinding();
     }, [charId, refreshBinding, resetQrState]);
@@ -321,6 +416,8 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
     const qrPanelHint = qrImageLoadError
         ? '二维码图片服务暂时没响应，请点下方“重新生成”再试一次。'
         : qrStatusText;
+    const repairStateText = getRepairStateText(repairState);
+    const repairStateClassName = getRepairStateClassName(repairState);
 
     return (
         <>
@@ -354,6 +451,14 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
                 <div className="mt-3 text-[10px] text-slate-400 leading-relaxed">
                     扫码成功后，真实微信消息会通过 staging 的 bridge 接到这个角色身上。
                 </div>
+                {repairStateText && (
+                    <div
+                        className={`mt-3 rounded-2xl border px-3 py-2 text-[10px] leading-relaxed ${repairStateClassName}`}
+                        aria-live="polite"
+                    >
+                        {repairStateText}
+                    </div>
+                )}
             </div>
 
             <Modal

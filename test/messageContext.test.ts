@@ -357,6 +357,27 @@ describe('message context formatter', () => {
         expect(apiMessages[2]?.content).toContain('看后一张');
     });
 
+    it('formats text reply context with quoted content and current user content', () => {
+        const text = formatMessageForContext(msg({
+            role: 'user',
+            content: '你要接住我后面这句话',
+            replyTo: {
+                id: 90,
+                name: '糯米',
+                content: '你发消息之前都不自己检查一遍的吗。',
+                type: 'text',
+            },
+        }), {
+            surface: 'chat',
+            charName: '糯米',
+        });
+
+        expect(text).toContain('引用回复上下文');
+        expect(text).toContain('正在回复糯米的消息');
+        expect(text).toContain('你发消息之前都不自己检查一遍的吗。');
+        expect(text).toContain('本条消息正文：你要接住我后面这句话');
+    });
+
     it('formats image reply prefixes without leaking raw image URLs', () => {
         const text = formatMessageForContext(msg({
             role: 'user',
@@ -373,7 +394,7 @@ describe('message context formatter', () => {
             charName: '糯米',
         });
 
-        expect(text).toContain('[回复 "窗边自拍...');
+        expect(text).toContain('正在回复糯米的消息「窗边自拍」');
         expect(text).toContain('好帅');
         expect(text).not.toContain('https://cdn.example.com');
     });
@@ -398,7 +419,7 @@ describe('message context formatter', () => {
             charName: '糯米',
         });
 
-        expect(text).toContain('[回复 "图片...');
+        expect(text).toContain('正在回复糯米的消息「图片」');
         expect(text).toContain('好帅');
         expect(text).not.toContain('画面：');
         expect(text).not.toContain('镜头：');

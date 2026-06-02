@@ -1017,19 +1017,57 @@ ${skeletonBlock}
  * 副模型专用。生成虚拟社交媒体帖子。
  * 帖子有不同立场，分析可能对也可能错，制造信息不对称。
  */
+export interface SocialPostsGuestBrief {
+  id: string;
+  name: string;
+  profile?: string;
+  state?: string;
+  impression?: string;
+}
+
+function formatSocialPostsGuestBriefs(guestBriefs: SocialPostsGuestBrief[]): string {
+  if (guestBriefs.length === 0) {
+    return '暂无可用嘉宾档案。本次只能生成观众帖子和观众热评。';
+  }
+
+  return guestBriefs.map((guest, index) => {
+    const details = [
+      `id=${guest.id}`,
+      `姓名=${guest.name}`,
+      guest.profile ? `人设=${guest.profile}` : '',
+      guest.state ? `当前状态=${guest.state}` : '',
+      guest.impression ? `对主角印象=${guest.impression}` : '',
+    ].filter(Boolean).join('；');
+    return `${index + 1}. ${details}`;
+  }).join('\n');
+}
+
 export function buildSocialPostsPrompt(
   day: number,
   seasonSummary: string,
   charNames: string[],
   userName = '用户',
+  guestBriefs: SocialPostsGuestBrief[] = [],
 ): string {
-  return `你是一个社交媒体内容模拟器。你的任务是为《唯一心动线》生成「心动广场」里的观众反应。
+  const guestBriefBlock = formatSocialPostsGuestBriefs(guestBriefs);
+  const guestInstruction = guestBriefs.length > 0
+    ? `- 必须生成至少 1 条嘉宾本人发出的帖子，或至少 1 条嘉宾本人留下的评论；嘉宾内容只能使用「可发言嘉宾档案」里的 id 与姓名。`
+    : `- 没有可发言嘉宾档案时，不允许生成 authorType=guest。`;
+  const firstGuest = guestBriefs[0];
+  const outputExample = firstGuest
+    ? `[{"platform": "weibo", "authorType": "audience", "username": "暂停键按烂", "content": "${userName}没接话那半秒我倒回去看了三遍，${firstGuest.name}手还停在杯沿上。", "comments": [{"authorType": "audience", "authorName": "显微镜在线", "content": "他不是忘了递杯子，是在等她先抬头吧。"}, {"authorType": "guest", "authorGuestId": "${firstGuest.id}", "authorName": "${firstGuest.name}", "content": "那一下不是等镜头，是我自己慢了。"}]}, {"platform": "xhs", "authorType": "guest", "authorGuestId": "${firstGuest.id}", "authorName": "${firstGuest.name}", "username": "${firstGuest.name}", "content": "刚才那句我没接，不是没听见。只是她看过来的时候，我忽然不想把话说得太像营业。", "likes": 2341, "comments": [{"authorType": "audience", "authorName": "慢放三遍", "content": "这条比正片还明显，他真的在解释刚才那个停顿。"}]}]`
+    : `[{"platform": "weibo", "authorType": "audience", "username": "暂停键按烂", "content": "${userName}没接话那半秒我倒回去看了三遍，阿序手还停在杯沿上。", "comments": [{"authorType": "audience", "authorName": "显微镜在线", "content": "他不是忘了递杯子，是在等她先抬头吧。"}]}, {"platform": "xhs", "authorType": "audience", "username": "慢放糖渣", "content": "今天这段不是工业糖，是两个人同时不知道怎么把话接下去。", "likes": 2341, "comments": [{"authorType": "audience", "authorName": "慢放三遍", "content": "不是眼神大，是他后面那半秒没接话太明显。"}]}]`;
+
+  return `你是一个社交媒体内容模拟器。你的任务是为《唯一心动线》生成「心动广场」里的社交动态。
 
 ### 节目信息
 - 当前进度：第${day}天
 - 唯一主角：${userName}
 - 嘉宾：${charNames.join('、')}
 - 今天发生的事：${seasonSummary}
+
+### 可发言嘉宾档案
+${guestBriefBlock}
 
 ### 关系主轴
 本节目的恋爱主轴是「${userName} × 嘉宾」。
@@ -1038,20 +1076,33 @@ export function buildSocialPostsPrompt(
 不要生成「嘉宾 × 嘉宾」CP 锁定、互相心动、互相恋爱主线的内容。
 
 ### 你的任务
-生成 4-6 条来自不同平台、不同用户的帖子。要求：
+生成 4-6 条来自不同平台、不同账号的帖子。要求：
 - 平台只能是 weibo 或 xhs
-- 每个用户名要有网感（像真实的社交媒体昵称）
-- 帖子要有不同立场：有站「${userName} × 某位嘉宾」的、有理性分析的、有纯吃瓜起哄的
-- 可出现「心动风向」「今日风向」「观众正在起哄」「明日镜头倾向」「本轮最想看的单独约会」等说法
-- 投票或风向只能围绕${userName}，例如谁今天最在意${userName}、谁和${userName}最有张力、谁最像在吃醋
+- 观众账号的用户名要有网感（像真实的社交媒体昵称）；嘉宾账号必须使用档案里的姓名
+- 帖子要有不同立场：有站「${userName} × 某位嘉宾」的、有理性分析的、有纯吃瓜起哄的，也可以有嘉宾本人发的一句动态
+- 每条帖子必须带 comments 数组，生成 2-4 条热评；热评可以来自观众，也可以来自嘉宾本人，但嘉宾评论必须有 authorGuestId
+${guestInstruction}
+- 评论要像普通网友刚刷到这条时随手打的短评：抓一个具体动作、眼神、停顿、台词反应或镜头细节；可以有“我怎么感觉”“不是吧”“这句不像营业”“他刚才是不是”等口语
+- 嘉宾帖子/嘉宾评论要像这个人真的刚录完节目后发的：贴合他的人设、当前心情、对${userName}的误解或在意，只写他会说的话
+- 嘉宾发言要具体，不要替观众总结节目；可以写“刚才那句我没接，是因为……”“我以为她没看见，结果镜头比我诚实”这种有现场余温的话
+- 禁止抽象口号、金句、标语式总结，例如“遗憾留给昨天，心动留给被看见”这类句式不要出现
+- 可出现「心动风向」「今日风向」「观众正在起哄」「明日镜头倾向」等说法
+- 不要写投票题、选项题、A/B/C/D 分组题、榜单题；不要使用“心动风向标”这类像系统模板的用户名
+- 风向只能围绕${userName}，例如谁今天最在意${userName}、谁和${userName}最有张力、谁最像在吃醋
 - 分析可能是对的，也可能是完全错误的解读——观众永远只能看到表面
 - xhs 帖子可以附带点赞数
 - 语气要像真的网友在讨论，不要太书面
 - 不要生成“谁和谁最配”、嘉宾 CP 排名、嘉宾互选心动对象、嘉宾之间的恋爱线投票
 
 ### 输出格式
+字段要求：
+- 观众帖子：authorType="audience"，username 是观众昵称，不要 authorGuestId
+- 嘉宾帖子：authorType="guest"，authorGuestId 必须等于档案 id，authorName 和 username 必须等于档案姓名
+- 观众评论：authorType="audience"，authorName 是观众昵称
+- 嘉宾评论：authorType="guest"，authorGuestId 必须等于档案 id，authorName 必须等于档案姓名
+
 直接输出 JSON 数组，不要添加任何其他内容，不要用 code fence 包裹：
-[{"platform": "weibo", "username": "甜甜圈少女", "content": "${userName}和阿昊做早餐那段也太苏了 #恋综第三季#"}, {"platform": "xhs", "username": "嗑糖日记", "content": "Day${day} 名场面！！小野看${userName}那个眼神我先嗑为敬", "likes": 2341}]`;
+${outputExample}`;
 }
 
 // ═══════════════════════════════════════════

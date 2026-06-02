@@ -9,9 +9,11 @@ import {
     createLoveShowSocialSignal,
     ensureLoveShowPostCommentFloor,
     getLoveShowSocialImagePlan,
+    isLoveShowTemplateFallbackPost,
     LOVE_SHOW_MIN_COMMENTS_PER_POST,
     markLoveShowSocialSignalsConsumed,
     normalizeLoveShowSocialPost,
+    normalizeLoveShowSocialPosts,
 } from './loveshowSocial';
 import type { LoveShowPrivateSecret } from '../types/loveshow';
 
@@ -146,7 +148,7 @@ describe('LoveShow social feed', () => {
         expect(post.image?.intent).toBe('alt_account_mood');
     });
 
-    it('fills user posts with guest and audience replies', () => {
+    it('does not fill user posts with generated fallback replies', () => {
         const post = normalizeLoveShowSocialPost({
             id: 'user-post-a',
             platform: 'weibo',
@@ -169,13 +171,11 @@ describe('LoveShow social feed', () => {
             createdAt: 100,
         });
 
-        expect(enriched.comments).toHaveLength(LOVE_SHOW_MIN_COMMENTS_PER_POST);
-        expect(enriched.comments.some(comment => comment.authorType === 'guest')).toBe(true);
-        expect(enriched.comments.some(comment => comment.authorType === 'audience')).toBe(true);
-        expect(enriched.comments.every(comment => comment.content.trim().length > 8)).toBe(true);
+        expect(LOVE_SHOW_MIN_COMMENTS_PER_POST).toBe(0);
+        expect(enriched.comments).toEqual([]);
     });
 
-    it('fills guest-to-guest feed replies with a full user-centered comment floor', () => {
+    it('does not create a local guest scene post when no model content exists', () => {
         const posts = createLoveShowGuestScenePosts({
             day: 1,
             sceneSummary: '阿序和小雨在厨房停顿了一下',
@@ -189,11 +189,77 @@ describe('LoveShow social feed', () => {
             enableImage: true,
         });
 
+        expect(posts).toEqual([]);
+    });
+
+    it('filters existing template fallback posts and comments from storage payloads', () => {
+        const posts = normalizeLoveShowSocialPosts([
+            {
+                id: 'fallback-scene',
+                platform: 'weibo',
+                username: '沈既白',
+                authorType: 'guest',
+                authorId: 'guest-a',
+                authorName: '沈既白',
+                authorGuestId: 'guest-a',
+                content: '刚才那段停顿比台本长一点。小雨应该也听出来了吧。',
+                dayNumber: 1,
+                source: 'scene_end',
+                comments: [],
+            },
+            {
+                id: 'real-post',
+                platform: 'xhs',
+                username: '显微镜在线',
+                authorType: 'audience',
+                authorId: 'audience-real',
+                authorName: '显微镜在线',
+                content: '刚才厨房里阿序把杯子换到小雨顺手那边，这个细节我先记下来。',
+                dayNumber: 1,
+                source: 'system',
+                comments: [{
+                    id: 'comment_audience_old',
+                    postId: 'real-post',
+                    authorType: 'audience',
+                    authorId: 'audience-template',
+                    authorName: '今天也在追心动',
+                    content: '这条下面怎么突然有录制现场的味道了，我先蹲一个后续。',
+                    createdAt: 2,
+                }, {
+                    id: 'comment-guest-slogan',
+                    postId: 'real-post',
+                    authorType: 'guest',
+                    authorId: 'guest-c',
+                    authorName: '陈望舒',
+                    authorGuestId: 'guest-c',
+                    content: '遗憾留给昨天，心动留给被看见的那一刻。',
+                    createdAt: 2,
+                }, {
+                    id: 'comment-ai',
+                    postId: 'real-post',
+                    authorType: 'audience',
+                    authorId: 'audience-ai',
+                    authorName: '显微镜二号',
+                    content: '他换杯子的动作太顺了，像是刚刚已经观察过她的习惯。',
+                    createdAt: 3,
+                }],
+            },
+        ], 1);
+
         expect(posts).toHaveLength(1);
-        expect(posts[0].comments).toHaveLength(LOVE_SHOW_MIN_COMMENTS_PER_POST);
-        expect(posts[0].comments.some(comment => comment.authorType === 'guest')).toBe(true);
-        expect(posts[0].comments.some(comment => comment.authorType === 'audience')).toBe(true);
-        expect(posts[0].comments.every(comment => comment.content.includes('小雨') || comment.content.trim().length > 8)).toBe(true);
-        expect(posts[0].image?.stylePresetId).toBe('loveshow-solo-cg');
+        expect(posts[0].id).toBe('real-post');
+        expect(posts[0].comments).toHaveLength(1);
+        expect(posts[0].comments[0].content).toContain('换杯子');
+        expect(isLoveShowTemplateFallbackPost(normalizeLoveShowSocialPost({
+            id: 'fallback-alt',
+            platform: 'weibo',
+            username: '匿名心跳',
+            authorType: 'guest_alt',
+            authorId: 'alt_guest-a',
+            authorName: '匿名心跳',
+            content: '有些话在镜头前只能停一下。差点露出来的时候，反而更想装作没事。',
+            dayNumber: 1,
+            source: 'private_secret',
+        }, 1))).toBe(true);
     });
 });

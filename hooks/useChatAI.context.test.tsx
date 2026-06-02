@@ -219,6 +219,58 @@ describe('useChatAI context loading', () => {
         );
     });
 
+    it('keeps a live reply user message when the DB context is stale', async () => {
+        const staleDbMessage = makeMessage(2, 'full db context');
+        const liveReplyMessage: Message = {
+            ...makeMessage(3, '我后面这句话也要被看见'),
+            replyTo: {
+                id: 99,
+                name: 'Sully',
+                content: '被引用的原文',
+                type: 'text',
+            },
+        };
+        mockedDB.getRecentMessagesByCharId.mockResolvedValueOnce([staleDbMessage]);
+
+        const char = {
+            id: 'char-1',
+            name: 'Sully',
+            avatar: '',
+            description: '',
+            systemPrompt: '',
+            memories: [],
+            contextLimit: 777,
+            statusBarMode: 'off',
+        } as CharacterProfile;
+
+        const { result } = renderHook(() => useChatAI({
+            char,
+            userProfile: { name: 'Tester', avatar: '' } as any,
+            apiConfig: { baseUrl: 'https://example.test', apiKey: 'sk-test', model: 'test-model' },
+            groups: [],
+            emojis: [],
+            categories: [],
+            addToast: vi.fn(),
+            setMessages: vi.fn(),
+        }));
+
+        await act(async () => {
+            await result.current.triggerAI([liveReplyMessage]);
+        });
+
+        const messageHistoryInput = mockedChatPrompts.buildMessageHistory.mock.calls[0][0];
+        expect(messageHistoryInput).toEqual([
+            staleDbMessage,
+            expect.objectContaining({
+                content: '我后面这句话也要被看见',
+                replyTo: expect.objectContaining({
+                    content: '被引用的原文',
+                    name: 'Sully',
+                }),
+            }),
+        ]);
+    });
+
     it('passes the previous assistant thinking chain to pre-reply state sensing', async () => {
         mockedSelectSecondaryApiConfig.mockReturnValue({
             baseUrl: 'https://secondary.example.test',

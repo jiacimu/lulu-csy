@@ -18,22 +18,7 @@ import { getLoveShowImagePresetId } from './loveshowPrompts';
 const SOCIAL_POST_LIMIT = 80;
 const SOCIAL_SIGNAL_LIMIT = 160;
 const ALT_NICKNAMES = ['匿名心跳', '玻璃窗外', '不署名观众', '晚风账号', '只看一眼'];
-export const LOVE_SHOW_MIN_COMMENTS_PER_POST = 15;
-
-const AUDIENCE_COMMENT_NAMES = [
-    '前排嗑糖员',
-    '今天也在追心动',
-    '镜头暂停一下',
-    '弹幕不眨眼',
-    '恋综观察样本',
-    '只看细节',
-    '心动显微镜',
-    '路过也要尖叫',
-    '今晚别剪了',
-    '小屋围观中',
-    '别替TA决定',
-    '节目组快放花絮',
-];
+export const LOVE_SHOW_MIN_COMMENTS_PER_POST = 0;
 
 const AUDIENCE_COMMENT_TEMPLATES = [
     '这条下面怎么突然有录制现场的味道了，我先蹲一个后续。',
@@ -114,11 +99,35 @@ function compactText(value: string | undefined | null, maxLength: number): strin
     return text.length > maxLength ? text.slice(0, maxLength) : text;
 }
 
-function fillCommentTemplate(template: string, input: { userName: string; authorName: string; postAuthorName: string }): string {
-    return template
-        .replace(/\{userName\}/g, input.userName)
-        .replace(/\{authorName\}/g, input.authorName)
-        .replace(/\{postAuthorName\}/g, input.postAuthorName);
+function escapeForRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function templateToRegExp(template: string): RegExp {
+    const pattern = escapeForRegExp(template)
+        .replace(/\\\{userName\\\}/g, '.+?')
+        .replace(/\\\{authorName\\\}/g, '.+?')
+        .replace(/\\\{postAuthorName\\\}/g, '.+?');
+    return new RegExp(`^${pattern}$`);
+}
+
+const GENERATED_COMMENT_TEMPLATE_RE = [
+    ...AUDIENCE_COMMENT_TEMPLATES,
+    ...GUEST_COMMENT_TEMPLATES_FOR_USER,
+    ...GUEST_COMMENT_TEMPLATES_FOR_GUEST,
+    ...GUEST_COMMENT_TEMPLATES_FOR_PUBLIC,
+].map(templateToRegExp);
+const STOCK_SOCIAL_COMMENT_RE = /(遗憾留给|心动留给|被看见|留给昨天|我选[ABCDＡＢＣＤ]|大家怎么看|呼声最高|心动风向标|Day\s*\d+\s*总结|总结：|温柔庇护组|真迹拆穿组|宿命拉扯组|推倒重来组|投票|^[^，。！？]{0,8}留给[^，。！？]{0,12}[，,][^，。！？]{0,12}留给)/i;
+
+function isTemplateGeneratedComment(raw: Partial<LoveShowFeedComment>, content: string): boolean {
+    const id = String(raw.id || '');
+    if (/^comment_(?:guest|audience)_/.test(id)) return true;
+    if (STOCK_SOCIAL_COMMENT_RE.test(content)) return true;
+    return GENERATED_COMMENT_TEMPLATE_RE.some(pattern => pattern.test(content));
+}
+
+function isVerifiedGeneratedGuestComment(comment: LoveShowFeedComment): boolean {
+    return Boolean(comment.authorGuestId) && /^comment_ai_/.test(comment.id);
 }
 
 function authorIdFromName(type: LoveShowFeedAuthorType, name: string): string {
@@ -138,9 +147,11 @@ function inferSource(raw: Partial<LoveShowFeedPost>): LoveShowFeedSource {
     return 'system';
 }
 
-function normalizeComment(raw: Partial<LoveShowFeedComment>, postId: string, index: number): LoveShowFeedComment {
+function normalizeComment(raw: Partial<LoveShowFeedComment>, postId: string, index: number): LoveShowFeedComment | null {
     const authorType = raw.authorType || 'audience';
     const authorName = compactText(raw.authorName, 24) || '心动观众';
+    const content = compactText(raw.content, 180);
+    if (!content || isTemplateGeneratedComment(raw, content)) return null;
     return {
         id: raw.id || createSocialId(`comment_${index}`),
         postId,
@@ -148,7 +159,7 @@ function normalizeComment(raw: Partial<LoveShowFeedComment>, postId: string, ind
         authorId: raw.authorId || authorIdFromName(authorType, authorName),
         authorName,
         authorGuestId: raw.authorGuestId,
-        content: compactText(raw.content, 180) || '看到了。',
+        content,
         createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
     };
 }
@@ -170,20 +181,30 @@ export function normalizeLoveShowSocialPost(raw: Partial<LoveShowFeedPost>, day:
     const username = compactText(raw.username || raw.authorName, 28) || '心动观众';
     const authorName = compactText(raw.authorName || username, 28) || username;
     const id = raw.id || createSocialId('post');
+    const content = compactText(raw.content, 280);
+    const source = inferSource(raw);
     const likeCount = typeof raw.likeCount === 'number'
         ? Math.max(0, Math.round(raw.likeCount))
         : typeof raw.likes === 'number'
             ? Math.max(0, Math.round(raw.likes))
             : 0;
     const comments = Array.isArray(raw.comments)
-        ? raw.comments.map((comment, index) => normalizeComment(comment, id, index))
+        ? raw.comments
+            .map((comment, index) => normalizeComment(comment, id, index))
+            .filter((comment): comment is LoveShowFeedComment => Boolean(comment))
+            .filter(comment => !(
+                source === 'system'
+                && authorType === 'audience'
+                && comment.authorType === 'guest'
+                && !isVerifiedGeneratedGuestComment(comment)
+            ))
         : [];
 
     return {
         id,
         platform: raw.platform === 'xhs' ? 'xhs' : 'weibo',
         username,
-        content: compactText(raw.content, 280) || '今天的心动风向还在发酵。',
+        content,
         likes: likeCount,
         dayNumber: typeof raw.dayNumber === 'number' ? raw.dayNumber : day,
         authorType,
@@ -193,7 +214,7 @@ export function normalizeLoveShowSocialPost(raw: Partial<LoveShowFeedPost>, day:
         authorGuestId: raw.authorGuestId || raw.guestRefs?.[0]?.guestId,
         hiddenOwnerGuestId: raw.hiddenOwnerGuestId,
         image: normalizeImage(raw.image),
-        source: inferSource(raw),
+        source,
         comments,
         likeCount,
         likedByUser: raw.likedByUser === true,
@@ -205,10 +226,38 @@ export function normalizeLoveShowSocialPost(raw: Partial<LoveShowFeedPost>, day:
     };
 }
 
+export function isLoveShowTemplateFallbackPost(post: LoveShowSocialPost): boolean {
+    const content = compactText(post.content, 280);
+    if (!content) return true;
+    if (post.source === 'scene_end' && post.authorType === 'guest' && content.startsWith('刚才那段停顿比台本长一点。')) {
+        return true;
+    }
+    if (post.source === 'private_secret' && post.authorType === 'guest_alt' && content === '有些话在镜头前只能停一下。差点露出来的时候，反而更想装作没事。') {
+        return true;
+    }
+    if (post.source === 'system' && post.authorType === 'audience') {
+        const identity = `${post.username} ${post.authorName}`;
+        if (identity.includes('心动风向标')) return true;
+        return content.includes('心动风向又被观众起哄了，大家最想看TA下一步靠近谁。')
+            || content.includes('今日风向有点微妙')
+            || content.includes('单独约会投票')
+            || content.includes('本轮最想看的单独约会')
+            || (content.includes('心动放送开播了') && content.includes('的眼神感觉藏了很多话。'))
+            || (content.includes('观众正在起哄，但别急着替') && content.includes('本质上还是都在观察'));
+    }
+    if (post.source === 'wind' && post.authorType === 'audience') {
+        return content.startsWith('#心动风向#')
+            && content.includes('这段心动片段有点安静')
+            && content.includes('每个停顿都在等');
+    }
+    return false;
+}
+
 export function normalizeLoveShowSocialPosts(raw: Partial<LoveShowFeedPost>[], day: number): LoveShowSocialPost[] {
     return raw
         .filter(Boolean)
         .map(post => normalizeLoveShowSocialPost(post, day))
+        .filter(post => !isLoveShowTemplateFallbackPost(post))
         .sort((a, b) => a.createdAt - b.createdAt)
         .slice(-SOCIAL_POST_LIMIT);
 }
@@ -233,70 +282,13 @@ export function ensureLoveShowPostCommentFloor(
         createdAt?: number;
     },
 ): LoveShowSocialPost {
-    const minComments = Math.max(0, input.minComments ?? LOVE_SHOW_MIN_COMMENTS_PER_POST);
-    const existing = post.comments
-        .filter(comment => Boolean(comment.content?.trim()))
-        .map((comment, index) => normalizeComment(comment, post.id, index));
-    if (existing.length >= minComments) return { ...post, comments: existing };
-
-    const createdAt = input.createdAt || Date.now();
-    const postAuthorGuestId = post.authorGuestId || post.hiddenOwnerGuestId;
-    const guestCommenters = input.guests.filter(guest => (
-        guest.id
-        && guest.name
-        && guest.id !== postAuthorGuestId
-    ));
-    const guestTemplates = post.authorType === 'user'
-        ? GUEST_COMMENT_TEMPLATES_FOR_USER
-        : post.authorType === 'guest' || post.authorType === 'guest_alt'
-            ? GUEST_COMMENT_TEMPLATES_FOR_GUEST
-            : GUEST_COMMENT_TEMPLATES_FOR_PUBLIC;
-    const additions: LoveShowFeedComment[] = [];
-    const needed = minComments - existing.length;
-    const guestCommentTarget = Math.min(guestCommenters.length, Math.max(2, Math.ceil(needed / 3)));
-
-    for (let index = 0; index < guestCommentTarget && additions.length < needed; index += 1) {
-        const guest = guestCommenters[index % guestCommenters.length];
-        if (!guest) break;
-        const template = guestTemplates[index % guestTemplates.length];
-        additions.push(normalizeComment({
-            id: createSocialId('comment_guest'),
-            postId: post.id,
-            authorType: 'guest',
-            authorId: guest.id,
-            authorName: guest.name,
-            authorGuestId: guest.id,
-            content: fillCommentTemplate(template, {
-                userName: input.userName,
-                authorName: guest.name,
-                postAuthorName: post.authorName,
-            }),
-            createdAt: createdAt + existing.length + additions.length + 1,
-        }, post.id, existing.length + additions.length));
-    }
-
-    while (additions.length < needed) {
-        const offset = existing.length + additions.length;
-        const name = AUDIENCE_COMMENT_NAMES[offset % AUDIENCE_COMMENT_NAMES.length];
-        const template = AUDIENCE_COMMENT_TEMPLATES[offset % AUDIENCE_COMMENT_TEMPLATES.length];
-        additions.push(normalizeComment({
-            id: createSocialId('comment_audience'),
-            postId: post.id,
-            authorType: 'audience',
-            authorId: authorIdFromName('audience', name),
-            authorName: name,
-            content: fillCommentTemplate(template, {
-                userName: input.userName,
-                authorName: name,
-                postAuthorName: post.authorName,
-            }),
-            createdAt: createdAt + existing.length + additions.length + 1,
-        }, post.id, existing.length + additions.length));
-    }
-
+    void input;
+    const comments = post.comments
+        .map((comment, index) => normalizeComment(comment, post.id, index))
+        .filter((comment): comment is LoveShowFeedComment => Boolean(comment));
     return {
         ...post,
-        comments: [...existing, ...additions],
+        comments,
     };
 }
 
@@ -309,11 +301,7 @@ export function ensureLoveShowPostsCommentFloor(
         createdAt?: number;
     },
 ): LoveShowSocialPost[] {
-    const baseCreatedAt = input.createdAt || Date.now();
-    return posts.map((post, index) => ensureLoveShowPostCommentFloor(post, {
-        ...input,
-        createdAt: baseCreatedAt + index * 100,
-    }));
+    return posts.map(post => ensureLoveShowPostCommentFloor(post, input));
 }
 
 export function createLoveShowSocialSignal(input: Omit<SocialSignal, 'id' | 'consumed' | 'createdAt'> & {
@@ -439,53 +427,8 @@ export function createLoveShowGuestScenePosts(input: {
     enableImage: boolean;
     createdAt?: number;
 }): LoveShowSocialPost[] {
-    const activeGuests = input.guests.filter(guest => Boolean(guest.id && guest.name));
-    if (activeGuests.length === 0) return [];
-    const lead = activeGuests.find(guest => guest.id === input.preferredGuestId) || activeGuests[0];
-    const second = activeGuests.find(guest => guest.id !== lead.id);
-    const createdAt = input.createdAt || Date.now();
-    const imagePrompt = [
-        `节目内社交平台配图：${lead.name}在刚结束的恋综片段后发了一张动态图。`,
-        `剧情背景：${input.sceneSummary}`,
-        `画面要求：竖版手机社交媒体图片，像嘉宾自己发出的自拍或节目花絮照，表情克制但能看出在意${input.userName}。`,
-        '不要出现文字、水印、节目 logo，不要让其他嘉宾成为恋爱主体。',
-    ].join('\n');
-    const leadPost = normalizeLoveShowSocialPost({
-        id: createSocialId('guest_post'),
-        platform: 'weibo',
-        username: lead.name,
-        content: `刚才那段停顿比台本长一点。${input.userName}应该也听出来了吧。`,
-        dayNumber: input.day,
-        authorType: 'guest',
-        authorId: lead.id,
-        authorName: lead.name,
-        authorAvatar: lead.avatar,
-        authorGuestId: lead.id,
-        image: input.enableImage ? createLoveShowFeedImage('guest_selfie', input.imageStyle, imagePrompt) : undefined,
-        source: 'scene_end',
-        comments: second ? [normalizeComment({
-            id: createSocialId('comment_guest'),
-            postId: 'temporary',
-            authorType: 'guest',
-            authorId: second.id,
-            authorName: second.name,
-            authorGuestId: second.id,
-            content: `镜头都拍到了，重点还是看${input.userName}怎么接。`,
-            createdAt: createdAt + 1,
-        }, 'temporary', 0)] : [],
-        likeCount: 421,
-        likes: 421,
-        createdAt,
-    }, input.day);
-    const comments = leadPost.comments.map(comment => ({ ...comment, postId: leadPost.id }));
-    return [ensureLoveShowPostCommentFloor(
-        { ...leadPost, comments },
-        {
-            userName: input.userName,
-            guests: activeGuests,
-            createdAt,
-        },
-    )];
+    void input;
+    return [];
 }
 
 export function createLoveShowAltPostFromSecret(input: {

@@ -4385,7 +4385,7 @@ const Chat: React.FC = () => {
                 lastTokenUsage={lastTokenUsage}
                 tokenBreakdown={tokenBreakdown}
                 onClose={closeApp}
-                onTriggerAI={() => triggerAI(messages)}
+                onTriggerAI={() => triggerAI(messagesRef.current)}
                 onShowCharsPanel={() => setShowPanel('chars')}
                 onCallPress={() => { unlockAudio(); openApp(AppID.VoiceCall, { direction: 'outgoing' }); }}
             />

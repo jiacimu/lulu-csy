@@ -13,6 +13,7 @@ import {
   expandNpcPrompt,
   expandNpcPrompts,
   generateSceneSummaryWithHighlights,
+  generateSocialPosts,
   generateNextChoicePoint,
   generateNpcSkeletons,
   isUserCenteredHighlight,
@@ -573,6 +574,94 @@ describe('LoveShow NPC generation pipeline', () => {
     expect(prompts[0]).toContain('闻烈');
     expect(prompts[1]).toContain('裴予');
     expect(prompts[1]).toContain('本季只有用户一位主角');
+  });
+});
+
+describe('LoveShow social post generation', () => {
+  it('keeps persona-verified guest posts/comments and filters poll templates, fake guests, and slogans', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(chatResponse(JSON.stringify({
+      posts: [
+        {
+          platform: 'xhs',
+          username: '心动风向标',
+          content: 'Day4 总结：本轮最想看的单独约会投票！A. 陆沉（温柔庇护组） B. 宋逾（真迹拆穿组）',
+          comments: [
+            { authorType: 'guest', authorName: '陈望舒', content: '遗憾留给昨天，心动留给被看见的那一刻。' },
+          ],
+        },
+        {
+          platform: 'weibo',
+          username: '暂停键按烂',
+          content: '厨房那段我真的想倒回去，小满没接话以后阿序手还停在杯沿上。',
+          comments: [
+            { authorType: 'guest', authorGuestId: 'guest-a', authorName: '阿序', content: '那一下不是等镜头，是我自己慢了。' },
+            { authorType: 'guest', authorName: '陈望舒', content: '刚才那段我也看见了，但我不该在这里替她决定。' },
+            { authorType: 'audience', authorName: '嗑学家', content: '遗憾留给昨天，心动留给被看见的那一刻。' },
+            { authorType: 'audience', authorName: '慢放三遍', content: '他那个手停住不是剪辑吧，像等她先开口。' },
+          ],
+        },
+        {
+          platform: 'xhs',
+          authorType: 'guest',
+          authorGuestId: 'guest-a',
+          authorName: '阿序',
+          username: '阿序',
+          content: '刚才那句我没接，不是没听见。她看过来的时候，我忽然不想把话说得太像营业。',
+          comments: [
+            { authorType: 'audience', authorName: '慢放到凌晨', content: '这条就是在解释杯沿那一下吧，太不像营业了。' },
+          ],
+        },
+        {
+          platform: 'xhs',
+          authorType: 'guest',
+          authorGuestId: 'guest-z',
+          authorName: '不存在的嘉宾',
+          username: '不存在的嘉宾',
+          content: '我也在现场，所以我想解释一下刚才的沉默。',
+          comments: [],
+        },
+      ],
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const posts = await generateSocialPosts(
+      apiConfig,
+      4,
+      '小满和阿序在厨房短暂停顿，镜头捕捉到杯沿上的手',
+      ['阿序', '陈望舒'],
+      '小满',
+      [{
+        id: 'guest-a',
+        name: '阿序',
+        profile: '慢热，紧张时会把话收回去，用动作补偿。',
+        state: '心情：克制；内心：刚才没接话不是不在意',
+        impression: '觉得小满会注意到别人藏起来的小动作',
+      }],
+    );
+
+    expect(posts).toHaveLength(2);
+    const audiencePost = posts.find(post => post.username === '暂停键按烂');
+    expect(audiencePost?.comments).toEqual([
+      expect.objectContaining({
+        authorType: 'guest',
+        authorGuestId: 'guest-a',
+        authorName: '阿序',
+        content: '那一下不是等镜头，是我自己慢了。',
+      }),
+      expect.objectContaining({
+        authorType: 'audience',
+        authorName: '慢放三遍',
+        content: '他那个手停住不是剪辑吧，像等她先开口。',
+      }),
+    ]);
+    const guestPost = posts.find(post => post.authorType === 'guest');
+    expect(guestPost).toEqual(expect.objectContaining({
+      authorGuestId: 'guest-a',
+      authorName: '阿序',
+      username: '阿序',
+      source: 'scene_end',
+    }));
+    expect(guestPost?.content).toContain('不是没听见');
   });
 });
 
