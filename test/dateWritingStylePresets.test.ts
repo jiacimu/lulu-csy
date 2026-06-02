@@ -19,6 +19,11 @@ describe('date writing style presets', () => {
             'tender',
             'artisan',
             'quiet',
+            'banter',
+            'angst',
+            'danger',
+            'comedy',
+            'fluffy',
         ]);
     });
 
