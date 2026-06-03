@@ -27,6 +27,12 @@ export interface DateStateDraft {
     restoredFromHistory?: boolean;
 }
 
+export type PendingDateReplyGap = {
+    userMessageId: number;
+    userText: string;
+    status: 'pending' | 'failed';
+};
+
 export function getActiveDateSprites(char: CharacterProfile): Record<string, string> {
     if (char.activeSkinSetId && char.dateSkinSets) {
         const skin = char.dateSkinSets.find(item => item.id === char.activeSkinSetId);
@@ -121,6 +127,38 @@ const isDateRawDialogueMessage = (message: Message): boolean => (
     && !message.metadata?.isSummary
     && !message.metadata?.isDateContextBridge
 );
+
+const isVisibleDateDialogueMessage = (message: Message): boolean => (
+    isDateRawDialogueMessage(message)
+    && !message.metadata?.hiddenFromUser
+);
+
+export function findPendingDateReplyGap(messages: Message[]): PendingDateReplyGap | null {
+    const dateMessages = messages
+        .filter(isVisibleDateDialogueMessage)
+        .sort((a, b) => a.timestamp - b.timestamp || a.id - b.id);
+    if (dateMessages.length === 0) return null;
+
+    const openingIndex = dateMessages.map(message => message.metadata?.isOpening === true).lastIndexOf(true);
+    const sessionMessages = openingIndex >= 0 ? dateMessages.slice(openingIndex) : dateMessages;
+    if (sessionMessages.length === 0) return null;
+
+    const lastMessage = sessionMessages[sessionMessages.length - 1];
+    if (lastMessage.role !== 'user') return null;
+
+    const userIndex = sessionMessages.findIndex(message => message.id === lastMessage.id);
+    const hasAssistantAfterUser = sessionMessages
+        .slice(userIndex + 1)
+        .some(message => message.role === 'assistant');
+    if (hasAssistantAfterUser) return null;
+
+    const rawStatus = lastMessage.metadata?.dateReplyStatus;
+    return {
+        userMessageId: lastMessage.id,
+        userText: lastMessage.content || '',
+        status: rawStatus === 'failed' || rawStatus === 'complete' ? 'failed' : 'pending',
+    };
+}
 
 export function buildDateHistoryRecoveryState(
     messages: Message[],

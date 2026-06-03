@@ -3,6 +3,7 @@ import type { CharacterProfile, DateState, Message } from '../types';
 import {
     buildDateHistoryRecoveryState,
     createLightweightDateState,
+    findPendingDateReplyGap,
     resolveDateStateBackground,
     resolveDateStateSprite,
     shouldUseDateVisualSafeMode,
@@ -108,5 +109,51 @@ describe('date session lightweight state', () => {
         expect(state?.restoredFromHistory).toBe(true);
         expect(state?.peekStatus).toBe('opening');
         expect(state?.currentSpriteKey).toBe('normal');
+    });
+
+    it('detects the latest user date message when no assistant reply was saved', () => {
+        const gap = findPendingDateReplyGap([
+            makeMessage(1, 'assistant', 'opening', { source: 'date', isOpening: true }),
+            makeMessage(2, 'user', '你在吗', {
+                source: 'date',
+                dateReplyStatus: 'pending',
+            }),
+        ]);
+
+        expect(gap).toEqual({
+            userMessageId: 2,
+            userText: '你在吗',
+            status: 'pending',
+        });
+    });
+
+    it('does not report a pending gap when an assistant reply exists after the user message', () => {
+        const gap = findPendingDateReplyGap([
+            makeMessage(1, 'assistant', 'opening', { source: 'date', isOpening: true }),
+            makeMessage(2, 'user', '你在吗', {
+                source: 'date',
+                dateReplyStatus: 'pending',
+            }),
+            makeMessage(3, 'assistant', '我在', { source: 'date' }),
+        ]);
+
+        expect(gap).toBeNull();
+    });
+
+    it('treats a completed user message with a missing assistant reply as failed', () => {
+        const gap = findPendingDateReplyGap([
+            makeMessage(1, 'assistant', 'opening', { source: 'date', isOpening: true }),
+            makeMessage(2, 'user', '刚才是不是断了', {
+                source: 'date',
+                dateReplyStatus: 'complete',
+                replyMessageId: 99,
+            }),
+        ]);
+
+        expect(gap).toEqual({
+            userMessageId: 2,
+            userText: '刚才是不是断了',
+            status: 'failed',
+        });
     });
 });

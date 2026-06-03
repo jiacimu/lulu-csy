@@ -14,6 +14,7 @@ import {
     buildDateSessionSystemPrompt,
     buildHistorySessions,
     maybeExtractDateTemporalEvent,
+    mergeDateMessages,
 } from './DateApp';
 import { EventExtractor } from '../utils/eventExtractor';
 import type { CharacterProfile,Message,UserProfile } from '../types';
@@ -137,6 +138,45 @@ describe('buildHistorySessions', () => {
         expect(sessions[1].bridges).toHaveLength(0);
     });
 
+});
+
+describe('mergeDateMessages', () => {
+    it('appends new visible date messages and keeps timestamp/id order', () => {
+        const merged = mergeDateMessages([
+            makeMessage(3, 3_000, { source: 'date' }),
+        ], [
+            makeMessage(1, 1_000, { source: 'date', isOpening: true }),
+            makeMessage(2, 2_000, { source: 'date' }, 'user'),
+        ]);
+
+        expect(merged.map(m => m.id)).toEqual([1, 2, 3]);
+    });
+
+    it('dedupes background reconcile messages by id with the latest copy winning', () => {
+        const optimistic = makeMessage(2, 2_000, { source: 'date', dateReplyStatus: 'pending' }, 'user');
+        const reconciled = makeMessage(2, 2_000, {
+            source: 'date',
+            dateReplyStatus: 'complete',
+            replyMessageId: 3,
+        }, 'user');
+
+        const merged = mergeDateMessages([optimistic], [reconciled]);
+
+        expect(merged).toHaveLength(1);
+        expect(merged[0].metadata?.dateReplyStatus).toBe('complete');
+        expect(merged[0].metadata?.replyMessageId).toBe(3);
+    });
+
+    it('filters non-visible date records from append/reconcile inputs', () => {
+        const merged = mergeDateMessages([], [
+            makeMessage(1, 1_000, { source: 'date', isOpening: true }),
+            makeMessage(2, 2_000, { source: 'date', hiddenFromUser: true }),
+            makeMessage(3, 3_000, { source: 'date', isSummary: true }),
+            makeMessage(4, 4_000, { source: 'chat' }),
+        ]);
+
+        expect(merged.map(m => m.id)).toEqual([1]);
+    });
 });
 
 describe('date temporal awareness helpers', () => {

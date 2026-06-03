@@ -10,6 +10,7 @@ import {
     resolveDateStateBackground,
     resolveDateStateSprite,
     shouldUseDateVisualSafeMode,
+    type PendingDateReplyGap,
     type DateStateDraft,
 } from '../../utils/dateSessionState';
 import Modal from '../../components/os/Modal';
@@ -190,6 +191,8 @@ interface DateSessionProps {
     initialState?: DateState; // Resume state
     onSendMessage: (text: string, directorHint?: string) => Promise<{ content: string; whispers: InnerWhisper[] }>; // Returns AI content + optional whispers
     onReroll: () => Promise<{ content: string; whispers: InnerWhisper[] }>;
+    pendingReplyGap?: PendingDateReplyGap;
+    onRetryMissingReply: (userMessageId: number) => Promise<{ content: string; whispers: InnerWhisper[] }>;
     onExit: (currentState: DateState, syncMode: DateExitSyncMode) => void;
     onAutosaveState?: (state: DateState, reason: string) => void;
     onEditMessage: (msg: Message) => void;
@@ -235,6 +238,8 @@ const DateSession: React.FC<DateSessionProps> = ({
     initialState,
     onSendMessage, 
     onReroll, 
+    pendingReplyGap,
+    onRetryMissingReply,
     onExit,
     onAutosaveState,
     onEditMessage,
@@ -753,6 +758,79 @@ const DateSession: React.FC<DateSessionProps> = ({
         }
     };
 
+    const handleRetryMissingReplyClick = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!pendingReplyGap || isTyping) return;
+
+        setShowInputBox(false);
+        setIsTyping(true);
+        setVisualSafeMode(true);
+        setIsNovelMode(true);
+        clearWhispers();
+        emitAutosave('before-retry-missing-reply', {
+            dialogueQueue,
+            dialogueBatch,
+            currentText,
+            currentSprite,
+            currentSpriteKey,
+            isNovelMode: true,
+            visualSafeMode: true,
+            timestamp: Date.now(),
+            peekStatus,
+        }, true);
+
+        try {
+            const result = await onRetryMissingReply(pendingReplyGap.userMessageId);
+            const items = parseDialogue(result.content, 'normal');
+            const first = items[0];
+            const remaining = first ? items.slice(1) : [];
+            setDialogueBatch(items);
+            setDialogueQueue(remaining);
+            if (first) {
+                processNextDialogue(first, remaining, {
+                    autosaveReason: 'after-reply',
+                    immediate: true,
+                    dialogueBatchOverride: items,
+                });
+            } else {
+                emitAutosave('after-reply', {
+                    dialogueQueue: [],
+                    dialogueBatch: [],
+                    currentText: '',
+                    isNovelMode: true,
+                    visualSafeMode: true,
+                    timestamp: Date.now(),
+                    peekStatus,
+                }, true);
+            }
+            if (result.whispers.length > 0) {
+                const totalChars = items.reduce((sum, item) => sum + item.text.length, 0);
+                const estimatedPlayMs = totalChars * 20 + items.length * 500;
+                whisperRevealTimer.current = setTimeout(() => {
+                    setActiveWhispers(result.whispers);
+                    setWhispersVisible(true);
+                }, Math.min(estimatedPlayMs, 8000));
+            }
+        } catch (e: any) {
+            const errorText = "(连接中断)";
+            setCurrentText(errorText);
+            setShowInputBox(true);
+            emitAutosave('send-error', {
+                dialogueQueue,
+                dialogueBatch,
+                currentText: errorText,
+                currentSprite,
+                currentSpriteKey,
+                isNovelMode: true,
+                visualSafeMode: true,
+                timestamp: Date.now(),
+                peekStatus,
+            }, true);
+        } finally {
+            setIsTyping(false);
+        }
+    };
+
     // Handle whisper option click: send the whisper as user action with hidden director hint
     const handleWhisperClick = async (whisper: InnerWhisper) => {
         if (isTyping) return;
@@ -1104,6 +1182,25 @@ const DateSession: React.FC<DateSessionProps> = ({
                                     )}
                                 </div>
                             ))}
+                            {pendingReplyGap && !isTyping && (
+                                <div
+                                    className={`mx-auto max-w-sm rounded-2xl border px-4 py-3 text-center shadow-sm ${char.dateLightReading ? 'border-amber-100 bg-amber-50 text-stone-600' : 'border-white/10 bg-white/[0.06] text-slate-200'}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <div className="text-sm font-bold">上一条回复中断了</div>
+                                    <p className={`mt-1 text-xs leading-relaxed ${char.dateLightReading ? 'text-stone-400' : 'text-slate-400'}`}>
+                                        {pendingReplyGap.status === 'failed' ? '这次请求没有完整保存角色回复。' : '正在恢复这次未完成的回复。'}
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={handleRetryMissingReplyClick}
+                                        disabled={isTyping}
+                                        className={`mt-3 min-h-10 rounded-full px-4 text-xs font-bold transition active:scale-95 disabled:opacity-50 ${char.dateLightReading ? 'bg-stone-900 text-white' : 'bg-white text-black'}`}
+                                    >
+                                        {isTyping ? '生成中...' : '重新生成'}
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
