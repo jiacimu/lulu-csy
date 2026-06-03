@@ -25,60 +25,6 @@ const isAppleMobileWebKit = () => {
     return /iP(ad|hone|od)/.test(ua) || (platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 };
 
-const DATE_ASSET_REVEAL_DELAY_MS = 120;
-
-const scheduleDateAssetReveal = (src: string, onReady: (readySrc: string) => void): (() => void) => {
-    if (!src || typeof window === 'undefined') {
-        onReady(src);
-        return () => undefined;
-    }
-
-    let cancelled = false;
-    let timeoutId: number | null = null;
-    let fallbackId: number | null = null;
-    let frameId: number | null = null;
-
-    const finish = () => {
-        if (!cancelled) onReady(src);
-    };
-
-    const load = () => {
-        if (typeof Image === 'undefined') {
-            finish();
-            return;
-        }
-
-        const img = new Image();
-        let settled = false;
-        const settle = () => {
-            if (settled) return;
-            settled = true;
-            finish();
-        };
-
-        img.decoding = 'async';
-        img.onload = settle;
-        img.onerror = settle;
-        img.src = src;
-        fallbackId = window.setTimeout(settle, 900);
-
-        if (typeof img.decode === 'function') {
-            img.decode().then(settle).catch(settle);
-        }
-    };
-
-    timeoutId = window.setTimeout(() => {
-        frameId = window.requestAnimationFrame(load);
-    }, DATE_ASSET_REVEAL_DELAY_MS);
-
-    return () => {
-        cancelled = true;
-        if (timeoutId !== null) window.clearTimeout(timeoutId);
-        if (fallbackId !== null) window.clearTimeout(fallbackId);
-        if (frameId !== null) window.cancelAnimationFrame(frameId);
-    };
-};
-
 // Helper: Parse dialogue with simple state machine
 const isContextNoise = (line: string) => {
     const l = line.trim().toLowerCase();
@@ -285,7 +231,6 @@ const DateSession: React.FC<DateSessionProps> = ({
     const [visibleCurrentSprite, setVisibleCurrentSprite] = useState<string>('');
     const [spriteConfig, setSpriteConfig] = useState(char.spriteConfig || { scale: 1, x: 0, y: 0 });
     const [visualSafeMode, setVisualSafeMode] = useState(initialVisualSafeMode);
-    const [summaryControlsReady, setSummaryControlsReady] = useState(false);
     
     // Dialogue Engine State
     const [dialogueQueue, setDialogueQueue] = useState<DialogueItem[]>([]);
@@ -298,6 +243,7 @@ const DateSession: React.FC<DateSessionProps> = ({
     const [input, setInput] = useState('');
     const [showInputBox, setShowInputBox] = useState(false);
     const [isTyping, setIsTyping] = useState(false); // Waiting for API
+    const summaryControlsReady = !isTyping;
     const [showExitModal, setShowExitModal] = useState(false);
     
     // Inner Whispers State (内心低语)
@@ -316,41 +262,21 @@ const DateSession: React.FC<DateSessionProps> = ({
     const novelScrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const isResumedRef = useRef(false);
-    const bgRevealCancelRef = useRef<(() => void) | null>(null);
-    const spriteRevealCancelRef = useRef<(() => void) | null>(null);
     const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const setDeferredBgImage = React.useCallback((src: string) => {
+    const setImmediateBgImage = React.useCallback((src: string) => {
         setBgImage(src);
-        bgRevealCancelRef.current?.();
-        bgRevealCancelRef.current = null;
-
-        if (!src) {
-            setVisibleBgImage('');
-            return;
-        }
-
-        bgRevealCancelRef.current = scheduleDateAssetReveal(src, setVisibleBgImage);
+        setVisibleBgImage(src);
     }, []);
 
-    const setDeferredCurrentSprite = React.useCallback((src: string, key?: string) => {
+    const setImmediateCurrentSprite = React.useCallback((src: string, key?: string) => {
         setCurrentSprite(src);
         setCurrentSpriteKey(key);
-        spriteRevealCancelRef.current?.();
-        spriteRevealCancelRef.current = null;
-
-        if (!src) {
-            setVisibleCurrentSprite('');
-            return;
-        }
-
-        spriteRevealCancelRef.current = scheduleDateAssetReveal(src, setVisibleCurrentSprite);
+        setVisibleCurrentSprite(src);
     }, []);
 
     useEffect(() => {
         return () => {
-            bgRevealCancelRef.current?.();
-            spriteRevealCancelRef.current?.();
             if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
         };
     }, []);
@@ -465,8 +391,8 @@ const DateSession: React.FC<DateSessionProps> = ({
                 setCurrentSpriteKey(resolvedSpriteKey);
                 setVisibleCurrentSprite('');
             } else {
-                setDeferredBgImage(resolvedBg);
-                setDeferredCurrentSprite(resolvedSprite, resolvedSpriteKey);
+                setImmediateBgImage(resolvedBg);
+                setImmediateCurrentSprite(resolvedSprite, resolvedSpriteKey);
             }
             setCurrentText(initialState.currentText || '');
             setDisplayedText(initialState.currentText || '');
@@ -514,8 +440,8 @@ const DateSession: React.FC<DateSessionProps> = ({
                 setCurrentSpriteKey(initSpriteKey);
                 setVisibleCurrentSprite('');
             } else {
-                setDeferredBgImage(char.dateBackground || '');
-                setDeferredCurrentSprite(initSprite, initSpriteKey);
+                setImmediateBgImage(char.dateBackground || '');
+                setImmediateCurrentSprite(initSprite, initSpriteKey);
             }
             
             // Parse Peek Status as opening
@@ -552,17 +478,8 @@ const DateSession: React.FC<DateSessionProps> = ({
     // Sprite & Config Sync (If user goes to settings and comes back, this helps)
     useEffect(() => {
         if (char.spriteConfig) setSpriteConfig(char.spriteConfig);
-        if (char.dateBackground && !isResumedRef.current && !visualSafeMode) setDeferredBgImage(char.dateBackground);
-    }, [char, setDeferredBgImage, visualSafeMode]);
-
-    useEffect(() => {
-        if (isTyping) {
-            setSummaryControlsReady(false);
-            return;
-        }
-        const id = setTimeout(() => setSummaryControlsReady(true), visualSafeMode ? 900 : 300);
-        return () => clearTimeout(id);
-    }, [isTyping, visualSafeMode]);
+        if (char.dateBackground && !isResumedRef.current && !visualSafeMode) setImmediateBgImage(char.dateBackground);
+    }, [char, setImmediateBgImage, visualSafeMode]);
 
     // Novel Mode Scroll
     useEffect(() => {
@@ -630,7 +547,7 @@ const DateSession: React.FC<DateSessionProps> = ({
         const autosaveSprite = nextSprite?.src ?? currentSprite;
         const autosaveSpriteKey = nextSprite?.key ?? currentSpriteKey;
         if (nextSprite) {
-            setDeferredCurrentSprite(nextSprite.src, nextSprite.key);
+            setImmediateCurrentSprite(nextSprite.src, nextSprite.key);
         }
         setDialogueQueue(remaining);
         emitAutosave(options.autosaveReason || 'dialogue-progress', {
