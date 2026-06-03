@@ -8,6 +8,8 @@ import MeituanTakeoutCard from './phone/MeituanTakeoutCard';
 import CallLogCard from './phone/CallLogCard';
 import SocialPostSpyCard from './phone/SocialPostSpyCard';
 import DefaultAppCard from './phone/DefaultAppCard';
+import NeteaseMusicPhoneCard, { NeteaseMusicPhoneTrack } from './phone/NeteaseMusicPhoneCard';
+import ShiguangCameraCard from './phone/ShiguangCameraCard';
 
 /**
  * PhoneEvidenceCard — Pure Dispatcher / Router
@@ -21,6 +23,8 @@ import DefaultAppCard from './phone/DefaultAppCard';
 
 interface PhoneEvidenceCardProps {
     message: Message;
+    charName?: string;
+    charAvatar?: string;
 }
 
 function asPhoneCardText(value: unknown, fallback = '', maxChars = 1200): string {
@@ -55,16 +59,51 @@ function asPhoneCardText(value: unknown, fallback = '', maxChars = 1200): string
     return `${normalized.slice(0, maxChars).trimEnd()}...`;
 }
 
-const PhoneEvidenceCard: React.FC<PhoneEvidenceCardProps> = ({ message }) => {
+function asPhoneCardNumber(value: unknown): number | undefined {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function asPhoneCardImageUrl(value: unknown): string | undefined {
+    return asPhoneCardText(value, '', Number.POSITIVE_INFINITY) || undefined;
+}
+
+function asNeteaseTrack(value: unknown): NeteaseMusicPhoneTrack | null {
+    if (!value || typeof value !== 'object') return null;
+    const record = value as Record<string, unknown>;
+    const title = asPhoneCardText(record.title);
+    const artist = asPhoneCardText(record.artist);
+    if (!title && !artist) return null;
+
+    return {
+        title,
+        artist,
+        comment: asPhoneCardText(record.comment) || undefined,
+        tag: asPhoneCardText(record.tag) || undefined,
+        albumCover: asPhoneCardText(record.albumCover) || undefined,
+        playlistName: asPhoneCardText(record.playlistName) || undefined,
+        playlistCount: asPhoneCardNumber(record.playlistCount),
+        playlistIndex: asPhoneCardNumber(record.playlistIndex),
+        songIndex: asPhoneCardNumber(record.songIndex),
+    };
+}
+
+const PhoneEvidenceCard: React.FC<PhoneEvidenceCardProps> = ({ message, charName: currentCharName, charAvatar: currentCharAvatar }) => {
     const meta = message.metadata || {};
     const phoneType = asPhoneCardText(meta.phoneType);
     const title = asPhoneCardText(meta.phoneTitle);
     const detail = asPhoneCardText(meta.phoneDetail);
     const value = asPhoneCardText(meta.phoneValue) || undefined;
     const label = asPhoneCardText(meta.phoneLabel, phoneType);
-    const charName = asPhoneCardText(meta.charName);
-    const charAvatar = asPhoneCardText(meta.charAvatar) || undefined;
+    const charName = currentCharName || asPhoneCardText(meta.charName);
+    const charAvatar = currentCharAvatar || asPhoneCardText(meta.charAvatar) || undefined;
     const shop = asPhoneCardText(meta.phoneShop) || undefined;
+    const comment = asPhoneCardText(meta.phoneComment) || undefined;
+    const albumCover = asPhoneCardImageUrl(meta.phoneAlbumCover);
+    const profileNickname = asPhoneCardText(meta.phoneProfileNickname) || undefined;
+    const profileLevel = asPhoneCardNumber(meta.phoneProfileLevel);
+    const profileSignature = asPhoneCardText(meta.phoneProfileSignature) || undefined;
+    const profilePlayCount = asPhoneCardNumber(meta.phoneProfilePlayCount);
 
     switch (phoneType) {
         case 'chat':
@@ -77,6 +116,57 @@ const PhoneEvidenceCard: React.FC<PhoneEvidenceCardProps> = ({ message }) => {
             return <CallLogCard title={title} detail={detail} value={value} />;
         case 'social':
             return <SocialPostSpyCard title={title} detail={detail} charName={charName} charAvatar={charAvatar} />;
+        case 'shiguang_camera':
+            return (
+                <ShiguangCameraCard
+                    title={title}
+                    value={value}
+                    comment={comment}
+                    albumCover={albumCover}
+                    charName={charName}
+                    charAvatar={charAvatar}
+                />
+            );
+        case 'netease_music_page': {
+            const tracks = Array.isArray(meta.phoneNeteaseTracks)
+                ? meta.phoneNeteaseTracks
+                    .map(asNeteaseTrack)
+                    .filter((track): track is NeteaseMusicPhoneTrack => Boolean(track))
+                : [];
+            return (
+                <NeteaseMusicPhoneCard
+                    profileNickname={profileNickname}
+                    profileLevel={profileLevel}
+                    profileSignature={profileSignature}
+                    profilePlayCount={profilePlayCount}
+                    charName={charName}
+                    charAvatar={charAvatar}
+                    tracks={tracks}
+                />
+            );
+        }
+        case 'netease_music':
+            return (
+                <NeteaseMusicPhoneCard
+                    profileNickname={profileNickname}
+                    profileLevel={profileLevel}
+                    profileSignature={profileSignature}
+                    profilePlayCount={profilePlayCount}
+                    charName={charName}
+                    charAvatar={charAvatar}
+                    tracks={[{
+                        title,
+                        artist: asPhoneCardText(meta.phoneArtist) || detail.split(/\s*\|\s*|\n/)[0] || '未知歌手',
+                        comment,
+                        tag: value,
+                        albumCover,
+                        playlistName: asPhoneCardText(meta.phonePlaylistName) || undefined,
+                        playlistCount: asPhoneCardNumber(meta.phonePlaylistCount),
+                        playlistIndex: asPhoneCardNumber(meta.phonePlaylistIndex),
+                        songIndex: asPhoneCardNumber(meta.phoneSongIndex),
+                    }]}
+                />
+            );
         default:
             // Custom apps or unknown types — generic purple card
             return <DefaultAppCard label={label} title={title} detail={detail} value={value} />;

@@ -344,7 +344,7 @@ const MessageItem = React.memo(({
             noticeCard = <StoryPhoneEvidenceCard message={m} />;
         } else if (m.metadata?.source === 'phone' && m.metadata?.phoneTitle) {
             // Phone evidence with structured data → render as app-simulation card
-            noticeCard = <PhoneEvidenceCard message={m} />;
+            noticeCard = <PhoneEvidenceCard message={m} charName={charName} charAvatar={charAvatar} />;
         } else if (m.metadata?.source === 'room' && m.metadata?.roomEvent === 'todo') {
             // Room daily plan → collage journal style card
             noticeCard = <RoomPlanCard message={m} />;

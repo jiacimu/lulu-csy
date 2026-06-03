@@ -406,6 +406,7 @@ export const XhsMcpSection = React.memo<XhsMcpProps>(({ enabled, mcpUrl, nicknam
                     </div>
                     <p className="text-[10px] text-red-500/70 leading-relaxed">
                         <b>推荐用法：</b>双击 scripts/start-xhs.bat 一键启动，连接 {recommendedBridgeUrl}<br />
+                        手机或另一台设备访问时，请把 localhost 改成电脑局域网 IP，例如 http://192.168.x.x:18061/api<br />
                         本地开发也可直接用 /xhs-api（Vite 代理）<br />
                         连接成功后会自动读取昵称和登录状态
                     </p>

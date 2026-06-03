@@ -23,8 +23,32 @@ type BackendMode = 'mcp' | 'bridge';
 const XHS_BRIDGE_SERVER_URL = 'http://localhost:18061/api';
 
 const detectMode = (serverUrl: string): BackendMode => {
-    if (serverUrl.includes('/api')) return 'bridge';
+    const normalized = serverUrl.trim().toLowerCase();
+    try {
+        const { pathname, port } = new URL(normalized, 'http://local.test');
+        if (
+            port === '18061'
+            || pathname === '/api'
+            || pathname.startsWith('/api/')
+            || pathname === '/xhs-api'
+            || pathname.startsWith('/xhs-api/')
+        ) return 'bridge';
+    } catch {
+        if (normalized.includes('18061') || normalized.includes('/xhs-api')) return 'bridge';
+    }
     return 'mcp'; // default: MCP (backwards compatible)
+};
+
+const buildBridgeUrl = (serverUrl: string, endpoint: string): string => {
+    const cleanBase = serverUrl.trim().replace(/\/+$/, '');
+    const cleanEndpoint = endpoint.replace(/^\/+/, '');
+    if (
+        cleanBase.endsWith('/api')
+        || cleanBase.endsWith('/xhs-api')
+    ) {
+        return `${cleanBase}/${cleanEndpoint}`;
+    }
+    return `${cleanBase}/api/${cleanEndpoint}`;
 };
 
 const isConnectionRefusedError = (message: string): boolean => {
@@ -42,8 +66,11 @@ const formatConnectionError = (serverUrl: string, error: unknown): string => {
         return rawMessage;
     }
 
-    if (serverUrl.includes('/api') || serverUrl.includes('18061')) {
-        return `连接不到 ${serverUrl}。请先运行 scripts/start-xhs.bat，启动 Bridge 服务后再试（推荐地址: ${XHS_BRIDGE_SERVER_URL}）。`;
+    if (detectMode(serverUrl) === 'bridge') {
+        const mobileHint = /localhost|127\.0\.0\.1/i.test(serverUrl)
+            ? '如果你是在手机或另一台设备上打开页面，请把 localhost 改成电脑的局域网 IP，例如 http://192.168.x.x:18061/api，并确认手机和电脑在同一 Wi-Fi。'
+            : '如果跨设备使用，请确认手机和电脑在同一 Wi-Fi，并且 Windows 防火墙已允许 18061 端口。';
+        return `连接不到 ${serverUrl}。请先运行 scripts/start-xhs.bat，启动 Bridge 服务后再试（推荐地址: ${XHS_BRIDGE_SERVER_URL}）。${mobileHint}`;
     }
 
     if (serverUrl.includes('/mcp') || serverUrl.includes('18060')) {
@@ -60,8 +87,7 @@ const bridgePost = async (
     endpoint: string,
     body: Record<string, any> = {},
 ): Promise<McpToolResult> => {
-    const baseUrl = serverUrl.replace(/\/+$/, '').replace(/\/api$/, '');
-    const url = `${baseUrl}/api/${endpoint}`;
+    const url = buildBridgeUrl(serverUrl, endpoint);
 
     try {
         const resp = await fetch(url, {
@@ -403,8 +429,7 @@ export const XhsMcpClient = {
 
         if (mode === 'bridge') {
             try {
-                const baseUrl = serverUrl.replace(/\/+$/, '').replace(/\/api$/, '');
-                const healthResp = await fetch(`${baseUrl}/api/health`);
+                const healthResp = await fetch(buildBridgeUrl(serverUrl, 'health'));
                 if (!healthResp.ok) return { connected: false, error: `Bridge 服务未响应 (HTTP ${healthResp.status})` };
 
                 const loginResult = await bridgePost(serverUrl, 'check-login');

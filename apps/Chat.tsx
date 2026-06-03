@@ -393,7 +393,7 @@ function getDisplayableMainChatMessages(
     },
 ): Message[] {
     const historyStartMessageId = getEffectiveHistoryStartMessageId(messages, options.hideBeforeMessageId);
-    return messages
+    const visibleMessages = messages
         .filter(isMainChatVisibleMessage)
         .filter(m => (m.type as string) !== 'health_signal')
         .filter(m => !shouldHideLifeStreamLikeMessage(m))
@@ -403,6 +403,104 @@ function getDisplayableMainChatMessages(
             if (options.hideSystemLogs && m.role === 'system' && m.type !== 'call_log') return false;
             return true;
         });
+
+    return collapseNeteaseMusicPhoneMessages(visibleMessages);
+}
+
+function readPhoneDisplayText(value: unknown, fallback = '', maxChars = 1200): string {
+    let text = fallback;
+    if (value === null || value === undefined) return fallback;
+
+    if (typeof value === 'string') {
+        text = value;
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+        text = String(value);
+    } else if (typeof value === 'object') {
+        const record = value as Record<string, unknown>;
+        text = readPhoneDisplayText(
+            record.text ?? record.content ?? record.name ?? record.label ?? record.title ?? record.detail ?? record.value,
+            fallback,
+            maxChars,
+        );
+    }
+
+    const normalized = text.trim();
+    if (normalized.length <= maxChars) return normalized;
+    return `${normalized.slice(0, maxChars).trimEnd()}...`;
+}
+
+function readPhoneDisplayNumber(value: unknown): number | undefined {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function isNeteaseMusicPhoneMessage(message: Message): boolean {
+    return (
+        message.role === 'system' &&
+        message.metadata?.source === 'phone' &&
+        readPhoneDisplayText(message.metadata?.phoneType) === 'netease_music'
+    );
+}
+
+function toNeteaseMusicPageMessage(group: Message[]): Message {
+    const first = group[0];
+    const firstMeta = first.metadata || {};
+    const tracks = group.map(message => {
+        const meta = message.metadata || {};
+        const title = readPhoneDisplayText(meta.phoneTitle);
+        const detail = readPhoneDisplayText(meta.phoneDetail);
+        return {
+            title,
+            artist: readPhoneDisplayText(meta.phoneArtist) || detail.split(/\s*\|\s*|\n/)[0] || '未知歌手',
+            comment: readPhoneDisplayText(meta.phoneComment) || undefined,
+            tag: readPhoneDisplayText(meta.phoneValue) || undefined,
+            albumCover: readPhoneDisplayText(meta.phoneAlbumCover) || undefined,
+            playlistName: readPhoneDisplayText(meta.phonePlaylistName) || undefined,
+            playlistCount: readPhoneDisplayNumber(meta.phonePlaylistCount),
+            playlistIndex: readPhoneDisplayNumber(meta.phonePlaylistIndex),
+            songIndex: readPhoneDisplayNumber(meta.phoneSongIndex),
+        };
+    });
+
+    const nickname = readPhoneDisplayText(firstMeta.phoneProfileNickname);
+    return {
+        ...first,
+        content: first.content,
+        metadata: {
+            ...firstMeta,
+            source: 'phone',
+            phoneType: 'netease_music_page',
+            phoneLabel: '网易云音乐',
+            phoneTitle: nickname ? `${nickname}的网易云音乐` : '网易云音乐主页',
+            phoneDetail: `${tracks.length} 首听歌痕迹`,
+            phoneNeteaseTracks: tracks,
+            phoneGroupedMessageIds: group.map(message => message.id),
+        },
+    };
+}
+
+function collapseNeteaseMusicPhoneMessages(messages: Message[]): Message[] {
+    const collapsed: Message[] = [];
+    let group: Message[] = [];
+
+    const flushGroup = () => {
+        if (group.length === 0) return;
+        collapsed.push(toNeteaseMusicPageMessage(group));
+        group = [];
+    };
+
+    for (const message of messages) {
+        if (isNeteaseMusicPhoneMessage(message)) {
+            group.push(message);
+            continue;
+        }
+
+        flushGroup();
+        collapsed.push(message);
+    }
+
+    flushGroup();
+    return collapsed;
 }
 
 type ScopedAgentTodayScheduleState = AgentTodayScheduleState & {
