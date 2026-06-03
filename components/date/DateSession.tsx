@@ -275,6 +275,34 @@ const DateSession: React.FC<DateSessionProps> = ({
         setVisibleCurrentSprite(src);
     }, []);
 
+    const restoreVisualAssetsAfterReply = React.useCallback(() => {
+        const resolvedBg = bgImage || resolveDateStateBackground(char, initialState) || char.dateBackground || '';
+        const resolvedSprite = currentSprite || resolveDateStateSprite(char, {
+            currentSprite,
+            currentSpriteKey,
+        });
+        const resolvedSpriteKey = currentSpriteKey || findDateSpriteKey(char, resolvedSprite);
+
+        setVisualSafeMode(false);
+        setImmediateBgImage(resolvedBg);
+        setImmediateCurrentSprite(resolvedSprite, resolvedSpriteKey);
+
+        return {
+            bgImage: resolvedBg,
+            currentSprite: resolvedSprite,
+            currentSpriteKey: resolvedSpriteKey,
+            visualSafeMode: false,
+        };
+    }, [
+        bgImage,
+        char,
+        currentSprite,
+        currentSpriteKey,
+        initialState,
+        setImmediateBgImage,
+        setImmediateCurrentSprite,
+    ]);
+
     useEffect(() => {
         return () => {
             if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
@@ -539,13 +567,18 @@ const DateSession: React.FC<DateSessionProps> = ({
             autosaveReason?: string;
             immediate?: boolean;
             dialogueBatchOverride?: DialogueItem[];
+            bgImageOverride?: string;
+            currentSpriteOverride?: string;
+            currentSpriteKeyOverride?: string;
+            isNovelModeOverride?: boolean;
+            visualSafeModeOverride?: boolean;
         } = {},
     ) => {
         setCurrentText(item.text);
         setCurrentTranslation(item.translationText || '');
         const nextSprite = resolveSpriteForEmotion(item.emotion);
-        const autosaveSprite = nextSprite?.src ?? currentSprite;
-        const autosaveSpriteKey = nextSprite?.key ?? currentSpriteKey;
+        const autosaveSprite = nextSprite?.src ?? options.currentSpriteOverride ?? currentSprite;
+        const autosaveSpriteKey = nextSprite?.key ?? options.currentSpriteKeyOverride ?? currentSpriteKey;
         if (nextSprite) {
             setImmediateCurrentSprite(nextSprite.src, nextSprite.key);
         }
@@ -554,10 +587,11 @@ const DateSession: React.FC<DateSessionProps> = ({
             dialogueQueue: remaining,
             dialogueBatch: options.dialogueBatchOverride ?? dialogueBatch,
             currentText: item.text,
+            bgImage: options.bgImageOverride ?? bgImage,
             currentSprite: autosaveSprite,
             currentSpriteKey: autosaveSpriteKey,
-            isNovelMode,
-            visualSafeMode,
+            isNovelMode: options.isNovelModeOverride ?? isNovelMode,
+            visualSafeMode: options.visualSafeModeOverride ?? visualSafeMode,
             timestamp: Date.now(),
             peekStatus,
         }, !!options.immediate);
@@ -602,11 +636,10 @@ const DateSession: React.FC<DateSessionProps> = ({
     const handleSend = async (directorHint?: string) => {
         if (!input.trim() && !directorHint || isTyping) return;
         const text = input.trim();
+        const previousNovelMode = isNovelMode;
         setInput('');
         setShowInputBox(false);
         setIsTyping(true);
-        setVisualSafeMode(true);
-        setIsNovelMode(true);
         clearWhispers();
         emitAutosave('before-send', {
             dialogueQueue,
@@ -614,14 +647,16 @@ const DateSession: React.FC<DateSessionProps> = ({
             currentText,
             currentSprite,
             currentSpriteKey,
-            isNovelMode: true,
-            visualSafeMode: true,
+            isNovelMode,
+            visualSafeMode,
             timestamp: Date.now(),
             peekStatus,
         }, true);
 
         try {
             const result = await onSendMessage(text, directorHint);
+            const restoredVisuals = restoreVisualAssetsAfterReply();
+            setIsNovelMode(previousNovelMode);
             // Parse new content
             const items = parseDialogue(result.content, 'normal');
             const first = items[0];
@@ -633,14 +668,22 @@ const DateSession: React.FC<DateSessionProps> = ({
                     autosaveReason: 'after-reply',
                     immediate: true,
                     dialogueBatchOverride: items,
+                    bgImageOverride: restoredVisuals.bgImage,
+                    currentSpriteOverride: restoredVisuals.currentSprite,
+                    currentSpriteKeyOverride: restoredVisuals.currentSpriteKey,
+                    isNovelModeOverride: previousNovelMode,
+                    visualSafeModeOverride: false,
                 });
             } else {
                 emitAutosave('after-reply', {
                     dialogueQueue: [],
                     dialogueBatch: [],
                     currentText: '',
-                    isNovelMode: true,
-                    visualSafeMode: true,
+                    bgImage: restoredVisuals.bgImage,
+                    currentSprite: restoredVisuals.currentSprite,
+                    currentSpriteKey: restoredVisuals.currentSpriteKey,
+                    isNovelMode: previousNovelMode,
+                    visualSafeMode: false,
                     timestamp: Date.now(),
                     peekStatus,
                 }, true);
@@ -665,8 +708,8 @@ const DateSession: React.FC<DateSessionProps> = ({
                 currentText: errorText,
                 currentSprite,
                 currentSpriteKey,
-                isNovelMode: true,
-                visualSafeMode: true,
+                isNovelMode,
+                visualSafeMode,
                 timestamp: Date.now(),
                 peekStatus,
             }, true);
@@ -679,10 +722,9 @@ const DateSession: React.FC<DateSessionProps> = ({
         e.stopPropagation();
         if (!pendingReplyGap || isTyping) return;
 
+        const previousNovelMode = isNovelMode;
         setShowInputBox(false);
         setIsTyping(true);
-        setVisualSafeMode(true);
-        setIsNovelMode(true);
         clearWhispers();
         emitAutosave('before-retry-missing-reply', {
             dialogueQueue,
@@ -690,14 +732,16 @@ const DateSession: React.FC<DateSessionProps> = ({
             currentText,
             currentSprite,
             currentSpriteKey,
-            isNovelMode: true,
-            visualSafeMode: true,
+            isNovelMode,
+            visualSafeMode,
             timestamp: Date.now(),
             peekStatus,
         }, true);
 
         try {
             const result = await onRetryMissingReply(pendingReplyGap.userMessageId);
+            const restoredVisuals = restoreVisualAssetsAfterReply();
+            setIsNovelMode(previousNovelMode);
             const items = parseDialogue(result.content, 'normal');
             const first = items[0];
             const remaining = first ? items.slice(1) : [];
@@ -708,14 +752,22 @@ const DateSession: React.FC<DateSessionProps> = ({
                     autosaveReason: 'after-reply',
                     immediate: true,
                     dialogueBatchOverride: items,
+                    bgImageOverride: restoredVisuals.bgImage,
+                    currentSpriteOverride: restoredVisuals.currentSprite,
+                    currentSpriteKeyOverride: restoredVisuals.currentSpriteKey,
+                    isNovelModeOverride: previousNovelMode,
+                    visualSafeModeOverride: false,
                 });
             } else {
                 emitAutosave('after-reply', {
                     dialogueQueue: [],
                     dialogueBatch: [],
                     currentText: '',
-                    isNovelMode: true,
-                    visualSafeMode: true,
+                    bgImage: restoredVisuals.bgImage,
+                    currentSprite: restoredVisuals.currentSprite,
+                    currentSpriteKey: restoredVisuals.currentSpriteKey,
+                    isNovelMode: previousNovelMode,
+                    visualSafeMode: false,
                     timestamp: Date.now(),
                     peekStatus,
                 }, true);
@@ -738,8 +790,8 @@ const DateSession: React.FC<DateSessionProps> = ({
                 currentText: errorText,
                 currentSprite,
                 currentSpriteKey,
-                isNovelMode: true,
-                visualSafeMode: true,
+                isNovelMode,
+                visualSafeMode,
                 timestamp: Date.now(),
                 peekStatus,
             }, true);
@@ -751,10 +803,9 @@ const DateSession: React.FC<DateSessionProps> = ({
     // Handle whisper option click: send the whisper as user action with hidden director hint
     const handleWhisperClick = async (whisper: InnerWhisper) => {
         if (isTyping) return;
+        const previousNovelMode = isNovelMode;
         clearWhispers();
         setIsTyping(true);
-        setVisualSafeMode(true);
-        setIsNovelMode(true);
 
         // The whisper text becomes the user's visible action
         const userAction = whisper.whisper;
@@ -764,14 +815,16 @@ const DateSession: React.FC<DateSessionProps> = ({
             currentText,
             currentSprite,
             currentSpriteKey,
-            isNovelMode: true,
-            visualSafeMode: true,
+            isNovelMode,
+            visualSafeMode,
             timestamp: Date.now(),
             peekStatus,
         }, true);
 
         try {
             const result = await onSendMessage(userAction, whisper.secret || undefined);
+            const restoredVisuals = restoreVisualAssetsAfterReply();
+            setIsNovelMode(previousNovelMode);
             const items = parseDialogue(result.content, 'normal');
             const first = items[0];
             const remaining = first ? items.slice(1) : [];
@@ -782,14 +835,22 @@ const DateSession: React.FC<DateSessionProps> = ({
                     autosaveReason: 'after-reply',
                     immediate: true,
                     dialogueBatchOverride: items,
+                    bgImageOverride: restoredVisuals.bgImage,
+                    currentSpriteOverride: restoredVisuals.currentSprite,
+                    currentSpriteKeyOverride: restoredVisuals.currentSpriteKey,
+                    isNovelModeOverride: previousNovelMode,
+                    visualSafeModeOverride: false,
                 });
             } else {
                 emitAutosave('after-reply', {
                     dialogueQueue: [],
                     dialogueBatch: [],
                     currentText: '',
-                    isNovelMode: true,
-                    visualSafeMode: true,
+                    bgImage: restoredVisuals.bgImage,
+                    currentSprite: restoredVisuals.currentSprite,
+                    currentSpriteKey: restoredVisuals.currentSpriteKey,
+                    isNovelMode: previousNovelMode,
+                    visualSafeMode: false,
                     timestamp: Date.now(),
                     peekStatus,
                 }, true);
@@ -813,8 +874,8 @@ const DateSession: React.FC<DateSessionProps> = ({
                 currentText: errorText,
                 currentSprite,
                 currentSpriteKey,
-                isNovelMode: true,
-                visualSafeMode: true,
+                isNovelMode,
+                visualSafeMode,
                 timestamp: Date.now(),
                 peekStatus,
             }, true);
@@ -825,9 +886,8 @@ const DateSession: React.FC<DateSessionProps> = ({
 
     const handleRerollClick = async () => {
         if (isTyping) return;
+        const previousNovelMode = isNovelMode;
         setIsTyping(true);
-        setVisualSafeMode(true);
-        setIsNovelMode(true);
         clearWhispers();
         emitAutosave('before-reroll', {
             dialogueQueue,
@@ -835,13 +895,15 @@ const DateSession: React.FC<DateSessionProps> = ({
             currentText,
             currentSprite,
             currentSpriteKey,
-            isNovelMode: true,
-            visualSafeMode: true,
+            isNovelMode,
+            visualSafeMode,
             timestamp: Date.now(),
             peekStatus,
         }, true);
         try {
             const result = await onReroll();
+            const restoredVisuals = restoreVisualAssetsAfterReply();
+            setIsNovelMode(previousNovelMode);
             const items = parseDialogue(result.content, 'normal');
             const first = items[0];
             const remaining = first ? items.slice(1) : [];
@@ -852,14 +914,22 @@ const DateSession: React.FC<DateSessionProps> = ({
                     autosaveReason: 'after-reply',
                     immediate: true,
                     dialogueBatchOverride: items,
+                    bgImageOverride: restoredVisuals.bgImage,
+                    currentSpriteOverride: restoredVisuals.currentSprite,
+                    currentSpriteKeyOverride: restoredVisuals.currentSpriteKey,
+                    isNovelModeOverride: previousNovelMode,
+                    visualSafeModeOverride: false,
                 });
             } else {
                 emitAutosave('after-reply', {
                     dialogueQueue: [],
                     dialogueBatch: [],
                     currentText: '',
-                    isNovelMode: true,
-                    visualSafeMode: true,
+                    bgImage: restoredVisuals.bgImage,
+                    currentSprite: restoredVisuals.currentSprite,
+                    currentSpriteKey: restoredVisuals.currentSpriteKey,
+                    isNovelMode: previousNovelMode,
+                    visualSafeMode: false,
                     timestamp: Date.now(),
                     peekStatus,
                 }, true);
@@ -881,8 +951,8 @@ const DateSession: React.FC<DateSessionProps> = ({
                 currentText,
                 currentSprite,
                 currentSpriteKey,
-                isNovelMode: true,
-                visualSafeMode: true,
+                isNovelMode,
+                visualSafeMode,
                 timestamp: Date.now(),
                 peekStatus,
             }, true);
@@ -966,7 +1036,7 @@ const DateSession: React.FC<DateSessionProps> = ({
     // Determine if we can reroll (last message is assistant)
     const canReroll = messages.length > 0 && messages[messages.length - 1].role === 'assistant';
     const transientUiActive = showInputBox || isTyping;
-    const renderVisualAssets = !visualSafeMode && !isTyping;
+    const renderVisualAssets = !visualSafeMode;
     const backgroundLayerClass = renderVisualAssets && isNovelMode
         ? 'blur-xl opacity-30'
         : isNovelMode

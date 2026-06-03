@@ -111,14 +111,10 @@ export function createLightweightDateState(
 }
 
 export function shouldUseDateVisualSafeMode(state?: Partial<DateState>, device?: DateDeviceInfo): boolean {
-    if (state?.visualSafeMode) return true;
-    if (state?.autosaveReason && state.autosaveReason !== 'manual-exit') return true;
-
-    const nav = device || (typeof navigator !== 'undefined' ? navigator as DateDeviceInfo : undefined);
-    if (!nav) return false;
-    if (nav.connection?.saveData || nav.mozConnection?.saveData || nav.webkitConnection?.saveData) return true;
-    if (typeof nav.deviceMemory === 'number' && nav.deviceMemory <= 4) return true;
-    if (typeof nav.hardwareConcurrency === 'number' && nav.hardwareConcurrency <= 4) return true;
+    void device;
+    if (state?.restoredFromHistory) return true;
+    if (state?.autosaveReason === 'history-recovery') return true;
+    if (state?.autosaveReason === 'send-error' && state?.visualSafeMode) return true;
     return false;
 }
 

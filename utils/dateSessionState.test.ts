@@ -89,11 +89,13 @@ describe('date session lightweight state', () => {
         expect(resolveDateStateSprite(char, { currentSpriteKey: 'happy' })).toBe('skin-2-happy.png');
     });
 
-    it('detects safe visual mode for weak devices and abnormal autosaves', () => {
-        expect(shouldUseDateVisualSafeMode(undefined, { deviceMemory: 4 })).toBe(true);
-        expect(shouldUseDateVisualSafeMode(undefined, { hardwareConcurrency: 4 })).toBe(true);
-        expect(shouldUseDateVisualSafeMode(undefined, { connection: { saveData: true } })).toBe(true);
-        expect(shouldUseDateVisualSafeMode({ autosaveReason: 'after-reply' })).toBe(true);
+    it('only uses visual safe mode for explicit recovery states', () => {
+        expect(shouldUseDateVisualSafeMode(undefined, { deviceMemory: 4 })).toBe(false);
+        expect(shouldUseDateVisualSafeMode(undefined, { hardwareConcurrency: 4 })).toBe(false);
+        expect(shouldUseDateVisualSafeMode(undefined, { connection: { saveData: true } })).toBe(false);
+        expect(shouldUseDateVisualSafeMode({ autosaveReason: 'after-reply', visualSafeMode: true })).toBe(false);
+        expect(shouldUseDateVisualSafeMode({ autosaveReason: 'history-recovery' })).toBe(true);
+        expect(shouldUseDateVisualSafeMode({ restoredFromHistory: true })).toBe(true);
     });
 
     it('builds a text-first recovery state from recent date history', () => {
