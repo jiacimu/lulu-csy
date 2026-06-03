@@ -27,6 +27,7 @@ import { isDateModeContextMessage } from '../utils/mainlineMemory';
 import { trackedApiRequest } from '../utils/apiRequestLedger';
 import { buildTemporalContext } from '../utils/temporalContext';
 import { EventExtractor } from '../utils/eventExtractor';
+import { buildDateHistoryRecoveryState } from '../utils/dateSessionState';
 
 type SummaryType = 'auto' | 'manual';
 const DATE_SUMMARY_CONTEXT_KEEP_COUNT = 5;
@@ -269,6 +270,8 @@ const DateApp: React.FC = () => {
 
     // Resume Logic State
     const [pendingSessionCharId, setPendingSessionCharId] = useState<string | null>(null);
+    const [resumeOverrideState, setResumeOverrideState] = useState<DateState | null>(null);
+    const [pendingRecoveryState, setPendingRecoveryState] = useState<DateState | null>(null);
 
     // --- NEW: Editing State lifted to here for DB sync ---
     const [dateMessages, setDateMessages] = useState<Message[]>([]);
@@ -291,6 +294,7 @@ const DateApp: React.FC = () => {
 
     const char = characters.find(c => c.id === activeCharacterId);
     const pendingChar = pendingSessionCharId ? characters.find(c => c.id === pendingSessionCharId) : null;
+    const pendingSessionState = pendingChar?.savedDateState || pendingRecoveryState;
     const secondaryApiConfig = getSecondaryApiConfig();
     const canManualSummary = hasCompleteApiConfig(secondaryApiConfig) || hasCompleteApiConfig(apiConfig);
     const canAutoSummary = hasCompleteApiConfig(secondaryApiConfig);
@@ -325,9 +329,9 @@ const DateApp: React.FC = () => {
     }, [char?.id, dateTranslateTargetLang]);
 
     // --- Data Loading ---
-    const loadDateMessages = async () => {
-        if (char) {
-            const msgs = await DB.getMessagesByCharId(char.id);
+    const loadDateMessages = async (charId = char?.id) => {
+        if (charId) {
+            const msgs = await DB.getMessagesByCharId(charId);
             // 只筛选 source='date' 的消息用于小说模式显示
             const filtered = msgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp);
             setDateMessages(filtered);
@@ -344,6 +348,17 @@ const DateApp: React.FC = () => {
             loadDateMessages();
         }
     }, [char, mode]);
+
+    const handleDateAutosaveState = React.useCallback((state: DateState, reason: string) => {
+        if (!char) return;
+        updateCharacter(char.id, {
+            savedDateState: {
+                ...state,
+                autosaveReason: reason,
+                autosavedAt: Date.now(),
+            },
+        }, { skipImmediateAgentContextPush: true });
+    }, [char, updateCharacter]);
 
     // --- Navigation Helpers ---
     const handleBack = () => {
@@ -923,6 +938,8 @@ ${exitPromptContent}
         setMode('select');
         setPeekStatus('');
         setHasSavedOpening(false);
+        setResumeOverrideState(null);
+        setPendingRecoveryState(null);
     };
 
     const saveRawBridgeAndExit = async (finalState: DateState) => {
@@ -1229,26 +1246,51 @@ ${exitPromptContent}
     };
 
     // --- Resume / Start Logic ---
-    const handleCharClick = (c: CharacterProfile) => {
+    const handleCharClick = async (c: CharacterProfile) => {
+        setResumeOverrideState(null);
+        setPendingRecoveryState(null);
+
         if (c.savedDateState) {
             setPendingSessionCharId(c.id);
-        } else {
-            startPeek(c);
+            return;
         }
+
+        const msgs = await DB.getMessagesByCharId(c.id);
+        const recoveryState = buildDateHistoryRecoveryState(msgs, c);
+        if (recoveryState) {
+            setPendingRecoveryState(recoveryState);
+            setPendingSessionCharId(c.id);
+            return;
+        }
+
+        startPeek(c);
     };
 
-    const handleResumeSession = () => {
+    const clearPendingSessionPrompt = () => {
+        setPendingSessionCharId(null);
+        setPendingRecoveryState(null);
+    };
+
+    const handleResumeSession = async () => {
         if (!pendingSessionCharId) return;
         const c = characters.find(ch => ch.id === pendingSessionCharId);
-        if (!c || !c.savedDateState) {
+        const resumeState = c?.savedDateState || pendingRecoveryState;
+        if (!c || !resumeState) {
             addToast('存档已丢失', 'error');
-            setPendingSessionCharId(null);
+            clearPendingSessionPrompt();
             return;
         }
         setActiveCharacterId(c.id);
         setForceFreshSession(false);
+        setResumeOverrideState(resumeState);
+        setPeekStatus(resumeState.peekStatus || '');
+        setHasSavedOpening(true);
+        if (pendingRecoveryState && !c.savedDateState) {
+            updateCharacter(c.id, { savedDateState: resumeState }, { skipImmediateAgentContextPush: true });
+        }
+        await loadDateMessages(c.id);
         setMode('session');
-        setPendingSessionCharId(null);
+        clearPendingSessionPrompt();
         addToast('已恢复上次进度', 'success');
     };
 
@@ -1256,13 +1298,15 @@ ${exitPromptContent}
         if (!pendingSessionCharId) return;
         const c = characters.find(ch => ch.id === pendingSessionCharId);
         if (!c) {
-            setPendingSessionCharId(null);
+            clearPendingSessionPrompt();
             return;
         }
-        updateCharacter(c.id, { savedDateState: undefined });
+        setResumeOverrideState(null);
+        setPendingRecoveryState(null);
+        updateCharacter(c.id, { savedDateState: undefined }, { skipImmediateAgentContextPush: true });
         setForceFreshSession(true);
         startPeek(c);
-        setPendingSessionCharId(null);
+        clearPendingSessionPrompt();
     };
 
     // --- 关键修复: 进入 Session 时立即归档开场白 ---
@@ -1294,11 +1338,14 @@ ${exitPromptContent}
 
     // --- Peek (Generation) Logic ---
     const startPeek = async (c: CharacterProfile) => {
+        setResumeOverrideState(null);
+        setPendingRecoveryState(null);
         setActiveCharacterId(c.id);
         setForceFreshSession(true);
         setMode('peek');
         setPeekLoading(true);
         setPeekStatus('');
+        setDateMessages([]);
         setHasSavedOpening(false);
 
         try {
@@ -1593,14 +1640,14 @@ ${exitPromptContent}
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" /></svg>
                             </button>
-                            <img src={c.avatar} className="w-16 h-16 rounded-full object-cover" />
+                            <img src={c.avatar} loading="lazy" decoding="async" className="w-16 h-16 rounded-full object-cover" />
                             <span className="font-bold text-slate-700">{c.name}</span>
                             {c.savedDateState && <div className="absolute top-2 left-2 w-2 h-2 bg-green-500 rounded-full animate-pulse" title="有存档"></div>}
                         </div>
                     ))}
                 </div>
-                <Modal isOpen={!!pendingSessionCharId} title="发现进度" onClose={() => setPendingSessionCharId(null)} footer={<div className="flex gap-3 w-full"><button onClick={handleStartNewSession} className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-600 font-bold">新的见面</button><button onClick={handleResumeSession} className="flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200">继续上次</button></div>}>
-                    <div className="text-center text-slate-500 text-sm py-4">检测到 {pendingChar?.name} 有未结束的见面。<br /><span className="text-xs text-slate-400 mt-2 block">(存档时间: {pendingChar?.savedDateState?.timestamp ? new Date(pendingChar.savedDateState.timestamp).toLocaleString() : 'Unknown'})</span></div>
+                <Modal isOpen={!!pendingSessionCharId} title={pendingRecoveryState ? "发现历史进度" : "发现进度"} onClose={clearPendingSessionPrompt} footer={<div className="flex gap-3 w-full"><button onClick={handleStartNewSession} className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-600 font-bold">新的见面</button><button onClick={handleResumeSession} className="flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200">继续上次</button></div>}>
+                    <div className="text-center text-slate-500 text-sm py-4">{pendingRecoveryState ? '检测到历史见面记录，可以从文本安全模式继续。' : <>检测到 {pendingChar?.name} 有未结束的见面。</>}<br /><span className="text-xs text-slate-400 mt-2 block">(存档时间: {pendingSessionState?.timestamp ? new Date(pendingSessionState.timestamp).toLocaleString() : 'Unknown'})</span></div>
                 </Modal>
             </div>
         );
@@ -1739,10 +1786,11 @@ ${exitPromptContent}
                     userProfile={userProfile}
                     messages={dateMessages}
                     peekStatus={peekStatus}
-                    initialState={forceFreshSession ? undefined : char.savedDateState}
+                    initialState={forceFreshSession ? undefined : (resumeOverrideState || char.savedDateState)}
                     onSendMessage={handleSendMessage}
                     onReroll={handleReroll}
                     onExit={onExitSession}
+                    onAutosaveState={handleDateAutosaveState}
                     onEditMessage={openEditModal}
                     onDeleteMessage={handleDeleteMessage}
                     isSummaryGenerating={isSummaryGenerating}

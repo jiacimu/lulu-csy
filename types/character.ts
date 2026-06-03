@@ -16,9 +16,21 @@ export interface DateState {
     dialogueQueue: DialogueItem[];
     dialogueBatch: DialogueItem[];
     currentText: string;
+    /** Legacy/full background value; lightweight saves prefer bgSource. */
     bgImage: string;
+    /** How to resolve bgImage without duplicating large inline assets. */
+    bgSource?: 'characterDateBackground' | 'inline' | 'none';
+    /** Legacy/full sprite value; lightweight saves prefer currentSpriteKey. */
     currentSprite: string;
+    /** Emotion/sprite key resolved from the active date skin set or default sprites. */
+    currentSpriteKey?: string;
     isNovelMode: boolean;
+    /** Prefer text-first rendering and defer visual assets on weak devices or recovered autosaves. */
+    visualSafeMode?: boolean;
+    /** Metadata for crash-resume autosaves; normal manual exits may omit it. */
+    autosaveReason?: string;
+    autosavedAt?: number;
+    restoredFromHistory?: boolean;
     timestamp: number;
     peekStatus: string;
 }

@@ -1645,28 +1645,34 @@
 }
 
 .checkphone-desktop-dock {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: center;
-  justify-content: space-between;
   flex: none;
   margin: 16px 16px 14px;
   border: 1px solid var(--cpd-line);
   border-radius: 30px;
   background: var(--cpd-card);
   box-shadow: 0 12px 30px -18px rgba(0, 0, 0, 0.3);
-  padding: 15px 24px;
+  padding: 10px 12px 9px;
+  gap: 4px;
 }
 
 .checkphone-desktop-dock-button {
+  position: relative;
   display: flex;
-  width: 32px;
-  height: 32px;
+  min-width: 0;
+  height: 54px;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 5px;
   border: 0;
-  border-radius: 16px;
+  border-radius: 18px;
   background: transparent;
   color: var(--cpd-ink);
+  font: inherit;
+  transition: transform 0.18s, background 0.18s;
 }
 
 .checkphone-desktop-dock-button:active {
@@ -1675,8 +1681,60 @@
 }
 
 .checkphone-desktop-dock-icon {
-  width: 25px;
-  height: 25px;
+  width: 23px;
+  height: 23px;
+  flex: none;
+}
+
+.checkphone-desktop-dock-custom-icon {
+  display: block;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.checkphone-desktop-dock-label {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: currentColor;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkphone-desktop-dock-badge {
+  position: absolute;
+  top: 4px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  min-width: 17px;
+  height: 17px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--cpd-card);
+  border-radius: 10px;
+  background: var(--cpd-ink);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0 5px;
+}
+
+.checkphone-desktop-dock-badge.is-dot {
+  top: 8px;
+  right: 18px;
+  min-width: 0;
+  width: 8px;
+  height: 8px;
+  padding: 0;
 }
 
 .checkphone-desktop-home-ind {
@@ -1750,6 +1808,27 @@
     width: 50px;
     height: 50px;
   }
+
+  .checkphone-desktop-dock {
+    margin-right: 14px;
+    margin-left: 14px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .checkphone-desktop-dock-button {
+    height: 52px;
+    gap: 4px;
+  }
+
+  .checkphone-desktop-dock-icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .checkphone-desktop-dock-label {
+    font-size: 9.5px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1760,6 +1839,801 @@
 
   .checkphone-desktop-pages {
     scroll-behavior: auto;
+  }
+}
+
+.shiguang-camera-page {
+  --sg-ink: #fff8ee;
+  --sg-ink-soft: rgba(255, 248, 238, 0.86);
+  --sg-ink-dim: rgba(255, 248, 238, 0.66);
+  --sg-paper: #f4e8d8;
+  --sg-paper-deep: #d8c4aa;
+  --sg-rose: #d99a8d;
+  --sg-gold: #d6b075;
+  --sg-black: #120d11;
+  --sg-line: rgba(255, 248, 238, 0.18);
+  --sg-ui-font: var(--app-font, "Quicksand", sans-serif), "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    linear-gradient(172deg, rgba(82, 48, 55, 0.88) 0%, rgba(27, 20, 29, 0.98) 46%, #0b090c 100%),
+    linear-gradient(90deg, rgba(214, 176, 117, 0.18), transparent 42%, rgba(217, 154, 141, 0.16));
+  color: var(--sg-ink);
+  font-family: var(--sg-ui-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+.shiguang-camera-page::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 248, 238, 0.08), transparent 22%),
+    linear-gradient(0deg, rgba(0, 0, 0, 0.44), transparent 42%);
+  content: "";
+}
+
+.shiguang-camera-grain {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.06;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: screen;
+}
+
+.shiguang-camera-topbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 18px;
+  padding-left: 18px;
+}
+
+.shiguang-camera-back,
+.shiguang-camera-ghost {
+  display: flex;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--sg-line);
+  border-radius: 18px;
+  background: rgba(255, 248, 238, 0.08);
+  color: var(--sg-ink);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.shiguang-camera-back svg {
+  width: 18px;
+  height: 18px;
+}
+
+.shiguang-camera-ghost {
+  font-family: Georgia, serif;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.shiguang-camera-title {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+}
+
+.shiguang-camera-title span {
+  color: var(--sg-ink);
+  font-family: var(--sg-ui-font);
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.05;
+}
+
+.shiguang-camera-title b {
+  max-width: min(210px, 100%);
+  color: rgba(255, 248, 238, 0.9);
+  font-family: var(--sg-ui-font);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.shiguang-camera-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding: 4px 18px 12px;
+}
+
+.shiguang-camera-body.is-empty {
+  gap: 16px;
+}
+
+.shiguang-viewfinder {
+  position: relative;
+  flex: none;
+  height: clamp(178px, 28vh, 250px);
+  overflow: hidden;
+  border: 1px solid rgba(255, 248, 238, 0.14);
+  border-radius: 8px;
+  background: #08070a;
+  box-shadow: 0 18px 40px -28px rgba(0, 0, 0, 0.82), inset 0 0 0 1px rgba(214, 176, 117, 0.12);
+}
+
+.shiguang-viewfinder video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.94;
+}
+
+.shiguang-viewfinder video.is-mirror {
+  transform: scaleX(-1);
+}
+
+.shiguang-viewfinder-shade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, rgba(255, 248, 238, 0.18), transparent 34%),
+    linear-gradient(0deg, rgba(10, 8, 11, 0.44), transparent 44%);
+}
+
+.shiguang-viewfinder-status {
+  position: absolute;
+  right: 12px;
+  bottom: 11px;
+  left: 12px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--sg-ink);
+  pointer-events: none;
+}
+
+.shiguang-viewfinder-status span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--sg-ink-soft);
+  font-size: 10px;
+}
+
+.shiguang-viewfinder-status span i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sg-rose);
+  box-shadow: 0 0 10px rgba(217, 154, 141, 0.75);
+}
+
+.shiguang-viewfinder-status b {
+  overflow: hidden;
+  color: var(--sg-ink);
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shiguang-viewfinder-capture,
+.shiguang-viewfinder-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  background: rgba(10, 8, 11, 0.34);
+  color: rgba(255, 248, 238, 0.9);
+  font-size: 12px;
+}
+
+.shiguang-viewfinder-capture {
+  cursor: pointer;
+}
+
+.shiguang-viewfinder-capture:active {
+  transform: scale(0.99);
+}
+
+.shiguang-viewfinder-capture span,
+.shiguang-viewfinder-fallback span {
+  font-weight: 500;
+}
+
+.shiguang-viewfinder-fallback small {
+  color: var(--sg-ink-dim);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.shiguang-viewfinder-capture svg,
+.shiguang-viewfinder-fallback svg {
+  width: 34px;
+  height: 34px;
+}
+
+.shiguang-develop-zone {
+  position: relative;
+  display: grid;
+  flex: none;
+  grid-template-columns: minmax(120px, 0.82fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  border: 1px solid rgba(255, 248, 238, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 248, 238, 0.055);
+  box-shadow: inset 0 0 0 1px rgba(214, 176, 117, 0.06), 0 18px 36px -30px rgba(0, 0, 0, 0.82);
+  padding: 12px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.shiguang-develop-zone.has-reaction-message {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.shiguang-develop-zone.has-reaction-message::before,
+.shiguang-develop-zone.has-reaction-message::after {
+  display: none;
+}
+
+.shiguang-develop-zone::before {
+  position: absolute;
+  top: 50%;
+  left: calc(39% + 4px);
+  z-index: 0;
+  width: 32px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(214, 176, 117, 0.12), rgba(214, 176, 117, 0.52), rgba(255, 248, 238, 0));
+  content: "";
+}
+
+.shiguang-develop-zone::after {
+  position: absolute;
+  top: calc(50% - 3px);
+  left: calc(39% + 33px);
+  z-index: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(214, 176, 117, 0.68);
+  box-shadow: 0 0 12px rgba(214, 176, 117, 0.42);
+  content: "";
+}
+
+.shiguang-polaroid {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 148px;
+  justify-self: center;
+  border-radius: 5px;
+  background: linear-gradient(155deg, var(--sg-paper), var(--sg-paper-deep));
+  box-shadow: 0 18px 34px -24px rgba(0, 0, 0, 0.88), inset 0 0 0 1px rgba(80, 58, 35, 0.14);
+  padding: 8px 8px 22px;
+  transform: rotate(-2deg);
+}
+
+.shiguang-polaroid.has-photo {
+  animation: shiguangPrint 0.58s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.shiguang-polaroid-photo {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 4px;
+  background: linear-gradient(145deg, #2b2524, #111014);
+  color: rgba(244, 232, 216, 0.62);
+  font-size: 11px;
+}
+
+.shiguang-polaroid-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: contrast(1.02) saturate(0.96) sepia(0.07);
+}
+
+.shiguang-polaroid.has-photo .shiguang-polaroid-photo img {
+  animation: shiguangDevelop 1.45s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.shiguang-polaroid-photo span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  text-align: center;
+}
+
+.shiguang-polaroid-caption {
+  position: absolute;
+  right: 10px;
+  bottom: 7px;
+  left: 10px;
+  overflow: hidden;
+  color: rgba(65, 48, 38, 0.7);
+  font-family: "Bodoni Moda", "Bodoni 72", Didot, Georgia, serif;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shiguang-reaction {
+  position: relative;
+  z-index: 1;
+  appearance: none;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+  border-width: 1px;
+  border: 1px solid var(--sg-line);
+  border-radius: 8px;
+  background: rgba(255, 248, 238, 0.095);
+  color: inherit;
+  cursor: default;
+  font-family: var(--sg-ui-font);
+  box-shadow: 0 14px 28px -24px rgba(0, 0, 0, 0.78);
+  padding: 12px;
+  text-align: left;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.shiguang-reaction.is-advanceable {
+  cursor: pointer;
+}
+
+.shiguang-reaction.is-advanceable:active {
+  transform: scale(0.99);
+}
+
+.shiguang-reaction.has-photo {
+  animation: shiguangSeen 0.48s 0.1s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.shiguang-reaction.has-photo .shiguang-reaction-avatar {
+  animation: shiguangAvatarSeen 0.5s 0.16s cubic-bezier(0.2, 1.25, 0.25, 1) both;
+}
+
+.shiguang-reaction.is-thinking {
+  border-color: rgba(214, 176, 117, 0.34);
+  background: rgba(255, 248, 238, 0.13);
+}
+
+.shiguang-reaction.is-thinking .shiguang-reaction-avatar {
+  box-shadow: 0 0 0 3px rgba(214, 176, 117, 0.16), 0 0 18px rgba(214, 176, 117, 0.22);
+}
+
+.shiguang-reaction-avatar {
+  display: flex;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 248, 238, 0.42);
+  border-radius: 50%;
+  background: linear-gradient(145deg, rgba(217, 154, 141, 0.88), rgba(214, 176, 117, 0.72));
+  color: var(--sg-black);
+  font-family: "Bodoni Moda", "Bodoni 72", Didot, serif;
+}
+
+.shiguang-reaction-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.shiguang-reaction-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.shiguang-reaction-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--sg-gold);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.shiguang-reaction-message-list {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.shiguang-reaction-message {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  border: 1px solid rgba(255, 248, 238, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 248, 238, 0.075);
+  color: var(--sg-ink);
+  font-size: 12.5px;
+  font-weight: 300;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  padding: 7px 9px;
+  white-space: pre-wrap;
+}
+
+.shiguang-reaction-progress {
+  align-self: flex-end;
+  margin-top: -1px;
+  color: rgba(214, 176, 117, 0.72);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.shiguang-thinking-dots {
+  display: inline-flex;
+  width: 1.6em;
+  justify-content: flex-start;
+  gap: 1px;
+  padding-left: 2px;
+}
+
+.shiguang-thinking-dots i {
+  width: 2px;
+  height: 2px;
+  align-self: flex-end;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: shiguangThinkingDot 1.05s ease-in-out infinite;
+}
+
+.shiguang-thinking-dots i:nth-child(2) {
+  animation-delay: 0.14s;
+}
+
+.shiguang-thinking-dots i:nth-child(3) {
+  animation-delay: 0.28s;
+}
+
+.shiguang-tray {
+  display: flex;
+  min-height: 76px;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-top: 1px solid rgba(255, 248, 238, 0.08);
+  padding: 8px 0 2px;
+}
+
+.shiguang-first-shot-cue {
+  display: flex;
+  min-height: 86px;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: rgba(255, 248, 238, 0.74);
+  font-size: 12px;
+}
+
+.shiguang-first-shot-cue span {
+  width: 34px;
+  height: 1px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(214, 176, 117, 0.7));
+  animation: shiguangCueFloat 2.6s ease-in-out infinite;
+}
+
+.shiguang-tray-photo {
+  position: relative;
+  width: 58px;
+  height: 72px;
+  flex: 0 0 58px;
+  overflow: hidden;
+  border: 1px solid rgba(244, 232, 216, 0.26);
+  border-radius: 5px;
+  background: var(--sg-paper);
+  padding: 4px 4px 14px;
+  transition: transform 0.18s, border-color 0.18s;
+}
+
+.shiguang-tray-photo.is-selected {
+  border-color: var(--sg-gold);
+  transform: translateY(-4px);
+}
+
+.shiguang-tray-photo img {
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+  object-fit: cover;
+}
+
+.shiguang-tray-photo span {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  left: 4px;
+  overflow: hidden;
+  color: rgba(65, 48, 38, 0.76);
+  font-size: 9px;
+  line-height: 1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shiguang-camera-controls {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  flex: none;
+  grid-template-columns: minmax(0, 1fr) 82px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid rgba(255, 248, 238, 0.08);
+  background: rgba(11, 9, 12, 0.78);
+  padding: 12px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.shiguang-control-btn {
+  min-width: 0;
+  height: 38px;
+  overflow: hidden;
+  border: 1px solid var(--sg-line);
+  border-radius: 8px;
+  background: rgba(255, 248, 238, 0.08);
+  color: var(--sg-ink);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shiguang-control-btn:disabled {
+  color: var(--sg-ink-dim);
+  opacity: 0.52;
+}
+
+.shiguang-shutter {
+  position: relative;
+  display: flex;
+  width: 72px;
+  height: 72px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 248, 238, 0.3);
+  border-radius: 50%;
+  background: rgba(244, 232, 216, 0.16);
+  box-shadow: 0 12px 28px -20px rgba(0, 0, 0, 0.8);
+}
+
+.shiguang-shutter:not(:disabled)::before {
+  position: absolute;
+  inset: -5px;
+  border: 1px solid rgba(214, 176, 117, 0.34);
+  border-radius: 50%;
+  box-shadow: 0 0 20px rgba(214, 176, 117, 0.22);
+  content: "";
+  animation: shiguangShutterPulse 2.2s ease-in-out infinite;
+}
+
+.shiguang-shutter span {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: linear-gradient(155deg, #fffaf0, #d7b98d);
+  box-shadow: inset 0 2px 6px rgba(255, 255, 255, 0.8), inset 0 -5px 12px rgba(108, 73, 39, 0.18);
+}
+
+.shiguang-shutter:disabled {
+  opacity: 0.48;
+}
+
+.shiguang-camera-back:active,
+.shiguang-camera-ghost:active,
+.shiguang-control-btn:active,
+.shiguang-shutter:active {
+  transform: scale(0.96);
+}
+
+@keyframes shiguangPrint {
+  from {
+    opacity: 0;
+    transform: translateY(14px) rotate(-5deg) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(-2deg);
+  }
+}
+
+@keyframes shiguangThinkingDot {
+  0%, 100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 0.95;
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes shiguangDevelop {
+  0% {
+    filter: brightness(0.34) contrast(1.2) saturate(0.55) blur(7px) sepia(0.22);
+    opacity: 0.28;
+    transform: scale(1.02);
+  }
+  48% {
+    filter: brightness(0.74) contrast(1.1) saturate(0.78) blur(2.6px) sepia(0.14);
+    opacity: 0.78;
+  }
+  100% {
+    filter: contrast(1.02) saturate(0.96) blur(0) sepia(0.07);
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shiguangSeen {
+  from {
+    opacity: 0;
+    transform: translateX(8px) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes shiguangAvatarSeen {
+  0% { transform: scale(0.92); }
+  65% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+@keyframes shiguangShutterPulse {
+  0%, 100% {
+    opacity: 0.46;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes shiguangCueFloat {
+  0%, 100% {
+    opacity: 0.36;
+    transform: translateX(-3px);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translateX(3px);
+  }
+}
+
+@media (max-height: 720px) {
+  .shiguang-camera-body {
+    gap: 10px;
+  }
+
+  .shiguang-viewfinder {
+    height: 164px;
+  }
+
+  .shiguang-polaroid {
+    max-width: 128px;
+    padding: 7px 7px 20px;
+  }
+
+  .shiguang-reaction {
+    padding: 10px;
+  }
+
+  .shiguang-reaction-message {
+    font-size: 12px;
+    padding: 6px 8px;
+  }
+
+  .shiguang-tray {
+    min-height: 66px;
+  }
+
+  .shiguang-first-shot-cue {
+    min-height: 50px;
+  }
+
+  .shiguang-tray-photo {
+    width: 52px;
+    height: 62px;
+    flex-basis: 52px;
+  }
+
+  .shiguang-camera-controls {
+    padding-top: 10px;
+  }
+
+  .shiguang-shutter {
+    width: 64px;
+    height: 64px;
+  }
+
+  .shiguang-shutter span {
+    width: 48px;
+    height: 48px;
+  }
+}
+
+@media (max-width: 370px) {
+  .shiguang-camera-body,
+  .shiguang-camera-controls {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .shiguang-develop-zone {
+    grid-template-columns: 118px minmax(0, 1fr);
+    padding: 10px;
+  }
+
+  .shiguang-control-btn {
+    font-size: 11px;
   }
 }
 
@@ -1874,23 +2748,10 @@
   text-shadow: 0 1px 5px rgba(15, 23, 42, 0.46);
 }
 
-.checkphone-settings-photo-caption {
-  min-height: 16px;
-  overflow: hidden;
-  margin-top: 6px;
-  color: #64748b;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.2;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .checkphone-settings-photo-actions {
   display: flex;
   gap: 4px;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 .checkphone-settings-photo-actions button {
@@ -3467,44 +4328,64 @@ select:focus {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: linear-gradient(160deg, #7c5b50 0%, #3a2c28 60%, #241b19 100%);
+  isolation: isolate;
+  background:
+    radial-gradient(120% 90% at 30% 22%, rgba(210, 205, 184, 0.18), transparent 52%),
+    linear-gradient(160deg, #2e332f 0%, #191d1b 60%, #17110f 100%);
 }
 
 .netease-profile-portrait-avatar {
   position: absolute;
-  inset: -18%;
-  width: 136%;
-  height: 136%;
+  inset: -10%;
+  width: 120%;
+  height: 120%;
   object-fit: cover;
-  filter: blur(24px) saturate(0.82) contrast(0.9) brightness(0.78);
-  transform: scale(1.03);
+  object-position: center 34%;
+  filter: blur(10px) saturate(0.58) contrast(0.9) brightness(0.5);
+  opacity: 0.86;
+  transform: scale(1.04);
+}
+
+.netease-profile-portrait-subject {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 34%;
+  filter: saturate(0.68) contrast(0.95) brightness(0.68) sepia(0.14);
+  opacity: 0.56;
+  transform: scale(1.01);
 }
 
 .netease-profile-portrait-img.has-avatar::before {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 2;
   background:
-    linear-gradient(90deg, rgba(239, 231, 217, 0.12), rgba(40, 24, 20, 0.42)),
-    radial-gradient(120% 100% at 28% 18%, rgba(255, 245, 228, 0.22), transparent 48%);
-  mix-blend-mode: soft-light;
+    linear-gradient(90deg, rgba(239, 231, 217, 0.08), rgba(21, 13, 11, 0.36) 70%, rgba(21, 13, 11, 0.58)),
+    linear-gradient(180deg, rgba(255, 248, 230, 0.08), transparent 30%, rgba(15, 9, 8, 0.38));
+  mix-blend-mode: normal;
 }
 
 .netease-profile-portrait-img::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 2;
-  background: radial-gradient(120% 100% at 30% 20%, transparent, rgba(20, 12, 10, 0.5));
-  mix-blend-mode: multiply;
+  z-index: 3;
+  background:
+    radial-gradient(90% 75% at 42% 30%, transparent 0 34%, rgba(15, 10, 9, 0.3) 72%, rgba(12, 8, 7, 0.58)),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 7px);
+  mix-blend-mode: normal;
 }
 
 .netease-profile-portrait > span {
   position: absolute;
   right: 16px;
   bottom: 14px;
-  z-index: 3;
+  z-index: 4;
   color: rgba(255, 255, 255, 0.7);
   font-family: var(--netease-en-font);
   font-size: 11px;

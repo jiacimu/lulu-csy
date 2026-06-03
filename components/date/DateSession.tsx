@@ -2,6 +2,16 @@ import React,{ useState,useEffect,useRef } from 'react';
 import { CharacterProfile,Message,DateState,DialogueItem,UserProfile } from '../../types';
 import { type InnerWhisper } from '../../utils/thinkingExtractor';
 import { extractTranslationPairs } from '../../utils/chatParser';
+import {
+    createLightweightDateState,
+    findDateSpriteKey,
+    getActiveDateSprites,
+    getDateEmotionKeys,
+    resolveDateStateBackground,
+    resolveDateStateSprite,
+    shouldUseDateVisualSafeMode,
+    type DateStateDraft,
+} from '../../utils/dateSessionState';
 import Modal from '../../components/os/Modal';
 import { useOS } from '../../context/OSContext';
 import DateSettings from './DateSettings';
@@ -181,6 +191,7 @@ interface DateSessionProps {
     onSendMessage: (text: string, directorHint?: string) => Promise<{ content: string; whispers: InnerWhisper[] }>; // Returns AI content + optional whispers
     onReroll: () => Promise<{ content: string; whispers: InnerWhisper[] }>;
     onExit: (currentState: DateState, syncMode: DateExitSyncMode) => void;
+    onAutosaveState?: (state: DateState, reason: string) => void;
     onEditMessage: (msg: Message) => void;
     onDeleteMessage: (msg: Message) => void;
     isSummaryGenerating: boolean;
@@ -225,6 +236,7 @@ const DateSession: React.FC<DateSessionProps> = ({
     onSendMessage, 
     onReroll, 
     onExit,
+    onAutosaveState,
     onEditMessage,
     onDeleteMessage,
     isSummaryGenerating,
@@ -257,13 +269,18 @@ const DateSession: React.FC<DateSessionProps> = ({
     const textScale = Math.min(Math.max(fontScale ?? 1, 0.85), 1.3);
     const scaledFont = (basePx: number) => `${Math.round(basePx * textScale * 10) / 10}px`;
     
+    const initialVisualSafeMode = shouldUseDateVisualSafeMode(initialState);
+
     // Core VN State
-    const [isNovelMode, setIsNovelMode] = useState(false);
-    const [bgImage, setBgImage] = useState<string>(char.dateBackground || '');
+    const [isNovelMode, setIsNovelMode] = useState(initialVisualSafeMode || !!initialState?.isNovelMode);
+    const [bgImage, setBgImage] = useState<string>('');
     const [visibleBgImage, setVisibleBgImage] = useState<string>('');
     const [currentSprite, setCurrentSprite] = useState<string>('');
+    const [currentSpriteKey, setCurrentSpriteKey] = useState<string | undefined>(initialState?.currentSpriteKey);
     const [visibleCurrentSprite, setVisibleCurrentSprite] = useState<string>('');
     const [spriteConfig, setSpriteConfig] = useState(char.spriteConfig || { scale: 1, x: 0, y: 0 });
+    const [visualSafeMode, setVisualSafeMode] = useState(initialVisualSafeMode);
+    const [summaryControlsReady, setSummaryControlsReady] = useState(false);
     
     // Dialogue Engine State
     const [dialogueQueue, setDialogueQueue] = useState<DialogueItem[]>([]);
@@ -296,6 +313,7 @@ const DateSession: React.FC<DateSessionProps> = ({
     const isResumedRef = useRef(false);
     const bgRevealCancelRef = useRef<(() => void) | null>(null);
     const spriteRevealCancelRef = useRef<(() => void) | null>(null);
+    const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const setDeferredBgImage = React.useCallback((src: string) => {
         setBgImage(src);
@@ -310,8 +328,9 @@ const DateSession: React.FC<DateSessionProps> = ({
         bgRevealCancelRef.current = scheduleDateAssetReveal(src, setVisibleBgImage);
     }, []);
 
-    const setDeferredCurrentSprite = React.useCallback((src: string) => {
+    const setDeferredCurrentSprite = React.useCallback((src: string, key?: string) => {
         setCurrentSprite(src);
+        setCurrentSpriteKey(key);
         spriteRevealCancelRef.current?.();
         spriteRevealCancelRef.current = null;
 
@@ -327,6 +346,7 @@ const DateSession: React.FC<DateSessionProps> = ({
         return () => {
             bgRevealCancelRef.current?.();
             spriteRevealCancelRef.current?.();
+            if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
         };
     }, []);
 
@@ -359,57 +379,185 @@ const DateSession: React.FC<DateSessionProps> = ({
         return visibleMessages;
     }, [messages]);
 
+    // Only allow date-relevant emotions (required + custom), never chibi or other non-date sprites.
+    const dateEmotionKeys = React.useMemo(() => getDateEmotionKeys(char), [char.customDateSprites]);
+
+    // Resolve active sprites: if a skin set is active, use its sprites; otherwise fall back to char.sprites.
+    const activeSprites = React.useMemo(() => getActiveDateSprites(char), [char.activeSkinSetId, char.dateSkinSets, char.sprites]);
+
+    const buildAutosaveState = React.useCallback((reason: string, overrides: Partial<DateStateDraft> = {}) => {
+        return createLightweightDateState({
+            dialogueQueue: overrides.dialogueQueue ?? dialogueQueue ?? [],
+            dialogueBatch: overrides.dialogueBatch ?? dialogueBatch ?? [],
+            currentText: overrides.currentText ?? currentText,
+            bgImage: overrides.bgImage ?? bgImage,
+            currentSprite: overrides.currentSprite ?? currentSprite,
+            currentSpriteKey: overrides.currentSpriteKey ?? currentSpriteKey,
+            isNovelMode: overrides.isNovelMode ?? isNovelMode,
+            visualSafeMode: overrides.visualSafeMode ?? visualSafeMode,
+            timestamp: overrides.timestamp ?? Date.now(),
+            peekStatus: overrides.peekStatus ?? peekStatus,
+            restoredFromHistory: overrides.restoredFromHistory ?? initialState?.restoredFromHistory,
+        }, char, reason);
+    }, [
+        bgImage,
+        char,
+        currentSprite,
+        currentSpriteKey,
+        currentText,
+        dialogueBatch,
+        dialogueQueue,
+        initialState?.restoredFromHistory,
+        isNovelMode,
+        peekStatus,
+        visualSafeMode,
+    ]);
+
+    const emitAutosave = React.useCallback((
+        reason: string,
+        overrides: Partial<DateStateDraft> = {},
+        immediate = false,
+    ) => {
+        if (!onAutosaveState) return;
+
+        const run = () => {
+            onAutosaveState(buildAutosaveState(reason, overrides), reason);
+        };
+
+        if (immediate) {
+            if (autosaveTimerRef.current) {
+                clearTimeout(autosaveTimerRef.current);
+                autosaveTimerRef.current = null;
+            }
+            run();
+            return;
+        }
+
+        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = setTimeout(() => {
+            autosaveTimerRef.current = null;
+            run();
+        }, 700);
+    }, [buildAutosaveState, onAutosaveState]);
+
     // Initialization
     useEffect(() => {
+        const safeMode = shouldUseDateVisualSafeMode(initialState);
+
         if (initialState) {
             // Resume
             isResumedRef.current = true;
-            setDeferredBgImage(initialState.bgImage || '');
-            setDeferredCurrentSprite(initialState.currentSprite || '');
+            const resolvedBg = resolveDateStateBackground(char, initialState);
+            const resolvedSprite = resolveDateStateSprite(char, initialState);
+            const resolvedSpriteKey = initialState.currentSpriteKey || findDateSpriteKey(char, resolvedSprite);
+
+            setVisualSafeMode(safeMode);
+            setIsNovelMode(safeMode || initialState.isNovelMode);
+            if (safeMode) {
+                setBgImage('');
+                setVisibleBgImage('');
+                setCurrentSprite('');
+                setCurrentSpriteKey(resolvedSpriteKey);
+                setVisibleCurrentSprite('');
+            } else {
+                setDeferredBgImage(resolvedBg);
+                setDeferredCurrentSprite(resolvedSprite, resolvedSpriteKey);
+            }
             setCurrentText(initialState.currentText || '');
             setDisplayedText(initialState.currentText || '');
             setDialogueQueue(initialState.dialogueQueue || []);
             setDialogueBatch(initialState.dialogueBatch || []);
-            setIsNovelMode(initialState.isNovelMode);
+            emitAutosave('session-init', {
+                dialogueQueue: initialState.dialogueQueue || [],
+                dialogueBatch: initialState.dialogueBatch || [],
+                currentText: initialState.currentText || '',
+                bgImage: resolvedBg,
+                currentSprite: resolvedSprite,
+                currentSpriteKey: resolvedSpriteKey,
+                isNovelMode: safeMode || initialState.isNovelMode,
+                visualSafeMode: safeMode,
+                timestamp: Date.now(),
+                peekStatus: initialState.peekStatus || peekStatus,
+                restoredFromHistory: initialState.restoredFromHistory,
+            }, true);
         } else {
             // New Session - pick initial sprite from active skin set or default sprites
-            const s = (() => {
-                if (char.activeSkinSetId && char.dateSkinSets) {
-                    const skin = char.dateSkinSets.find(sk => sk.id === char.activeSkinSetId);
-                    if (skin && Object.keys(skin.sprites).length > 0) return skin.sprites;
-                }
-                return char.sprites;
-            })();
-            let initSprite = s?.['normal'] || s?.['default'];
+            const s = activeSprites;
+            let initSpriteKey: string | undefined = s?.['normal'] ? 'normal' : s?.['default'] ? 'default' : undefined;
+            let initSprite = initSpriteKey ? s[initSpriteKey] : undefined;
             if (!initSprite && s) {
                 const fallbackKey = dateEmotionKeys.find(k => s[k]);
-                initSprite = fallbackKey ? s[fallbackKey] : Object.values(s).find(v => v) || char.avatar;
+                if (fallbackKey) {
+                    initSpriteKey = fallbackKey;
+                    initSprite = s[fallbackKey];
+                } else {
+                    const fallbackEntry = Object.entries(s).find(([, value]) => !!value);
+                    initSpriteKey = fallbackEntry?.[0];
+                    initSprite = fallbackEntry?.[1] || char.avatar;
+                }
             }
-            if (!initSprite) initSprite = char.avatar;
-            setDeferredCurrentSprite(initSprite);
+            if (!initSprite) {
+                initSprite = char.avatar;
+                initSpriteKey = 'avatar';
+            }
+            setVisualSafeMode(safeMode);
+            setIsNovelMode(safeMode);
+            if (safeMode) {
+                setBgImage('');
+                setVisibleBgImage('');
+                setCurrentSprite('');
+                setCurrentSpriteKey(initSpriteKey);
+                setVisibleCurrentSprite('');
+            } else {
+                setDeferredBgImage(char.dateBackground || '');
+                setDeferredCurrentSprite(initSprite, initSpriteKey);
+            }
             
             // Parse Peek Status as opening
             const startText = peekStatus || "Waiting for connection...";
             const items = parseDialogue(startText, 'normal');
+            const first = items[0];
+            const remaining = first ? items.slice(1) : [];
             setDialogueBatch(items);
             setDialogueQueue(items);
             
-            if (items.length > 0) {
+            if (first) {
                 // Manually trigger first item processing
-                const first = items[0];
                 setCurrentText(first.text);
                 // Note: Not setting sprite here because useEffect below will handle emotion->sprite mapping if needed, 
                 // or we rely on default.
-                setDialogueQueue(items.slice(1));
+                setDialogueQueue(remaining);
             }
+
+            emitAutosave('session-init', {
+                dialogueQueue: remaining,
+                dialogueBatch: items,
+                currentText: first?.text || '',
+                bgImage: char.dateBackground || '',
+                currentSprite: initSprite,
+                currentSpriteKey: initSpriteKey,
+                isNovelMode: safeMode,
+                visualSafeMode: safeMode,
+                timestamp: Date.now(),
+                peekStatus,
+            }, true);
         }
     }, []); // Run once on mount
 
     // Sprite & Config Sync (If user goes to settings and comes back, this helps)
     useEffect(() => {
         if (char.spriteConfig) setSpriteConfig(char.spriteConfig);
-        if (char.dateBackground && !isResumedRef.current) setDeferredBgImage(char.dateBackground);
-    }, [char, setDeferredBgImage]);
+        if (char.dateBackground && !isResumedRef.current && !visualSafeMode) setDeferredBgImage(char.dateBackground);
+    }, [char, setDeferredBgImage, visualSafeMode]);
+
+    useEffect(() => {
+        if (isTyping) {
+            setSummaryControlsReady(false);
+            return;
+        }
+        const id = setTimeout(() => setSummaryControlsReady(true), visualSafeMode ? 900 : 300);
+        return () => clearTimeout(id);
+    }, [isTyping, visualSafeMode]);
 
     // Novel Mode Scroll
     useEffect(() => {
@@ -446,38 +594,51 @@ const DateSession: React.FC<DateSessionProps> = ({
 
     // --- Logic ---
 
-    // Only allow date-relevant emotions (required + custom), never chibi or other non-date sprites
-    const REQUIRED_EMOTIONS_SET = ['normal', 'happy', 'angry', 'sad', 'shy'];
-    const dateEmotionKeys = [...REQUIRED_EMOTIONS_SET, ...(char.customDateSprites || [])];
-
-    // Resolve active sprites: if a skin set is active, use its sprites; otherwise fall back to char.sprites
-    const activeSprites = React.useMemo(() => {
-        if (char.activeSkinSetId && char.dateSkinSets) {
-            const skin = char.dateSkinSets.find(s => s.id === char.activeSkinSetId);
-            if (skin) return skin.sprites;
-        }
-        return char.sprites || {};
-    }, [char.activeSkinSetId, char.dateSkinSets, char.sprites]);
-
     // Track current translation text for VN mode display
     const [currentTranslation, setCurrentTranslation] = useState('');
 
-    const processNextDialogue = (item: DialogueItem, remaining: DialogueItem[]) => {
+    const resolveSpriteForEmotion = React.useCallback((emotion?: string) => {
+        if (!emotion) return null;
+        const emotionKey = emotion.toLowerCase();
+        if (dateEmotionKeys.includes(emotionKey) && activeSprites[emotionKey]) {
+            return { key: emotionKey, src: activeSprites[emotionKey] };
+        }
+        const found = dateEmotionKeys.find(k => emotionKey.includes(k));
+        if (found && activeSprites[found]) {
+            return { key: found, src: activeSprites[found] };
+        }
+        return null;
+    }, [activeSprites, dateEmotionKeys]);
+
+    const processNextDialogue = (
+        item: DialogueItem,
+        remaining: DialogueItem[],
+        options: {
+            autosaveReason?: string;
+            immediate?: boolean;
+            dialogueBatchOverride?: DialogueItem[];
+        } = {},
+    ) => {
         setCurrentText(item.text);
         setCurrentTranslation(item.translationText || '');
-        if (item.emotion && activeSprites) {
-            const emotionKey = item.emotion.toLowerCase();
-            if (dateEmotionKeys.includes(emotionKey)) {
-                const nextSprite = activeSprites[emotionKey];
-                if (nextSprite) setDeferredCurrentSprite(nextSprite);
-            } else {
-                const found = dateEmotionKeys.find(k => emotionKey.includes(k));
-                if (found && activeSprites[found]) {
-                    setDeferredCurrentSprite(activeSprites[found]);
-                }
-            }
+        const nextSprite = resolveSpriteForEmotion(item.emotion);
+        const autosaveSprite = nextSprite?.src ?? currentSprite;
+        const autosaveSpriteKey = nextSprite?.key ?? currentSpriteKey;
+        if (nextSprite) {
+            setDeferredCurrentSprite(nextSprite.src, nextSprite.key);
         }
         setDialogueQueue(remaining);
+        emitAutosave(options.autosaveReason || 'dialogue-progress', {
+            dialogueQueue: remaining,
+            dialogueBatch: options.dialogueBatchOverride ?? dialogueBatch,
+            currentText: item.text,
+            currentSprite: autosaveSprite,
+            currentSpriteKey: autosaveSpriteKey,
+            isNovelMode,
+            visualSafeMode,
+            timestamp: Date.now(),
+            peekStatus,
+        }, !!options.immediate);
     };
 
     const handleScreenClick = (e: React.MouseEvent) => {
@@ -522,16 +683,45 @@ const DateSession: React.FC<DateSessionProps> = ({
         setInput('');
         setShowInputBox(false);
         setIsTyping(true);
+        setVisualSafeMode(true);
+        setIsNovelMode(true);
         clearWhispers();
+        emitAutosave('before-send', {
+            dialogueQueue,
+            dialogueBatch,
+            currentText,
+            currentSprite,
+            currentSpriteKey,
+            isNovelMode: true,
+            visualSafeMode: true,
+            timestamp: Date.now(),
+            peekStatus,
+        }, true);
 
         try {
             const result = await onSendMessage(text, directorHint);
             // Parse new content
             const items = parseDialogue(result.content, 'normal');
+            const first = items[0];
+            const remaining = first ? items.slice(1) : [];
             setDialogueBatch(items);
-            setDialogueQueue(items);
-            if (items.length > 0) {
-                processNextDialogue(items[0], items.slice(1));
+            setDialogueQueue(remaining);
+            if (first) {
+                processNextDialogue(first, remaining, {
+                    autosaveReason: 'after-reply',
+                    immediate: true,
+                    dialogueBatchOverride: items,
+                });
+            } else {
+                emitAutosave('after-reply', {
+                    dialogueQueue: [],
+                    dialogueBatch: [],
+                    currentText: '',
+                    isNovelMode: true,
+                    visualSafeMode: true,
+                    timestamp: Date.now(),
+                    peekStatus,
+                }, true);
             }
             // Schedule whisper reveal after dialogue plays out
             if (result.whispers.length > 0) {
@@ -544,8 +734,20 @@ const DateSession: React.FC<DateSessionProps> = ({
                 }, Math.min(estimatedPlayMs, 8000)); // Cap at 8s
             }
         } catch (e: any) {
-            setCurrentText("(连接中断)");
+            const errorText = "(连接中断)";
+            setCurrentText(errorText);
             setShowInputBox(true);
+            emitAutosave('send-error', {
+                dialogueQueue,
+                dialogueBatch,
+                currentText: errorText,
+                currentSprite,
+                currentSpriteKey,
+                isNovelMode: true,
+                visualSafeMode: true,
+                timestamp: Date.now(),
+                peekStatus,
+            }, true);
         } finally {
             setIsTyping(false);
         }
@@ -556,17 +758,46 @@ const DateSession: React.FC<DateSessionProps> = ({
         if (isTyping) return;
         clearWhispers();
         setIsTyping(true);
+        setVisualSafeMode(true);
+        setIsNovelMode(true);
 
         // The whisper text becomes the user's visible action
         const userAction = whisper.whisper;
+        emitAutosave('before-send', {
+            dialogueQueue,
+            dialogueBatch,
+            currentText,
+            currentSprite,
+            currentSpriteKey,
+            isNovelMode: true,
+            visualSafeMode: true,
+            timestamp: Date.now(),
+            peekStatus,
+        }, true);
 
         try {
             const result = await onSendMessage(userAction, whisper.secret || undefined);
             const items = parseDialogue(result.content, 'normal');
+            const first = items[0];
+            const remaining = first ? items.slice(1) : [];
             setDialogueBatch(items);
-            setDialogueQueue(items);
-            if (items.length > 0) {
-                processNextDialogue(items[0], items.slice(1));
+            setDialogueQueue(remaining);
+            if (first) {
+                processNextDialogue(first, remaining, {
+                    autosaveReason: 'after-reply',
+                    immediate: true,
+                    dialogueBatchOverride: items,
+                });
+            } else {
+                emitAutosave('after-reply', {
+                    dialogueQueue: [],
+                    dialogueBatch: [],
+                    currentText: '',
+                    isNovelMode: true,
+                    visualSafeMode: true,
+                    timestamp: Date.now(),
+                    peekStatus,
+                }, true);
             }
             // Schedule next whisper reveal if AI provided more
             if (result.whispers.length > 0) {
@@ -578,8 +809,20 @@ const DateSession: React.FC<DateSessionProps> = ({
                 }, Math.min(estimatedPlayMs, 8000));
             }
         } catch (e: any) {
-            setCurrentText("(连接中断)");
+            const errorText = "(连接中断)";
+            setCurrentText(errorText);
             setShowInputBox(true);
+            emitAutosave('send-error', {
+                dialogueQueue,
+                dialogueBatch,
+                currentText: errorText,
+                currentSprite,
+                currentSpriteKey,
+                isNovelMode: true,
+                visualSafeMode: true,
+                timestamp: Date.now(),
+                peekStatus,
+            }, true);
         } finally {
             setIsTyping(false);
         }
@@ -588,13 +831,44 @@ const DateSession: React.FC<DateSessionProps> = ({
     const handleRerollClick = async () => {
         if (isTyping) return;
         setIsTyping(true);
+        setVisualSafeMode(true);
+        setIsNovelMode(true);
         clearWhispers();
+        emitAutosave('before-reroll', {
+            dialogueQueue,
+            dialogueBatch,
+            currentText,
+            currentSprite,
+            currentSpriteKey,
+            isNovelMode: true,
+            visualSafeMode: true,
+            timestamp: Date.now(),
+            peekStatus,
+        }, true);
         try {
             const result = await onReroll();
             const items = parseDialogue(result.content, 'normal');
+            const first = items[0];
+            const remaining = first ? items.slice(1) : [];
             setDialogueBatch(items);
-            setDialogueQueue(items);
-            if (items.length > 0) processNextDialogue(items[0], items.slice(1));
+            setDialogueQueue(remaining);
+            if (first) {
+                processNextDialogue(first, remaining, {
+                    autosaveReason: 'after-reply',
+                    immediate: true,
+                    dialogueBatchOverride: items,
+                });
+            } else {
+                emitAutosave('after-reply', {
+                    dialogueQueue: [],
+                    dialogueBatch: [],
+                    currentText: '',
+                    isNovelMode: true,
+                    visualSafeMode: true,
+                    timestamp: Date.now(),
+                    peekStatus,
+                }, true);
+            }
             // Schedule whisper reveal after reroll (same as handleSend)
             if (result.whispers.length > 0) {
                 const totalChars = items.reduce((sum, item) => sum + item.text.length, 0);
@@ -606,22 +880,49 @@ const DateSession: React.FC<DateSessionProps> = ({
             }
         } catch(e) {
             // Error handled in parent
+            emitAutosave('send-error', {
+                dialogueQueue,
+                dialogueBatch,
+                currentText,
+                currentSprite,
+                currentSpriteKey,
+                isNovelMode: true,
+                visualSafeMode: true,
+                timestamp: Date.now(),
+                peekStatus,
+            }, true);
         } finally {
             setIsTyping(false);
         }
     };
 
     const handleExitClick = (syncMode: DateExitSyncMode) => {
-        const currentState: DateState = {
+        const currentState = createLightweightDateState({
             dialogueQueue: dialogueQueue || [],
             dialogueBatch: dialogueBatch || [],
             currentText,
             bgImage,
             currentSprite,
+            currentSpriteKey,
             isNovelMode,
+            visualSafeMode,
             timestamp: Date.now(),
-            peekStatus
-        };
+            peekStatus,
+            restoredFromHistory: initialState?.restoredFromHistory,
+        }, char, 'manual-exit');
+        emitAutosave('manual-exit', {
+            dialogueQueue: dialogueQueue || [],
+            dialogueBatch: dialogueBatch || [],
+            currentText,
+            bgImage,
+            currentSprite,
+            currentSpriteKey,
+            isNovelMode,
+            visualSafeMode,
+            timestamp: currentState.timestamp,
+            peekStatus,
+            restoredFromHistory: initialState?.restoredFromHistory,
+        }, true);
         setShowExitModal(false);
         onExit(currentState, syncMode);
     };
@@ -670,14 +971,20 @@ const DateSession: React.FC<DateSessionProps> = ({
     // Determine if we can reroll (last message is assistant)
     const canReroll = messages.length > 0 && messages[messages.length - 1].role === 'assistant';
     const transientUiActive = showInputBox || isTyping;
+    const renderVisualAssets = !visualSafeMode && !isTyping;
+    const backgroundLayerClass = renderVisualAssets && isNovelMode
+        ? 'blur-xl opacity-30'
+        : isNovelMode
+            ? 'opacity-20'
+            : '';
 
     return (
         <div className="h-full w-full relative bg-black overflow-hidden font-sans select-none" onClick={handleScreenClick}>
             
             {/* Background Layer */}
             <div 
-                className={`absolute inset-0 bg-cover bg-center transition-all duration-1000 ${isNovelMode ? 'blur-xl opacity-30' : ''}`} 
-                style={{ backgroundImage: visibleBgImage ? `url(${visibleBgImage})` : 'none' }}
+                className={`absolute inset-0 bg-cover bg-center transition-all duration-1000 ${backgroundLayerClass}`}
+                style={{ backgroundImage: renderVisualAssets && visibleBgImage ? `url(${visibleBgImage})` : 'none' }}
             ></div>
 
             {/* Menu Layer */}
@@ -689,7 +996,16 @@ const DateSession: React.FC<DateSessionProps> = ({
                 )}
                 
                 {/* Novel Mode Toggle */}
-                <button onClick={(e) => { e.stopPropagation(); setIsNovelMode(!isNovelMode); }} className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all shadow-lg active:scale-95 ${isNovelMode ? 'bg-white text-black border-white' : 'bg-black/30 backdrop-blur-md border-white/20 text-white hover:bg-white/20'}`}>
+                <button onClick={(e) => {
+                    e.stopPropagation();
+                    const nextNovelMode = !isNovelMode;
+                    setIsNovelMode(nextNovelMode);
+                    emitAutosave('view-mode-toggle', {
+                        isNovelMode: nextNovelMode,
+                        visualSafeMode,
+                        timestamp: Date.now(),
+                    });
+                }} className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all shadow-lg active:scale-95 ${isNovelMode ? 'bg-white text-black border-white' : 'bg-black/30 backdrop-blur-md border-white/20 text-white hover:bg-white/20'}`}>
                     {isNovelMode ? (
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" /></svg>
                     ) : (
@@ -709,35 +1025,37 @@ const DateSession: React.FC<DateSessionProps> = ({
                 </button>
             </div>
 
-            <SummaryFloatingBall
-                char={char}
-                isGenerating={isSummaryGenerating}
-                hasPendingSummary={hasPendingSummary}
-                canManualSummary={canManualSummary}
-                canAutoSummary={canAutoSummary}
-                disabledReason={summaryDisabledReason}
-                onRequestManualSummary={onRequestSummary}
-                onReviewPendingSummary={onReviewPendingSummary}
-                onDiscardPendingSummary={onDiscardPendingSummary}
-                onToggleAutoSummary={onToggleAutoSummary}
-                onToggleAutoHideSummary={onToggleAutoHideSummary}
-                onChangeThreshold={onChangeThreshold}
-                onOpenSettings={onOpenSummarySettings}
-                wordCount={wordCount}
-                writingStyle={writingStyle}
-                onChangeWordCount={onChangeWordCount}
-                onChangeWritingStyle={onChangeWritingStyle}
-                temperature={temperature}
-                onChangeTemperature={onChangeTemperature}
-                fontScale={textScale}
-                onChangeFontScale={onChangeFontScale}
-                translationEnabled={translationEnabled}
-                translateSourceLang={translateSourceLang}
-                translateTargetLang={translateTargetLang}
-                onToggleTranslation={onToggleTranslation}
-                onSetTranslateSourceLang={onSetTranslateSourceLang}
-                onSetTranslateTargetLang={onSetTranslateTargetLang}
-            />
+            {summaryControlsReady && (
+                <SummaryFloatingBall
+                    char={char}
+                    isGenerating={isSummaryGenerating}
+                    hasPendingSummary={hasPendingSummary}
+                    canManualSummary={canManualSummary}
+                    canAutoSummary={canAutoSummary}
+                    disabledReason={summaryDisabledReason}
+                    onRequestManualSummary={onRequestSummary}
+                    onReviewPendingSummary={onReviewPendingSummary}
+                    onDiscardPendingSummary={onDiscardPendingSummary}
+                    onToggleAutoSummary={onToggleAutoSummary}
+                    onToggleAutoHideSummary={onToggleAutoHideSummary}
+                    onChangeThreshold={onChangeThreshold}
+                    onOpenSettings={onOpenSummarySettings}
+                    wordCount={wordCount}
+                    writingStyle={writingStyle}
+                    onChangeWordCount={onChangeWordCount}
+                    onChangeWritingStyle={onChangeWritingStyle}
+                    temperature={temperature}
+                    onChangeTemperature={onChangeTemperature}
+                    fontScale={textScale}
+                    onChangeFontScale={onChangeFontScale}
+                    translationEnabled={translationEnabled}
+                    translateSourceLang={translateSourceLang}
+                    translateTargetLang={translateTargetLang}
+                    onToggleTranslation={onToggleTranslation}
+                    onSetTranslateSourceLang={onSetTranslateSourceLang}
+                    onSetTranslateTargetLang={onSetTranslateTargetLang}
+                />
+            )}
 
             {/* Novel Mode View */}
             {isNovelMode && (
@@ -795,7 +1113,7 @@ const DateSession: React.FC<DateSessionProps> = ({
             {!isNovelMode && (
                 <>
                     <div className="absolute inset-x-0 bottom-0 h-[90%] flex items-end justify-center pointer-events-none z-10 overflow-hidden">
-                        {visibleCurrentSprite && <img src={visibleCurrentSprite} className="max-h-full max-w-full object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)] transition-all duration-300 origin-bottom" style={{ transform: `translate(${spriteConfig.x}%, ${spriteConfig.y}%) scale(${isTextAnimating ? spriteConfig.scale * 1.02 : spriteConfig.scale})` }} />}
+                        {renderVisualAssets && visibleCurrentSprite && <img src={visibleCurrentSprite} className="max-h-full max-w-full object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)] transition-all duration-300 origin-bottom" style={{ transform: `translate(${spriteConfig.x}%, ${spriteConfig.y}%) scale(${isTextAnimating ? spriteConfig.scale * 1.02 : spriteConfig.scale})` }} />}
                     </div>
                     {!isTyping && (
                         <div className="absolute inset-x-0 bottom-8 z-30 flex flex-col items-center gap-3">

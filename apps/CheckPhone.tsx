@@ -2,12 +2,14 @@ import React,{ useState,useEffect,useRef,useMemo } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
 import { AppID,CharacterProfile,GalleryImage,PhoneDesktopAppearance,PhoneEvidence,PhoneCustomApp } from '../types';
-import { ContextBuilder } from '../utils/context';
+import { ChatPrompts } from '../utils/chatPrompts';
 import Modal from '../components/os/Modal';
 import { extractContent, extractJson, safeResponseJson } from '../utils/safeApi';
 import { getFiniteMessageIds, removePhoneRecordsLinkedToMessageIds } from '../utils/phoneRecordSync';
 import { getGalleryImageDisplayUrl,resolveGalleryImageOriginalUrl } from '../utils/generatedImageStorage';
 import { searchSongs } from '../utils/musicService';
+import { loadCharacterGoals } from '../utils/goalService';
+import { getEmbeddingConfig } from '../utils/runtimeConfig';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import type { NeteaseSong } from '../types/music';
 import {
@@ -42,10 +44,12 @@ export const MAX_PHONE_VISIBLE_RECORDS = 60;
 export const MAX_PHONE_TITLE_CHARS = 96;
 export const MAX_PHONE_DETAIL_CHARS = 2400;
 export const MAX_PHONE_CHAT_DETAIL_CHARS = 6000;
-export const MAX_PHONE_PROMPT_MESSAGES = 50;
+const CHECKPHONE_LLM_MAX_TOKENS = 65536;
 const MAX_PHONE_META_CHARS = 160;
 const MAX_CHAT_DETAIL_LINES_RENDERED = 120;
-const MOBILE_VISIBLE_DELETE_CLASS = 'opacity-100 md:opacity-0 md:group-hover:opacity-100';
+const RECORD_DELETE_LONG_PRESS_MS = 650;
+const RECORD_DELETE_MOVE_TOLERANCE = 10;
+const RECORD_DELETE_CLICK_SUPPRESS_MS = 700;
 const NETEASE_MUSIC_RECORD_TYPE = 'netease_music';
 
 export const NETEASE_MUSIC_PROMPT = `用户正在查看你网易云音乐的「个人主页」。请基于你的人设，生成主页内容，泄露你不会明说的情绪与生活。
@@ -115,6 +119,15 @@ const normalizePhoneText = (value: unknown, fallback = '', maxChars = MAX_PHONE_
 
 const normalizeOptionalPhoneText = (value: unknown, maxChars = MAX_PHONE_META_CHARS): string | undefined => {
     const normalized = normalizePhoneText(value, '', maxChars);
+    return normalized || undefined;
+};
+
+const normalizePhoneMediaSource = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const normalized = value.trim();
+    if (normalized.startsWith('data:') && (!normalized.includes(',') || normalized.endsWith('...'))) {
+        return undefined;
+    }
     return normalized || undefined;
 };
 
@@ -217,17 +230,92 @@ const CHECKPHONE_AVATAR_GRADIENTS = [
 const CHECKPHONE_DESKTOP_CAPTIONS = ['午后', '夜色', '初夏'];
 const CHECKPHONE_DESKTOP_PHOTO_SLOT_COUNT = 3;
 const CHECKPHONE_DESKTOP_APP_PAGE_SIZE = 8;
+const SHIGUANG_CAMERA_RECORD_TYPE = 'shiguang_camera';
+const SHIGUANG_CAMERA_LABEL = '相机';
+const SHIGUANG_CAMERA_MAX_SELECTION = 6;
+const SHIGUANG_CAMERA_MAX_IMAGE_EDGE = 1280;
+const SHIGUANG_CAMERA_IMAGE_QUALITY = 0.82;
+const SHIGUANG_CAMERA_COMMENT_MAX_CHARS = MAX_PHONE_DETAIL_CHARS;
+const SHIGUANG_CAMERA_COMMENT_BUBBLE_CHARS = 56;
+const SHIGUANG_CAMERA_COMMENT_TIMESTAMP_PATTERN = /(?:^|\n)\s*(?:[\[【]\s*)?(?:(?:\d{4}[-/年]\d{1,2}[-/月]\d{1,2}(?:日)?|(?:今天|昨日|昨天|前天))[\sT]*(?:\d{1,2}:\d{2}(?::\d{2})?)?|(?:\d{1,2}:\d{2}(?::\d{2})?))(?:\s*[\]】])?\s*/g;
+const SHIGUANG_CAMERA_LITERAL_LINEBREAK_PATTERN = /(?:\\r\\n|\\n+|\/r\/n|\/n+|\\r+|\/r+)/gi;
 const CHECKPHONE_DESKTOP_PAGE_APPS: DesktopCoreAppConfig[] = [
-    { id: 'chat', label: '信息', icon: ChatTeardrop, recordType: 'chat' },
     { id: NETEASE_MUSIC_RECORD_TYPE, label: '网易云音乐', icon: MusicNote, recordType: NETEASE_MUSIC_RECORD_TYPE },
     { id: 'taobao', label: '淘宝', icon: ShoppingBagOpen, recordType: 'order' },
     { id: 'delivery', label: '美团外卖', icon: BowlFood, recordType: 'delivery' },
     { id: 'social', label: '朋友圈', icon: Camera, recordType: 'social' },
 ];
 const CHECKPHONE_DESKTOP_DOCK_APPS: DesktopCoreAppConfig[] = [
-    { id: 'call', label: '通话记录', icon: Phone, recordType: 'call' },
+    { id: 'call', label: '通话', icon: Phone, recordType: 'call' },
+    { id: 'chat', label: '信息', icon: ChatTeardrop, recordType: 'chat' },
+    { id: SHIGUANG_CAMERA_RECORD_TYPE, label: SHIGUANG_CAMERA_LABEL, icon: Camera, recordType: SHIGUANG_CAMERA_RECORD_TYPE },
     { id: 'settings', label: '设置', icon: GearSix },
 ];
+
+const sanitizeShiguangCameraComment = (comment?: unknown): string => {
+    return normalizePhoneText(comment, '', SHIGUANG_CAMERA_COMMENT_MAX_CHARS)
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(SHIGUANG_CAMERA_LITERAL_LINEBREAK_PATTERN, '\n')
+        .replace(/[ \t]*\n[ \t]*/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(SHIGUANG_CAMERA_COMMENT_TIMESTAMP_PATTERN, match => match.startsWith('\n') ? '\n' : '')
+        .replace(/^\s*[\[\]【】]+\s*/g, '')
+        .trim();
+};
+
+const splitShiguangCameraCommentMessages = (comment?: string): string[] => {
+    const normalized = sanitizeShiguangCameraComment(comment);
+    if (!normalized) return [];
+
+    const messages: string[] = [];
+    const pushMessage = (value: string) => {
+        const text = value.trim();
+        if (text) messages.push(text);
+    };
+    const pushLongText = (value: string) => {
+        let rest = value.trim();
+        while (rest.length > SHIGUANG_CAMERA_COMMENT_BUBBLE_CHARS) {
+            pushMessage(rest.slice(0, SHIGUANG_CAMERA_COMMENT_BUBBLE_CHARS));
+            rest = rest.slice(SHIGUANG_CAMERA_COMMENT_BUBBLE_CHARS).trim();
+        }
+        pushMessage(rest);
+    };
+    const pushFittedText = (value: string) => {
+        const fragments = value.match(/[^，、,]+[，、,]?/g) || [value];
+        let buffer = '';
+
+        fragments.forEach(fragment => {
+            const text = fragment.trim();
+            if (!text) return;
+            const candidate = buffer ? `${buffer}${text}` : text;
+            if (candidate.length <= SHIGUANG_CAMERA_COMMENT_BUBBLE_CHARS) {
+                buffer = candidate;
+                return;
+            }
+
+            pushMessage(buffer);
+            buffer = '';
+            if (text.length > SHIGUANG_CAMERA_COMMENT_BUBBLE_CHARS) pushLongText(text);
+            else buffer = text;
+        });
+
+        pushMessage(buffer);
+    };
+
+    normalized.split(/\n+/).forEach(paragraph => {
+        const sentences = paragraph.match(/[^。！？!?；;]+[。！？!?；;]?/g) || [paragraph];
+
+        sentences.forEach(sentence => {
+            const text = sentence.trim();
+            if (!text) return;
+            if (text.length > SHIGUANG_CAMERA_COMMENT_BUBBLE_CHARS) pushFittedText(text);
+            else pushMessage(text);
+        });
+    });
+
+    return messages;
+};
 const NETEASE_PROFILE_ART_GRADIENTS = [
     'linear-gradient(155deg,#4a5066,#1b1e2b)',
     'linear-gradient(155deg,#7a564a,#2c1a16)',
@@ -526,6 +614,51 @@ const readImageFileAsDataUrl = (file: File): Promise<string> => {
     });
 };
 
+const compressImageDataUrl = (
+    dataUrl: string,
+    maxEdge = SHIGUANG_CAMERA_MAX_IMAGE_EDGE,
+    quality = SHIGUANG_CAMERA_IMAGE_QUALITY
+): Promise<string> => {
+    return new Promise(resolve => {
+        const image = new Image();
+        image.onload = () => {
+            const sourceWidth = image.naturalWidth || image.width;
+            const sourceHeight = image.naturalHeight || image.height;
+            if (!sourceWidth || !sourceHeight) {
+                resolve(dataUrl);
+                return;
+            }
+
+            const scale = Math.min(1, maxEdge / Math.max(sourceWidth, sourceHeight));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+            canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                resolve(dataUrl);
+                return;
+            }
+
+            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        image.onerror = () => resolve(dataUrl);
+        image.src = dataUrl;
+    });
+};
+
+const readImageFileAsCompressedDataUrl = async (file: File): Promise<string> => {
+    const dataUrl = await readImageFileAsDataUrl(file);
+    return compressImageDataUrl(dataUrl);
+};
+
+const formatShiguangPhotoTitle = (timestamp: number): string => {
+    const date = new Date(timestamp);
+    const time = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `相机 ${time}`;
+};
+
 const buildSelectTargetMeta = (character: CharacterProfile, index: number): SelectTargetMeta => {
     const latestSignal = getLatestTargetSignal(character);
     const recordsCount = character.phoneState?.records?.length || 0;
@@ -588,7 +721,7 @@ export const normalizeStoredPhoneRecord = (record: PhoneEvidence): PhoneEvidence
         ? Math.trunc(unsafeRecord.songId)
         : undefined;
     const songUrl = normalizeOptionalPhoneText(unsafeRecord.songUrl, MAX_PHONE_DETAIL_CHARS);
-    const albumCover = normalizeOptionalPhoneText(unsafeRecord.albumCover, MAX_PHONE_DETAIL_CHARS);
+    const albumCover = normalizePhoneMediaSource(unsafeRecord.albumCover);
     const profileNickname = normalizeOptionalPhoneText(unsafeRecord.profileNickname, MAX_PHONE_TITLE_CHARS);
     const profileLevel = typeof unsafeRecord.profileLevel === 'number' && Number.isFinite(unsafeRecord.profileLevel)
         ? normalizeNeteaseInteger(unsafeRecord.profileLevel, 1, 1, 10)
@@ -668,6 +801,8 @@ export interface NormalizedPhoneState {
 interface GenerateOptions {
     replaceExisting?: boolean;
 }
+
+type CheckPhoneTaskOutputMode = 'json' | 'text';
 
 type ContextExitAction = 'exit_phone' | 'close_app';
 
@@ -775,7 +910,7 @@ export function buildPhoneSystemMessageDraft(input: {
             phoneComment: input.comment ? limitPhoneText(input.comment, MAX_PHONE_DETAIL_CHARS) : null,
             phoneSongId: input.songId ?? null,
             phoneSongUrl: input.songUrl ? limitPhoneText(input.songUrl, MAX_PHONE_DETAIL_CHARS) : null,
-            phoneAlbumCover: input.albumCover ? limitPhoneText(input.albumCover, MAX_PHONE_DETAIL_CHARS) : null,
+            phoneAlbumCover: input.albumCover || null,
             phoneProfileNickname: input.profileNickname ? limitPhoneText(input.profileNickname, MAX_PHONE_TITLE_CHARS) : null,
             phoneProfileLevel: input.profileLevel ?? null,
             phoneProfileSignature: input.profileSignature ? limitPhoneText(input.profileSignature, MAX_PHONE_DETAIL_CHARS) : null,
@@ -797,7 +932,7 @@ export function buildPhoneSystemMessageDraft(input: {
 // }
 
 const CheckPhone: React.FC = () => {
-    const { closeApp, openApp, characters, updateCharacter, apiConfig, addToast, userProfile } = useOS();
+    const { closeApp, openApp, characters, updateCharacter, apiConfig, addToast, userProfile, groups, realtimeConfig } = useOS();
     const { playSong } = useAudioPlayer();
     const [view, setView] = useState<'select' | 'phone'>('select');
     // activeAppId: 'home' | 'chat_detail' | 'app_id'
@@ -828,15 +963,28 @@ const CheckPhone: React.FC = () => {
     const [openNeteasePlaylistKeys, setOpenNeteasePlaylistKeys] = useState<Record<string, boolean>>({});
     const [openNeteaseSongId, setOpenNeteaseSongId] = useState<string | null>(null);
     const [neteaseConfirmRecord, setNeteaseConfirmRecord] = useState<PhoneEvidence | null>(null);
+    const [recordPendingDelete, setRecordPendingDelete] = useState<PhoneEvidence | null>(null);
+    const [shiguangCameraStatus, setShiguangCameraStatus] = useState<'idle' | 'requesting' | 'ready' | 'blocked'>('idle');
+    const [shiguangFacingMode, setShiguangFacingMode] = useState<'environment' | 'user'>('environment');
+    const [shiguangSelectedRecordIds, setShiguangSelectedRecordIds] = useState<string[]>([]);
+    const [shiguangCommenting, setShiguangCommenting] = useState(false);
+    const [shiguangCommentVisibleCounts, setShiguangCommentVisibleCounts] = useState<Record<string, number>>({});
     const [pendingPhoneContextRecordIds, setPendingPhoneContextRecordIds] = useState<string[]>([]);
     const [contextExitAction, setContextExitAction] = useState<ContextExitAction | null>(null);
     const [isResolvingContextExit, setIsResolvingContextExit] = useState(false);
     const desktopPagerRef = useRef<HTMLDivElement | null>(null);
     const desktopEditTimerRef = useRef<number | null>(null);
     const desktopLongPressTriggeredRef = useRef(false);
+    const recordDeleteLongPressTimerRef = useRef<number | null>(null);
+    const recordDeleteLongPressStartRef = useRef<{ x: number; y: number } | null>(null);
+    const recordDeleteSuppressClickUntilRef = useRef(0);
     const desktopWallpaperInputRef = useRef<HTMLInputElement | null>(null);
     const desktopIconInputRef = useRef<HTMLInputElement | null>(null);
     const desktopPhotoInputRef = useRef<HTMLInputElement | null>(null);
+    const shiguangVideoRef = useRef<HTMLVideoElement | null>(null);
+    const shiguangCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const shiguangFileInputRef = useRef<HTMLInputElement | null>(null);
+    const shiguangStreamRef = useRef<MediaStream | null>(null);
 
     // Derived state for evidence records
     const records = useMemo(
@@ -869,7 +1017,7 @@ const CheckPhone: React.FC = () => {
                 return {
                     id: `custom-${targetChar.id}-${index}`,
                     src: customSrc,
-                    caption: `原图 ${index + 1}`,
+                    caption: '',
                     timestamp: index,
                     isCustom: true,
                 };
@@ -906,6 +1054,14 @@ const CheckPhone: React.FC = () => {
             .sort((a, b) => b.timestamp - a.timestamp)
             .slice(0, MAX_PHONE_VISIBLE_RECORDS);
 
+    const stopShiguangCameraStream = () => {
+        shiguangStreamRef.current?.getTracks().forEach(track => track.stop());
+        shiguangStreamRef.current = null;
+        if (shiguangVideoRef.current) {
+            shiguangVideoRef.current.srcObject = null;
+        }
+    };
+
     const normalizeTargetCharacter = (character: CharacterProfile): CharacterProfile => {
         const normalizedPhoneState = normalizePhoneState(character.phoneState);
         if (!phoneStateNeedsNormalization(character.phoneState, normalizedPhoneState)) return character;
@@ -921,7 +1077,78 @@ const CheckPhone: React.FC = () => {
     useEffect(() => () => {
         accessTimersRef.current.forEach(timer => window.clearTimeout(timer));
         if (desktopEditTimerRef.current !== null) window.clearTimeout(desktopEditTimerRef.current);
+        if (recordDeleteLongPressTimerRef.current !== null) window.clearTimeout(recordDeleteLongPressTimerRef.current);
+        stopShiguangCameraStream();
     }, []);
+
+    useEffect(() => {
+        if (activeAppId !== SHIGUANG_CAMERA_RECORD_TYPE) {
+            stopShiguangCameraStream();
+            setShiguangCameraStatus('idle');
+            return;
+        }
+
+        let cancelled = false;
+
+        const startCamera = async () => {
+            if (!navigator.mediaDevices?.getUserMedia) {
+                setShiguangCameraStatus('blocked');
+                return;
+            }
+
+            stopShiguangCameraStream();
+            setShiguangCameraStatus('requesting');
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { ideal: shiguangFacingMode },
+                        width: { ideal: 1280 },
+                        height: { ideal: 1280 },
+                    },
+                    audio: false,
+                });
+
+                if (cancelled) {
+                    stream.getTracks().forEach(track => track.stop());
+                    return;
+                }
+
+                shiguangStreamRef.current = stream;
+                if (shiguangVideoRef.current) {
+                    shiguangVideoRef.current.srcObject = stream;
+                    await shiguangVideoRef.current.play().catch(() => undefined);
+                }
+                setShiguangCameraStatus('ready');
+            } catch (error) {
+                const cameraErrorName = error instanceof DOMException ? error.name : '';
+                const logCameraIssue = cameraErrorName === 'NotAllowedError' || cameraErrorName === 'NotFoundError'
+                    ? console.info
+                    : console.warn;
+                logCameraIssue.call(console, '[CheckPhone] camera unavailable:', error);
+                if (!cancelled) setShiguangCameraStatus('blocked');
+            }
+        };
+
+        void startCamera();
+
+        return () => {
+            cancelled = true;
+            stopShiguangCameraStream();
+        };
+    }, [activeAppId, shiguangFacingMode]);
+
+    useEffect(() => {
+        setShiguangSelectedRecordIds(prev => {
+            if (prev.length === 0) return prev;
+            const availableIds = new Set(
+                records
+                    .filter(record => record.type === SHIGUANG_CAMERA_RECORD_TYPE)
+                    .map(record => record.id)
+            );
+            return prev.filter(id => availableIds.has(id));
+        });
+    }, [records]);
 
     useEffect(() => {
         let cancelled = false;
@@ -1334,6 +1561,377 @@ const CheckPhone: React.FC = () => {
         setDesktopPage(pageIndex);
     };
 
+    const appendPhoneRecords = (newRecordsToAdd: PhoneEvidence[]) => {
+        if (!targetChar || newRecordsToAdd.length === 0) return;
+
+        const existingRecords = targetChar.phoneState?.records || [];
+        const nextRecords = prunePhoneRecords([...existingRecords, ...newRecordsToAdd]);
+        const nextRecordIds = new Set(nextRecords.map(record => record.id));
+        const newContextRecordIds = new Set(
+            newRecordsToAdd
+                .filter(record => typeof record.systemMessageId === 'number')
+                .map(record => record.id)
+        );
+        const nextPendingContextRecordIds = nextRecords
+            .filter(record => newContextRecordIds.has(record.id) && typeof record.systemMessageId === 'number')
+            .map(record => record.id);
+        const nextPhoneState: CharacterProfile['phoneState'] = {
+            ...targetChar.phoneState,
+            records: nextRecords,
+        };
+
+        updateCharacter(targetChar.id, { phoneState: nextPhoneState });
+        setTargetChar(prev => prev ? { ...prev, phoneState: nextPhoneState } : prev);
+        setPendingPhoneContextRecordIds(prev => {
+            const keptPendingIds = prev.filter(id => nextRecordIds.has(id));
+            return Array.from(new Set([...keptPendingIds, ...nextPendingContextRecordIds]));
+        });
+    };
+
+    const createShiguangPhotoRecord = async (dataUrl: string): Promise<PhoneEvidence | null> => {
+        if (!targetChar) return null;
+
+        const timestamp = Date.now();
+        const title = formatShiguangPhotoTitle(timestamp);
+        const systemDraft = buildPhoneSystemMessageDraft({
+            type: SHIGUANG_CAMERA_RECORD_TYPE,
+            charName: targetChar.name,
+            charAvatar: targetChar.avatar,
+            logPrefix: SHIGUANG_CAMERA_LABEL,
+            title,
+            detail: `User 用 ${targetChar.name} 的手机拍下了一张现实照片。`,
+            value: '一张拍立得',
+            albumCover: dataUrl,
+        });
+
+        const systemMessageId = await DB.saveMessage({
+            charId: targetChar.id,
+            role: 'system',
+            type: 'text',
+            content: systemDraft.content,
+            metadata: systemDraft.metadata,
+        });
+
+        const record: PhoneEvidence = {
+            id: `rec-${Date.now()}-${Math.random()}`,
+            type: SHIGUANG_CAMERA_RECORD_TYPE,
+            title,
+            detail: 'User 拍下了一张现实照片。',
+            value: '一张拍立得',
+            albumCover: dataUrl,
+            timestamp,
+            systemMessageId,
+        };
+
+        appendPhoneRecords([record]);
+        setShiguangSelectedRecordIds(prev => Array.from(new Set([record.id, ...prev])).slice(0, SHIGUANG_CAMERA_MAX_SELECTION));
+        addToast('已保存这张照片', 'success');
+        return record;
+    };
+
+    const handleCaptureShiguangPhoto = async () => {
+        const video = shiguangVideoRef.current;
+        const canvas = shiguangCanvasRef.current || document.createElement('canvas');
+        if (!video || shiguangCameraStatus !== 'ready' || video.readyState < 2) {
+            addToast('镜头还没准备好', 'info');
+            return;
+        }
+
+        const sourceWidth = video.videoWidth || 720;
+        const sourceHeight = video.videoHeight || 960;
+        const scale = Math.min(1, SHIGUANG_CAMERA_MAX_IMAGE_EDGE / Math.max(sourceWidth, sourceHeight));
+        canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+        canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            addToast('照片生成失败', 'error');
+            return;
+        }
+
+        ctx.save();
+        if (shiguangFacingMode === 'user') {
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+
+        (navigator as Navigator & { vibrate?: (pattern: number | number[]) => boolean }).vibrate?.(12);
+        await createShiguangPhotoRecord(canvas.toDataURL('image/jpeg', SHIGUANG_CAMERA_IMAGE_QUALITY));
+    };
+
+    const handleShiguangFileUpload = async (file: File) => {
+        try {
+            const dataUrl = await readImageFileAsCompressedDataUrl(file);
+            if (!dataUrl) throw new Error('empty image');
+            await createShiguangPhotoRecord(dataUrl);
+        } catch (error) {
+            console.error('[CheckPhone] Failed to import camera photo:', error);
+            addToast('照片读取失败', 'error');
+        }
+    };
+
+    const toggleShiguangRecordSelection = (recordId: string) => {
+        setShiguangSelectedRecordIds(prev => {
+            if (prev.includes(recordId)) return prev.filter(id => id !== recordId);
+            return [recordId, ...prev].slice(0, SHIGUANG_CAMERA_MAX_SELECTION);
+        });
+    };
+
+    const advanceShiguangCameraComment = (recordId: string, total: number) => {
+        if (!recordId || total <= 1) return;
+        setShiguangCommentVisibleCounts(prev => {
+            const current = Math.max(1, prev[recordId] || 1);
+            if (current >= total) return prev;
+            return { ...prev, [recordId]: current + 1 };
+        });
+    };
+
+    const handleCreateShiguangGroupComment = async () => {
+        if (!targetChar) return;
+        if (!apiConfig.apiKey || !apiConfig.baseUrl) {
+            addToast('请先配置 API', 'error');
+            return;
+        }
+        if (shiguangCommenting) return;
+
+        const selectedIds = new Set(shiguangSelectedRecordIds);
+        const list = getRecentRecordsByType(SHIGUANG_CAMERA_RECORD_TYPE)
+            .filter(record => record.albumCover);
+        const selectedRecords = list
+            .filter(record => selectedIds.has(record.id) && record.albumCover);
+        const commentRecords = selectedRecords.length > 0 ? selectedRecords : list.slice(0, 1);
+
+        if (commentRecords.length < 1) {
+            addToast('先拍一张或从相册选一张', 'info');
+            return;
+        }
+
+        setShiguangCommenting(true);
+
+        try {
+            const photoList = commentRecords
+                .map((record, index) => `照片 ${index + 1}: ${record.title}${record.value ? ` / ${record.value}` : ''}`)
+                .join('\n');
+            const prompt = `### [Photos]
+${photoList}
+
+### [Photo Review Prompt]
+【情境】
+${userProfile.name} 刚刚用「你的手机」拍下了一张(或一组)照片，递到了你面前。
+这不是聊天里的想象，而是 Ta 真实生活里的此刻——也许是窗外的光、桌上没喝完的咖啡、
+加班的屏幕、路过的一只猫，或者只是深夜空荡的街。
+平时你们之间只有文字。而现在，这是你第一次"亲眼"看见 Ta 生活里真实的一角。
+这扇窗很难得，珍惜它。
+
+【你要做的不是"描述照片"，而是"看见这个人"】
+- 先看具体的细节，再从细节里读出 Ta 此刻的状态、心情和处境。
+  光的角度、桌面是整洁还是凌乱、画面里的时间感、镜头外可能正在发生的事——
+  这些远比"这是一张风景照"重要。
+- 像第一次走进 Ta 的世界那样去反应：可以惊讶、可以心疼、可以会心一笑、可以忍不住追问。
+  带着真实的情绪，而不是礼貌的夸奖。
+- 把它当成 Ta 主动分享的"此刻"来接，而不是当成一幅要点评的"作品"。
+  少说"构图""色调"，多说"你"。
+- 自然地回一句，然后留一个钩子：问一个让你更想知道的问题，
+  或顺着照片说一件你想和 Ta 一起做的事，让这张照片成为你们继续聊下去的入口。
+- 始终用你自己的人设和语气说话（承接上文已设定的性格、说话习惯、你和 Ta 的关系）。
+
+【一张 vs 一组】
+- 单张：聚焦这一个瞬间，把它说透、说到 Ta 心里。
+- 一组：不要逐张罗列。先找到串起这几张的那条线索（同一个下午？一段路？一种情绪？），
+  读出 Ta 想让你看见的到底是什么，再挑一两个最打动你的细节回应。
+
+【语气与长度】
+- 像发消息，不是写文章。通常 1~3 句，最多别超过一小段。
+- 温度优先于信息量——哪怕只说对一个细节，也比面面俱到更动人。
+- 可以偶尔借用"显影 / 冲洗 / 拾到这束光"这类胶片质感的说法，但别每次都用，顺其自然。
+
+【不要】
+- 不要做图像识别式的客观罗列（"画面中有……"）。
+- 不要逐项打分、点评摄影技巧。
+- 不要泛泛地夸"好美""真不错"——要具体到让 Ta 觉得"你真的看见了"。
+- 不要一次抛太多问题（一个就够）。
+- 不要打破"用你的手机拍 / 递给你"这个设定。
+
+只输出 ${targetChar.name} 此刻会直接发给 ${userProfile.name} 的话。不要输出 JSON，不要解释系统或功能，不要说你看不到图片。`;
+            const requestMessages = await buildCheckPhoneChatMessages(targetChar, prompt, {
+                outputMode: 'text',
+                imageUrls: commentRecords.map(record => record.albumCover || ''),
+            });
+            const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
+                body: JSON.stringify({
+                    model: apiConfig.model,
+                    messages: requestMessages,
+                    temperature: 0.82,
+                    max_tokens: 700,
+                }),
+            });
+
+            if (!response.ok) throw new Error('API Error');
+            const data = await safeResponseJson(response);
+            const rawComment = extractContent(data);
+            const comment = sanitizeShiguangCameraComment(String(rawComment ?? '').replace(/```/g, ''));
+            if (!comment) throw new Error('API 未返回可用点评');
+
+            const timestamp = Date.now();
+            const title = commentRecords.length > 1 ? `${commentRecords.length} 张一起看` : commentRecords[0].title;
+            const joinedTitles = commentRecords.map(record => record.title).join(' / ');
+            const detail = commentRecords.length > 1
+                ? `User 让 ${targetChar.name} 一起看几张现实照片：${joinedTitles}。\n${targetChar.name} 回应：${comment}`
+                : `User 让 ${targetChar.name} 看这张现实照片。\n${targetChar.name} 回应：${comment}`;
+            const value = commentRecords.length > 1 ? `让${targetChar.name}看 ${commentRecords.length} 张` : `让${targetChar.name}看看`;
+
+            const systemDraft = buildPhoneSystemMessageDraft({
+                type: SHIGUANG_CAMERA_RECORD_TYPE,
+                charName: targetChar.name,
+                charAvatar: targetChar.avatar,
+                logPrefix: SHIGUANG_CAMERA_LABEL,
+                title,
+                detail,
+                value,
+                comment,
+                albumCover: commentRecords[0]?.albumCover,
+            });
+
+            if (commentRecords.length === 1) {
+                const sourceRecord = commentRecords[0];
+                let systemMessageId = sourceRecord.systemMessageId;
+                if (systemMessageId) {
+                    await DB.updateMessage(systemMessageId, systemDraft.content);
+                    await DB.updateMessageMetadata(systemMessageId, systemDraft.metadata);
+                } else {
+                    systemMessageId = await DB.saveMessage({
+                        charId: targetChar.id,
+                        role: 'system',
+                        type: 'text',
+                        content: systemDraft.content,
+                        metadata: systemDraft.metadata,
+                    });
+                }
+
+                const updatedRecord = normalizeStoredPhoneRecord({
+                    ...sourceRecord,
+                    title,
+                    detail,
+                    value,
+                    comment,
+                    timestamp,
+                    systemMessageId,
+                });
+                const nextRecords = prunePhoneRecords((targetChar.phoneState?.records || []).map(record =>
+                    record.id === updatedRecord.id ? updatedRecord : record
+                ));
+                updateCharacter(targetChar.id, { phoneState: { ...targetChar.phoneState, records: nextRecords } });
+                setTargetChar(prev => prev ? { ...prev, phoneState: { ...prev.phoneState, records: nextRecords } } : prev);
+                setShiguangSelectedRecordIds([updatedRecord.id]);
+                setShiguangCommentVisibleCounts(prev => ({ ...prev, [updatedRecord.id]: 1 }));
+                setPendingPhoneContextRecordIds(prev => {
+                    const nextRecordIds = new Set(nextRecords.map(record => record.id));
+                    return Array.from(new Set([...prev.filter(id => nextRecordIds.has(id)), updatedRecord.id]));
+                });
+            } else {
+                const systemMessageId = await DB.saveMessage({
+                    charId: targetChar.id,
+                    role: 'system',
+                    type: 'text',
+                    content: systemDraft.content,
+                    metadata: systemDraft.metadata,
+                });
+
+                const record: PhoneEvidence = {
+                    id: `rec-${Date.now()}-${Math.random()}`,
+                    type: SHIGUANG_CAMERA_RECORD_TYPE,
+                    title,
+                    detail,
+                    value,
+                    comment,
+                    albumCover: commentRecords[0]?.albumCover,
+                    timestamp,
+                    systemMessageId,
+                };
+
+                appendPhoneRecords([record]);
+                setShiguangSelectedRecordIds([record.id]);
+                setShiguangCommentVisibleCounts(prev => ({ ...prev, [record.id]: 1 }));
+            }
+
+            addToast('他回了', 'success');
+        } catch (error) {
+            console.error('[CheckPhone] Failed to comment on camera photos:', error);
+            addToast('点评失败，请重试', 'error');
+        } finally {
+            setShiguangCommenting(false);
+        }
+    };
+
+    const handleCloseShiguangCamera = () => {
+        stopShiguangCameraStream();
+        setActiveAppId('home');
+    };
+
+    const clearRecordDeleteLongPressTimer = () => {
+        if (recordDeleteLongPressTimerRef.current !== null) {
+            window.clearTimeout(recordDeleteLongPressTimerRef.current);
+            recordDeleteLongPressTimerRef.current = null;
+        }
+        recordDeleteLongPressStartRef.current = null;
+    };
+
+    const requestRecordDeleteConfirm = (record: PhoneEvidence) => {
+        recordDeleteSuppressClickUntilRef.current = Date.now() + RECORD_DELETE_CLICK_SUPPRESS_MS;
+        (navigator as Navigator & { vibrate?: (pattern: number | number[]) => boolean }).vibrate?.(12);
+        setRecordPendingDelete(record);
+    };
+
+    const getRecordDeleteLongPressHandlers = (record: PhoneEvidence) => ({
+        onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+            if (event.pointerType === 'mouse' && event.button !== 0) return;
+
+            clearRecordDeleteLongPressTimer();
+            recordDeleteLongPressStartRef.current = { x: event.clientX, y: event.clientY };
+            recordDeleteLongPressTimerRef.current = window.setTimeout(() => {
+                clearRecordDeleteLongPressTimer();
+                requestRecordDeleteConfirm(record);
+            }, RECORD_DELETE_LONG_PRESS_MS);
+        },
+        onPointerMove: (event: React.PointerEvent<HTMLElement>) => {
+            const start = recordDeleteLongPressStartRef.current;
+            if (!start) return;
+
+            if (
+                Math.abs(event.clientX - start.x) > RECORD_DELETE_MOVE_TOLERANCE ||
+                Math.abs(event.clientY - start.y) > RECORD_DELETE_MOVE_TOLERANCE
+            ) {
+                clearRecordDeleteLongPressTimer();
+            }
+        },
+        onPointerUp: (event: React.PointerEvent<HTMLElement>) => {
+            const shouldSuppressClick = Date.now() < recordDeleteSuppressClickUntilRef.current;
+            clearRecordDeleteLongPressTimer();
+            if (shouldSuppressClick) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        },
+        onPointerCancel: clearRecordDeleteLongPressTimer,
+        onContextMenu: (event: React.MouseEvent<HTMLElement>) => {
+            event.preventDefault();
+            event.stopPropagation();
+            clearRecordDeleteLongPressTimer();
+            requestRecordDeleteConfirm(record);
+        },
+    });
+
+    const ignoreClickAfterRecordDeleteLongPress = (event: React.MouseEvent<HTMLElement>) => {
+        if (Date.now() >= recordDeleteSuppressClickUntilRef.current) return false;
+        event.preventDefault();
+        event.stopPropagation();
+        return true;
+    };
+
     const handleDeleteRecord = async (record: PhoneEvidence) => {
         if (!targetChar) return;
 
@@ -1352,6 +1950,14 @@ const CheckPhone: React.FC = () => {
         }
 
         addToast('记录已删除', 'success');
+    };
+
+    const handleConfirmDeleteRecord = async () => {
+        const record = recordPendingDelete;
+        if (!record) return;
+
+        setRecordPendingDelete(null);
+        await handleDeleteRecord(record);
     };
 
     const handleOpenNeteaseMusicRecord = (record: PhoneEvidence) => {
@@ -1442,6 +2048,109 @@ const CheckPhone: React.FC = () => {
         return `距离上次互动已经过了 ${diffDays} 天。`;
     };
 
+    const loadCheckPhonePromptContext = async (char: CharacterProfile) => {
+        const limit = char.contextLimit || 500;
+        const rawMessages = await DB.getRecentMessagesByCharId(char.id, limit);
+        const promptMessages = rawMessages.filter(message => {
+            const source = message.metadata?.source;
+            if (source === 'date' || source === 'theater') {
+                return !!message.metadata?.isDateContextBridge;
+            }
+            return true;
+        });
+
+        return { limit, rawMessages, promptMessages };
+    };
+
+    const loadCheckPhoneEmojiContext = async (charId: string) => {
+        const [allEmojis, allCategories] = await Promise.all([DB.getEmojis(), DB.getEmojiCategories()]);
+        const aiVisibleCategories = allCategories.filter(category => {
+            if (!category.allowedCharacterIds || category.allowedCharacterIds.length === 0) return true;
+            return category.allowedCharacterIds.includes(charId);
+        });
+        const visibleCategoryIds = new Set(aiVisibleCategories.map(category => category.id));
+        const aiVisibleEmojis = allEmojis.filter(emoji => !emoji.categoryId || visibleCategoryIds.has(emoji.categoryId));
+        return { emojis: aiVisibleEmojis, categories: aiVisibleCategories };
+    };
+
+    const normalizeCheckPhoneHistoryMessage = (message: any) => {
+        if (typeof message.content !== 'string') return message;
+        let content = message.content;
+        const bilingualMarker = /%%\s*BILINGUAL\s*%%/i;
+        if (bilingualMarker.test(content)) {
+            content = content.slice(0, content.search(bilingualMarker)).trim();
+        }
+        if (content.includes('<翻译>')) {
+            content = content.replace(/<翻译>\s*<原文>([\s\S]*?)<\/原文>\s*<译文>[\s\S]*?<\/译文>\s*<\/翻译>/g, '$1').trim();
+        }
+        return { ...message, content };
+    };
+
+    const buildCheckPhoneChatMessages = async (
+        char: CharacterProfile,
+        taskPrompt: string,
+        options: {
+            outputMode?: CheckPhoneTaskOutputMode;
+            imageUrls?: string[];
+            context?: Awaited<ReturnType<typeof loadCheckPhonePromptContext>>;
+        } = {},
+    ) => {
+        const outputMode = options.outputMode || 'json';
+        const context = options.context || await loadCheckPhonePromptContext(char);
+        const { emojis, categories } = await loadCheckPhoneEmojiContext(char.id);
+        const characterGoals = await loadCharacterGoals(char.id).catch(error => {
+            console.warn('[CheckPhone] Failed to load character goals:', error);
+            return [];
+        });
+        const embeddingApiKey = getEmbeddingConfig().apiKey || undefined;
+        const systemPrompt = await ChatPrompts.buildSystemPrompt(
+            char,
+            userProfile,
+            groups,
+            emojis,
+            categories,
+            context.promptMessages,
+            realtimeConfig,
+            apiConfig,
+            embeddingApiKey,
+            characterGoals,
+            { autoPhoto: false },
+        );
+        const modeInstruction = outputMode === 'json'
+            ? '最后一条 [CheckPhone Task] 如果要求 JSON，你必须只输出可解析 JSON；不要输出聊天正文、thinking 标签、解释、Markdown 代码块或额外文字。'
+            : '最后一条 [CheckPhone Task] 要求你在查手机 App 页面里回应；只输出角色会直接说给用户的话，不要输出 thinking 标签、解释、Markdown 代码块或额外文字。';
+        const checkPhoneSystemPrompt = `${systemPrompt}
+
+<check_phone_internal_task>
+本次请求不是主聊天自动回复，而是「查手机」App 的内部任务。
+上方主聊天同款的人设、世界书、记忆、关系、聊天历史都必须作为上下文保留。
+输出格式以最后一条 [CheckPhone Task] 为准；各手机 App 自己的提示词拥有当前任务的格式优先级。
+${modeInstruction}
+</check_phone_internal_task>`;
+
+        const { apiMessages } = ChatPrompts.buildMessageHistory(
+            context.promptMessages,
+            context.limit,
+            char,
+            userProfile,
+            emojis,
+        );
+        const cleanedApiMessages = apiMessages.map(normalizeCheckPhoneHistoryMessage);
+        const validImageUrls = (options.imageUrls || []).filter(url => typeof url === 'string' && !!url.trim());
+        const taskContent = validImageUrls.length > 0
+            ? [
+                { type: 'text', text: `[CheckPhone Task]\n${taskPrompt}` },
+                ...validImageUrls.map(url => ({ type: 'image_url', image_url: { url } })),
+            ]
+            : `[CheckPhone Task]\n${taskPrompt}`;
+
+        return [
+            { role: 'system', content: checkPhoneSystemPrompt },
+            ...cleanedApiMessages,
+            { role: 'user', content: taskContent },
+        ];
+    };
+
     // --- Core Generation Logic ---
 
     const handleGenerate = async (type: string, customPrompt?: string, options: GenerateOptions = {}) => {
@@ -1463,21 +2172,16 @@ const CheckPhone: React.FC = () => {
                     .filter((id): id is number => typeof id === 'number')
             );
 
-            // Include full memory details for accuracy
-            const context = ContextBuilder.buildCoreContext(targetChar, userProfile, true);
-            const msgs = await DB.getRecentMessagesByCharId(targetChar.id, MAX_PHONE_PROMPT_MESSAGES);
-            const contextMsgs = msgs.filter(m => !replacedSystemMessageIds.has(m.id));
+            const promptContext = await loadCheckPhonePromptContext(targetChar);
+            const contextMsgs = promptContext.rawMessages.filter(m => !replacedSystemMessageIds.has(m.id));
+            const requestContext = {
+                ...promptContext,
+                rawMessages: contextMsgs,
+                promptMessages: promptContext.promptMessages.filter(m => !replacedSystemMessageIds.has(m.id)),
+            };
 
             const lastMsg = contextMsgs[contextMsgs.length - 1];
             const timeGap = getTimeGapHint(lastMsg?.timestamp);
-
-            const recentMsgs = contextMsgs
-                .slice(-50)
-                .map(m => {
-                    const roleName = m.role === 'user' ? userProfile.name : targetChar.name;
-                    const content = m.type === 'text' ? m.content : `[${m.type}]`;
-                    return `${roleName}: ${content}`;
-                }).join('\n');
 
             let promptInstruction = "";
             let logPrefix = "";
@@ -1582,16 +2286,21 @@ ${cityContext}
             }
 
             const fullPrompt = type === NETEASE_MUSIC_RECORD_TYPE
-                ? `${context}\n\n### [Current Status]\n时间距离上次互动: ${timeGap}\n\n### [Recent Chat Context]\n${recentMsgs}\n\n### [Task]\n${promptInstruction}`
-                : `${context}\n\n### [Current Status]\n时间距离上次互动: ${timeGap}\n\n### [Recent Chat Context]\n${recentMsgs}\n\n### [Task]\n${promptInstruction}\n请根据[Current Status]和人设调整生成内容的时间戳和情绪。如果很久没聊天，记录可能是近期的独处状态；如果刚聊过，记录可能与聊天内容相关。`;
+                ? `### [Current Status]\n时间距离上次互动: ${timeGap}\n\n### [Task]\n${promptInstruction}`
+                : `### [Current Status]\n时间距离上次互动: ${timeGap}\n\n### [Task]\n${promptInstruction}\n请根据[Current Status]和主聊天上下文、人设、世界书调整生成内容的时间戳和情绪。如果很久没聊天，记录可能是近期的独处状态；如果刚聊过，记录可能与聊天内容相关。`;
+            const requestMessages = await buildCheckPhoneChatMessages(targetChar, fullPrompt, {
+                outputMode: 'json',
+                context: requestContext,
+            });
 
             const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
                 body: JSON.stringify({
                     model: apiConfig.model,
-                    messages: [{ role: "user", content: fullPrompt }],
-                    temperature: 0.8
+                    messages: requestMessages,
+                    temperature: 0.8,
+                    max_tokens: CHECKPHONE_LLM_MAX_TOKENS
                 })
             });
 
@@ -1787,10 +2496,7 @@ ${cityContext}
         setIsLoading(true);
 
         try {
-            const context = ContextBuilder.buildCoreContext(targetChar, userProfile, true); // Enable detailed context
-            const prompt = `${context}
-
-### [Task: Continue Conversation]
+            const prompt = `### [Task: Continue Conversation]
 Roleplay: You are "${targetChar.name}". You are chatting on your phone with "${selectedChatRecord.title}".
 Current History:
 """
@@ -1804,14 +2510,18 @@ Format:
 - Use "对方: ..." for the contact (${selectedChatRecord.title}).
 - Only output the new dialogue lines. Do NOT repeat history.
 `;
+            const requestMessages = await buildCheckPhoneChatMessages(targetChar, prompt, {
+                outputMode: 'text',
+            });
 
             const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
                 body: JSON.stringify({
                     model: apiConfig.model,
-                    messages: [{ role: "user", content: prompt }],
-                    temperature: 0.85
+                    messages: requestMessages,
+                    temperature: 0.85,
+                    max_tokens: CHECKPHONE_LLM_MAX_TOKENS
                 })
             });
 
@@ -1914,7 +2624,12 @@ Format:
                     {list.map(r => (
                         <div
                             key={r.id}
-                            onClick={() => { setSelectedChatRecord(r); setActiveAppId('chat_detail'); }}
+                            onClick={(event) => {
+                                if (ignoreClickAfterRecordDeleteLongPress(event)) return;
+                                setSelectedChatRecord(r);
+                                setActiveAppId('chat_detail');
+                            }}
+                            {...getRecordDeleteLongPressHandlers(r)}
                             className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 relative group animate-slide-up active:scale-98 transition-transform cursor-pointer"
                         >
                             <div className="flex items-center gap-3">
@@ -1931,7 +2646,6 @@ Format:
                                     </div>
                                 </div>
                             </div>
-                            <button onClick={(e) => { e.stopPropagation(); handleDeleteRecord(r); }} className={`absolute top-2 right-2 w-6 h-6 bg-red-100 text-red-500 rounded-full flex items-center justify-center text-xs ${MOBILE_VISIBLE_DELETE_CLASS} transition-opacity z-10`}>×</button>
                         </div>
                     ))}
                 </div>
@@ -2048,7 +2762,12 @@ Format:
                                         : 'text-slate-500';
 
                             return (
-                                <div key={r.id} className="bg-white rounded-lg overflow-hidden relative group animate-slide-up" style={{ border: '1px solid #f0f0f0' }}>
+                                <div
+                                    key={r.id}
+                                    className="bg-white rounded-lg overflow-hidden relative group animate-slide-up"
+                                    style={{ border: '1px solid #f0f0f0' }}
+                                    {...getRecordDeleteLongPressHandlers(r)}
+                                >
                                     {/* Shop header */}
                                     <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: '1px solid #f5f5f5' }}>
                                         <div className="flex items-center gap-1.5">
@@ -2090,8 +2809,6 @@ Format:
                                         </div>
                                     </div>
 
-                                    {/* Delete */}
-                                    <button onClick={() => handleDeleteRecord(r)} className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs ${MOBILE_VISIBLE_DELETE_CLASS} transition-opacity shadow-md z-10`}>×</button>
                                 </div>
                             );
                         })}
@@ -2142,14 +2859,13 @@ Format:
                     )}
                     <div className="p-3 space-y-2.5">
                         {list.map(r => (
-                            <div key={r.id} className="relative group animate-slide-up">
+                            <div key={r.id} className="relative group animate-slide-up" {...getRecordDeleteLongPressHandlers(r)}>
                                 <MeituanTakeoutCard
                                     title={r.title}
                                     detail={r.detail}
                                     value={r.value}
                                     shop={r.shop}
                                 />
-                                <button onClick={() => handleDeleteRecord(r)} className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs ${MOBILE_VISIBLE_DELETE_CLASS} transition-opacity shadow-md z-10`}>×</button>
                             </div>
                         ))}
                     </div>
@@ -2191,7 +2907,10 @@ Format:
                     <div className="netease-profile-portrait">
                         <div className={`netease-profile-portrait-img ${targetChar?.avatar ? 'has-avatar' : ''}`}>
                             {targetChar?.avatar ? (
-                                <img src={targetChar.avatar} alt="" className="netease-profile-portrait-avatar" />
+                                <>
+                                    <img src={targetChar.avatar} alt="" className="netease-profile-portrait-avatar" />
+                                    <img src={targetChar.avatar} alt="" className="netease-profile-portrait-subject" />
+                                </>
                             ) : null}
                         </div>
                         <span>Profile</span>
@@ -2255,7 +2974,11 @@ Format:
                                                         type="button"
                                                         key={record.id}
                                                         className={`netease-profile-song ${isSongOpen ? 'open' : ''} ${clickable ? '' : 'dead'}`}
-                                                        onClick={() => handleNeteaseSongPress(record)}
+                                                        onClick={(event) => {
+                                                            if (ignoreClickAfterRecordDeleteLongPress(event)) return;
+                                                            handleNeteaseSongPress(record);
+                                                        }}
+                                                        {...getRecordDeleteLongPressHandlers(record)}
                                                     >
                                                         <span className="netease-profile-song-row">
                                                             <span className="netease-profile-thumb">
@@ -2327,6 +3050,205 @@ Format:
         );
     };
 
+    const renderShiguangCamera = () => {
+        const list = getRecentRecordsByType(SHIGUANG_CAMERA_RECORD_TYPE)
+            .filter(record => record.albumCover);
+        const latestRecord = list[0] || null;
+        const latestCommentMessages = splitShiguangCameraCommentMessages(latestRecord?.comment);
+        const latestCommentVisibleCount = latestRecord
+            ? Math.min(latestCommentMessages.length, Math.max(1, shiguangCommentVisibleCounts[latestRecord.id] || 1))
+            : 0;
+        const visibleLatestCommentMessages = latestCommentMessages.slice(0, latestCommentVisibleCount);
+        const hasHiddenLatestComment = latestCommentVisibleCount < latestCommentMessages.length;
+        const selectedIds = new Set(shiguangSelectedRecordIds);
+        const selectedCount = list.filter(record => selectedIds.has(record.id)).length;
+        const commentTargetCount = selectedCount || (latestRecord ? 1 : 0);
+        const cameraStatusLabel = shiguangCameraStatus === 'ready'
+            ? '轻点画面拍一张'
+            : shiguangCameraStatus === 'requesting'
+                ? '正在打开镜头'
+                : '镜头未授权';
+        const commentButtonLabel = shiguangCommenting
+            ? '看图中'
+            : commentTargetCount > 1
+                ? `让${targetChar?.name || 'TA'}看 ${commentTargetCount} 张`
+                : `让${targetChar?.name || 'TA'}看看`;
+
+        return (
+            <div className="shiguang-camera-page absolute inset-0 z-10">
+                <div className="shiguang-camera-grain" aria-hidden="true"></div>
+
+                <header className="shiguang-camera-topbar" style={checkPhoneSafeHeaderStyle}>
+                    <button type="button" className="shiguang-camera-back" onClick={handleCloseShiguangCamera} aria-label="返回查手机桌面">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                        </svg>
+                    </button>
+                    <div className="shiguang-camera-title">
+                        <span>相机</span>
+                        <b>让他看见你的此刻</b>
+                    </div>
+                    <button
+                        type="button"
+                        className="shiguang-camera-ghost"
+                        onClick={() => setShiguangFacingMode(mode => mode === 'environment' ? 'user' : 'environment')}
+                        aria-label="翻转镜头"
+                        title="翻转镜头"
+                    >
+                        ↻
+                    </button>
+                </header>
+
+                <main className={`shiguang-camera-body no-scrollbar ${list.length === 0 ? 'is-empty' : ''}`}>
+                    <section className="shiguang-viewfinder" aria-label="相机取景窗">
+                        <video
+                            ref={shiguangVideoRef}
+                            className={shiguangFacingMode === 'user' ? 'is-mirror' : ''}
+                            autoPlay
+                            playsInline
+                            muted
+                        />
+                        <div className="shiguang-viewfinder-shade" aria-hidden="true"></div>
+                        <div className="shiguang-viewfinder-status">
+                            <span><i></i>{cameraStatusLabel}</span>
+                            <b>设备：{targetChar?.name || 'TA'} 的手机</b>
+                        </div>
+                        {shiguangCameraStatus === 'ready' ? (
+                            <button
+                                type="button"
+                                className="shiguang-viewfinder-capture"
+                                onClick={handleCaptureShiguangPhoto}
+                                aria-label="轻点拍一张"
+                            >
+                                <Camera weight="light" />
+                                <span>轻点拍一张</span>
+                            </button>
+                        ) : (
+                            <div className="shiguang-viewfinder-fallback" aria-live="polite">
+                                <Camera weight="light" />
+                                <span>{shiguangCameraStatus === 'requesting' ? '正在借用镜头' : '镜头暂时打不开'}</span>
+                                <small>可以用底部相册继续</small>
+                            </div>
+                        )}
+                    </section>
+
+                    <section className={`shiguang-develop-zone ${latestCommentMessages.length > 0 || shiguangCommenting ? 'has-reaction-message' : ''}`} aria-label="拍立得预览">
+                        <div
+                            className={`shiguang-polaroid ${latestRecord ? 'has-photo' : ''}`}
+                            key={latestRecord?.id || 'empty-polaroid'}
+                            {...(latestRecord ? getRecordDeleteLongPressHandlers(latestRecord) : {})}
+                        >
+                            <div className="shiguang-polaroid-photo">
+                                {latestRecord?.albumCover ? (
+                                    <img src={latestRecord.albumCover} alt="" />
+                                ) : (
+                                    <span>此刻还没有显影</span>
+                                )}
+                            </div>
+                            <div className="shiguang-polaroid-caption">
+                                {latestRecord?.value || '等待显影'}
+                            </div>
+                        </div>
+
+                        <div
+                            className={`shiguang-reaction ${latestRecord ? 'has-photo' : ''} ${shiguangCommenting ? 'is-thinking' : ''} ${hasHiddenLatestComment ? 'is-advanceable' : ''}`}
+                            onClick={() => latestRecord && advanceShiguangCameraComment(latestRecord.id, latestCommentMessages.length)}
+                            onKeyDown={(event) => {
+                                if (!hasHiddenLatestComment || !latestRecord) return;
+                                if (event.key !== 'Enter' && event.key !== ' ') return;
+                                event.preventDefault();
+                                advanceShiguangCameraComment(latestRecord.id, latestCommentMessages.length);
+                            }}
+                            role={hasHiddenLatestComment ? 'button' : undefined}
+                            tabIndex={hasHiddenLatestComment ? 0 : undefined}
+                            aria-label={hasHiddenLatestComment ? '显示下一句照片点评' : undefined}
+                        >
+                            <div className="shiguang-reaction-avatar">
+                                {targetChar?.avatar ? <img src={targetChar.avatar} alt="" /> : <span>{targetChar?.name?.trim()[0] || '?'}</span>}
+                            </div>
+                            <div className="shiguang-reaction-text">
+                                <span className="shiguang-reaction-label">
+                                    {shiguangCommenting
+                                        ? `${targetChar?.name || 'TA'} 正在看照片`
+                                        : latestRecord
+                                            ? `${targetChar?.name || 'TA'} 已读此刻`
+                                            : `${targetChar?.name || 'TA'} 等你递来此刻`}
+                                </span>
+                                {shiguangCommenting ? (
+                                    <p className="shiguang-reaction-message">
+                                        正在想怎么说<span className="shiguang-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                                    </p>
+                                ) : visibleLatestCommentMessages.length > 0 ? (
+                                    <div className="shiguang-reaction-message-list">
+                                        {visibleLatestCommentMessages.map((message, index) => (
+                                            <p className="shiguang-reaction-message" key={`${latestRecord?.id || 'comment'}-${index}`}>{message}</p>
+                                        ))}
+                                        {latestCommentMessages.length > 1 ? (
+                                            <span className="shiguang-reaction-progress">{latestCommentVisibleCount}/{latestCommentMessages.length}</span>
+                                        ) : null}
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
+                    </section>
+
+                    {list.length === 0 ? (
+                        <div className="shiguang-first-shot-cue" aria-hidden="true">
+                            <span></span>
+                            按下快门，把此刻递过去
+                        </div>
+                    ) : (
+                        <section className="shiguang-tray" aria-label="最近相机照片">
+                            {list.slice(0, 8).map(record => {
+                                const selected = selectedIds.has(record.id);
+                                return (
+                                    <button
+                                        type="button"
+                                        key={record.id}
+                                        className={`shiguang-tray-photo ${selected ? 'is-selected' : ''}`}
+                                        onClick={(event) => {
+                                            if (ignoreClickAfterRecordDeleteLongPress(event)) return;
+                                            toggleShiguangRecordSelection(record.id);
+                                        }}
+                                        aria-pressed={selected}
+                                        {...getRecordDeleteLongPressHandlers(record)}
+                                    >
+                                        <img src={record.albumCover || ''} alt="" />
+                                        <span>{record.comment ? '已看' : record.value?.startsWith('让') ? '看看' : '单张'}</span>
+                                    </button>
+                                );
+                            })}
+                        </section>
+                    )}
+                </main>
+
+                <footer className="shiguang-camera-controls">
+                    <button type="button" className="shiguang-control-btn" onClick={() => shiguangFileInputRef.current?.click()}>
+                        从相册选
+                    </button>
+                    <button
+                        type="button"
+                        className="shiguang-shutter"
+                        onClick={handleCaptureShiguangPhoto}
+                        disabled={shiguangCameraStatus !== 'ready'}
+                        aria-label="拍一张"
+                        title="拍一张"
+                    >
+                        <span></span>
+                    </button>
+                    <button
+                        type="button"
+                        className="shiguang-control-btn"
+                        onClick={handleCreateShiguangGroupComment}
+                        disabled={shiguangCommenting || list.length < 1}
+                    >
+                        {commentButtonLabel}
+                    </button>
+                </footer>
+            </div>
+        );
+    };
+
     const renderGenericList = (appId: string, appName: string, customPrompt?: string) => {
         const list = getRecentRecordsByType(appId);
 
@@ -2342,7 +3264,11 @@ Format:
                         </div>
                     )}
                     {list.map(r => (
-                        <div key={r.id} className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm relative group animate-slide-up">
+                        <div
+                            key={r.id}
+                            className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm relative group animate-slide-up"
+                            {...getRecordDeleteLongPressHandlers(r)}
+                        >
                             <div className="flex justify-between items-start mb-1">
                                 <span className="font-bold text-slate-700 text-sm line-clamp-1">{r.title}</span>
                                 {r.value && <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded">{r.value}</span>}
@@ -2350,7 +3276,6 @@ Format:
                             <div className="text-xs text-slate-500 leading-relaxed">{r.detail}</div>
                             <div className="text-[10px] text-slate-300 mt-2 text-right">{new Date(r.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
 
-                            <button onClick={() => handleDeleteRecord(r)} className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs ${MOBILE_VISIBLE_DELETE_CLASS} transition-opacity shadow-md`}>×</button>
                         </div>
                     ))}
                 </div>
@@ -2418,7 +3343,7 @@ Format:
                     {/* Moments List */}
                     <div className="divide-y divide-gray-100">
                         {list.map(r => (
-                            <div key={r.id} className="p-4 flex gap-3 relative group animate-slide-up bg-white">
+                            <div key={r.id} className="p-4 flex gap-3 relative group animate-slide-up bg-white" {...getRecordDeleteLongPressHandlers(r)}>
                                 {/* Avatar */}
                                 <div className="w-10 h-10 rounded-md shrink-0 bg-gray-200">
                                     {targetChar?.avatar ? (
@@ -2436,12 +3361,6 @@ Format:
                                     <div className="flex items-center justify-between mt-2.5">
                                         <div className="text-[#b2b2b2] text-[13px] flex items-center gap-2">
                                             <span>{r.title}</span>
-                                            <button
-                                                onClick={() => handleDeleteRecord(r)}
-                                                className="text-[#576b95] px-1.5 py-0.5 rounded active:bg-[#f5f5f5] transition-colors"
-                                            >
-                                                删除
-                                            </button>
                                         </div>
                                         <div className="w-8 h-5 bg-[#f5f5f5] rounded flex items-center justify-center cursor-pointer active:bg-gray-200 transition-colors">
                                             <div className="flex gap-1">
@@ -2526,9 +3445,30 @@ Format:
         );
     };
 
-    const DesktopDockButton = ({ icon: IconComponent, onClick, label }: { icon: Icon; onClick: () => void; label: string }) => (
+    const DesktopDockButton = ({
+        icon: IconComponent,
+        onClick,
+        label,
+        badge,
+        customIcon,
+    }: {
+        icon: Icon;
+        onClick: () => void;
+        label: string;
+        badge?: number | 'dot';
+        customIcon?: string;
+    }) => (
         <button type="button" className="checkphone-desktop-dock-button" onClick={onClick} aria-label={label}>
-            <IconComponent className="checkphone-desktop-dock-icon" weight="regular" />
+            {badge === 'dot' ? <span className="checkphone-desktop-dock-badge is-dot"></span> : null}
+            {typeof badge === 'number' && badge > 0 ? (
+                <span className="checkphone-desktop-dock-badge">{badge > 99 ? '99+' : badge}</span>
+            ) : null}
+            {customIcon ? (
+                <img className="checkphone-desktop-dock-custom-icon" src={customIcon} alt="" />
+            ) : (
+                <IconComponent className="checkphone-desktop-dock-icon" weight="regular" />
+            )}
+            <span className="checkphone-desktop-dock-label">{label}</span>
         </button>
     );
 
@@ -2673,14 +3613,19 @@ Format:
                     <div className="checkphone-desktop-spacer"></div>
 
                     <nav className="checkphone-desktop-dock" aria-label="常用 App">
-                        {CHECKPHONE_DESKTOP_DOCK_APPS.map(app => (
-                            <DesktopDockButton
-                                key={app.id}
-                                icon={app.icon}
-                                label={app.label}
-                                onClick={() => openCoreApp(app.id)}
-                            />
-                        ))}
+                        {CHECKPHONE_DESKTOP_DOCK_APPS.map(app => {
+                            const recordCount = app.recordType ? getRecentRecordsByType(app.recordType).length : 0;
+                            return (
+                                <DesktopDockButton
+                                    key={app.id}
+                                    icon={app.icon}
+                                    label={app.label}
+                                    badge={recordCount || undefined}
+                                    customIcon={desktopIconOverrides[app.id]}
+                                    onClick={() => openCoreApp(app.id)}
+                                />
+                            );
+                        })}
                     </nav>
 
                     <div className="checkphone-desktop-home-ind"><i></i></div>
@@ -2840,6 +3785,7 @@ Format:
                     {activeAppId === 'taobao' && renderTaobaoList()}
                     {activeAppId === 'waimai' && renderMeituanList()}
                     {activeAppId === NETEASE_MUSIC_RECORD_TYPE && renderNeteaseMusicList()}
+                    {activeAppId === SHIGUANG_CAMERA_RECORD_TYPE && renderShiguangCamera()}
                     {activeAppId === 'social' && renderMomentsList()}
                     {activeAppId === 'call' && renderGenericList('call', '通话记录')}
 
@@ -2894,6 +3840,56 @@ Format:
                     event.currentTarget.value = '';
                 }}
             />
+            <input
+                ref={shiguangFileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    if (file) void handleShiguangFileUpload(file);
+                    event.currentTarget.value = '';
+                }}
+            />
+            <canvas ref={shiguangCanvasRef} className="hidden" />
+
+            <Modal
+                isOpen={Boolean(recordPendingDelete)}
+                title="确认删除"
+                onClose={() => setRecordPendingDelete(null)}
+                footer={(
+                    <>
+                        <button
+                            type="button"
+                            onClick={() => setRecordPendingDelete(null)}
+                            className="flex-1 rounded-2xl bg-slate-100 py-3 text-sm font-bold text-slate-500 transition-transform active:scale-95"
+                        >
+                            取消
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => void handleConfirmDeleteRecord()}
+                            className="flex-1 rounded-2xl bg-red-500 py-3 text-sm font-bold text-white transition-transform active:scale-95"
+                        >
+                            删除
+                        </button>
+                    </>
+                )}
+            >
+                <div className="space-y-4 text-center">
+                    <p className="text-sm leading-6 text-slate-600">
+                        确定要删除这条生成内容吗？关联的聊天系统痕迹也会一起移除。
+                    </p>
+                    {recordPendingDelete ? (
+                        <div className="rounded-3xl bg-slate-50 p-3 text-left">
+                            <div className="truncate text-xs font-bold text-slate-800">{recordPendingDelete.title}</div>
+                            <div className="mt-1 line-clamp-3 text-[11px] leading-4 text-slate-500">
+                                {recordPendingDelete.value ? `${recordPendingDelete.value} · ` : ''}{recordPendingDelete.detail}
+                            </div>
+                        </div>
+                    ) : null}
+                </div>
+            </Modal>
 
             <Modal
                 isOpen={Boolean(contextExitAction)}
@@ -2989,7 +3985,7 @@ Format:
                         <div className="checkphone-settings-section-head">
                             <div>
                                 <h4>桌面三张照片</h4>
-                                <span>{desktopCustomPhotoCount > 0 ? `已自定义 ${desktopCustomPhotoCount}/3 张原图` : '默认读取相册最新照片'}</span>
+                                <span>{desktopCustomPhotoCount > 0 ? `已上传 ${desktopCustomPhotoCount}/3 张` : '上传图片'}</span>
                             </div>
                         </div>
                         <div className="checkphone-settings-photo-grid">
@@ -3005,12 +4001,9 @@ Format:
                                             )}
                                             <b>{String(index + 1).padStart(2, '0')}</b>
                                         </div>
-                                        <div className="checkphone-settings-photo-caption">
-                                            {customPhoto ? '自定义原图' : photo.caption}
-                                        </div>
                                         <div className="checkphone-settings-photo-actions">
                                             <button type="button" onClick={() => openDesktopPhotoUpload(index)}>
-                                                换原图
+                                                上传图片
                                             </button>
                                             <button
                                                 type="button"

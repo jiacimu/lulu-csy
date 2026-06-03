@@ -1,0 +1,112 @@
+import { describe, expect, it } from 'vitest';
+import type { CharacterProfile, DateState, Message } from '../types';
+import {
+    buildDateHistoryRecoveryState,
+    createLightweightDateState,
+    resolveDateStateBackground,
+    resolveDateStateSprite,
+    shouldUseDateVisualSafeMode,
+} from './dateSessionState';
+
+const heavyDataUrl = `data:image/png;base64,${'a'.repeat(8192)}`;
+
+const makeCharacter = (overrides: Partial<CharacterProfile> = {}): CharacterProfile => ({
+    id: 'char-1',
+    name: 'Sully',
+    avatar: 'avatar.png',
+    description: '',
+    systemPrompt: '',
+    memories: [],
+    dateBackground: 'bg.png',
+    sprites: {
+        normal: 'normal.png',
+        happy: 'happy.png',
+    },
+    ...overrides,
+} as CharacterProfile);
+
+const makeMessage = (
+    id: number,
+    role: Message['role'],
+    content: string,
+    metadata: Record<string, unknown>,
+): Message => ({
+    id,
+    charId: 'char-1',
+    role,
+    type: 'text',
+    content,
+    timestamp: id * 1000,
+    metadata,
+});
+
+describe('date session lightweight state', () => {
+    it('does not duplicate large background or sprite assets in autosaves', () => {
+        const char = makeCharacter({
+            dateBackground: heavyDataUrl,
+            sprites: { normal: heavyDataUrl },
+        });
+
+        const state = createLightweightDateState({
+            dialogueQueue: [],
+            dialogueBatch: [{ text: 'hello', emotion: 'normal' }],
+            currentText: 'hello',
+            bgImage: heavyDataUrl,
+            currentSprite: heavyDataUrl,
+            isNovelMode: true,
+            visualSafeMode: true,
+            peekStatus: 'opening',
+        }, char, 'before-send');
+
+        expect(state.bgImage).toBe('');
+        expect(state.bgSource).toBe('characterDateBackground');
+        expect(state.currentSprite).toBe('');
+        expect(state.currentSpriteKey).toBe('normal');
+        expect(state.autosaveReason).toBe('before-send');
+    });
+
+    it('restores old full-image state fields for compatibility', () => {
+        const char = makeCharacter();
+        const legacyState = {
+            bgImage: 'legacy-bg.png',
+            currentSprite: 'legacy-sprite.png',
+        } as Partial<DateState>;
+
+        expect(resolveDateStateBackground(char, legacyState)).toBe('legacy-bg.png');
+        expect(resolveDateStateSprite(char, legacyState)).toBe('legacy-sprite.png');
+    });
+
+    it('resolves sprite keys from the active date skin set', () => {
+        const char = makeCharacter({
+            activeSkinSetId: 'skin-2',
+            dateSkinSets: [
+                { id: 'skin-1', name: 'One', sprites: { happy: 'skin-1-happy.png' } },
+                { id: 'skin-2', name: 'Two', sprites: { happy: 'skin-2-happy.png' } },
+            ],
+        });
+
+        expect(resolveDateStateSprite(char, { currentSpriteKey: 'happy' })).toBe('skin-2-happy.png');
+    });
+
+    it('detects safe visual mode for weak devices and abnormal autosaves', () => {
+        expect(shouldUseDateVisualSafeMode(undefined, { deviceMemory: 4 })).toBe(true);
+        expect(shouldUseDateVisualSafeMode(undefined, { hardwareConcurrency: 4 })).toBe(true);
+        expect(shouldUseDateVisualSafeMode(undefined, { connection: { saveData: true } })).toBe(true);
+        expect(shouldUseDateVisualSafeMode({ autosaveReason: 'after-reply' })).toBe(true);
+    });
+
+    it('builds a text-first recovery state from recent date history', () => {
+        const char = makeCharacter();
+        const state = buildDateHistoryRecoveryState([
+            makeMessage(1, 'assistant', 'opening', { source: 'date', isOpening: true }),
+            makeMessage(2, 'user', 'user reply', { source: 'date' }),
+        ], char);
+
+        expect(state).not.toBeNull();
+        expect(state?.isNovelMode).toBe(true);
+        expect(state?.visualSafeMode).toBe(true);
+        expect(state?.restoredFromHistory).toBe(true);
+        expect(state?.peekStatus).toBe('opening');
+        expect(state?.currentSpriteKey).toBe('normal');
+    });
+});
