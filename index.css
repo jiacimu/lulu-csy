@@ -1123,6 +1123,1817 @@
   }
 }
 
+/* CheckPhone character desktop */
+.checkphone-desktop-ui {
+  --checkphone-real-safe-top: var(--hardware-safe-top, env(safe-area-inset-top, 0px));
+  --cpd-bg: #fbfbfa;
+  --cpd-card: #ffffff;
+  --cpd-ink: #1e1d1b;
+  --cpd-ink-2: #86857f;
+  --cpd-ink-3: #bdbcb6;
+  --cpd-line: rgba(20, 20, 18, 0.11);
+  --cpd-sage: #9aa886;
+  --cpd-serif: "Bodoni Moda", "Bodoni 72", Didot, "Times New Roman", serif;
+  --cpd-cn: "Noto Sans SC", var(--app-font), "PingFang SC", "Microsoft YaHei", sans-serif;
+  --cpd-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow: hidden;
+  background: var(--cpd-bg);
+  color: var(--cpd-ink);
+  font-family: var(--cpd-cn);
+  -webkit-font-smoothing: antialiased;
+}
+
+.checkphone-desktop-ui.has-wallpaper {
+  --cpd-card: rgba(255, 255, 255, 0.84);
+  --cpd-ink: #f8fafc;
+  --cpd-ink-2: rgba(248, 250, 252, 0.86);
+  --cpd-ink-3: rgba(248, 250, 252, 0.7);
+  --cpd-line: rgba(255, 255, 255, 0.28);
+  background:
+    radial-gradient(120% 42% at 50% 0%, rgba(0, 0, 0, 0.18), transparent 70%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.06), transparent 34%, rgba(0, 0, 0, 0.14)),
+    var(--cpd-wallpaper) center / cover no-repeat;
+}
+
+.checkphone-desktop-ui.has-wallpaper .checkphone-desktop-statusbar,
+.checkphone-desktop-ui.has-wallpaper .checkphone-desktop-clock,
+.checkphone-desktop-ui.has-wallpaper .checkphone-desktop-online,
+.checkphone-desktop-ui.has-wallpaper .checkphone-desktop-disconnect-pill,
+.checkphone-desktop-ui.has-wallpaper .checkphone-desktop-label,
+.checkphone-desktop-ui.has-wallpaper .checkphone-desktop-home-ind {
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.48), 0 0 16px rgba(0, 0, 0, 0.25);
+}
+
+.checkphone-desktop-ui.has-wallpaper .checkphone-desktop-chip,
+.checkphone-desktop-ui.has-wallpaper .checkphone-desktop-dock {
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.checkphone-desktop-ui.has-wallpaper .checkphone-desktop-chip,
+.checkphone-desktop-ui.has-wallpaper .checkphone-desktop-dock-button {
+  color: #1e1d1b;
+}
+
+.checkphone-desktop-ui.has-wallpaper .checkphone-desktop-chip.is-utility {
+  color: #6b7280;
+}
+
+.checkphone-desktop-ui.has-wallpaper .checkphone-desktop-home-ind i {
+  background: rgba(248, 250, 252, 0.72);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.32);
+}
+
+.checkphone-desktop-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.checkphone-desktop-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  padding: max(15px, calc(var(--checkphone-real-safe-top) + 8px)) 24px 0;
+  color: var(--cpd-ink);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.checkphone-desktop-status-right {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.checkphone-desktop-bars {
+  display: inline-flex;
+  height: 11px;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.checkphone-desktop-bars i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--cpd-ink);
+}
+
+.checkphone-desktop-bars i:nth-child(1) { height: 35%; }
+.checkphone-desktop-bars i:nth-child(2) { height: 58%; }
+.checkphone-desktop-bars i:nth-child(3) { height: 80%; }
+.checkphone-desktop-bars i:nth-child(4) { height: 100%; }
+
+.checkphone-desktop-wifi {
+  width: 15px;
+  height: 15px;
+}
+
+.checkphone-desktop-batt {
+  position: relative;
+  width: 24px;
+  height: 12px;
+  border: 1.5px solid rgba(30, 29, 27, 0.5);
+  border-radius: 3px;
+}
+
+.checkphone-desktop-batt::after {
+  position: absolute;
+  top: 3px;
+  right: -3.5px;
+  width: 2px;
+  height: 6px;
+  border-radius: 0 1px 1px 0;
+  background: rgba(30, 29, 27, 0.5);
+  content: "";
+}
+
+.checkphone-desktop-batt i {
+  position: absolute;
+  inset: 1.5px auto 1.5px 1.5px;
+  width: 82%;
+  border-radius: 1.5px;
+  background: var(--cpd-ink);
+}
+
+.checkphone-desktop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  gap: 16px;
+  padding: 18px 24px 0;
+}
+
+.checkphone-desktop-who {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+}
+
+.checkphone-desktop-avatar {
+  display: flex;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: linear-gradient(155deg, #aab0b6, #5b6068);
+  box-shadow: 0 0 0 1px var(--cpd-line), 0 6px 14px -8px rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-family: var(--cpd-serif);
+  font-size: 18px;
+}
+
+.checkphone-desktop-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.checkphone-desktop-meta {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.checkphone-desktop-online {
+  display: flex;
+  max-width: 150px;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--cpd-ink-2);
+  font-family: var(--cpd-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkphone-desktop-online i {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--cpd-sage);
+}
+
+.checkphone-desktop-disconnect-pill {
+  border: 1px solid var(--cpd-line);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--cpd-ink-3);
+  font-family: var(--cpd-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  padding: 4px 9px;
+}
+
+.checkphone-desktop-disconnect-pill:active {
+  transform: scale(0.97);
+  border-color: rgba(30, 29, 27, 0.24);
+  color: var(--cpd-ink);
+}
+
+.checkphone-desktop-clock {
+  flex: none;
+  text-align: right;
+}
+
+.checkphone-desktop-clock-time {
+  color: var(--cpd-ink);
+  font-family: var(--cpd-serif);
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 0.85;
+}
+
+.checkphone-desktop-clock-date {
+  margin-top: 7px;
+  color: var(--cpd-ink-2);
+  font-family: var(--cpd-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+}
+
+.checkphone-desktop-fan {
+  position: relative;
+  flex: none;
+  height: 250px;
+  margin-top: 14px;
+}
+
+.checkphone-desktop-photo-card {
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  width: 130px;
+  height: 184px;
+  margin-left: -65px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 13px;
+  background: linear-gradient(155deg, #bbc3b8, #717a6e);
+  box-shadow: 0 16px 32px -18px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transform: rotate(var(--rot));
+  transform-origin: bottom center;
+  transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1), box-shadow 0.3s;
+  animation: checkphoneDesktopDeal 0.6s cubic-bezier(0.2, 0.9, 0.3, 1) backwards;
+  animation-delay: var(--deal-delay, 0ms);
+}
+
+.checkphone-desktop-photo-card:nth-child(1) {
+  background: linear-gradient(155deg, #b7bdc5, #6c727b);
+}
+
+.checkphone-desktop-photo-card:nth-child(2) {
+  background: linear-gradient(155deg, #c4b7c0, #7c707b);
+}
+
+.checkphone-desktop-photo-card:nth-child(3) {
+  background: linear-gradient(155deg, #bbc3b8, #717a6e);
+}
+
+.checkphone-desktop-photo-card:active {
+  transform: rotate(var(--rot)) translateY(-10px);
+}
+
+.checkphone-desktop-photo-card.is-active {
+  box-shadow: 0 26px 44px -20px rgba(0, 0, 0, 0.6);
+  transform: rotate(var(--rot)) translateY(-18px);
+}
+
+.checkphone-desktop-photo-card img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.checkphone-desktop-photo-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.72);
+  font-family: var(--cpd-serif);
+  font-size: 48px;
+}
+
+.checkphone-desktop-photo-noise {
+  position: absolute;
+  inset: 0;
+  opacity: 0.07;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.checkphone-desktop-photo-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.26), transparent 50%);
+}
+
+.checkphone-desktop-photo-caption {
+  position: absolute;
+  bottom: 8px;
+  left: 10px;
+  z-index: 2;
+  max-width: calc(100% - 20px);
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.92);
+  font-family: var(--cpd-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  opacity: 0;
+  text-overflow: ellipsis;
+  transition: opacity 0.3s;
+  white-space: nowrap;
+}
+
+.checkphone-desktop-photo-card.is-active .checkphone-desktop-photo-caption {
+  opacity: 1;
+}
+
+.checkphone-desktop-page-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  gap: 6px;
+  padding: 10px 0 2px;
+}
+
+.checkphone-desktop-page-dots button {
+  width: 6px;
+  height: 6px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--cpd-ink-3);
+  padding: 0;
+}
+
+.checkphone-desktop-page-dots button.is-on {
+  width: 18px;
+  background: var(--cpd-ink);
+}
+
+.checkphone-desktop-pages {
+  display: flex;
+  min-height: 0;
+  flex: 0 0 196px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+}
+
+.checkphone-desktop-grid {
+  display: grid;
+  min-width: 100%;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 84px;
+  align-content: start;
+  gap: 18px 10px;
+  padding: 18px 24px 0;
+  scroll-snap-align: start;
+}
+
+.checkphone-desktop-app {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkphone-desktop-app.is-editing {
+  animation: checkphoneDesktopWiggle 0.24s ease-in-out infinite alternate;
+}
+
+.checkphone-desktop-chip {
+  position: relative;
+  display: flex;
+  width: 54px;
+  height: 54px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--cpd-line);
+  border-radius: 16px;
+  background: var(--cpd-card);
+  box-shadow: 0 6px 15px -12px rgba(0, 0, 0, 0.35);
+  color: var(--cpd-ink);
+  transition: transform 0.18s;
+}
+
+.checkphone-desktop-chip:active {
+  transform: scale(0.92);
+}
+
+.checkphone-desktop-chip.is-utility {
+  color: var(--cpd-ink-2);
+}
+
+.checkphone-desktop-chip.is-danger {
+  color: #8b3a3a;
+}
+
+.checkphone-desktop-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.checkphone-desktop-custom-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 15px;
+  object-fit: cover;
+}
+
+.checkphone-desktop-emoji {
+  display: flex;
+  max-width: 42px;
+  max-height: 42px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 23px;
+  line-height: 1;
+}
+
+.checkphone-desktop-label {
+  max-width: 72px;
+  overflow: hidden;
+  color: var(--cpd-ink);
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkphone-desktop-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 3;
+  display: flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--cpd-bg);
+  border-radius: 10px;
+  background: var(--cpd-ink);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0 5px;
+}
+
+.checkphone-desktop-badge.is-dot {
+  top: -2px;
+  right: 2px;
+  min-width: 0;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+}
+
+.checkphone-desktop-delete {
+  position: absolute;
+  top: -7px;
+  right: 6px;
+  z-index: 4;
+  display: flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--cpd-bg);
+  border-radius: 50%;
+  background: var(--cpd-ink);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.checkphone-desktop-spacer {
+  flex: 1 1 auto;
+  min-height: 10px;
+}
+
+.checkphone-desktop-dock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  margin: 16px 16px 14px;
+  border: 1px solid var(--cpd-line);
+  border-radius: 30px;
+  background: var(--cpd-card);
+  box-shadow: 0 12px 30px -18px rgba(0, 0, 0, 0.3);
+  padding: 15px 24px;
+}
+
+.checkphone-desktop-dock-button {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--cpd-ink);
+}
+
+.checkphone-desktop-dock-button:active {
+  transform: scale(0.92);
+  background: rgba(30, 29, 27, 0.05);
+}
+
+.checkphone-desktop-dock-icon {
+  width: 25px;
+  height: 25px;
+}
+
+.checkphone-desktop-home-ind {
+  flex: none;
+  text-align: center;
+}
+
+.checkphone-desktop-home-ind i {
+  display: inline-block;
+  width: 120px;
+  height: 5px;
+  margin-bottom: 16px;
+  border-radius: 3px;
+  background: rgba(30, 29, 27, 0.3);
+}
+
+@keyframes checkphoneDesktopDeal {
+  from {
+    opacity: 0;
+    transform: rotate(0deg) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(var(--rot));
+  }
+}
+
+@keyframes checkphoneDesktopWiggle {
+  from { transform: rotate(-1.4deg); }
+  to { transform: rotate(1.4deg); }
+}
+
+@media (max-height: 720px) {
+  .checkphone-desktop-fan {
+    height: 222px;
+  }
+
+  .checkphone-desktop-photo-card {
+    width: 118px;
+    height: 166px;
+    margin-left: -59px;
+  }
+
+  .checkphone-desktop-pages {
+    flex-basis: 184px;
+  }
+
+  .checkphone-desktop-grid {
+    gap: 14px 8px;
+    grid-auto-rows: 80px;
+  }
+}
+
+@media (max-width: 370px) {
+  .checkphone-desktop-head,
+  .checkphone-desktop-statusbar {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .checkphone-desktop-clock-time {
+    font-size: 36px;
+  }
+
+  .checkphone-desktop-grid {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .checkphone-desktop-chip {
+    width: 50px;
+    height: 50px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .checkphone-desktop-photo-card,
+  .checkphone-desktop-app.is-editing {
+    animation: none;
+  }
+
+  .checkphone-desktop-pages {
+    scroll-behavior: auto;
+  }
+}
+
+.checkphone-settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: #1e293b;
+}
+
+.checkphone-settings-section {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.84);
+  padding: 12px;
+}
+
+.checkphone-settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.checkphone-settings-section-head h4 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.checkphone-settings-section-head span {
+  display: block;
+  margin-top: 3px;
+  color: #94a3b8;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.checkphone-settings-wallpaper {
+  position: relative;
+  display: flex;
+  height: 116px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(154, 168, 134, 0.42), transparent 45%),
+    linear-gradient(135deg, #f8fafc, #e5e7eb);
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+.checkphone-settings-wallpaper img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.checkphone-settings-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.checkphone-settings-photo-slot {
+  min-width: 0;
+}
+
+.checkphone-settings-photo-preview {
+  position: relative;
+  display: flex;
+  aspect-ratio: 3 / 4;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(148, 163, 184, 0.34), transparent 45%),
+    linear-gradient(145deg, #f8fafc, #e5e7eb);
+  color: #94a3b8;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.checkphone-settings-photo-preview img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.checkphone-settings-photo-preview b {
+  position: absolute;
+  right: 6px;
+  bottom: 5px;
+  z-index: 1;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-shadow: 0 1px 5px rgba(15, 23, 42, 0.46);
+}
+
+.checkphone-settings-photo-caption {
+  min-height: 16px;
+  overflow: hidden;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkphone-settings-photo-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.checkphone-settings-photo-actions button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 28px;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.checkphone-settings-photo-actions button:last-child {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.checkphone-settings-photo-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.checkphone-settings-photo-actions button:active {
+  transform: scale(0.97);
+}
+
+.checkphone-settings-actions,
+.checkphone-settings-icon-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.checkphone-settings-actions {
+  margin-top: 10px;
+}
+
+.checkphone-settings-actions button,
+.checkphone-settings-icon-actions button,
+.checkphone-settings-install {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.checkphone-settings-actions button,
+.checkphone-settings-icon-actions button {
+  min-height: 34px;
+  flex: 1;
+  background: #0f172a;
+  color: #fff;
+  padding: 0 12px;
+}
+
+.checkphone-settings-actions button:last-child,
+.checkphone-settings-icon-actions button:last-child {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.checkphone-settings-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.checkphone-settings-actions button:active,
+.checkphone-settings-icon-actions button:active,
+.checkphone-settings-install:active {
+  transform: scale(0.97);
+}
+
+.checkphone-settings-install {
+  width: 100%;
+  min-height: 42px;
+  gap: 8px;
+  background: #111827;
+  color: #fff;
+  padding: 0 14px;
+}
+
+.checkphone-settings-install svg {
+  width: 16px;
+  height: 16px;
+}
+
+.checkphone-settings-icon-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checkphone-settings-icon-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 50px;
+  border-radius: 12px;
+  background: #fff;
+  padding: 7px;
+}
+
+.checkphone-settings-icon-sample {
+  display: flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 11px;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.checkphone-settings-icon-sample svg {
+  width: 20px;
+  height: 20px;
+}
+
+.checkphone-settings-icon-sample img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.checkphone-settings-icon-sample span {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.checkphone-settings-icon-name {
+  min-width: 0;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkphone-settings-icon-actions {
+  width: 156px;
+}
+
+.checkphone-settings-icon-actions button {
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.checkphone-settings-icon-actions button.is-danger {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+@media (max-width: 370px) {
+  .checkphone-settings-icon-row {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .checkphone-settings-icon-actions {
+    grid-column: 2;
+    width: 100%;
+  }
+}
+
+/* CheckPhone target selector */
+.checkphone-select-ui {
+  --checkphone-real-safe-top: var(--hardware-safe-top, env(safe-area-inset-top, 0px));
+  --cp-bg: #07090a;
+  --cp-panel: #0d1214;
+  --cp-line: rgba(120, 150, 150, 0.13);
+  --cp-line-2: rgba(120, 150, 150, 0.24);
+  --cp-ink: #d8dfde;
+  --cp-ink-dim: #69716f;
+  --cp-ink-faint: #3d4544;
+  --cp-cyan: #46c7bd;
+  --cp-cyan-dim: rgba(70, 199, 189, 0.45);
+  --cp-live: #ff4d52;
+  --cp-live-glow: rgba(255, 77, 82, 0.55);
+  background:
+    radial-gradient(120% 80% at 50% -10%, #0f1719 0%, var(--cp-bg) 54%),
+    linear-gradient(180deg, #07090a, #050607);
+  color: var(--cp-ink);
+  font-family: var(--app-font), "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.checkphone-select-ui::before {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.018) 0 1px,
+    transparent 1px 3px
+  );
+  content: "";
+  mix-blend-mode: overlay;
+  opacity: 0.64;
+  pointer-events: none;
+}
+
+.checkphone-select-sweep,
+.checkphone-select-grain,
+.checkphone-select-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.checkphone-select-sweep {
+  height: 140px;
+  background: linear-gradient(to bottom, transparent, rgba(70, 199, 189, 0.1), transparent);
+  opacity: 0.72;
+  animation: checkphoneSweep 6.5s linear infinite;
+}
+
+.checkphone-select-grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+  opacity: 0.05;
+}
+
+.checkphone-select-vignette {
+  background: radial-gradient(125% 100% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.62) 100%);
+}
+
+.checkphone-terminal-bar {
+  position: relative;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: max(13px, calc(var(--checkphone-real-safe-top) + 8px)) 20px 4px;
+  color: var(--cp-ink-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.checkphone-terminal-mid,
+.checkphone-terminal-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.checkphone-terminal-mid {
+  color: var(--cp-cyan);
+}
+
+.checkphone-terminal-mid span {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--cp-cyan);
+  box-shadow: 0 0 8px var(--cp-cyan);
+}
+
+.checkphone-status-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 9px;
+}
+
+.checkphone-status-bars i {
+  width: 2.5px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.checkphone-status-bars i:nth-child(1) { height: 30%; }
+.checkphone-status-bars i:nth-child(2) { height: 55%; }
+.checkphone-status-bars i:nth-child(3) { height: 78%; }
+.checkphone-status-bars i:nth-child(4) { height: 100%; }
+
+.checkphone-battery {
+  position: relative;
+  width: 20px;
+  height: 10px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+}
+
+.checkphone-battery::after {
+  position: absolute;
+  top: 2.5px;
+  right: -3px;
+  width: 2px;
+  height: 4px;
+  border-radius: 0 1px 1px 0;
+  background: currentColor;
+  content: "";
+}
+
+.checkphone-battery i {
+  position: absolute;
+  inset: 1.5px auto 1.5px 1.5px;
+  width: 62%;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.checkphone-select-back {
+  position: absolute;
+  top: max(44px, calc(var(--checkphone-real-safe-top) + 24px));
+  left: 16px;
+  z-index: 24;
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--cp-line);
+  border-radius: 999px;
+  background: rgba(13, 18, 20, 0.62);
+  color: var(--cp-ink);
+  transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.checkphone-select-back svg {
+  width: 20px;
+  height: 20px;
+}
+
+.checkphone-select-back:active {
+  transform: scale(0.94);
+  border-color: var(--cp-cyan-dim);
+  background: rgba(70, 199, 189, 0.1);
+}
+
+.checkphone-rec-indicator {
+  position: absolute;
+  top: max(51px, calc(var(--checkphone-real-safe-top) + 31px));
+  right: 20px;
+  z-index: 24;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cp-live);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+}
+
+.checkphone-rec-indicator span,
+.checkphone-live-badge span {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--cp-live);
+  box-shadow: 0 0 8px var(--cp-live-glow);
+  animation: checkphoneBlink 1.1s steps(1) infinite;
+}
+
+.checkphone-select-scroll {
+  position: relative;
+  z-index: 14;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 20px 24px;
+}
+
+.checkphone-select-header {
+  padding: 42px 0 16px;
+}
+
+.checkphone-secure-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cp-cyan);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+
+.checkphone-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--cp-cyan);
+  animation: checkphonePulse 2s infinite;
+}
+
+.checkphone-cursor {
+  width: 7px;
+  height: 13px;
+  margin-left: 1px;
+  background: var(--cp-cyan);
+  animation: checkphoneBlink 1s steps(1) infinite;
+}
+
+.checkphone-select-header h1 {
+  margin: 14px 0 6px;
+  color: #eef2f1;
+  font-family: "HuiwenMingchao", "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: 33px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.05;
+}
+
+.checkphone-select-subtitle {
+  color: var(--cp-ink-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.24em;
+}
+
+.checkphone-select-meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 15px;
+  color: var(--cp-ink-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.checkphone-select-meta b {
+  color: var(--cp-ink);
+  font-weight: 600;
+}
+
+.checkphone-scanning {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.checkphone-scanning i {
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--cp-cyan);
+  opacity: 0.28;
+  animation: checkphoneScanning 1.2s infinite;
+}
+
+.checkphone-scanning i:nth-child(2) { animation-delay: 0.2s; }
+.checkphone-scanning i:nth-child(3) { animation-delay: 0.4s; }
+
+.checkphone-select-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 18px;
+  color: var(--cp-ink-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+}
+
+.checkphone-select-divider span {
+  height: 1px;
+  flex: 1;
+  background: linear-gradient(to right, var(--cp-line), transparent);
+}
+
+.checkphone-select-divider span:last-child {
+  background: linear-gradient(to left, var(--cp-line), transparent);
+}
+
+.checkphone-target-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+}
+
+.checkphone-target-card {
+  position: relative;
+  min-height: 228px;
+  overflow: hidden;
+  border: 1px solid var(--cp-line);
+  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0.006));
+  color: inherit;
+  cursor: pointer;
+  opacity: 0;
+  padding: 16px 12px 38px;
+  text-align: center;
+  transform: translateY(12px);
+  transition: border-color 0.28s ease, box-shadow 0.28s ease, transform 0.28s ease, opacity 0.28s ease;
+  animation: checkphoneCardRise 0.52s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+  animation-delay: var(--card-delay, 0ms);
+}
+
+.checkphone-target-card::before {
+  position: absolute;
+  inset: 7px;
+  border-radius: 12px;
+  background:
+    linear-gradient(var(--cp-line-2), var(--cp-line-2)) left top / 10px 1px no-repeat,
+    linear-gradient(var(--cp-line-2), var(--cp-line-2)) left top / 1px 10px no-repeat,
+    linear-gradient(var(--cp-line-2), var(--cp-line-2)) right bottom / 10px 1px no-repeat,
+    linear-gradient(var(--cp-line-2), var(--cp-line-2)) right bottom / 1px 10px no-repeat;
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s ease;
+}
+
+.checkphone-target-card:focus-visible,
+.checkphone-target-card:hover,
+.checkphone-target-card:active {
+  border-color: var(--cp-cyan-dim);
+  box-shadow: 0 18px 40px -24px rgba(70, 199, 189, 0.52), inset 0 0 30px -20px var(--cp-cyan);
+  transform: translateY(-2px);
+}
+
+.checkphone-target-card:focus-visible::before,
+.checkphone-target-card:hover::before,
+.checkphone-target-card:active::before {
+  opacity: 1;
+}
+
+.checkphone-target-card--live {
+  border-color: rgba(255, 77, 82, 0.3);
+}
+
+.checkphone-target-card--live:focus-visible,
+.checkphone-target-card--live:hover,
+.checkphone-target-card--live:active {
+  border-color: var(--cp-live-glow);
+  box-shadow: 0 18px 40px -24px var(--cp-live-glow), inset 0 0 30px -20px var(--cp-live);
+}
+
+.checkphone-live-badge {
+  position: absolute;
+  top: 11px;
+  left: 11px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cp-live);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 8.5px;
+  letter-spacing: 0.13em;
+}
+
+.checkphone-avatar-frame {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  margin: 3px auto 0;
+}
+
+.checkphone-avatar-image {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--avatar-gradient);
+  color: rgba(255, 255, 255, 0.92);
+  font-family: "HuiwenMingchao", "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.checkphone-avatar-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: grayscale(0.22) saturate(0.86) contrast(1.05);
+  transition: filter 0.28s ease, transform 0.28s ease;
+}
+
+.checkphone-avatar-image::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0.2) 0 1px, transparent 1px 3px);
+  content: "";
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.checkphone-target-card:focus-visible .checkphone-avatar-image img,
+.checkphone-target-card:hover .checkphone-avatar-image img,
+.checkphone-target-card:active .checkphone-avatar-image img {
+  filter: grayscale(0) saturate(1.03) contrast(1.08);
+  transform: scale(1.04);
+}
+
+.checkphone-reticle i {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--cp-cyan);
+  opacity: 0.55;
+  transition: all 0.28s ease;
+}
+
+.checkphone-reticle i:nth-child(1) {
+  top: -5px;
+  left: -5px;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.checkphone-reticle i:nth-child(2) {
+  top: -5px;
+  right: -5px;
+  border-bottom: 0;
+  border-left: 0;
+}
+
+.checkphone-reticle i:nth-child(3) {
+  bottom: -5px;
+  left: -5px;
+  border-top: 0;
+  border-right: 0;
+}
+
+.checkphone-reticle i:nth-child(4) {
+  right: -5px;
+  bottom: -5px;
+  border-top: 0;
+  border-left: 0;
+}
+
+.checkphone-target-card--live .checkphone-reticle i {
+  border-color: var(--cp-live);
+  opacity: 0.72;
+}
+
+.checkphone-target-card:focus-visible .checkphone-reticle i,
+.checkphone-target-card:hover .checkphone-reticle i,
+.checkphone-target-card:active .checkphone-reticle i {
+  width: 9px;
+  height: 9px;
+  opacity: 1;
+  box-shadow: 0 0 6px var(--cp-cyan-dim);
+}
+
+.checkphone-target-card:focus-visible .checkphone-reticle i:nth-child(1),
+.checkphone-target-card:hover .checkphone-reticle i:nth-child(1),
+.checkphone-target-card:active .checkphone-reticle i:nth-child(1) {
+  top: -2px;
+  left: -2px;
+}
+
+.checkphone-target-card:focus-visible .checkphone-reticle i:nth-child(2),
+.checkphone-target-card:hover .checkphone-reticle i:nth-child(2),
+.checkphone-target-card:active .checkphone-reticle i:nth-child(2) {
+  top: -2px;
+  right: -2px;
+}
+
+.checkphone-target-card:focus-visible .checkphone-reticle i:nth-child(3),
+.checkphone-target-card:hover .checkphone-reticle i:nth-child(3),
+.checkphone-target-card:active .checkphone-reticle i:nth-child(3) {
+  bottom: -2px;
+  left: -2px;
+}
+
+.checkphone-target-card:focus-visible .checkphone-reticle i:nth-child(4),
+.checkphone-target-card:hover .checkphone-reticle i:nth-child(4),
+.checkphone-target-card:active .checkphone-reticle i:nth-child(4) {
+  right: -2px;
+  bottom: -2px;
+}
+
+.checkphone-card-name {
+  margin-top: 13px;
+  color: #eef2f1;
+  font-family: "HuiwenMingchao", "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
+.checkphone-card-id {
+  margin-top: 4px;
+  color: var(--cp-ink-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.checkphone-card-row,
+.checkphone-target-status {
+  display: flex;
+  align-items: center;
+}
+
+.checkphone-card-row {
+  justify-content: center;
+  gap: 7px;
+  margin-top: 10px;
+  color: var(--cp-ink-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9.5px;
+}
+
+.checkphone-target-status {
+  min-width: 0;
+  gap: 4px;
+}
+
+.checkphone-target-status i {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--cp-cyan);
+  box-shadow: 0 0 6px rgba(70, 199, 189, 0.36);
+}
+
+.checkphone-target-card--idle {
+  opacity: 0.62;
+}
+
+.checkphone-target-card--idle .checkphone-target-status i {
+  background: var(--cp-ink-faint);
+  box-shadow: none;
+}
+
+.checkphone-target-card--live .checkphone-target-status i {
+  background: var(--cp-live);
+  box-shadow: 0 0 7px var(--cp-live-glow);
+}
+
+.checkphone-minibars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 8px;
+}
+
+.checkphone-minibars i {
+  width: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.checkphone-minibars i:nth-child(1) { height: 35%; }
+.checkphone-minibars i:nth-child(2) { height: 60%; }
+.checkphone-minibars i:nth-child(3) { height: 85%; }
+.checkphone-minibars i:nth-child(4) { height: 100%; }
+.checkphone-minibars i.is-dim { opacity: 0.25; }
+
+.checkphone-card-peek {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  margin-top: 10px;
+  border: 1px solid rgba(70, 199, 189, 0.14);
+  border-radius: 8px;
+  background: rgba(70, 199, 189, 0.055);
+  color: #8ad9d2;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 8.8px;
+  line-height: 1.25;
+  padding: 5px 7px;
+}
+
+.checkphone-target-card--live .checkphone-card-peek {
+  border-color: rgba(255, 77, 82, 0.18);
+  background: rgba(255, 77, 82, 0.075);
+  color: #ff9a9d;
+}
+
+.checkphone-card-peek span {
+  width: 0;
+  height: 0;
+  flex: none;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 5px solid currentColor;
+}
+
+.checkphone-card-foot {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--cp-ink-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+}
+
+.checkphone-acquire {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  border-top: 1px solid var(--cp-cyan-dim);
+  background: linear-gradient(to top, rgba(70, 199, 189, 0.16), transparent);
+  color: var(--cp-cyan);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  padding: 7px 4px;
+  transform: translateY(100%);
+  transition: transform 0.24s ease;
+}
+
+.checkphone-target-card--live .checkphone-acquire {
+  border-color: var(--cp-live-glow);
+  background: linear-gradient(to top, rgba(255, 77, 82, 0.16), transparent);
+  color: #ff9a9d;
+}
+
+.checkphone-target-card:focus-visible .checkphone-acquire,
+.checkphone-target-card:hover .checkphone-acquire,
+.checkphone-target-card:active .checkphone-acquire {
+  transform: translateY(0);
+}
+
+.checkphone-empty-state {
+  display: flex;
+  min-height: 260px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--cp-line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.016);
+  color: var(--cp-ink-dim);
+  text-align: center;
+}
+
+.checkphone-empty-reticle {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 14px;
+  border: 1px solid var(--cp-line-2);
+  border-radius: 12px;
+  background:
+    linear-gradient(var(--cp-cyan-dim), var(--cp-cyan-dim)) center / 22px 1px no-repeat,
+    linear-gradient(90deg, var(--cp-cyan-dim), var(--cp-cyan-dim)) center / 1px 22px no-repeat;
+}
+
+.checkphone-empty-state p {
+  margin: 0;
+  color: var(--cp-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.checkphone-empty-state span {
+  margin-top: 5px;
+  font-size: 11px;
+}
+
+.checkphone-select-footer {
+  padding: 20px 0 4px;
+}
+
+.checkphone-select-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--cp-ink-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+}
+
+.checkphone-select-hint span {
+  color: var(--cp-cyan);
+}
+
+.checkphone-disconnect {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 16px;
+  border: 1px solid var(--cp-line);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--cp-ink-dim);
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  padding: 12px;
+  transition: border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
+}
+
+.checkphone-disconnect svg {
+  width: 14px;
+  height: 14px;
+}
+
+.checkphone-disconnect:active {
+  transform: scale(0.985);
+  border-color: rgba(255, 77, 82, 0.4);
+  background: rgba(255, 77, 82, 0.04);
+  color: var(--cp-live);
+}
+
+.checkphone-access-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(5, 7, 8, 0.92);
+  color: var(--cp-cyan);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: center;
+  animation: fadeIn 0.18s ease both;
+}
+
+.checkphone-access-ring {
+  display: flex;
+  width: 58px;
+  height: 58px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--cp-line-2);
+  border-top-color: var(--cp-cyan);
+  border-radius: 999px;
+  animation: checkphoneSpin 0.8s linear infinite;
+}
+
+.checkphone-access-ring svg {
+  width: 30px;
+  height: 30px;
+}
+
+.checkphone-access-overlay.is-granted .checkphone-access-ring {
+  border-color: var(--cp-cyan);
+  animation: none;
+}
+
+.checkphone-access-name {
+  color: #eef2f1;
+  font-family: "HuiwenMingchao", "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.checkphone-access-line {
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+}
+
+@keyframes checkphoneSweep {
+  0% { transform: translateY(-160px); }
+  100% { transform: translateY(820px); }
+}
+
+@keyframes checkphoneBlink {
+  50% { opacity: 0.15; }
+}
+
+@keyframes checkphonePulse {
+  0% { box-shadow: 0 0 0 0 var(--cp-cyan-dim); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@keyframes checkphoneScanning {
+  0%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+
+@keyframes checkphoneCardRise {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes checkphoneSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 370px) {
+  .checkphone-select-scroll {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .checkphone-target-grid {
+    gap: 10px;
+  }
+
+  .checkphone-target-card {
+    min-height: 218px;
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .checkphone-avatar-frame {
+    width: 58px;
+    height: 58px;
+  }
+
+  .checkphone-select-header h1 {
+    font-size: 30px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .checkphone-select-sweep,
+  .checkphone-rec-indicator span,
+  .checkphone-live-badge span,
+  .checkphone-pulse-dot,
+  .checkphone-cursor,
+  .checkphone-scanning i,
+  .checkphone-target-card,
+  .checkphone-access-overlay,
+  .checkphone-access-ring {
+    animation: none;
+  }
+}
+
 /* ==========================================
    Custom Theme (migrated from CDN inline config)
    Tailwind v4 CSS-first configuration
@@ -1428,6 +3239,7 @@
   --pill-text: #64748b;
 
   /* Smart Safe Area Variables */
+  --hardware-safe-top: env(safe-area-inset-top, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--standalone-safe-area-bottom, 0px));
 }
@@ -1545,4 +3357,618 @@ select:focus {
 /* Utility for Safe Area */
 .pb-safe {
   padding-bottom: var(--safe-bottom, env(safe-area-inset-bottom));
+}
+
+.netease-profile-page {
+  --netease-paper: #EFE7D9;
+  --netease-paper-2: #E7DCC9;
+  --netease-ink: #2B2520;
+  --netease-ink-2: #6E6356;
+  --netease-ink-3: #A99D8C;
+  --netease-accent: #9C3A2C;
+  --netease-line: rgba(43, 37, 32, 0.16);
+  --netease-line-soft: rgba(43, 37, 32, 0.09);
+  --netease-cn-font: "HuiwenMingchao", "Songti SC", "Noto Serif SC", "Source Han Serif SC", SimSun, serif;
+  --netease-note-font: "HuiwenMingchao", "Kaiti SC", STKaiti, KaiTi, serif;
+  --netease-en-font: "Cormorant Garamond", "Bodoni 72", Didot, Georgia, serif;
+  background: var(--netease-paper);
+  color: var(--netease-ink);
+  font-family: var(--netease-cn-font);
+  overflow: hidden;
+}
+
+.netease-profile-page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  z-index: 35;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.netease-profile-scroll {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: max(58px, calc(var(--hardware-safe-bottom, env(safe-area-inset-bottom, 0px)) + 42px));
+}
+
+.netease-profile-micro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(16px, calc(var(--hardware-safe-top, env(safe-area-inset-top, 0px)) + 10px)) 24px 0;
+}
+
+.netease-profile-back {
+  border: 0;
+  background: transparent;
+  color: var(--netease-ink-2);
+  font-size: 30px;
+  line-height: 1;
+  padding: 0 8px 2px 0;
+  cursor: pointer;
+}
+
+.netease-profile-mirror,
+.netease-profile-kicker,
+.netease-profile-meta,
+.netease-profile-pmeta,
+.netease-profile-idx,
+.netease-profile-chev,
+.netease-profile-mark,
+.netease-profile-tagline,
+.netease-profile-jump,
+.netease-profile-refresh,
+.netease-profile-dialog-lbl,
+.netease-profile-dialog-btns button {
+  font-family: var(--netease-en-font);
+}
+
+.netease-profile-mirror {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--netease-ink-3);
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+}
+
+.netease-profile-mirror span {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--netease-accent);
+}
+
+.netease-profile-kicker {
+  padding: 22px 24px 0;
+  color: var(--netease-accent);
+  font-size: 12px;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+}
+
+.netease-profile-portrait {
+  position: relative;
+  margin: 14px 24px 0;
+  aspect-ratio: 3 / 2.05;
+  border: 1px solid var(--netease-line);
+  padding: 7px;
+  background: var(--netease-paper-2);
+}
+
+.netease-profile-portrait-img {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: linear-gradient(160deg, #7c5b50 0%, #3a2c28 60%, #241b19 100%);
+}
+
+.netease-profile-portrait-avatar {
+  position: absolute;
+  inset: -18%;
+  width: 136%;
+  height: 136%;
+  object-fit: cover;
+  filter: blur(24px) saturate(0.82) contrast(0.9) brightness(0.78);
+  transform: scale(1.03);
+}
+
+.netease-profile-portrait-img.has-avatar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(90deg, rgba(239, 231, 217, 0.12), rgba(40, 24, 20, 0.42)),
+    radial-gradient(120% 100% at 28% 18%, rgba(255, 245, 228, 0.22), transparent 48%);
+  mix-blend-mode: soft-light;
+}
+
+.netease-profile-portrait-img::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: radial-gradient(120% 100% at 30% 20%, transparent, rgba(20, 12, 10, 0.5));
+  mix-blend-mode: multiply;
+}
+
+.netease-profile-portrait > span {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  z-index: 3;
+  color: rgba(255, 255, 255, 0.7);
+  font-family: var(--netease-en-font);
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.netease-profile-name {
+  padding: 20px 24px 0;
+}
+
+.netease-profile-cn {
+  font-family: var(--netease-cn-font);
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  line-height: 1.1;
+}
+
+.netease-profile-meta {
+  margin-top: 9px;
+  color: var(--netease-ink-2);
+  font-size: 13.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.netease-profile-meta b {
+  color: var(--netease-accent);
+  font-weight: 600;
+}
+
+.netease-profile-epigraph {
+  margin: 18px 24px 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--netease-line);
+  color: #403831;
+  font-family: var(--netease-note-font);
+  font-size: 15px;
+  font-style: italic;
+  font-weight: 400;
+  line-height: 1.85;
+}
+
+.netease-profile-epigraph span {
+  margin-right: 4px;
+  color: var(--netease-accent);
+  font-family: var(--netease-en-font);
+}
+
+.netease-profile-sec {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 34px 24px 4px;
+}
+
+.netease-profile-sec .zh {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.5em;
+}
+
+.netease-profile-sec .en {
+  color: var(--netease-accent);
+  font-family: var(--netease-en-font);
+  font-size: 12px;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+}
+
+.netease-profile-sec .rule {
+  flex: 1;
+  height: 1px;
+  background: var(--netease-line);
+}
+
+.netease-profile-plists {
+  margin: 0 24px;
+}
+
+.netease-profile-plist {
+  border-bottom: 1px solid var(--netease-line-soft);
+}
+
+.netease-profile-plist-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 18px 2px;
+  text-align: left;
+}
+
+.netease-profile-idx {
+  width: 26px;
+  flex: none;
+  color: var(--netease-accent);
+  font-size: 21px;
+  font-style: italic;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.netease-profile-pcover,
+.netease-profile-thumb {
+  position: relative;
+  flex: none;
+  border: 1px solid var(--netease-line);
+  background: var(--netease-paper-2);
+}
+
+.netease-profile-pcover {
+  width: 50px;
+  height: 50px;
+  padding: 3px;
+}
+
+.netease-profile-thumb {
+  width: 38px;
+  height: 38px;
+  padding: 2px;
+}
+
+.netease-profile-art,
+.netease-profile-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.netease-profile-thumb img {
+  object-fit: cover;
+  filter: saturate(0.75) contrast(0.9);
+}
+
+.netease-profile-pinfo,
+.netease-profile-smeta {
+  flex: 1;
+  min-width: 0;
+}
+
+.netease-profile-pname,
+.netease-profile-pmeta,
+.netease-profile-sname,
+.netease-profile-sartist {
+  display: block;
+  min-width: 0;
+}
+
+.netease-profile-pname {
+  font-size: 15.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.netease-profile-pmeta {
+  margin-top: 4px;
+  color: var(--netease-ink-3);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.netease-profile-chev {
+  flex: none;
+  color: var(--netease-ink-3);
+  font-size: 18px;
+  transition: transform 0.35s ease;
+}
+
+.netease-profile-plist.open .netease-profile-chev {
+  transform: rotate(45deg);
+}
+
+.netease-profile-songs {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.45s ease;
+}
+
+.netease-profile-plist.open .netease-profile-songs {
+  max-height: 2600px;
+}
+
+.netease-profile-song {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-top: 1px dotted var(--netease-line-soft);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 14px 2px 14px 42px;
+  text-align: left;
+}
+
+.netease-profile-song-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.netease-profile-sname {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.netease-profile-sartist {
+  margin-top: 2px;
+  color: var(--netease-ink-2);
+  font-family: var(--netease-en-font);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.netease-profile-mark {
+  max-width: 82px;
+  flex: none;
+  color: var(--netease-accent);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.netease-profile-note {
+  display: block;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 0.4s ease, opacity 0.4s ease, margin 0.4s ease;
+}
+
+.netease-profile-song.open .netease-profile-note {
+  max-height: 320px;
+  margin-top: 15px;
+  opacity: 1;
+}
+
+.netease-profile-tagline {
+  display: block;
+  color: var(--netease-ink-3);
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.netease-profile-quote {
+  position: relative;
+  display: block;
+  margin-top: 13px;
+  padding-left: 22px;
+  color: #3c352e;
+  font-family: var(--netease-note-font);
+  font-size: 15.5px;
+  font-style: italic;
+  line-height: 1.9;
+  white-space: pre-wrap;
+}
+
+.netease-profile-quote span {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  color: var(--netease-accent);
+  font-family: var(--netease-en-font);
+  font-size: 30px;
+  line-height: 1;
+  opacity: 0.45;
+}
+
+.netease-profile-nocomment {
+  display: block;
+  margin-top: 13px;
+  color: var(--netease-ink-3);
+  font-family: var(--netease-note-font);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.netease-profile-jump {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  color: var(--netease-accent);
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.netease-profile-jump span {
+  flex: 1;
+  height: 1px;
+  background: var(--netease-accent);
+  opacity: 0.3;
+}
+
+.netease-profile-song.dead .netease-profile-jump {
+  color: var(--netease-ink-3);
+}
+
+.netease-profile-song.dead .netease-profile-jump span {
+  background: var(--netease-ink-3);
+}
+
+.netease-profile-refresh {
+  display: block;
+  margin: 40px auto 14px;
+  border: 0;
+  border-bottom: 1px solid var(--netease-accent);
+  background: transparent;
+  color: var(--netease-accent);
+  cursor: pointer;
+  font-size: 13px;
+  letter-spacing: 0.34em;
+  padding: 10px 4px;
+  text-transform: uppercase;
+  transition: opacity 0.2s ease;
+}
+
+.netease-profile-refresh:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.netease-profile-home {
+  position: absolute;
+  bottom: max(9px, var(--hardware-safe-bottom, env(safe-area-inset-bottom, 0px)));
+  left: 50%;
+  width: 118px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(43, 37, 32, 0.18);
+  transform: translateX(-50%);
+}
+
+.netease-profile-empty {
+  display: flex;
+  min-height: 210px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 0 24px;
+  color: var(--netease-ink-3);
+  gap: 8px;
+  text-align: center;
+}
+
+.netease-profile-empty svg {
+  width: 42px;
+  height: 42px;
+  opacity: 0.28;
+}
+
+.netease-profile-empty p {
+  color: var(--netease-ink-2);
+  font-size: 15px;
+}
+
+.netease-profile-empty span {
+  max-width: 230px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.netease-profile-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  background: rgba(30, 22, 18, 0.5);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.netease-profile-dialog {
+  width: 100%;
+  border: 1px solid var(--netease-line);
+  background: var(--netease-paper);
+  padding: 30px 26px 22px;
+  text-align: center;
+}
+
+.netease-profile-dialog-lbl {
+  color: var(--netease-accent);
+  font-size: 11px;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+}
+
+.netease-profile-dialog h3 {
+  margin-top: 14px;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.netease-profile-dialog-song {
+  margin-top: 10px;
+  color: var(--netease-ink-2);
+  font-size: 15px;
+  font-style: italic;
+  line-height: 1.6;
+}
+
+.netease-profile-dialog-btns {
+  display: flex;
+  margin-top: 26px;
+  border-top: 1px solid var(--netease-line);
+}
+
+.netease-profile-dialog-btns button {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  letter-spacing: 0.26em;
+  padding: 15px;
+  text-transform: uppercase;
+}
+
+.netease-profile-dialog-btns .cancel {
+  border-right: 1px solid var(--netease-line);
+  color: var(--netease-ink-3);
+}
+
+.netease-profile-dialog-btns .go {
+  color: var(--netease-accent);
+  font-weight: 600;
+}
+
+@media (max-width: 380px) {
+  .netease-profile-plist-head {
+    gap: 12px;
+  }
+
+  .netease-profile-song {
+    padding-left: 30px;
+  }
+
+  .netease-profile-mark {
+    max-width: 64px;
+  }
 }

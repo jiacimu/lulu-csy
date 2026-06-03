@@ -56,6 +56,7 @@ const TheaterApp = React.lazy(() => import('../apps/theater/TheaterApp'));
 const TrajectoryApp = React.lazy(() => import('../apps/TrajectoryApp'));
 const CrosstimeApp = React.lazy(() => import('../apps/crosstime/CrosstimeApp'));
 const LoveShowApp = React.lazy(() => import('../apps/loveshow/LoveShowApp'));
+const NianNianApp = React.lazy(() => import('../apps/niannian/NianNianApp'));
 
 const LazyValentineEvent = React.lazy(() => import('./ValentineEvent').then(m => ({
   default: m.SpecialMomentsApp
@@ -402,6 +403,7 @@ function renderActiveApp(activeApp: AppID) {
     case AppID.Trajectory: return <TrajectoryApp />;
     case AppID.Crosstime: return <CrosstimeApp />;
     case AppID.LoveShow: return <LoveShowApp />;
+    case AppID.NianNian: return <NianNianApp />;
     case AppID.Launcher:
     default: return <Launcher />;
   }
@@ -435,6 +437,9 @@ const PhoneShell: React.FC = () => {
   const useIOSStandaloneLayout = isIOSStandaloneWebApp();
   const { isLite } = usePerformanceMode();
   const [showIdleOverlays, setShowIdleOverlays] = useState(false);
+  const isNestedPhoneApp = activeApp === AppID.CheckPhone;
+  const showSystemChrome = !isNestedPhoneApp;
+  const showAmbientOverlays = showSystemChrome && showIdleOverlays;
 
   // Use a ref so that the popstate / backButton handlers always see the latest values
   // without needing to be re-registered every time state changes.
@@ -610,7 +615,7 @@ const PhoneShell: React.FC = () => {
   }, [activeApp]);
 
   useEffect(() => {
-    if (isLocked) {
+    if (isLocked || isNestedPhoneApp) {
       setShowIdleOverlays(false);
       return;
     }
@@ -632,7 +637,7 @@ const PhoneShell: React.FC = () => {
         cIC(idleId);
       }
     };
-  }, [isLocked, isLite]);
+  }, [isLocked, isLite, isNestedPhoneApp]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -698,6 +703,7 @@ const PhoneShell: React.FC = () => {
       className="relative w-full h-full overflow-hidden bg-gradient-to-br from-pink-200 via-purple-200 to-indigo-200 text-slate-900 font-sans select-none overscroll-none"
       data-testid="phone-shell-root"
       data-performance-mode={isLite ? 'lite' : 'full'}
+      data-system-chrome={showSystemChrome ? 'visible' : 'hidden'}
     >
       {/* Optimized Background Layer */}
       <div
@@ -705,7 +711,7 @@ const PhoneShell: React.FC = () => {
         className={`absolute inset-0 bg-cover bg-center transition-all ${isLite ? 'duration-200' : 'duration-700'} ease-[cubic-bezier(0.25,0.1,0.25,1)]`}
         style={{
           backgroundImage: bgImageValue,
-          transform: activeApp !== AppID.Launcher && !isLite ? 'scale(1.1)' : 'scale(1)',
+          transform: 'scale(1)',
           filter: activeApp !== AppID.Launcher && !isLite ? 'blur(10px)' : 'none',
           opacity: activeApp !== AppID.Launcher ? (isLite ? 0.72 : 0.6) : 1,
           backfaceVisibility: 'hidden',
@@ -730,17 +736,17 @@ const PhoneShell: React.FC = () => {
         />
 
         {/* Overlays: Status Bar (Top) */}
-        {!theme.hideStatusBar && <StatusBar />}
+        {showSystemChrome && !theme.hideStatusBar && <StatusBar />}
 
         {/* Overlays: Dynamic Island (Music mini player) */}
-        {showIdleOverlays && (
+        {showAmbientOverlays && (
           <Suspense fallback={null}>
             <DynamicIsland />
           </Suspense>
         )}
 
         {/* Overlays: Floating Lyrics */}
-        {showIdleOverlays && (
+        {showAmbientOverlays && (
           <Suspense fallback={null}>
             <FloatingLyrics />
           </Suspense>

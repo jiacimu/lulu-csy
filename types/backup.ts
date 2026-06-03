@@ -15,6 +15,7 @@ import { XhsActivityRecord,XhsStockImage } from './xhs';
 import { TtsConfig } from './tts';
 import { SttConfig } from './stt';
 import { ImageApiPreset, ImageGenerationConfig, PhotoStylePreset, SavedVibeReference } from './photo';
+import type { NianNianSession } from './niannian';
 
 export interface SerializedVoiceAudio {
     msgId: string | number;
@@ -116,6 +117,7 @@ export interface FullBackupData {
     voiceAudio?: SerializedVoiceAudio[];
     yesterdayNewspapers?: YesterdayNewspaperRecord[];
     vibeReferences?: SavedVibeReference[];
+    nianNianSessions?: NianNianSession[];
     musicAssets?: BackupMusicAssets;
     halfSugarData?: BackupExternalIndexedDbData;
 

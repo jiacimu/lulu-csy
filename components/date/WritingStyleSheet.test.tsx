@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React, { useState } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import WritingStyleSheet from './WritingStyleSheet';
 
@@ -114,6 +114,33 @@ describe('WritingStyleSheet', () => {
         await waitFor(() => {
             expect(screen.queryByText(/晚风是温的/)).not.toBeInTheDocument();
         });
+    });
+
+    it('scrolls the current style into view only when the sheet opens', () => {
+        vi.useFakeTimers();
+        const scrollIntoView = vi.fn();
+        Element.prototype.scrollIntoView = scrollIntoView;
+
+        try {
+            renderControlledSheet('lyrical');
+
+            act(() => {
+                vi.advanceTimersByTime(90);
+            });
+
+            expect(scrollIntoView).toHaveBeenCalledTimes(1);
+            expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'center', behavior: 'auto' });
+
+            fireEvent.click(screen.getByRole('button', { name: '选择静水深流' }));
+
+            act(() => {
+                vi.advanceTimersByTime(90);
+            });
+
+            expect(scrollIntoView).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('writes custom text back and preserves the draft after switching away', async () => {

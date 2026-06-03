@@ -30,7 +30,6 @@ import { EventExtractor } from '../utils/eventExtractor';
 
 type SummaryType = 'auto' | 'manual';
 const DATE_SUMMARY_CONTEXT_KEEP_COUNT = 5;
-const DATE_FORK_CONTEXT_KEEP_COUNT = 80;
 export type DateHistorySession = { date: string, msgs: Message[], rawMsgs: Message[], startMsgId: number, summaries: Message[], bridges: Message[] };
 type SummaryDraft = {
     content: string;
@@ -249,45 +248,6 @@ export const buildHistorySessions = (msgs: Message[]): DateHistorySession[] => {
             bridges: bridges.filter(matchesSession),
         };
     });
-};
-
-export const buildDateForkOpeningText = ({
-    charName,
-    userName,
-}: {
-    charName: string;
-    userName: string;
-}): string => [
-    '[normal] 像是某一天被轻轻翻回，空气里还留着那场见面的余温。',
-    `[normal] ${charName}站在熟悉的光影里，抬眼看向${userName}，这条没有被走完的岔路又安静地展开。`,
-].join('\n');
-
-export const buildDateForkBridgeContent = ({
-    session,
-    charName,
-    userName,
-}: {
-    session: DateHistorySession;
-    charName: string;
-    userName: string;
-}): string => {
-    const keptRawMessages = session.rawMsgs.slice(-DATE_FORK_CONTEXT_KEEP_COUNT);
-    const omittedCount = Math.max(0, session.rawMsgs.length - keptRawMessages.length);
-    const summaryBlock = session.summaries.length > 0
-        ? session.summaries.map((summary, index) => {
-            const label = summary.metadata?.summaryType === 'auto' ? '自动总结' : '手动总结';
-            return `### 已有总结 ${index + 1}（${label}）\n${summary.content}`;
-        }).join('\n\n')
-        : '';
-    const rawBlock = formatDateMessagesForBridge(keptRawMessages, charName, userName);
-
-    return [
-        '【旧见面分岔背景】',
-        `这是从 ${session.date} 的见面记录复制出来的新见面。旧记录不应被改写；下面内容只作为已经发生过的背景和情绪余温。`,
-        summaryBlock ? `\n【旧记录总结】\n${summaryBlock}` : '',
-        rawBlock ? `\n【旧记录原始片段${omittedCount > 0 ? `（已省略更早 ${omittedCount} 条）` : ''}】\n${rawBlock}` : '',
-        '\n请不要把这条背景当成正在发生的新动作；新的互动从下一条用户消息开始。',
-    ].filter(Boolean).join('\n');
 };
 
 const DateApp: React.FC = () => {
@@ -1588,64 +1548,6 @@ ${exitPromptContent}
         addToast('已删除本次见面记录', 'success');
     };
 
-    const handleForkHistorySession = async (session: DateHistorySession) => {
-        if (!char) return;
-        if (char.savedDateState) {
-            const confirmed = window.confirm('当前有未结束的见面进度。复制旧记录会放弃这份未结束进度，并开启一条新的见面；已有历史记录不受影响。要继续吗？');
-            if (!confirmed) return;
-        }
-
-        const forkedAt = Date.now();
-        const openingContent = buildDateForkOpeningText({
-            charName: char.name,
-            userName: userProfile.name,
-        });
-        const openingId = await DB.saveMessage({
-            charId: char.id,
-            role: 'assistant',
-            type: 'text',
-            content: openingContent,
-            timestamp: forkedAt,
-            metadata: {
-                source: 'date',
-                isOpening: true,
-                forkedFromSessionStartMsgId: session.startMsgId,
-                forkedAt,
-            },
-        });
-        await DB.saveMessage({
-            charId: char.id,
-            role: 'system',
-            type: 'text',
-            content: buildDateForkBridgeContent({
-                session,
-                charName: char.name,
-                userName: userProfile.name,
-            }),
-            timestamp: forkedAt + 1,
-            metadata: {
-                source: 'date',
-                hiddenFromUser: true,
-                isDateContextBridge: true,
-                bridgeType: 'fork',
-                sessionStartMsgId: openingId,
-                forkedFromSessionStartMsgId: session.startMsgId,
-                forkedFromMessageIds: session.rawMsgs.map(m => m.id),
-            },
-        });
-
-        updateCharacter(char.id, { savedDateState: undefined });
-        setForceFreshSession(true);
-        setPeekStatus(openingContent);
-        setPeekThinking('');
-        setHasSavedOpening(true);
-        setPendingAutoSummary(null);
-        setActiveSummaryDraft(null);
-        await loadDateMessages();
-        setMode('session');
-        addToast('已复制为新的见面', 'success');
-    };
-
     const onExitSession = async (finalState: DateState, syncMode: DateExitSyncMode) => {
         if (!char) return;
         if (syncMode === 'none') {
@@ -1719,12 +1621,6 @@ ${exitPromptContent}
                             <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex justify-between items-center"><span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{session.date}</span><span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">{session.msgs.length} 句</span></div>
                             <div className="p-4 space-y-4">
                                 <div className="flex justify-end gap-2">
-                                    <button
-                                        onClick={() => handleForkHistorySession(session)}
-                                        className="px-2.5 py-1 text-[11px] font-medium text-pink-500 bg-pink-50 rounded-full hover:bg-pink-100 transition-colors"
-                                    >
-                                        复制为新见面
-                                    </button>
                                     <button
                                         onClick={() => handleDeleteHistorySession(session)}
                                         className="px-2.5 py-1 text-[11px] font-medium text-red-500 bg-red-50 rounded-full hover:bg-red-100 transition-colors"

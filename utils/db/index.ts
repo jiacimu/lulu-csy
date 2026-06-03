@@ -15,6 +15,7 @@ import * as vectorMemoryStore from './vectorMemoryStore';
 import * as memoryRecordStore from './memoryRecordStore';
 import * as newspaperStore from './newspaperStore';
 import * as vibeReferenceStore from './vibeReferenceStore';
+import * as niannianStore from './niannianStore';
 
 
 // Compose the same `DB` object shape as the original monolithic file
@@ -220,4 +221,11 @@ export const DB = {
     deleteSavedVibeReference: vibeReferenceStore.deleteSavedVibeReference,
     clearSavedVibeReferenceCache: vibeReferenceStore.clearSavedVibeReferenceCache,
     upsertSavedVibeEncoding: vibeReferenceStore.upsertSavedVibeEncoding,
+
+    // 念念浮生
+    getAllNianNianSessions: niannianStore.getAllNianNianSessions,
+    getNianNianSessionsByCharId: niannianStore.getNianNianSessionsByCharId,
+    getNianNianSessionById: niannianStore.getNianNianSessionById,
+    saveNianNianSession: niannianStore.saveNianNianSession,
+    deleteNianNianSession: niannianStore.deleteNianNianSession,
 };

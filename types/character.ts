@@ -37,6 +37,12 @@ export interface PhoneCustomApp {
     prompt: string;
 }
 
+export interface PhoneDesktopAppearance {
+    wallpaper?: string;
+    appIcons?: Record<string, string>;
+    galleryPhotos?: string[];
+}
+
 export interface StoryPhoneCustomApp {
     id: string;
     name: string;
@@ -56,6 +62,19 @@ export interface PhoneEvidence {
     systemMessageId?: number;
     value?: string;
     shop?: string;  // Store/shop name (used by Taobao order cards)
+    artist?: string;
+    comment?: string;
+    songId?: number;
+    songUrl?: string;
+    albumCover?: string;
+    profileNickname?: string;
+    profileLevel?: number;
+    profileSignature?: string;
+    profilePlayCount?: number;
+    playlistName?: string;
+    playlistCount?: number;
+    playlistIndex?: number;
+    songIndex?: number;
 }
 
 export interface Worldbook {
@@ -219,6 +238,7 @@ export interface CharacterProfile {
     phoneState?: {
         records?: PhoneEvidence[];
         customApps?: PhoneCustomApp[];
+        desktopAppearance?: PhoneDesktopAppearance;
     };
 
     storyPhoneState?: {

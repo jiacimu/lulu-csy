@@ -11,8 +11,6 @@ vi.mock('../utils/eventExtractor', () => ({
 
 import {
     appendDateTemporalContext,
-    buildDateForkBridgeContent,
-    buildDateForkOpeningText,
     buildDateSessionSystemPrompt,
     buildHistorySessions,
     maybeExtractDateTemporalEvent,
@@ -139,30 +137,6 @@ describe('buildHistorySessions', () => {
         expect(sessions[1].bridges).toHaveLength(0);
     });
 
-    it('builds an immersive fork opening and hidden bridge context', () => {
-        const session = buildHistorySessions([
-            makeMessage(1, 1_000, { source: 'date', isOpening: true }),
-            makeMessage(2, 2_000, { source: 'date' }, 'user'),
-            makeMessage(3, 3_000, {
-                source: 'date',
-                hiddenFromUser: true,
-                isSummary: true,
-                summaryType: 'manual',
-                sessionStartMsgId: 1,
-            }, 'system'),
-        ])[0];
-
-        const opening = buildDateForkOpeningText({ charName: 'Sully', userName: '小米' });
-        const bridge = buildDateForkBridgeContent({ session, charName: 'Sully', userName: '小米' });
-
-        expect(opening).toContain('[normal]');
-        expect(opening).toContain('Sully');
-        expect(opening).toContain('小米');
-        expect(bridge).toContain('旧见面分岔背景');
-        expect(bridge).toContain('已有总结 1');
-        expect(bridge).toContain('Sully: message-1');
-        expect(bridge).toContain('小米: message-2');
-    });
 });
 
 describe('date temporal awareness helpers', () => {

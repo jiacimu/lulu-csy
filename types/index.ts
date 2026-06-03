@@ -15,5 +15,6 @@ export * from './stt';
 export * from './memoryRecord';
 export * from './theater';
 export * from './loveshow';
+export * from './niannian';
 export * from './newspaper';
 export * from './photo';

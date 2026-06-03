@@ -1,7 +1,7 @@
 
 
 const DB_NAME = 'AetherOS_Data';
-const DB_VERSION = 46; // Bumped for saved NovelAI Vibe references
+const DB_VERSION = 47; // Bumped for NianNian self-contained VN sessions
 
 export const STORE_CHARACTERS = 'characters';
 export const STORE_MESSAGES = 'messages';
@@ -37,6 +37,7 @@ export const STORE_HOT_NEWS_SNAPSHOTS = 'hot_news_snapshots';
 export const STORE_CHAT_CONTEXT_MIRRORS = 'chat_context_mirrors';
 export const STORE_YESTERDAY_NEWSPAPERS = 'yesterday_newspapers';
 export const STORE_VIBE_REFERENCES = 'vibe_references';
+export const STORE_NIANNIAN_SESSIONS = 'niannian_sessions';
 
 export interface ScheduledMessage {
     id: string;
@@ -233,6 +234,11 @@ export const openDB = (): Promise<IDBDatabase> => {
             if (!db.objectStoreNames.contains(STORE_VIBE_REFERENCES)) {
                 const vibeStore = db.createObjectStore(STORE_VIBE_REFERENCES, { keyPath: 'id' });
                 vibeStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+            }
+            if (!db.objectStoreNames.contains(STORE_NIANNIAN_SESSIONS)) {
+                const nianNianStore = db.createObjectStore(STORE_NIANNIAN_SESSIONS, { keyPath: 'id' });
+                nianNianStore.createIndex('charId', 'charId', { unique: false });
+                nianNianStore.createIndex('updatedAt', 'updatedAt', { unique: false });
             }
         };
     });

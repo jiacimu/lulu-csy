@@ -60,6 +60,13 @@ vi.mock('../apps/EchoRecordApp', async () => {
     };
 });
 
+vi.mock('../apps/CheckPhone', async () => {
+    const React = await import('react');
+    return {
+        default: () => React.createElement('div', null, 'CheckPhone App'),
+    };
+});
+
 vi.mock('../apps/zhaixinglou/AssetPreloader', () => ({
     prefetchZhaixinglouAssets: vi.fn(() => Promise.resolve()),
 }));
@@ -276,6 +283,48 @@ describe('PhoneShell active app rendering', () => {
 
         expect(screen.getByTestId('dynamic-island')).toBeTruthy();
         expect(screen.getByTestId('floating-lyrics')).toBeTruthy();
+    });
+
+    it('hides outer system chrome while CheckPhone is active', async () => {
+        mockedUseOS.mockReturnValue({
+            activeApp: AppID.CheckPhone,
+            characters: [],
+            closeApp: vi.fn(),
+            handleBack: vi.fn(() => true),
+            isDataLoaded: true,
+            isLocked: false,
+            theme: {
+                wallpaper: 'linear-gradient(#000000, #111111)',
+                hideStatusBar: false,
+            },
+            toasts: [],
+            unreadMessages: {},
+            unlock: vi.fn(),
+        } as any);
+
+        render(
+            <VirtualTimeProvider>
+                <PhoneShell />
+            </VirtualTimeProvider>,
+        );
+
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(screen.getByText('CheckPhone App')).toBeTruthy();
+        expect(screen.getByTestId('phone-shell-root')).toHaveAttribute('data-system-chrome', 'hidden');
+        expect(screen.queryByTestId('status-bar')).toBeNull();
+
+        await act(async () => {
+            vi.advanceTimersByTime(4000);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(screen.queryByTestId('dynamic-island')).toBeNull();
+        expect(screen.queryByTestId('floating-lyrics')).toBeNull();
     });
 
     it('renders the EchoRecord app when it is the active app', async () => {

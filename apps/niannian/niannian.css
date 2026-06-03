@@ -1,0 +1,534 @@
+.nn-app {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    color: #f9f3ea;
+    background:
+        linear-gradient(180deg, rgba(24, 18, 28, 0.24), rgba(24, 18, 28, 0.88)),
+        linear-gradient(135deg, #25384d 0%, #6f5068 48%, #bf8f6a 100%);
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.nn-loading {
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 12px;
+    font-size: 13px;
+}
+
+.nn-topbar {
+    position: absolute;
+    top: max(12px, calc(env(safe-area-inset-top) + 8px));
+    left: 12px;
+    right: 12px;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.nn-icon-btn,
+.nn-primary-btn,
+.nn-composer-actions button,
+.nn-send-btn,
+.nn-debug button {
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+}
+
+.nn-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(14px);
+}
+
+.nn-brand {
+    display: grid;
+    justify-items: center;
+    text-shadow: 0 2px 16px rgba(0, 0, 0, 0.34);
+}
+
+.nn-brand span {
+    font-size: 17px;
+    font-weight: 900;
+}
+
+.nn-brand strong {
+    color: rgba(249, 243, 234, 0.62);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+}
+
+.nn-setup {
+    height: 100%;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+    gap: 14px;
+    padding: max(76px, calc(env(safe-area-inset-top) + 68px)) 16px 22px;
+}
+
+.nn-setup-panel,
+.nn-session-list,
+.nn-debug {
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: rgba(14, 18, 28, 0.42);
+    box-shadow: 0 20px 54px rgba(21, 15, 22, 0.28);
+    backdrop-filter: blur(18px);
+}
+
+.nn-setup-panel {
+    display: grid;
+    gap: 13px;
+    padding: 16px;
+}
+
+.nn-section-title {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.nn-section-title h1 {
+    margin: 0;
+    font-size: 22px;
+    line-height: 1.15;
+}
+
+.nn-section-title p {
+    margin: 5px 0 0;
+    color: rgba(249, 243, 234, 0.62);
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.nn-setup label {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.nn-setup label span {
+    color: rgba(249, 243, 234, 0.66);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.nn-setup input,
+.nn-setup select,
+.nn-setup textarea,
+.nn-debug textarea {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    color: #f9f3ea;
+    background: rgba(255, 255, 255, 0.08);
+    outline: none;
+}
+
+.nn-setup input,
+.nn-setup select {
+    height: 40px;
+    padding: 0 11px;
+}
+
+.nn-setup textarea,
+.nn-debug textarea {
+    min-height: 82px;
+    resize: vertical;
+    padding: 10px 11px;
+    line-height: 1.55;
+}
+
+.nn-setup input::placeholder,
+.nn-setup textarea::placeholder,
+.nn-debug textarea::placeholder {
+    color: rgba(249, 243, 234, 0.34);
+}
+
+.nn-setup-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.nn-primary-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 42px;
+    border-radius: 8px;
+    color: #2a1e24;
+    background: #f5d7a4;
+    font-weight: 900;
+}
+
+.nn-session-list {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    padding: 14px;
+}
+
+.nn-session-list h2 {
+    margin: 0 0 5px;
+    font-size: 14px;
+}
+
+.nn-session-list button {
+    display: grid;
+    gap: 4px;
+    padding: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    color: inherit;
+    background: rgba(255, 255, 255, 0.08);
+    text-align: left;
+}
+
+.nn-session-list button span {
+    color: rgba(249, 243, 234, 0.6);
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.nn-stage {
+    position: relative;
+    height: 100%;
+}
+
+.nn-vn {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+}
+
+.nn-vn-bg {
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(180deg, rgba(12, 18, 29, 0.14), rgba(12, 18, 29, 0.78)),
+        linear-gradient(135deg, rgba(123, 161, 171, 0.82), rgba(84, 54, 79, 0.76), rgba(190, 141, 99, 0.72));
+}
+
+.nn-character-standee {
+    position: absolute;
+    left: 50%;
+    bottom: 210px;
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+    transform: translateX(-50%);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.nn-character-standee img,
+.nn-character-standee svg {
+    width: 132px;
+    height: 132px;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 999px;
+    object-fit: cover;
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+}
+
+.nn-character-standee span {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.24);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.nn-dialogue {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    bottom: 128px;
+    min-height: 112px;
+    padding: 18px 18px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 8px;
+    background: rgba(14, 18, 28, 0.62);
+    backdrop-filter: blur(18px);
+    box-shadow: 0 22px 56px rgba(0, 0, 0, 0.32);
+}
+
+.nn-dialogue-name {
+    width: fit-content;
+    margin-bottom: 8px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    color: #2a1e24;
+    background: #f5d7a4;
+    font-size: 12px;
+    font-weight: 900;
+}
+
+.nn-dialogue p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 15px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+}
+
+.nn-status {
+    position: absolute;
+    top: max(82px, calc(env(safe-area-inset-top) + 74px));
+    right: 12px;
+    z-index: 5;
+    display: grid;
+    gap: 7px;
+    width: 104px;
+}
+
+.nn-status div {
+    padding: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    background: rgba(14, 18, 28, 0.42);
+    backdrop-filter: blur(12px);
+}
+
+.nn-status span {
+    display: block;
+    color: rgba(249, 243, 234, 0.58);
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.nn-status strong {
+    display: block;
+    margin-top: 2px;
+    font-size: 12px;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.nn-composer {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    z-index: 10;
+    display: grid;
+    gap: 8px;
+}
+
+.nn-options {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.nn-options button {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 220px;
+    min-height: 34px;
+    padding: 0 11px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    color: rgba(249, 243, 234, 0.74);
+    background: rgba(14, 18, 28, 0.44);
+}
+
+.nn-options button.is-selected {
+    color: #2a1e24;
+    background: #f5d7a4;
+}
+
+.nn-beat-list {
+    display: grid;
+    gap: 8px;
+    max-height: 210px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.nn-beat-card {
+    display: grid;
+    gap: 7px;
+    padding: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 8px;
+    background: rgba(14, 18, 28, 0.58);
+    backdrop-filter: blur(14px);
+}
+
+.nn-beat-card.is-speech {
+    border-color: rgba(245, 215, 164, 0.38);
+}
+
+.nn-beat-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.nn-kind-toggle {
+    display: inline-flex;
+    gap: 3px;
+    padding: 2px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.09);
+}
+
+.nn-kind-toggle button,
+.nn-beat-head > button {
+    border: 0;
+    color: rgba(249, 243, 234, 0.58);
+    background: transparent;
+}
+
+.nn-kind-toggle button {
+    min-width: 44px;
+    height: 24px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.nn-kind-toggle button.is-active {
+    color: #2a1e24;
+    background: #f5d7a4;
+}
+
+.nn-beat-head > button {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    font-size: 16px;
+}
+
+.nn-beat-card textarea {
+    width: 100%;
+    min-height: 42px;
+    max-height: 96px;
+    resize: vertical;
+    border: 0;
+    outline: none;
+    color: #f9f3ea;
+    background: transparent;
+    font-size: 14px;
+    line-height: 1.55;
+}
+
+.nn-beat-card textarea::placeholder {
+    color: rgba(249, 243, 234, 0.32);
+}
+
+.nn-composer-actions {
+    display: grid;
+    grid-template-columns: auto auto 42px;
+    gap: 8px;
+}
+
+.nn-composer-actions button {
+    min-height: 38px;
+    border-radius: 8px;
+    color: rgba(249, 243, 234, 0.75);
+    background: rgba(14, 18, 28, 0.54);
+    backdrop-filter: blur(14px);
+    font-size: 12px;
+    font-weight: 850;
+}
+
+.nn-composer-actions .nn-send-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #2a1e24;
+    background: #f5d7a4;
+}
+
+.nn-send-btn:disabled {
+    opacity: 0.44;
+}
+
+.nn-debug {
+    position: absolute;
+    left: 12px;
+    top: max(82px, calc(env(safe-area-inset-top) + 74px));
+    z-index: 8;
+    width: min(360px, calc(100% - 136px));
+    padding: 10px;
+}
+
+.nn-debug summary {
+    color: rgba(249, 243, 234, 0.7);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 850;
+}
+
+.nn-debug textarea {
+    margin-top: 10px;
+    min-height: 94px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+}
+
+.nn-debug button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 34px;
+    margin-top: 8px;
+    padding: 0 12px;
+    border-radius: 8px;
+    color: #2a1e24;
+    background: #f5d7a4;
+    font-weight: 850;
+}
+
+@media (max-width: 680px) {
+    .nn-setup {
+        grid-template-columns: 1fr;
+    }
+
+    .nn-setup-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .nn-status {
+        top: auto;
+        right: 12px;
+        left: 12px;
+        bottom: 378px;
+        width: auto;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        opacity: 0.82;
+    }
+
+    .nn-dialogue {
+        bottom: 278px;
+    }
+
+    .nn-character-standee {
+        bottom: 390px;
+    }
+
+    .nn-debug {
+        width: calc(100% - 24px);
+        top: max(70px, calc(env(safe-area-inset-top) + 62px));
+    }
+}

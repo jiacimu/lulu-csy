@@ -31,11 +31,10 @@ type AccentVars = React.CSSProperties & {
 const CUSTOM_KEY = '__custom__';
 const CUSTOM_ACCENT = { light: '#888780', dark: '#B8B6AE' };
 
-const springTransition = {
-    type: 'spring' as const,
-    stiffness: 260,
-    damping: 34,
-    mass: 0.9,
+const calmTransition = {
+    type: 'tween' as const,
+    duration: 0.22,
+    ease: [0.22, 1, 0.36, 1] as const,
 };
 
 /** Check if a style string is a preset key */
@@ -85,6 +84,7 @@ const WritingStyleSheet: React.FC<WritingStyleSheetProps> = ({
     const [customText, setCustomText] = useState<string>('');
     const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const customTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const hasScrolledCurrentIntoViewRef = useRef(false);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -97,19 +97,25 @@ const WritingStyleSheet: React.FC<WritingStyleSheetProps> = ({
     }, [activePresetKey, currentStyle, isCustomActive, isOpen]);
 
     useEffect(() => {
-        if (!isOpen) return;
+        if (!isOpen) {
+            hasScrolledCurrentIntoViewRef.current = false;
+            return;
+        }
+        if (hasScrolledCurrentIntoViewRef.current) return;
+
         const targetKey = activePresetKey || (isCustomActive ? CUSTOM_KEY : null);
         if (!targetKey) return;
 
+        hasScrolledCurrentIntoViewRef.current = true;
         const timer = window.setTimeout(() => {
             rowRefs.current[targetKey]?.scrollIntoView({
                 block: 'center',
-                behavior: prefersReducedMotion ? 'auto' : 'smooth',
+                behavior: 'auto',
             });
         }, 80);
 
         return () => window.clearTimeout(timer);
-    }, [activePresetKey, isCustomActive, isOpen, prefersReducedMotion]);
+    }, [activePresetKey, isCustomActive, isOpen]);
 
     useEffect(() => {
         const textarea = customTextareaRef.current;
@@ -148,7 +154,7 @@ const WritingStyleSheet: React.FC<WritingStyleSheetProps> = ({
 
     const sheetTransition = prefersReducedMotion
         ? { duration: 0 }
-        : springTransition;
+        : calmTransition;
 
     const sheet = (
         <AnimatePresence>
@@ -268,7 +274,6 @@ const PresetStyleRow: React.FC<PresetStyleRowProps> = React.memo(({
     registerRow,
 }) => (
     <motion.div
-        layout={!prefersReducedMotion}
         ref={node => registerRow(preset.key, node)}
         className={`wsp-row ${isActive ? 'is-active' : ''}`}
         style={getAccentVars(preset.accent)}
@@ -304,12 +309,11 @@ const SamplePreview: React.FC<SamplePreviewProps> = React.memo(({ isOpen, sample
     <AnimatePresence initial={false}>
         {isOpen && (
             <motion.div
-                layout={!prefersReducedMotion}
                 className="wsp-row-extra"
                 initial={prefersReducedMotion ? false : { height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
                 exit={prefersReducedMotion ? { height: 0, opacity: 0 } : { height: 0, opacity: 0 }}
-                transition={prefersReducedMotion ? { duration: 0 } : springTransition}
+                transition={prefersReducedMotion ? { duration: 0 } : calmTransition}
             >
                 <motion.div
                     className="wsp-read"
@@ -355,7 +359,6 @@ const CustomStyleRow: React.FC<CustomStyleRowProps> = React.memo(({
 
     return (
         <motion.div
-            layout={!prefersReducedMotion}
             ref={node => registerRow(CUSTOM_KEY, node)}
             className={`wsp-row wsp-custom-row ${isActive ? 'is-active' : ''}`}
             style={getAccentVars(CUSTOM_ACCENT)}
@@ -377,12 +380,11 @@ const CustomStyleRow: React.FC<CustomStyleRowProps> = React.memo(({
             <AnimatePresence initial={false}>
                 {isExpanded && (
                     <motion.div
-                        layout={!prefersReducedMotion}
                         className="wsp-row-extra"
                         initial={prefersReducedMotion ? false : { height: 0, opacity: 0 }}
                         animate={{ height: 'auto', opacity: 1 }}
                         exit={prefersReducedMotion ? { height: 0, opacity: 0 } : { height: 0, opacity: 0 }}
-                        transition={prefersReducedMotion ? { duration: 0 } : springTransition}
+                        transition={prefersReducedMotion ? { duration: 0 } : calmTransition}
                     >
                         <textarea
                             ref={textareaRef}

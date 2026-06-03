@@ -5,12 +5,19 @@ import {
     MAX_PHONE_CHAT_DETAIL_CHARS,
     MAX_PHONE_RECORDS_PER_APP,
     MAX_PHONE_RECORDS_TOTAL,
+    buildNeteaseMusicProfileViewModel,
     buildPhoneSystemMessageDraft,
+    normalizeGeneratedNeteaseMusicProfilePayload,
     normalizeGeneratedPhoneItem,
+    normalizeGeneratedNeteaseMusicTrace,
     normalizePhoneState,
     normalizeStoredPhoneRecord,
+    parseNeteaseMusicProfileJson,
+    parseNeteaseMusicTraceJson,
+    phoneRecordToNeteaseSong,
     phoneStateNeedsNormalization,
-    prunePhoneRecords
+    prunePhoneRecords,
+    unlinkPhoneRecordFromContext
 } from './CheckPhone';
 
 describe('CheckPhone phone record normalization', () => {
@@ -28,6 +35,50 @@ describe('CheckPhone phone record normalization', () => {
             value: '18.5',
             shop: '已完成'
         });
+    });
+
+    it('parses fenced Netease music trace JSON and falls back to an empty array', () => {
+        expect(parseNeteaseMusicTraceJson('```json\n[{ "song": "红豆", "artist": "王菲", "tag": "红心", "comment": "" }]\n```')).toEqual([
+            { song: '红豆', artist: '王菲', tag: '红心', comment: '' }
+        ]);
+        expect(parseNeteaseMusicTraceJson('不是 JSON')).toEqual([]);
+    });
+
+    it('parses and normalizes a Netease profile payload', () => {
+        const parsed = parseNeteaseMusicProfileJson('```json\n{"profile":{"nickname":"夜航员","level":12,"signature":"不解释。","playCount":"4821"},"playlists":[{"name":"不会发出去的话","count":23,"songs":[{"song":"红豆","artist":"王菲","tag":"红心","comment":""}]}]}\n```');
+        const payload = normalizeGeneratedNeteaseMusicProfilePayload(parsed);
+
+        expect(payload).toEqual({
+            profile: {
+                nickname: '夜航员',
+                level: 10,
+                signature: '不解释。',
+                playCount: 4821
+            },
+            playlists: [{
+                name: '不会发出去的话',
+                count: 23,
+                songs: [{ song: '红豆', artist: '王菲', tag: '红心', comment: '' }]
+            }]
+        });
+        expect(parseNeteaseMusicProfileJson('不是 JSON')).toBeNull();
+    });
+
+    it('normalizes Netease music trace fields for safe rendering', () => {
+        const item = normalizeGeneratedNeteaseMusicTrace({
+            song: { title: '暧昧' },
+            artist: ['王菲'],
+            tag: { status: '单曲循环 32 次' },
+            comment: { content: '有些话只敢留在评论区。' }
+        });
+
+        expect(item).toEqual({
+            song: '暧昧',
+            artist: '王菲',
+            tag: '单曲循环 32 次',
+            comment: '有些话只敢留在评论区。'
+        });
+        expect(normalizeGeneratedNeteaseMusicTrace({ song: '孤独患者' })).toBeNull();
     });
 
     it('normalizes malformed persisted records before rendering', () => {
@@ -52,6 +103,150 @@ describe('CheckPhone phone record normalization', () => {
             shop: '旗舰店'
         });
         expect('systemMessageId' in record).toBe(false);
+    });
+
+    it('preserves optional Netease playback fields on stored records', () => {
+        const record = normalizeStoredPhoneRecord({
+            id: 'music-1',
+            type: 'netease_music',
+            title: '红豆',
+            detail: '王菲\n还没好好地感受。',
+            timestamp: 1710000000000,
+            value: '红心',
+            artist: '王菲',
+            comment: '还没好好地感受。',
+            songId: 25638273,
+            songUrl: 'https://music.163.com/song/media/outer/url?id=25638273.mp3',
+            albumCover: 'https://p1.music.126.net/cover.jpg',
+            profileNickname: '夜航员',
+            profileLevel: 8,
+            profileSignature: '把没说出口的话都放进播放列表。',
+            profilePlayCount: 4821,
+            playlistName: '不会发出去的话',
+            playlistCount: 23,
+            playlistIndex: 1,
+            songIndex: 3
+        } as PhoneEvidence);
+
+        expect(record).toMatchObject({
+            artist: '王菲',
+            comment: '还没好好地感受。',
+            songId: 25638273,
+            songUrl: 'https://music.163.com/song/media/outer/url?id=25638273.mp3',
+            albumCover: 'https://p1.music.126.net/cover.jpg',
+            profileNickname: '夜航员',
+            profileLevel: 8,
+            profileSignature: '把没说出口的话都放进播放列表。',
+            profilePlayCount: 4821,
+            playlistName: '不会发出去的话',
+            playlistCount: 23,
+            playlistIndex: 1,
+            songIndex: 3
+        });
+    });
+
+    it('unlinks a phone record from chat context without changing its visible evidence', () => {
+        const record = {
+            id: 'order-1',
+            type: 'order',
+            title: '深夜便利店',
+            detail: '薄荷糖×1',
+            value: '¥12.00',
+            timestamp: 1710000000000,
+            systemMessageId: 42
+        } as PhoneEvidence;
+
+        expect(unlinkPhoneRecordFromContext(record)).toEqual({
+            id: 'order-1',
+            type: 'order',
+            title: '深夜便利店',
+            detail: '薄荷糖×1',
+            value: '¥12.00',
+            timestamp: 1710000000000
+        });
+        expect(record.systemMessageId).toBe(42);
+    });
+
+    it('converts a Netease phone record into an Emo Cloud playable song', () => {
+        expect(phoneRecordToNeteaseSong({
+            id: 'music-1',
+            type: 'netease_music',
+            title: '红豆',
+            detail: '王菲\n还没好好地感受。',
+            timestamp: 1710000000000,
+            artist: '王菲 / 陈奕迅',
+            songId: 25638273,
+            albumCover: 'https://p1.music.126.net/cover.jpg'
+        } as PhoneEvidence)).toEqual({
+            kind: 'song',
+            id: 25638273,
+            name: '红豆',
+            artists: [
+                { id: 0, name: '王菲' },
+                { id: 0, name: '陈奕迅' }
+            ],
+            album: {
+                kind: 'album',
+                id: 0,
+                name: '',
+                picUrl: 'https://p1.music.126.net/cover.jpg'
+            },
+            duration: 0
+        });
+
+        expect(phoneRecordToNeteaseSong({
+            id: 'music-2',
+            type: 'netease_music',
+            title: '未匹配',
+            detail: '未知歌手',
+            timestamp: 1710000000000
+        } as PhoneEvidence)).toBeNull();
+    });
+
+    it('groups Netease phone records into profile playlists for rendering', () => {
+        const viewModel = buildNeteaseMusicProfileViewModel([
+            {
+                id: 'song-2',
+                type: 'netease_music',
+                title: '山丘',
+                detail: '李宗盛',
+                timestamp: 2,
+                profileNickname: '夜航员',
+                profileLevel: 8,
+                profileSignature: '不解释。',
+                profilePlayCount: 4821,
+                playlistName: '不会发出去的话',
+                playlistCount: 23,
+                playlistIndex: 1,
+                songIndex: 0
+            },
+            {
+                id: 'song-1',
+                type: 'netease_music',
+                title: '红豆',
+                detail: '王菲',
+                timestamp: 1,
+                playlistName: '我喜欢的音乐',
+                playlistCount: 88,
+                playlistIndex: 0,
+                songIndex: 0
+            }
+        ] as PhoneEvidence[], 'Fallback');
+
+        expect(viewModel.profile).toEqual({
+            nickname: '夜航员',
+            level: 8,
+            signature: '不解释。',
+            playCount: 4821
+        });
+        expect(viewModel.playlists.map(playlist => ({
+            name: playlist.name,
+            count: playlist.count,
+            records: playlist.records.map(record => record.title)
+        }))).toEqual([
+            { name: '我喜欢的音乐', count: 88, records: ['红豆'] },
+            { name: '不会发出去的话', count: 23, records: ['山丘'] }
+        ]);
     });
 
     it('trims overlong generated fields before they are stored', () => {

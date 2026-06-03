@@ -39,6 +39,7 @@ export enum AppID {
     Trajectory = 'trajectory', // 人生轨迹
     Crosstime = 'crosstime', // 跨时空对话
     LoveShow = 'love_show', // 恋综
+    NianNian = 'nian_nian', // 念念浮生
 }
 
 export interface SystemLog {
