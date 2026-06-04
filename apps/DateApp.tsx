@@ -3,7 +3,7 @@ import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { useVirtualTime } from '../context/VirtualTimeContext';
 import { DB } from '../utils/db';
-import { CharacterProfile,Message,DateState,UserProfile } from '../types';
+import { CharacterProfile,Message,DateState,UserProfile,DateTokenUsage } from '../types';
 import { ContextBuilder } from '../utils/context';
 import { safeResponseJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
@@ -23,10 +23,10 @@ import {
 import { getSecondaryApiConfig } from '../utils/runtimeConfig';
 import { renderMarkdown } from '../utils/markdownLite';
 import { stripTranslationTags } from '../utils/chatParser';
-import { isDateModeContextMessage } from '../utils/mainlineMemory';
 import { trackedApiRequest } from '../utils/apiRequestLedger';
 import { buildTemporalContext } from '../utils/temporalContext';
 import { EventExtractor } from '../utils/eventExtractor';
+import { buildDateRequestContextMessages } from '../utils/dateContext';
 
 type SummaryType = 'auto' | 'manual';
 const DATE_SUMMARY_CONTEXT_KEEP_COUNT = 5;
@@ -70,9 +70,6 @@ const getBridgeTypeLabel = (m: Message) => {
     if (m.metadata?.bridgeType === 'raw') return '原始记录';
     return '总结';
 };
-const getDateMessageContextContent = (m: Message) => (
-    m.type === 'image' ? '[User sent an image]' : stripTranslationTags(m.content)
-);
 const getDateHistoryDisplayText = (content: string) => (
     stripTranslationTags(content || '').replace(/\[.*?\]/g, '').trim()
 );
@@ -111,6 +108,41 @@ const buildDateSummaryMemoryPrompt = (msgs: Message[]) => {
 const hasCompleteApiConfig = (config?: { baseUrl?: string; apiKey?: string; model?: string } | null): config is { baseUrl: string; apiKey: string; model: string } => (
     !!config?.baseUrl?.trim() && !!config?.apiKey?.trim() && !!config?.model?.trim()
 );
+
+const toTokenCount = (value: unknown): number | undefined => {
+    const numberValue = typeof value === 'number'
+        ? value
+        : (typeof value === 'string' && value.trim() ? Number(value) : NaN);
+    return Number.isFinite(numberValue) && numberValue >= 0 ? Math.round(numberValue) : undefined;
+};
+
+const readTokenCount = (usage: Record<string, unknown>, keys: string[]): number | undefined => {
+    for (const key of keys) {
+        const value = toTokenCount(usage[key]);
+        if (value !== undefined) return value;
+    }
+    return undefined;
+};
+
+const normalizeDateTokenUsage = (payload: unknown, source: DateTokenUsage['source']): DateTokenUsage => {
+    const maybeRecord = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+    const usagePayload = maybeRecord.usage && typeof maybeRecord.usage === 'object'
+        ? maybeRecord.usage as Record<string, unknown>
+        : maybeRecord;
+    const inputTokens = readTokenCount(usagePayload, ['prompt_tokens', 'input_tokens', 'promptTokens', 'inputTokens', 'prompt', 'input']);
+    const outputTokens = readTokenCount(usagePayload, ['completion_tokens', 'output_tokens', 'completionTokens', 'outputTokens', 'completion', 'output']);
+    const explicitTotal = readTokenCount(usagePayload, ['total_tokens', 'totalTokens', 'total']);
+    const totalTokens = explicitTotal ?? (
+        inputTokens !== undefined && outputTokens !== undefined ? inputTokens + outputTokens : undefined
+    );
+    return {
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        source,
+        updatedAt: Date.now(),
+    };
+};
 
 export const buildDateSessionSystemPrompt = ({
     char,
@@ -262,6 +294,7 @@ const DateApp: React.FC = () => {
     const [peekStatus, setPeekStatus] = useState<string>('');
     const [peekThinking, setPeekThinking] = useState<string>('');
     const [peekLoading, setPeekLoading] = useState(false);
+    const [lastDateTokenUsage, setLastDateTokenUsage] = useState<DateTokenUsage | null>(null);
 
     // History State
     const [historySessions, setHistorySessions] = useState<DateHistorySession[]>([]);
@@ -1300,17 +1333,21 @@ ${exitPromptContent}
         setPeekLoading(true);
         setPeekStatus('');
         setHasSavedOpening(false);
+        setLastDateTokenUsage(null);
 
         try {
-            const msgs = (await DB.getMessagesByCharId(c.id)).filter(isDateModeContextMessage);
+            const allMsgs = await DB.getMessagesByCharId(c.id);
             const limit = c.contextLimit || 500;
-            const peekLimit = Math.min(limit, 50);
-            const lastMsg = msgs[msgs.length - 1];
+            const requestContext = buildDateRequestContextMessages({
+                allMessages: allMsgs,
+                currentSessionMessages: [],
+                contextLimit: limit,
+            });
+            const lastMsg = requestContext[requestContext.length - 1]?.sourceMessage;
             const gapHint = getTimeGapHint(lastMsg?.timestamp);
 
-            const recentMsgs = msgs.slice(-peekLimit).map(m => {
-                const content = getDateMessageContextContent(m);
-                return `${m.role}: ${content}`;
+            const recentMsgs = requestContext.map(item => {
+                return `${item.role}: ${item.content}`;
             }).join('\n');
 
             const timeStr = `${virtualTime.day} ${formatTime()}`;
@@ -1353,6 +1390,7 @@ ${exitPromptContent}
 
             if (!response.ok) throw new Error('Failed to sense presence');
             const data = await safeResponseJson(response);
+            setLastDateTokenUsage(normalizeDateTokenUsage(data, 'peek'));
             const rawPeek = data.choices[0].message.content;
             const peekExtracted = extractThinking(rawPeek);
             setPeekStatus(peekExtracted.content);
@@ -1382,10 +1420,13 @@ ${exitPromptContent}
         setDateMessages(dateFiltered);
 
         const limit = char.contextLimit || 500;
-        const visibleHistory = allMsgs
-            .filter(isDateModeContextMessage)
-            .sort((a, b) => a.timestamp - b.timestamp);
-        const temporalHistory = visibleHistory.slice(-limit);
+        const sessionMessages = getCurrentSessionMessages(allMsgs);
+        const requestContext = buildDateRequestContextMessages({
+            allMessages: allMsgs,
+            currentSessionMessages: sessionMessages,
+            contextLimit: limit,
+        });
+        const temporalHistory = requestContext.map(item => item.sourceMessage);
         const previousContextMsg = temporalHistory[temporalHistory.length - 2];
         const temporalContext = buildTemporalContext(temporalHistory, Date.now(), char.id)
             || getTimeGapHint(previousContextMsg?.timestamp);
@@ -1395,9 +1436,9 @@ ${exitPromptContent}
         // We exclude the very last message (UserMsg we just sent) from history array
         // because we'll pass it as the explicit user prompt "content".
         // BUT, we must ensure the Opening (Assistant) is included in history.
-        const historyMsgs = visibleHistory.slice(-limit, -1).map(m => ({
-            role: m.role,
-            content: getDateMessageContextContent(m)
+        const historyMsgs = requestContext.filter(item => item.sourceMessage.id !== userMessageId).map(item => ({
+            role: item.role,
+            content: item.content,
         }));
 
         const systemPrompt = buildDateSessionSystemPrompt({ char, userProfile, allMsgs });
@@ -1427,6 +1468,7 @@ ${exitPromptContent}
 
         if (!response.ok) throw new Error('API Error');
         const data = await safeResponseJson(response);
+        setLastDateTokenUsage(normalizeDateTokenUsage(data, 'send'));
         const rawContent = data.choices[0].message.content;
         const extracted = extractThinking(rawContent);
         // Extract inner whispers from the cleaned content
@@ -1455,24 +1497,28 @@ ${exitPromptContent}
         // 1. Find the user input that triggered it
         // Note: filter out the last AI msg from context without deleting it yet.
         const allMsgs = await DB.getMessagesByCharId(char.id);
-        const validMsgs = allMsgs
-            .filter(m => m.id !== lastMsg.id && isDateModeContextMessage(m))
-            .sort((a, b) => a.timestamp - b.timestamp);
-        const validDateMsgs = validMsgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp);
+        const validAllMsgs = allMsgs.filter(m => m.id !== lastMsg.id);
+        const validSessionMessages = getCurrentSessionMessages(validAllMsgs);
+        const validDateMsgs = validSessionMessages.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp);
         const lastUserMsg = [...validDateMsgs].reverse().find(m => m.role === 'user');
 
         if (!lastUserMsg || lastUserMsg.role !== 'user') throw new Error("Context lost");
 
         // 2. Call API logic
         const limit = char.contextLimit || 500;
-        const temporalHistory = validMsgs.slice(-limit);
+        const requestContext = buildDateRequestContextMessages({
+            allMessages: validAllMsgs,
+            currentSessionMessages: validSessionMessages,
+            contextLimit: limit,
+        });
+        const temporalHistory = requestContext.map(item => item.sourceMessage);
         const previousContextMsg = temporalHistory[temporalHistory.length - 2];
         const temporalContext = buildTemporalContext(temporalHistory, Date.now(), char.id)
             || getTimeGapHint(previousContextMsg?.timestamp);
         const userPromptText = appendDateTemporalContext(lastUserMsg.content, temporalContext);
-        const historyMsgs = validMsgs.slice(-limit, -1).map(m => ({
-            role: m.role,
-            content: getDateMessageContextContent(m)
+        const historyMsgs = requestContext.filter(item => item.sourceMessage.id !== lastUserMsg.id).map(item => ({
+            role: item.role,
+            content: item.content,
         }));
 
         const systemPrompt = buildDateSessionSystemPrompt({ char, userProfile, allMsgs });
@@ -1495,6 +1541,7 @@ ${exitPromptContent}
 
         if (!response.ok) throw new Error('API Error');
         const data = await safeResponseJson(response);
+        setLastDateTokenUsage(normalizeDateTokenUsage(data, 'reroll'));
         const rawContent = data.choices[0].message.content;
         const extracted = extractThinking(rawContent);
         // Also strip inner whispers on reroll (same as normal send)
@@ -1750,6 +1797,7 @@ ${exitPromptContent}
                     canManualSummary={canManualSummary}
                     canAutoSummary={canAutoSummary}
                     summaryDisabledReason={summaryDisabledReason}
+                    lastTokenUsage={lastDateTokenUsage}
                     onRequestSummary={requestManualSummary}
                     onReviewPendingSummary={() => pendingAutoSummary && setActiveSummaryDraft({ ...pendingAutoSummary, fromPendingAuto: true })}
                     onDiscardPendingSummary={discardPendingAutoSummary}

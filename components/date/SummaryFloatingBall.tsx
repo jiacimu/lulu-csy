@@ -1,7 +1,7 @@
 import React,{ memo,useEffect,useMemo,useRef,useState } from 'react';
 import { motion,useMotionValue,PanInfo } from 'framer-motion';
 import { GearSix,NotePencil,X,WarningCircle,ArrowCounterClockwise } from '@phosphor-icons/react';
-import { CharacterProfile } from '../../types';
+import { CharacterProfile,DateTokenUsage } from '../../types';
 import { DATE_DEFAULT_WORD_COUNT } from '../../utils/datePrompts';
 import WritingStyleSheet, { getStyleDisplayLabel } from './WritingStyleSheet';
 
@@ -30,6 +30,7 @@ interface SummaryFloatingBallProps {
     translationEnabled?: boolean;
     translateSourceLang?: string;
     translateTargetLang?: string;
+    lastTokenUsage?: DateTokenUsage | null;
     onToggleTranslation?: (enabled: boolean) => void;
     onSetTranslateSourceLang?: (lang: string) => void;
     onSetTranslateTargetLang?: (lang: string) => void;
@@ -98,6 +99,16 @@ const raisedSm = `1.5px 1.5px 3px ${C.shadow}, -1.5px -1.5px 3px ${C.hi}`;
 /* Gentle inset for recessed slots */
 const inset    = `inset 1.5px 1.5px 3px ${C.shadow}, inset -1.5px -1.5px 3px ${C.hi}`;
 
+const tokenSourceLabels: Record<DateTokenUsage['source'], string> = {
+    peek: '入场',
+    send: '回复',
+    reroll: '重掷',
+};
+
+const formatTokenCount = (value?: number) => (
+    Number.isFinite(value) ? Math.round(value as number).toLocaleString('zh-CN') : '--'
+);
+
 /* ── Shared sub-components ── */
 
 const Toggle: React.FC<{
@@ -153,6 +164,7 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
     temperature, onChangeTemperature,
     fontScale, onChangeFontScale,
     translationEnabled, translateSourceLang, translateTargetLang,
+    lastTokenUsage,
     onToggleTranslation, onSetTranslateSourceLang, onSetTranslateTargetLang,
 }) => {
     const storageKey = `date_summary_ball_pos_${char.id}`;
@@ -232,6 +244,12 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
     const label: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: C.text };
     const sub: React.CSSProperties = { fontSize: 9, color: C.textSec, marginTop: 1 };
     const sectionGap = 6;
+    const tokenUsageHasCounts = !!lastTokenUsage && (
+        lastTokenUsage.inputTokens !== undefined
+        || lastTokenUsage.outputTokens !== undefined
+        || lastTokenUsage.totalTokens !== undefined
+    );
+    const tokenUsageLabel = lastTokenUsage ? tokenSourceLabels[lastTokenUsage.source] : '等待请求';
 
     return (
         <div ref={constraintsRef} className="absolute inset-0 z-[90] pointer-events-none">
@@ -289,6 +307,51 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
                                 style={{ width: 22, height: 22, borderRadius: 8, border: 'none', background: C.card, boxShadow: raisedSm, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <X size={11} color={C.textSec} />
                             </button>
+                        </div>
+
+                        {/* ── Token usage ── */}
+                        <div
+                            title="最近一轮见面 API 请求返回的 usage"
+                            style={{ background: C.card, borderRadius: 14, padding: '8px 10px', marginBottom: sectionGap, boxShadow: raisedSm }}
+                        >
+                            <div style={row}>
+                                <span style={{ ...label, fontSize: 10 }}>本轮 Token</span>
+                                <span style={{ fontSize: 9, color: C.textSec }}>{tokenUsageLabel}</span>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 5, marginTop: 7 }}>
+                                {[
+                                    { key: 'input', text: '输入', value: lastTokenUsage?.inputTokens },
+                                    { key: 'output', text: '输出', value: lastTokenUsage?.outputTokens },
+                                    { key: 'total', text: '总计', value: lastTokenUsage?.totalTokens },
+                                ].map(item => (
+                                    <div key={item.key} style={{
+                                        minWidth: 0,
+                                        borderRadius: 9,
+                                        background: C.base,
+                                        boxShadow: inset,
+                                        padding: '5px 4px',
+                                        textAlign: 'center',
+                                    }}>
+                                        <div style={{ fontSize: 8, color: C.textSec, lineHeight: 1.2 }}>{item.text}</div>
+                                        <div style={{
+                                            marginTop: 2,
+                                            fontSize: 11,
+                                            fontWeight: 700,
+                                            color: item.key === 'total' ? C.accent : C.text,
+                                            lineHeight: 1.2,
+                                            fontVariantNumeric: 'tabular-nums',
+                                            overflowWrap: 'anywhere',
+                                        }}>
+                                            {formatTokenCount(item.value)}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            {!tokenUsageHasCounts && (
+                                <div style={{ ...sub, marginTop: 6, textAlign: 'center' }}>
+                                    {lastTokenUsage ? '接口未返回 usage 时显示 --' : '发送后显示最近一轮'}
+                                </div>
+                            )}
                         </div>
 
                         {/* ── Section 1: 总结 ── */}

@@ -1,5 +1,5 @@
 import React,{ useState,useEffect,useRef } from 'react';
-import { CharacterProfile,Message,DateState,DialogueItem,UserProfile } from '../../types';
+import { CharacterProfile,Message,DateState,DialogueItem,UserProfile,DateTokenUsage } from '../../types';
 import { type InnerWhisper } from '../../utils/thinkingExtractor';
 import { extractTranslationPairs } from '../../utils/chatParser';
 import Modal from '../../components/os/Modal';
@@ -12,60 +12,6 @@ const isAppleMobileWebKit = () => {
     const platform = navigator.platform || '';
     const ua = navigator.userAgent || '';
     return /iP(ad|hone|od)/.test(ua) || (platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-};
-
-const DATE_ASSET_REVEAL_DELAY_MS = 120;
-
-const scheduleDateAssetReveal = (src: string, onReady: (readySrc: string) => void): (() => void) => {
-    if (!src || typeof window === 'undefined') {
-        onReady(src);
-        return () => undefined;
-    }
-
-    let cancelled = false;
-    let timeoutId: number | null = null;
-    let fallbackId: number | null = null;
-    let frameId: number | null = null;
-
-    const finish = () => {
-        if (!cancelled) onReady(src);
-    };
-
-    const load = () => {
-        if (typeof Image === 'undefined') {
-            finish();
-            return;
-        }
-
-        const img = new Image();
-        let settled = false;
-        const settle = () => {
-            if (settled) return;
-            settled = true;
-            finish();
-        };
-
-        img.decoding = 'async';
-        img.onload = settle;
-        img.onerror = settle;
-        img.src = src;
-        fallbackId = window.setTimeout(settle, 900);
-
-        if (typeof img.decode === 'function') {
-            img.decode().then(settle).catch(settle);
-        }
-    };
-
-    timeoutId = window.setTimeout(() => {
-        frameId = window.requestAnimationFrame(load);
-    }, DATE_ASSET_REVEAL_DELAY_MS);
-
-    return () => {
-        cancelled = true;
-        if (timeoutId !== null) window.clearTimeout(timeoutId);
-        if (fallbackId !== null) window.clearTimeout(fallbackId);
-        if (frameId !== null) window.cancelAnimationFrame(frameId);
-    };
 };
 
 // Helper: Parse dialogue with simple state machine
@@ -83,6 +29,14 @@ const cleanTextForDisplay = (text: string) => {
     // Remove content inside brackets [] and trim extra spaces
     // Also remove typical system prompts if any leak through
     return text.replace(/\[.*?\]/g, '').trim();
+};
+
+const resolveDateBackground = (state: DateState | undefined, char: CharacterProfile): string => {
+    if (!state) return char.dateBackground || '';
+    if (state.bgSource === 'none') return '';
+    if (state.bgSource === 'characterDateBackground') return char.dateBackground || '';
+    if (state.bgSource === 'inline') return state.bgImage || '';
+    return state.bgImage || char.dateBackground || '';
 };
 
 /**
@@ -188,6 +142,7 @@ interface DateSessionProps {
     canManualSummary: boolean;
     canAutoSummary: boolean;
     summaryDisabledReason?: string;
+    lastTokenUsage?: DateTokenUsage | null;
     onRequestSummary: () => void;
     onReviewPendingSummary: () => void;
     onDiscardPendingSummary: () => void;
@@ -232,6 +187,7 @@ const DateSession: React.FC<DateSessionProps> = ({
     canManualSummary,
     canAutoSummary,
     summaryDisabledReason,
+    lastTokenUsage,
     onRequestSummary,
     onReviewPendingSummary,
     onDiscardPendingSummary,
@@ -260,9 +216,7 @@ const DateSession: React.FC<DateSessionProps> = ({
     // Core VN State
     const [isNovelMode, setIsNovelMode] = useState(false);
     const [bgImage, setBgImage] = useState<string>(char.dateBackground || '');
-    const [visibleBgImage, setVisibleBgImage] = useState<string>('');
     const [currentSprite, setCurrentSprite] = useState<string>('');
-    const [visibleCurrentSprite, setVisibleCurrentSprite] = useState<string>('');
     const [spriteConfig, setSpriteConfig] = useState(char.spriteConfig || { scale: 1, x: 0, y: 0 });
     
     // Dialogue Engine State
@@ -294,39 +248,17 @@ const DateSession: React.FC<DateSessionProps> = ({
     const novelScrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const isResumedRef = useRef(false);
-    const bgRevealCancelRef = useRef<(() => void) | null>(null);
-    const spriteRevealCancelRef = useRef<(() => void) | null>(null);
-
-    const setDeferredBgImage = React.useCallback((src: string) => {
-        setBgImage(src);
-        bgRevealCancelRef.current?.();
-        bgRevealCancelRef.current = null;
-
-        if (!src) {
-            setVisibleBgImage('');
-            return;
-        }
-
-        bgRevealCancelRef.current = scheduleDateAssetReveal(src, setVisibleBgImage);
-    }, []);
-
-    const setDeferredCurrentSprite = React.useCallback((src: string) => {
-        setCurrentSprite(src);
-        spriteRevealCancelRef.current?.();
-        spriteRevealCancelRef.current = null;
-
-        if (!src) {
-            setVisibleCurrentSprite('');
-            return;
-        }
-
-        spriteRevealCancelRef.current = scheduleDateAssetReveal(src, setVisibleCurrentSprite);
-    }, []);
 
     useEffect(() => {
         return () => {
-            bgRevealCancelRef.current?.();
-            spriteRevealCancelRef.current?.();
+            if (whisperRevealTimer.current) {
+                clearTimeout(whisperRevealTimer.current);
+                whisperRevealTimer.current = null;
+            }
+            if (longPressTimer.current) {
+                clearTimeout(longPressTimer.current);
+                longPressTimer.current = null;
+            }
         };
     }, []);
 
@@ -364,8 +296,8 @@ const DateSession: React.FC<DateSessionProps> = ({
         if (initialState) {
             // Resume
             isResumedRef.current = true;
-            setDeferredBgImage(initialState.bgImage || '');
-            setDeferredCurrentSprite(initialState.currentSprite || '');
+            setBgImage(resolveDateBackground(initialState, char));
+            setCurrentSprite(initialState.currentSprite || '');
             setCurrentText(initialState.currentText || '');
             setDisplayedText(initialState.currentText || '');
             setDialogueQueue(initialState.dialogueQueue || []);
@@ -386,7 +318,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                 initSprite = fallbackKey ? s[fallbackKey] : Object.values(s).find(v => v) || char.avatar;
             }
             if (!initSprite) initSprite = char.avatar;
-            setDeferredCurrentSprite(initSprite);
+            setCurrentSprite(initSprite);
             
             // Parse Peek Status as opening
             const startText = peekStatus || "Waiting for connection...";
@@ -408,8 +340,10 @@ const DateSession: React.FC<DateSessionProps> = ({
     // Sprite & Config Sync (If user goes to settings and comes back, this helps)
     useEffect(() => {
         if (char.spriteConfig) setSpriteConfig(char.spriteConfig);
-        if (char.dateBackground && !isResumedRef.current) setDeferredBgImage(char.dateBackground);
-    }, [char, setDeferredBgImage]);
+        if (!initialState || initialState.bgSource === 'characterDateBackground' || (!initialState.bgSource && !initialState.bgImage)) {
+            setBgImage(char.dateBackground || '');
+        }
+    }, [char, initialState]);
 
     // Novel Mode Scroll
     useEffect(() => {
@@ -469,11 +403,11 @@ const DateSession: React.FC<DateSessionProps> = ({
             const emotionKey = item.emotion.toLowerCase();
             if (dateEmotionKeys.includes(emotionKey)) {
                 const nextSprite = activeSprites[emotionKey];
-                if (nextSprite) setDeferredCurrentSprite(nextSprite);
+                if (nextSprite) setCurrentSprite(nextSprite);
             } else {
                 const found = dateEmotionKeys.find(k => emotionKey.includes(k));
                 if (found && activeSprites[found]) {
-                    setDeferredCurrentSprite(activeSprites[found]);
+                    setCurrentSprite(activeSprites[found]);
                 }
             }
         }
@@ -617,6 +551,7 @@ const DateSession: React.FC<DateSessionProps> = ({
             dialogueBatch: dialogueBatch || [],
             currentText,
             bgImage,
+            bgSource: bgImage ? (bgImage === char.dateBackground ? 'characterDateBackground' : 'inline') : 'none',
             currentSprite,
             isNovelMode,
             timestamp: Date.now(),
@@ -677,7 +612,7 @@ const DateSession: React.FC<DateSessionProps> = ({
             {/* Background Layer */}
             <div 
                 className={`absolute inset-0 bg-cover bg-center transition-all duration-1000 ${isNovelMode ? 'blur-xl opacity-30' : ''}`}
-                style={{ backgroundImage: visibleBgImage ? `url(${visibleBgImage})` : 'none' }}
+                style={{ backgroundImage: bgImage ? `url(${bgImage})` : 'none' }}
             ></div>
 
             {/* Menu Layer */}
@@ -716,6 +651,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                 canManualSummary={canManualSummary}
                 canAutoSummary={canAutoSummary}
                 disabledReason={summaryDisabledReason}
+                lastTokenUsage={lastTokenUsage}
                 onRequestManualSummary={onRequestSummary}
                 onReviewPendingSummary={onReviewPendingSummary}
                 onDiscardPendingSummary={onDiscardPendingSummary}
@@ -795,7 +731,7 @@ const DateSession: React.FC<DateSessionProps> = ({
             {!isNovelMode && (
                 <>
                     <div className="absolute inset-x-0 bottom-0 h-[90%] flex items-end justify-center pointer-events-none z-10 overflow-hidden">
-                        {visibleCurrentSprite && <img src={visibleCurrentSprite} className="max-h-full max-w-full object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)] transition-all duration-300 origin-bottom" style={{ transform: `translate(${spriteConfig.x}%, ${spriteConfig.y}%) scale(${isTextAnimating ? spriteConfig.scale * 1.02 : spriteConfig.scale})` }} />}
+                        {currentSprite && <img src={currentSprite} className="max-h-full max-w-full object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)] transition-all duration-300 origin-bottom" style={{ transform: `translate(${spriteConfig.x}%, ${spriteConfig.y}%) scale(${isTextAnimating ? spriteConfig.scale * 1.02 : spriteConfig.scale})` }} />}
                     </div>
                     {!isTyping && (
                         <div className="absolute inset-x-0 bottom-8 z-30 flex flex-col items-center gap-3">

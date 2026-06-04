@@ -35,6 +35,14 @@ export interface DateState {
     peekStatus: string;
 }
 
+export interface DateTokenUsage {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    source: 'peek' | 'send' | 'reroll';
+    updatedAt: number;
+}
+
 export interface SpecialMomentRecord {
     content: string;
     timestamp: number;
