@@ -27,7 +27,6 @@ import { isDateModeContextMessage } from '../utils/mainlineMemory';
 import { trackedApiRequest } from '../utils/apiRequestLedger';
 import { buildTemporalContext } from '../utils/temporalContext';
 import { EventExtractor } from '../utils/eventExtractor';
-import { buildDateHistoryRecoveryState,findPendingDateReplyGap } from '../utils/dateSessionState';
 
 type SummaryType = 'auto' | 'manual';
 const DATE_SUMMARY_CONTEXT_KEEP_COUNT = 5;
@@ -52,7 +51,12 @@ type DateDiaryMemoryPreviewState = {
 };
 
 const isDateSummaryMessage = (m: Message) => m.metadata?.source === 'date' && m.metadata?.isSummary === true;
-const isDateBridgeMessage = (m: Message) => m.metadata?.source === 'date' && m.metadata?.isDateContextBridge === true;
+const isDateBridgeMessage = (m: Message) => {
+    const bridgeType = m.metadata?.bridgeType;
+    return m.metadata?.source === 'date'
+        && m.metadata?.isDateContextBridge === true
+        && (bridgeType === undefined || bridgeType === 'raw' || bridgeType === 'summary');
+};
 const isDateRawDialogueMessage = (m: Message) => (
     m.metadata?.source === 'date'
     && !m.metadata?.isSummary
@@ -62,24 +66,10 @@ const isDateDialogueMessage = (m: Message) => (
     isDateRawDialogueMessage(m)
     && !m.metadata?.hiddenFromUser
 );
-export const mergeDateMessages = (prev: Message[], next: Message[]): Message[] => {
-    const byId = new Map<number, Message>();
-    for (const message of [...prev, ...next]) {
-        if (isDateDialogueMessage(message)) {
-            byId.set(message.id, message);
-        }
-    }
-    return [...byId.values()].sort((a, b) => a.timestamp - b.timestamp || a.id - b.id);
-};
-const isDateForkBridge = (m: Message) => m.metadata?.bridgeType === 'fork';
 const getBridgeTypeLabel = (m: Message) => {
     if (m.metadata?.bridgeType === 'raw') return '原始记录';
-    if (isDateForkBridge(m)) return '复刻背景';
     return '总结';
 };
-const getBridgeStatusLabel = (bridges: Message[]) => (
-    bridges.every(isDateForkBridge) ? '已带入旧见面背景' : '已同步到主聊天'
-);
 const getDateMessageContextContent = (m: Message) => (
     m.type === 'image' ? '[User sent an image]' : stripTranslationTags(m.content)
 );
@@ -279,8 +269,6 @@ const DateApp: React.FC = () => {
 
     // Resume Logic State
     const [pendingSessionCharId, setPendingSessionCharId] = useState<string | null>(null);
-    const [resumeOverrideState, setResumeOverrideState] = useState<DateState | null>(null);
-    const [pendingRecoveryState, setPendingRecoveryState] = useState<DateState | null>(null);
 
     // --- NEW: Editing State lifted to here for DB sync ---
     const [dateMessages, setDateMessages] = useState<Message[]>([]);
@@ -303,12 +291,10 @@ const DateApp: React.FC = () => {
 
     const char = characters.find(c => c.id === activeCharacterId);
     const pendingChar = pendingSessionCharId ? characters.find(c => c.id === pendingSessionCharId) : null;
-    const pendingSessionState = pendingChar?.savedDateState || pendingRecoveryState;
     const secondaryApiConfig = getSecondaryApiConfig();
     const canManualSummary = hasCompleteApiConfig(secondaryApiConfig) || hasCompleteApiConfig(apiConfig);
     const canAutoSummary = hasCompleteApiConfig(secondaryApiConfig);
     const summaryDisabledReason = canManualSummary ? undefined : '请先配置主 API 或副 API';
-    const pendingReplyGap = React.useMemo(() => findPendingDateReplyGap(dateMessages), [dateMessages]);
 
     // --- Translation State (persisted to localStorage per character) ---
     const [dateTranslationEnabled, setDateTranslationEnabled] = useState(() => {
@@ -339,9 +325,9 @@ const DateApp: React.FC = () => {
     }, [char?.id, dateTranslateTargetLang]);
 
     // --- Data Loading ---
-    const loadDateMessages = async (charId = char?.id) => {
-        if (charId) {
-            const msgs = await DB.getMessagesByCharId(charId);
+    const loadDateMessages = async () => {
+        if (char) {
+            const msgs = await DB.getMessagesByCharId(char.id);
             // 只筛选 source='date' 的消息用于小说模式显示
             const filtered = msgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp);
             setDateMessages(filtered);
@@ -358,17 +344,6 @@ const DateApp: React.FC = () => {
             loadDateMessages();
         }
     }, [char, mode]);
-
-    const handleDateAutosaveState = React.useCallback((state: DateState, reason: string) => {
-        if (!char) return;
-        updateCharacter(char.id, {
-            savedDateState: {
-                ...state,
-                autosaveReason: reason,
-                autosavedAt: Date.now(),
-            },
-        }, { skipImmediateAgentContextPush: true });
-    }, [char, updateCharacter]);
 
     // --- Navigation Helpers ---
     const handleBack = () => {
@@ -948,8 +923,6 @@ ${exitPromptContent}
         setMode('select');
         setPeekStatus('');
         setHasSavedOpening(false);
-        setResumeOverrideState(null);
-        setPendingRecoveryState(null);
     };
 
     const saveRawBridgeAndExit = async (finalState: DateState) => {
@@ -986,7 +959,6 @@ ${exitPromptContent}
         const sessionStartMsgId = sessionMessages[0].id;
         const bridges = allMsgs.filter(m =>
             m.metadata?.source === 'date' && m.metadata?.isDateContextBridge === true
-            && !isDateForkBridge(m)
             && (m.metadata?.sessionStartMsgId === sessionStartMsgId
                 || (Array.isArray(m.metadata?.coveredMsgIds) && m.metadata.coveredMsgIds.some((id: unknown) => typeof id === 'number' && sessionMsgIds.has(id as number))))
         );
@@ -1096,6 +1068,7 @@ ${exitPromptContent}
 
     const renderDiaryMemoryPreviewModal = () => {
         if (!diaryMemoryPreview) return null;
+        if (!char) return null;
         const validCount = diaryMemoryPreview.entries.filter(entry => entry.title.trim() && entry.content.trim()).length;
         return (
             <Modal
@@ -1256,51 +1229,26 @@ ${exitPromptContent}
     };
 
     // --- Resume / Start Logic ---
-    const handleCharClick = async (c: CharacterProfile) => {
-        setResumeOverrideState(null);
-        setPendingRecoveryState(null);
-
+    const handleCharClick = (c: CharacterProfile) => {
         if (c.savedDateState) {
             setPendingSessionCharId(c.id);
-            return;
+        } else {
+            startPeek(c);
         }
-
-        const msgs = await DB.getMessagesByCharId(c.id);
-        const recoveryState = buildDateHistoryRecoveryState(msgs, c);
-        if (recoveryState) {
-            setPendingRecoveryState(recoveryState);
-            setPendingSessionCharId(c.id);
-            return;
-        }
-
-        startPeek(c);
     };
 
-    const clearPendingSessionPrompt = () => {
-        setPendingSessionCharId(null);
-        setPendingRecoveryState(null);
-    };
-
-    const handleResumeSession = async () => {
+    const handleResumeSession = () => {
         if (!pendingSessionCharId) return;
         const c = characters.find(ch => ch.id === pendingSessionCharId);
-        const resumeState = c?.savedDateState || pendingRecoveryState;
-        if (!c || !resumeState) {
+        if (!c || !c.savedDateState) {
             addToast('存档已丢失', 'error');
-            clearPendingSessionPrompt();
+            setPendingSessionCharId(null);
             return;
         }
         setActiveCharacterId(c.id);
         setForceFreshSession(false);
-        setResumeOverrideState(resumeState);
-        setPeekStatus(resumeState.peekStatus || '');
-        setHasSavedOpening(true);
-        if (pendingRecoveryState && !c.savedDateState) {
-            updateCharacter(c.id, { savedDateState: resumeState }, { skipImmediateAgentContextPush: true });
-        }
-        await loadDateMessages(c.id);
         setMode('session');
-        clearPendingSessionPrompt();
+        setPendingSessionCharId(null);
         addToast('已恢复上次进度', 'success');
     };
 
@@ -1308,15 +1256,13 @@ ${exitPromptContent}
         if (!pendingSessionCharId) return;
         const c = characters.find(ch => ch.id === pendingSessionCharId);
         if (!c) {
-            clearPendingSessionPrompt();
+            setPendingSessionCharId(null);
             return;
         }
-        setResumeOverrideState(null);
-        setPendingRecoveryState(null);
-        updateCharacter(c.id, { savedDateState: undefined }, { skipImmediateAgentContextPush: true });
+        updateCharacter(c.id, { savedDateState: undefined });
         setForceFreshSession(true);
         startPeek(c);
-        clearPendingSessionPrompt();
+        setPendingSessionCharId(null);
     };
 
     // --- 关键修复: 进入 Session 时立即归档开场白 ---
@@ -1348,14 +1294,11 @@ ${exitPromptContent}
 
     // --- Peek (Generation) Logic ---
     const startPeek = async (c: CharacterProfile) => {
-        setResumeOverrideState(null);
-        setPendingRecoveryState(null);
         setActiveCharacterId(c.id);
         setForceFreshSession(true);
         setMode('peek');
         setPeekLoading(true);
         setPeekStatus('');
-        setDateMessages([]);
         setHasSavedOpening(false);
 
         try {
@@ -1423,71 +1366,48 @@ ${exitPromptContent}
     };
 
     // --- Session API Logic ---
-    const sanitizeDateReplyError = (error: unknown): string => {
-        const raw = error instanceof Error ? error.message : String(error || 'Unknown error');
-        return raw.slice(0, 240);
-    };
-
-    const markDateReplyStatus = async (
-        userMessageId: number,
-        status: 'pending' | 'complete' | 'failed',
-        metadataUpdates: Record<string, unknown> = {},
-    ) => {
-        const timestampKey = status === 'pending'
-            ? 'dateReplyStartedAt'
-            : status === 'complete'
-                ? 'dateReplyCompletedAt'
-                : 'dateReplyFailedAt';
-        await DB.updateMessageMetadata(userMessageId, {
-            dateReplyStatus: status,
-            [timestampKey]: Date.now(),
-            ...metadataUpdates,
-        });
-    };
-
-    const generateReplyForExistingUserMessage = async (
-        userMessageId: number,
-        directorHint?: string,
-        requestReason?: string,
-    ): Promise<{ content: string; whispers: InnerWhisper[] }> => {
+    const handleSendMessage = async (text: string, directorHint?: string): Promise<{ content: string; whispers: InnerWhisper[] }> => {
         if (!char) throw new Error("No char");
 
-        let assistantMessageId: number | null = null;
-        try {
-            await markDateReplyStatus(userMessageId, 'pending', {
-                dateReplyError: undefined,
-            });
+        // 1. Save User Msg
+        const userMessageId = await DB.saveMessage({ charId: char.id, role: 'user', type: 'text', content: text, metadata: { source: 'date' } });
 
-            const allMsgs = await DB.getMessagesByCharId(char.id);
-            const userMessage = allMsgs.find(m => m.id === userMessageId && m.role === 'user');
-            if (!userMessage) throw new Error('Date user message not found');
+        // 2. Prepare Context
+        // Re-fetch messages. Since we saved the opening in handleEnterSession,
+        // 'allMsgs' will now correctly contain: [History..., Opening, UserMsg]
+        const allMsgs = await DB.getMessagesByCharId(char.id);
 
-            const limit = char.contextLimit || 500;
-            const visibleHistory = allMsgs
-                .filter(isDateModeContextMessage)
-                .sort((a, b) => a.timestamp - b.timestamp || a.id - b.id);
-            const userHistoryIndex = visibleHistory.findIndex(m => m.id === userMessageId);
-            const contextHistory = userHistoryIndex >= 0 ? visibleHistory.slice(0, userHistoryIndex + 1) : visibleHistory;
-            const temporalHistory = contextHistory.slice(-limit);
-            const previousContextMsg = temporalHistory[temporalHistory.length - 2];
-            const temporalContext = buildTemporalContext(temporalHistory, Date.now(), char.id)
-                || getTimeGapHint(previousContextMsg?.timestamp);
-            const userPromptText = appendDateTemporalContext(userMessage.content, temporalContext);
+        // Update local state for display
+        const dateFiltered = allMsgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp);
+        setDateMessages(dateFiltered);
 
-            // Exclude the triggering user message from history because it is sent as the explicit prompt.
-            const historyMsgs = contextHistory.slice(-limit, -1).map(m => ({
-                role: m.role,
-                content: getDateMessageContextContent(m)
-            }));
+        const limit = char.contextLimit || 500;
+        const visibleHistory = allMsgs
+            .filter(isDateModeContextMessage)
+            .sort((a, b) => a.timestamp - b.timestamp);
+        const temporalHistory = visibleHistory.slice(-limit);
+        const previousContextMsg = temporalHistory[temporalHistory.length - 2];
+        const temporalContext = buildTemporalContext(temporalHistory, Date.now(), char.id)
+            || getTimeGapHint(previousContextMsg?.timestamp);
+        const userPromptText = appendDateTemporalContext(text, temporalContext);
 
-            const systemPrompt = buildDateSessionSystemPrompt({ char, userProfile, allMsgs });
+        // Construct History for AI
+        // We exclude the very last message (UserMsg we just sent) from history array
+        // because we'll pass it as the explicit user prompt "content".
+        // BUT, we must ensure the Opening (Assistant) is included in history.
+        const historyMsgs = visibleHistory.slice(-limit, -1).map(m => ({
+            role: m.role,
+            content: getDateMessageContextContent(m)
+        }));
 
-            const response = await fetchDateChatCompletion(apiConfig, {
-                    model: apiConfig.model,
-                    messages: [
-                        { role: 'system', content: systemPrompt },
-                        ...historyMsgs,
-                        { role: 'user', content: `${userPromptText}\n\n(System Note: 严格遵守沉浸剧场格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签。叙述人称严格遵守当前视角设定。${directorHint ? `\n<director_note>${directorHint}</director_note>` : ''}${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。规则：
+        const systemPrompt = buildDateSessionSystemPrompt({ char, userProfile, allMsgs });
+
+        const response = await fetchDateChatCompletion(apiConfig, {
+                model: apiConfig.model,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    ...historyMsgs,
+                    { role: 'user', content: `${userPromptText}\n\n(System Note: 严格遵守沉浸剧场格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签。叙述人称严格遵守当前视角设定。${directorHint ? `\n<director_note>${directorHint}</director_note>` : ''}${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。规则：
 • 每一行仍然必须以 [emotion] 开头，<翻译> 标签只能出现在 [emotion] 后面，不能放在行首。
 • 只有${char.name}的「台词/说的话」用${dateTranslateSourceLang}写，并写成 [emotion]<翻译><原文>${dateTranslateSourceLang}台词</原文><译文>${dateTranslateTargetLang}译文</译文></翻译>。
 • 叙述、动作描写、心理活动、环境描写 → 保持中文不变，不用 <翻译> 标签。
@@ -1495,138 +1415,35 @@ ${exitPromptContent}
 示例：
 [happy]<翻译><原文>「おはよう！今日はいい天気だね」</原文><译文>「早上好！今天天气真好呢」</译文></翻译>
 [shy] ${pronoun(char.gender ?? 'male')}的脸颊微微泛红，视线移向了窗外。]` : ''})` }
-                    ],
-                    temperature: char.dateTemperature ?? 0.85,
-                    max_tokens: 8192,
-                },
-                requestReason || (directorHint ? '见面导演提示回复' : '见面聊天回复'),
-                char.id,
-                userMessageId,
-                true,
-            );
+                ],
+                temperature: char.dateTemperature ?? 0.85,
+                max_tokens: 8192,
+            },
+            directorHint ? '见面导演提示回复' : '见面聊天回复',
+            char.id,
+            userMessageId,
+            true,
+        );
 
-            if (!response.ok) throw new Error('API Error');
-            const data = await safeResponseJson(response);
-            const rawContent = data.choices[0].message.content;
-            const extracted = extractThinking(rawContent);
-            const whisperResult = extractInnerWhispers(extracted.content);
-            const content = whisperResult.content;
+        if (!response.ok) throw new Error('API Error');
+        const data = await safeResponseJson(response);
+        const rawContent = data.choices[0].message.content;
+        const extracted = extractThinking(rawContent);
+        // Extract inner whispers from the cleaned content
+        const whisperResult = extractInnerWhispers(extracted.content);
+        const content = whisperResult.content;
 
-            // Keep bilingual XML in storage so replay/novel mode can show subtitles later.
-            // Context and summaries strip translation tags before they are sent to the model.
-            const assistantTimestamp = Date.now();
-            assistantMessageId = await DB.saveMessage({
-                charId: char.id,
-                role: 'assistant',
-                type: 'text',
-                content,
-                timestamp: assistantTimestamp,
-                metadata: { source: 'date', thinking: extracted.thinking, replyToUserMessageId: userMessageId },
-            });
-            const assistantMessage: Message = {
-                id: assistantMessageId,
-                charId: char.id,
-                role: 'assistant',
-                type: 'text',
-                content,
-                timestamp: assistantTimestamp,
-                metadata: { source: 'date', thinking: extracted.thinking, replyToUserMessageId: userMessageId },
-            };
-            setDateMessages(prev => mergeDateMessages(prev, [assistantMessage]));
+        // Keep bilingual XML in storage so replay/novel mode can show subtitles later.
+        // Context and summaries strip translation tags before they are sent to the model.
+        await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content, metadata: { source: 'date', thinking: extracted.thinking } });
 
-            try {
-                await markDateReplyStatus(userMessageId, 'complete', {
-                    replyMessageId: assistantMessageId,
-                    dateReplyError: undefined,
-                });
-            } catch (metadataError) {
-                console.error('[DateApp] Failed to mark date reply complete', metadataError);
-            }
+        // Refresh local state
+        const freshMsgs = await DB.getMessagesByCharId(char.id);
+        setDateMessages(freshMsgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp));
+        maybeExtractDateTemporalEvent(char.id, text, secondaryApiConfig);
+        void maybeTriggerAutoSummary(freshMsgs);
 
-            maybeExtractDateTemporalEvent(char.id, userMessage.content, secondaryApiConfig);
-            void DB.getMessagesByCharId(char.id)
-                .then(freshMsgs => {
-                    setDateMessages(prev => mergeDateMessages(prev, freshMsgs));
-                    void maybeTriggerAutoSummary(freshMsgs);
-                })
-                .catch(e => console.error('[DateApp] Background date message reconcile failed', e));
-
-            return { content, whispers: whisperResult.whispers };
-        } catch (e) {
-            if (assistantMessageId === null) {
-                try {
-                    await markDateReplyStatus(userMessageId, 'failed', {
-                        dateReplyError: sanitizeDateReplyError(e),
-                    });
-                } catch (metadataError) {
-                    console.error('[DateApp] Failed to mark date reply failed', metadataError);
-                }
-            }
-            const freshMsgs = await DB.getMessagesByCharId(char.id).catch(() => []);
-            setDateMessages(freshMsgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp));
-            throw e;
-        }
-    };
-
-    const handleSendMessage = async (text: string, directorHint?: string): Promise<{ content: string; whispers: InnerWhisper[] }> => {
-        if (!char) throw new Error("No char");
-
-        const userTimestamp = Date.now();
-        const userMetadata = {
-            source: 'date',
-            dateReplyStatus: 'pending',
-            dateReplyStartedAt: userTimestamp,
-        };
-        const userMessageId = await DB.saveMessage({
-            charId: char.id,
-            role: 'user',
-            type: 'text',
-            content: text,
-            timestamp: userTimestamp,
-            metadata: userMetadata,
-        });
-        setDateMessages(prev => mergeDateMessages(prev, [{
-            id: userMessageId,
-            charId: char.id,
-            role: 'user',
-            type: 'text',
-            content: text,
-            timestamp: userTimestamp,
-            metadata: userMetadata,
-        }]));
-
-        try {
-            return await generateReplyForExistingUserMessage(userMessageId, directorHint);
-        } catch (e) {
-            const freshMsgs = await DB.getMessagesByCharId(char.id).catch(() => []);
-            setDateMessages(freshMsgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp));
-            throw e;
-        }
-    };
-
-    const handleRetryMissingReply = async (userMessageId: number): Promise<{ content: string; whispers: InnerWhisper[] }> => {
-        if (!char) throw new Error("No char");
-
-        const allMsgs = await DB.getMessagesByCharId(char.id);
-        const dateFiltered = allMsgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp || a.id - b.id);
-        const userIndex = dateFiltered.findIndex(m => m.id === userMessageId && m.role === 'user');
-        if (userIndex < 0) throw new Error('Date user message not found');
-
-        const existingAssistant = dateFiltered.slice(userIndex + 1).find(m => m.role === 'assistant');
-        if (existingAssistant) {
-            try {
-                await markDateReplyStatus(userMessageId, 'complete', {
-                    replyMessageId: existingAssistant.id,
-                    dateReplyError: undefined,
-                });
-            } catch (metadataError) {
-                console.error('[DateApp] Failed to repair date reply metadata', metadataError);
-            }
-            setDateMessages(dateFiltered);
-            return { content: existingAssistant.content, whispers: [] };
-        }
-
-        return generateReplyForExistingUserMessage(userMessageId, undefined, '见面中断回复重试');
+        return { content, whispers: whisperResult.whispers };
     };
 
     const handleReroll = async (): Promise<{ content: string; whispers: InnerWhisper[] }> => {
@@ -1776,14 +1593,14 @@ ${exitPromptContent}
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" /></svg>
                             </button>
-                            <img src={c.avatar} loading="lazy" decoding="async" className="w-16 h-16 rounded-full object-cover" />
+                            <img src={c.avatar} className="w-16 h-16 rounded-full object-cover" />
                             <span className="font-bold text-slate-700">{c.name}</span>
                             {c.savedDateState && <div className="absolute top-2 left-2 w-2 h-2 bg-green-500 rounded-full animate-pulse" title="有存档"></div>}
                         </div>
                     ))}
                 </div>
-                <Modal isOpen={!!pendingSessionCharId} title={pendingRecoveryState ? "发现历史进度" : "发现进度"} onClose={clearPendingSessionPrompt} footer={<div className="flex gap-3 w-full"><button onClick={handleStartNewSession} className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-600 font-bold">新的见面</button><button onClick={handleResumeSession} className="flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200">继续上次</button></div>}>
-                    <div className="text-center text-slate-500 text-sm py-4">{pendingRecoveryState ? '检测到历史见面记录，可以从文本安全模式继续。' : <>检测到 {pendingChar?.name} 有未结束的见面。</>}<br /><span className="text-xs text-slate-400 mt-2 block">(存档时间: {pendingSessionState?.timestamp ? new Date(pendingSessionState.timestamp).toLocaleString() : 'Unknown'})</span></div>
+                <Modal isOpen={!!pendingSessionCharId} title="发现进度" onClose={() => setPendingSessionCharId(null)} footer={<div className="flex gap-3 w-full"><button onClick={handleStartNewSession} className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-600 font-bold">新的见面</button><button onClick={handleResumeSession} className="flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200">继续上次</button></div>}>
+                    <div className="text-center text-slate-500 text-sm py-4">检测到 {pendingChar?.name} 有未结束的见面。<br /><span className="text-xs text-slate-400 mt-2 block">(存档时间: {pendingChar?.savedDateState?.timestamp ? new Date(pendingChar.savedDateState.timestamp).toLocaleString() : 'Unknown'})</span></div>
                 </Modal>
             </div>
         );
@@ -1837,7 +1654,7 @@ ${exitPromptContent}
                                 })}
                                 {session.bridges.length > 0 && (
                                     <div className="flex items-center justify-between rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs">
-                                        <span className="font-bold text-emerald-700">{getBridgeStatusLabel(session.bridges)}</span>
+                                        <span className="font-bold text-emerald-700">已同步到主聊天</span>
                                         <span className="text-[11px] text-emerald-500">
                                             {Array.from(new Set(session.bridges.map(getBridgeTypeLabel))).join(' / ')}
                                         </span>
@@ -1922,13 +1739,10 @@ ${exitPromptContent}
                     userProfile={userProfile}
                     messages={dateMessages}
                     peekStatus={peekStatus}
-                    initialState={forceFreshSession ? undefined : (resumeOverrideState || char.savedDateState)}
+                    initialState={forceFreshSession ? undefined : char.savedDateState}
                     onSendMessage={handleSendMessage}
                     onReroll={handleReroll}
-                    pendingReplyGap={pendingReplyGap || undefined}
-                    onRetryMissingReply={handleRetryMissingReply}
                     onExit={onExitSession}
-                    onAutosaveState={handleDateAutosaveState}
                     onEditMessage={openEditModal}
                     onDeleteMessage={handleDeleteMessage}
                     isSummaryGenerating={isSummaryGenerating}
