@@ -18,6 +18,7 @@ import {
     ChatTeardrop,
     GearSix,
     MusicNote,
+    Play,
     Phone,
     Plus,
     ShoppingBagOpen,
@@ -333,6 +334,14 @@ const formatNeteaseProfileNumber = (value: number): string =>
 
 const formatNeteaseProfileIndex = (index: number): string =>
     String(index + 1).padStart(2, '0');
+
+const getNeteaseRecordArtist = (record?: PhoneEvidence | null): string =>
+    record?.artist || record?.detail.split('\n')[0] || '未知歌手';
+
+const getNeteaseRecordProgress = (record?: PhoneEvidence | null): number => {
+    const seed = Math.abs(Number(record?.songId || record?.timestamp || 0));
+    return 28 + (seed % 55);
+};
 
 const buildCheckPhoneDeviceHash = (value: string): string => {
     let hash = 2166136261;
@@ -3438,6 +3447,58 @@ Format:
 
     const DesktopAppIcon = ({ app }: { app: DesktopAppEntry }) => {
         const IconComponent = app.icon;
+        if (app.id === NETEASE_MUSIC_RECORD_TYPE) {
+            const musicRecords = getRecentRecordsByType(NETEASE_MUSIC_RECORD_TYPE);
+            const nowPlaying = musicRecords[0] || null;
+            const artist = nowPlaying ? getNeteaseRecordArtist(nowPlaying) : (targetChar?.name ? `${targetChar.name} 的听歌档案` : '等待翻找');
+            const progress = getNeteaseRecordProgress(nowPlaying);
+            const coverSrc = nowPlaying?.albumCover || app.customIcon || targetChar?.avatar;
+            const traceCount = typeof app.badge === 'number' ? app.badge : musicRecords.length;
+
+            return (
+                <div className={`checkphone-desktop-app is-music-widget ${isDesktopEditing ? 'is-editing' : ''}`}>
+                    <button
+                        type="button"
+                        className="checkphone-desktop-music-widget"
+                        onClick={() => handleDesktopAppClick(app.onClick)}
+                        onPointerDown={startDesktopEditPress}
+                        onPointerUp={cancelDesktopEditPress}
+                        onPointerCancel={cancelDesktopEditPress}
+                        onPointerMove={cancelDesktopEditPress}
+                        onContextMenu={(event) => {
+                            event.preventDefault();
+                            setIsDesktopEditing(true);
+                        }}
+                        aria-label={app.label}
+                    >
+                        <span className="checkphone-desktop-music-glow"></span>
+                        <span className="checkphone-desktop-music-cover">
+                            {coverSrc ? (
+                                <img src={coverSrc} alt="" />
+                            ) : (
+                                <MusicNote weight="fill" />
+                            )}
+                        </span>
+                        <span className="checkphone-desktop-music-main">
+                            <span className="checkphone-desktop-music-kicker">
+                                {traceCount > 0 ? `${traceCount} tracks` : 'idle'}
+                            </span>
+                            <span className="checkphone-desktop-music-title">
+                                {nowPlaying?.title || app.label}
+                            </span>
+                            <span className="checkphone-desktop-music-artist">{artist}</span>
+                            <span className="checkphone-desktop-music-progress" aria-hidden="true">
+                                <span style={{ width: `${progress}%` }}></span>
+                            </span>
+                        </span>
+                        <span className="checkphone-desktop-music-play">
+                            <Play weight="fill" />
+                        </span>
+                    </button>
+                </div>
+            );
+        }
+
         return (
             <div className={`checkphone-desktop-app ${isDesktopEditing ? 'is-editing' : ''}`}>
                 <button

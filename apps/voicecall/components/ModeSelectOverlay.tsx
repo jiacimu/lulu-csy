@@ -40,7 +40,7 @@ const ModeSelectOverlay: React.FC<ModeSelectOverlayProps> = ({
     const [replyChannel, setReplyChannel] = useState<VoiceCallReplyChannel>(initialReplyChannel);
 
     // ─── 外语模式 (Foreign Language): 本地状态 ───
-    const LANG_OPTIONS = ['中文', 'English', '日本語', '한국어', 'Français', 'Español'];
+    const LANG_OPTIONS = ['中文', '粤语', 'English', '日本語', '한국어', 'Français', 'Español'];
     const isEnabled = !!foreignLang;
     const [localSourceLang, setLocalSourceLang] = useState(() => foreignLang?.sourceLang || getVoiceCallForeignLangDraft().sourceLang);
     const [localTargetLang, setLocalTargetLang] = useState(() => foreignLang?.targetLang || getVoiceCallForeignLangDraft().targetLang);

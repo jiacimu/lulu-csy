@@ -20,7 +20,7 @@ import type {
   HighlightMemory,
   SocialSignal,
 } from '../types/loveshow';
-import type { ImageGenerationStyle, PhotoPromptBundle, PhotoStylePreset } from '../types';
+import { GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL, type ImageGenerationStyle, type OpenAICompatibleStyleFamily, type PhotoPromptBundle, type PhotoStylePreset } from '../types';
 
 export type LoveShowImageMode = 'solo' | 'couple';
 
@@ -37,11 +37,26 @@ export const LOVE_SHOW_IMAGE_PRESET_IDS: Record<LoveShowImageMode, Record<ImageG
   },
 };
 
+export const LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS: Record<LoveShowImageMode, Record<ImageGenerationStyle, string>> = {
+  solo: {
+    guoman: 'loveshow-gemini-solo-guoman',
+    cg: 'loveshow-gemini-solo-cg',
+    real: 'loveshow-gemini-solo-real',
+  },
+  couple: {
+    guoman: 'loveshow-gemini-couple-guoman',
+    cg: 'loveshow-gemini-couple-cg',
+    real: 'loveshow-gemini-couple-real',
+  },
+};
+
+const LOVE_SHOW_GEMINI_VERTICAL_SIZE = '768x1344';
+
 export const LOVE_SHOW_IMAGE_STYLE_PRESETS: PhotoStylePreset[] = [
   {
     id: LOVE_SHOW_IMAGE_PRESET_IDS.solo.guoman,
     name: '单人 · 国漫风',
-    providerScope: 'openai-compatible',
+    providerScope: 'openai-gpt',
     model: 'gpt-image-2',
     size: '1024x1792',
     positivePrompt: '单人立绘，国漫插画风，氛围感强，五官立体精致、眼睛绝美有神，干净通透上色，柔和光影，竖版手机壁纸尺寸',
@@ -50,7 +65,7 @@ export const LOVE_SHOW_IMAGE_STYLE_PRESETS: PhotoStylePreset[] = [
   {
     id: LOVE_SHOW_IMAGE_PRESET_IDS.solo.cg,
     name: '单人 · CG质感',
-    providerScope: 'openai-compatible',
+    providerScope: 'openai-gpt',
     model: 'gpt-image-2',
     size: '1024x1792',
     positivePrompt: '单人半身 CG，精修游戏立绘质感，光影立体，皮肤与发丝细节精致，电影级氛围打光，高细节渲染，竖版手机壁纸尺寸',
@@ -59,7 +74,7 @@ export const LOVE_SHOW_IMAGE_STYLE_PRESETS: PhotoStylePreset[] = [
   {
     id: LOVE_SHOW_IMAGE_PRESET_IDS.solo.real,
     name: '单人 · 真人风',
-    providerScope: 'openai-compatible',
+    providerScope: 'openai-gpt',
     model: 'gpt-image-2',
     size: '1024x1792',
     positivePrompt: '单人真人感人像写真，像真实相机拍摄，自然肤质与光影，五官立体深邃，柔和景深，电影感色调，竖版手机壁纸尺寸',
@@ -68,7 +83,7 @@ export const LOVE_SHOW_IMAGE_STYLE_PRESETS: PhotoStylePreset[] = [
   {
     id: LOVE_SHOW_IMAGE_PRESET_IDS.couple.guoman,
     name: '双人 · 国漫风',
-    providerScope: 'openai-compatible',
+    providerScope: 'openai-gpt',
     model: 'gpt-image-2',
     size: '1024x1792',
     positivePrompt: '双人合照，近距离同框，画面中有两位清晰主体，像角色亲手拍下的自拍，国漫插画风，氛围感强，五官立体精致，干净通透上色，柔和光影，竖版尺寸',
@@ -77,7 +92,7 @@ export const LOVE_SHOW_IMAGE_STYLE_PRESETS: PhotoStylePreset[] = [
   {
     id: LOVE_SHOW_IMAGE_PRESET_IDS.couple.cg,
     name: '双人 · CG质感',
-    providerScope: 'openai-compatible',
+    providerScope: 'openai-gpt',
     model: 'gpt-image-2',
     size: '1024x1792',
     positivePrompt: '双人合照，近距离同框，两位清晰主体，像角色亲手拍下的合影，精修 CG 质感，电影级光影，皮肤发丝细节精致，氛围感强，竖版尺寸',
@@ -86,26 +101,102 @@ export const LOVE_SHOW_IMAGE_STYLE_PRESETS: PhotoStylePreset[] = [
   {
     id: LOVE_SHOW_IMAGE_PRESET_IDS.couple.real,
     name: '双人 · 真人风',
-    providerScope: 'openai-compatible',
+    providerScope: 'openai-gpt',
     model: 'gpt-image-2',
     size: '1024x1792',
     positivePrompt: '双人同框真人感合照，两位清晰主体，像真实相机拍下的合影，自然肤质与光影，五官立体深邃，柔和景深，电影感色调，竖版尺寸',
     negativePrompt: '二次元，国漫风，动漫插画，Q版，卡通，3D建模感，假脸，塑料皮肤，过度磨皮，网红滤镜，单人照，只有一个人，裁掉其中一人，人物融合，脸部融合，重复人物，额外人物，陌生第三人，距离太远，拼贴，崩坏，多余的肢体，畸形，低清，水印，文字',
   },
+  {
+    id: LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS.solo.guoman,
+    name: 'Gemini 单人 · 国漫风',
+    providerScope: 'openai-gemini',
+    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+    size: LOVE_SHOW_GEMINI_VERTICAL_SIZE,
+    responseFormat: 'b64_json',
+    n: 1,
+    positivePrompt: '单人立绘，国漫插画风，氛围感强，五官立体精致、眼睛绝美有神，干净通透上色，柔和光影，竖版手机壁纸构图，保持主体身份一致',
+    negativePrompt: '写实，真人感，3D建模感，Q版，卡通，崩坏五官，多人，多余的手，多余的肢体，畸形，低清，水印，文字',
+  },
+  {
+    id: LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS.solo.cg,
+    name: 'Gemini 单人 · CG质感',
+    providerScope: 'openai-gemini',
+    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+    size: LOVE_SHOW_GEMINI_VERTICAL_SIZE,
+    responseFormat: 'b64_json',
+    n: 1,
+    positivePrompt: '单人半身 CG，精修游戏立绘质感，光影立体，皮肤与发丝细节精致，电影级氛围打光，竖版手机壁纸构图，保持主体身份一致',
+    negativePrompt: '粗糙线稿，廉价感，塑料感，崩坏五官，多人，多余的手，多余的肢体，畸形，低清，水印，文字',
+  },
+  {
+    id: LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS.solo.real,
+    name: 'Gemini 单人 · 真人风',
+    providerScope: 'openai-gemini',
+    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+    size: LOVE_SHOW_GEMINI_VERTICAL_SIZE,
+    responseFormat: 'b64_json',
+    n: 1,
+    positivePrompt: '单人真人感人像写真，像真实相机拍摄，自然肤质与光影，五官立体深邃，柔和景深，电影感色调，竖版手机壁纸构图，保持主体身份一致',
+    negativePrompt: '二次元，国漫风，动漫插画，Q版，卡通，3D建模感，假脸，塑料皮肤，过度磨皮，网红滤镜，崩坏，多人，多余的肢体，畸形，低清，水印，文字',
+  },
+  {
+    id: LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS.couple.guoman,
+    name: 'Gemini 双人 · 国漫风',
+    providerScope: 'openai-gemini',
+    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+    size: LOVE_SHOW_GEMINI_VERTICAL_SIZE,
+    responseFormat: 'b64_json',
+    n: 1,
+    positivePrompt: '双人合照，近距离同框，画面中有两位清晰主体，像角色亲手拍下的自拍，国漫插画风，五官立体精致，干净通透上色，柔和光影，竖版构图，保持两位主体身份一致',
+    negativePrompt: '单人照，只有一个人，裁掉其中一人，人物融合，脸部融合，重复人物，额外人物，陌生第三人，距离太远，拼贴，写实，真人感，3D建模感，崩坏五官，多余的肢体，畸形，低清，水印，文字',
+  },
+  {
+    id: LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS.couple.cg,
+    name: 'Gemini 双人 · CG质感',
+    providerScope: 'openai-gemini',
+    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+    size: LOVE_SHOW_GEMINI_VERTICAL_SIZE,
+    responseFormat: 'b64_json',
+    n: 1,
+    positivePrompt: '双人合照，近距离同框，两位清晰主体，像角色亲手拍下的合影，精修 CG 质感，电影级光影，皮肤发丝细节精致，竖版构图，保持两位主体身份一致',
+    negativePrompt: '单人照，只有一个人，裁掉其中一人，人物融合，脸部融合，重复人物，额外人物，陌生第三人，距离太远，拼贴，塑料感，廉价感，崩坏五官，多余的肢体，畸形，低清，水印，文字',
+  },
+  {
+    id: LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS.couple.real,
+    name: 'Gemini 双人 · 真人风',
+    providerScope: 'openai-gemini',
+    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+    size: LOVE_SHOW_GEMINI_VERTICAL_SIZE,
+    responseFormat: 'b64_json',
+    n: 1,
+    positivePrompt: '双人同框真人感合照，两位清晰主体，像真实相机拍下的合影，自然肤质与光影，五官立体深邃，柔和景深，电影感色调，竖版构图，保持两位主体身份一致',
+    negativePrompt: '二次元，国漫风，动漫插画，Q版，卡通，3D建模感，假脸，塑料皮肤，过度磨皮，网红滤镜，单人照，只有一个人，裁掉其中一人，人物融合，脸部融合，重复人物，额外人物，陌生第三人，距离太远，拼贴，崩坏，多余的肢体，畸形，低清，水印，文字',
+  },
 ];
 
-export function getLoveShowImagePresetId(mode: LoveShowImageMode, imageStyle: ImageGenerationStyle): string {
-  return LOVE_SHOW_IMAGE_PRESET_IDS[mode][imageStyle] || LOVE_SHOW_IMAGE_PRESET_IDS[mode].guoman;
+export function getLoveShowImagePresetId(
+  mode: LoveShowImageMode,
+  imageStyle: ImageGenerationStyle,
+  family: OpenAICompatibleStyleFamily = 'gpt',
+): string {
+  const presetIds = family === 'gemini' ? LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS : LOVE_SHOW_IMAGE_PRESET_IDS;
+  return presetIds[mode][imageStyle] || presetIds[mode].guoman;
 }
 
-export function getLoveShowImageStylePreset(mode: LoveShowImageMode, imageStyle: ImageGenerationStyle): PhotoStylePreset {
-  const presetId = getLoveShowImagePresetId(mode, imageStyle);
+export function getLoveShowImageStylePreset(
+  mode: LoveShowImageMode,
+  imageStyle: ImageGenerationStyle,
+  family: OpenAICompatibleStyleFamily = 'gpt',
+): PhotoStylePreset {
+  const presetId = getLoveShowImagePresetId(mode, imageStyle, family);
   return LOVE_SHOW_IMAGE_STYLE_PRESETS.find(preset => preset.id === presetId) || LOVE_SHOW_IMAGE_STYLE_PRESETS[0];
 }
 
 export function isLoveShowImageStylePreset(style: Pick<PhotoStylePreset, 'id'> | null | undefined): boolean {
   const id = style?.id || '';
-  return Object.values(LOVE_SHOW_IMAGE_PRESET_IDS).some(group => Object.values(group).includes(id));
+  return [LOVE_SHOW_IMAGE_PRESET_IDS, LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS]
+    .some(presetIds => Object.values(presetIds).some(group => Object.values(group).includes(id)));
 }
 
 export function buildLoveShowImagePrompt(input: {

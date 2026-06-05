@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MessageItem from '../components/chat/MessageItem';
 import type { StatusCardData } from '../types/statusCard';
+import { AFTERGLOW_CUSTOM_MOTIFS_STORAGE_KEY } from '../utils/afterglowMotifs';
 
 vi.mock('../utils/haptics', () => ({
     haptic: {
@@ -78,6 +79,7 @@ function renderMessageItem(extraProps: Record<string, unknown> = {}) {
 
 beforeEach(() => {
     vi.stubGlobal('Image', AutoLoadImage);
+    localStorage.clear();
 });
 
 afterEach(() => {
@@ -198,6 +200,101 @@ describe('MessageItem status overlay', () => {
         expect(statusShell).toHaveClass('items-center');
         expect(statusShell).toHaveClass('justify-center');
         expect(statusShell).toHaveStyle({ height: 'calc(100vh - 48px)' });
+    });
+
+    it('triggers afterglow generation from the composer and opens the returned card', async () => {
+        const longText = [
+            '━━━━━━━━━━━━━━',
+            '🎭 番外篇 ·【视角重播】',
+            '',
+            '《灯雨》',
+            '山有木兮木有枝 —— 越人歌',
+            '',
+            '第一页的灯慢慢暗下去。',
+            '',
+            '第二页的雨停在玻璃外。',
+            '',
+            '—— 番外小料 ——',
+            '◆〈内心OS他没说出口却真实的想法〉',
+            '他没有把那句话说完。',
+            '━━━━━━━━━━━━━━',
+        ].join('\n\n');
+        const afterglowCard = {
+            cardType: 'freeform',
+            body: longText,
+            meta: {
+                html: '<html><body><div>窗边的灯慢慢暗下去。</div></body></html>',
+                afterglowTags: ['#视角重播', '#番外', '#甜', '#吃醋'],
+                afterglowCover: {
+                    themeSource: '本轮梗',
+                    theme: '吃醋 · 嘴上不认动作出卖了他',
+                    type: '视角重播',
+                    tone: '甜',
+                    snacks: ['内心OS'],
+                    tags: ['#视角重播', '#番外', '#甜', '#吃醋'],
+                },
+            },
+            style: {},
+        } satisfies StatusCardData;
+        const onRequestAfterglow = vi.fn().mockResolvedValue(afterglowCard);
+
+        renderMessageItem({ onRequestAfterglow });
+
+        fireEvent.click(screen.getByRole('button', { name: '生成番外篇' }));
+        expect(screen.getByTestId('afterglow-composer-dialog')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '随机生成' }));
+
+        await waitFor(() => expect(onRequestAfterglow).toHaveBeenCalledTimes(1));
+        expect(onRequestAfterglow).toHaveBeenCalledWith(baseMessage, {});
+        expect(await screen.findByTestId('afterglow-reader-shell')).toBeInTheDocument();
+        expect(screen.getByTestId('afterglow-reader-core-seed')).toHaveTextContent('本轮梗');
+        expect(screen.getByTestId('afterglow-reader-core-seed')).toHaveTextContent('吃醋');
+        expect(screen.getByTestId('afterglow-reader-page')).toHaveTextContent('灯雨');
+        expect(screen.getByTestId('afterglow-reader-counter')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByTestId('afterglow-reader-next'));
+        expect(screen.getByTestId('afterglow-reader-page')).toHaveTextContent('第一页的灯慢慢暗下去');
+        const nextButton = screen.getByTestId('afterglow-reader-next') as HTMLButtonElement;
+        if (!screen.getByTestId('afterglow-reader-page').textContent?.includes('第二页的雨停在玻璃外') && !nextButton.disabled) {
+            fireEvent.click(nextButton);
+        }
+        expect(screen.getByTestId('afterglow-reader-page')).toHaveTextContent('第二页的雨停在玻璃外');
+        expect(screen.getByTestId('afterglow-reader-next')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByLabelText('关闭番外篇'));
+        fireEvent.click(screen.getByRole('button', { name: '生成番外篇' }));
+
+        expect(onRequestAfterglow).toHaveBeenCalledTimes(1);
+        expect(screen.getByTestId('afterglow-composer-dialog')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '打开已有' }));
+        expect(await screen.findByTestId('afterglow-reader-shell')).toBeInTheDocument();
+    });
+
+    it('passes a specified afterglow motif and can save it into the random pool', async () => {
+        const afterglowCard = {
+            cardType: 'freeform',
+            body: '━━━━━━━━━━━━━━\n🎭 番外篇 ·【if线〔番外〕】\n\n《雨误》\n\n雨声停在门外。\n━━━━━━━━━━━━━━',
+            meta: { html: '<html><body><div>雨声停在门外。</div></body></html>' },
+            style: {},
+        } satisfies StatusCardData;
+        const onRequestAfterglow = vi.fn().mockResolvedValue(afterglowCard);
+
+        renderMessageItem({ onRequestAfterglow });
+
+        fireEvent.click(screen.getByRole('button', { name: '生成番外篇' }));
+        fireEvent.change(screen.getByTestId('afterglow-motif-input'), { target: { value: '雨夜误会' } });
+        fireEvent.click(screen.getByLabelText('同时存入随机池'));
+        fireEvent.click(screen.getByRole('button', { name: '按这个梗生成' }));
+
+        await waitFor(() => expect(onRequestAfterglow).toHaveBeenCalledTimes(1));
+        expect(onRequestAfterglow).toHaveBeenCalledWith(baseMessage, {
+            userMotif: '雨夜误会',
+            customMotifs: ['雨夜误会'],
+        });
+
+        const saved = JSON.parse(localStorage.getItem(AFTERGLOW_CUSTOM_MOTIFS_STORAGE_KEY) || '[]');
+        expect(saved).toHaveLength(1);
+        expect(saved[0].text).toBe('雨夜误会');
     });
 
     it('shows expand control only for long classic inner voice text', () => {

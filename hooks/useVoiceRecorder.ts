@@ -8,7 +8,7 @@
  * VAD 作为增强层，如果加载失败不影响核心录音功能。
  */
 
-import { useState,useRef,useCallback } from 'react';
+import { useState,useRef,useCallback,useEffect } from 'react';
 import { loadVadWeb,withMutedVadModelLoadErrors } from '../utils/voiceVadLoader';
 
 export type RecordingState = 'idle' | 'recording' | 'processing';
@@ -67,6 +67,8 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
     const [error, setError] = useState<string | null>(null);
     const [isSpeaking, setIsSpeaking] = useState(false);
 
+    const mountedRef = useRef(true);
+    const resourceGenerationRef = useRef(0);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const chunksRef = useRef<Blob[]>([]);
@@ -87,11 +89,28 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
         && typeof MediaRecorder !== 'undefined';
 
     /** Clean up all resources */
-    const cleanup = useCallback(() => {
+    const cleanup = useCallback((options?: { resetUi?: boolean; resolvePending?: boolean }) => {
+        const resetUi = options?.resetUi ?? true;
+        const resolvePending = options?.resolvePending ?? false;
+        resourceGenerationRef.current += 1;
         // Stop timer
         if (timerRef.current) {
             clearInterval(timerRef.current);
             timerRef.current = null;
+        }
+        // Detach recorder callbacks so late browser events cannot update unmounted UI.
+        if (mediaRecorderRef.current) {
+            const recorder = mediaRecorderRef.current;
+            mediaRecorderRef.current.ondataavailable = null;
+            mediaRecorderRef.current.onstop = null;
+            mediaRecorderRef.current.onerror = null;
+            if (recorder.state !== 'inactive') {
+                try {
+                    recorder.stop();
+                } catch {
+                    // Some browsers throw if stop is already in progress.
+                }
+            }
         }
         // Stop all tracks
         if (streamRef.current) {
@@ -103,7 +122,6 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
             audioCtxRef.current.close().catch(() => { });
             audioCtxRef.current = null;
         }
-        setAnalyserNode(null);
         // Destroy VAD instance
         if (vadRef.current) {
             try {
@@ -113,21 +131,40 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
             }
             vadRef.current = null;
         }
-        setIsSpeaking(false);
         mediaRecorderRef.current = null;
         chunksRef.current = [];
+        if (resolvePending) {
+            resolveRef.current?.(null);
+            resolveRef.current = null;
+        }
+        if (resetUi && mountedRef.current) {
+            setAnalyserNode(null);
+            setIsSpeaking(false);
+        }
     }, []);
 
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+            cleanup({ resetUi: false, resolvePending: true });
+        };
+    }, [cleanup]);
+
     const startRecording = useCallback(async (): Promise<boolean> => {
+        if (!mountedRef.current) return false;
         if (state !== 'idle') return false;
 
         setError(null);
         cancelledRef.current = false;
+        const generation = resourceGenerationRef.current + 1;
+        resourceGenerationRef.current = generation;
 
         // 安全上下文检查 —— 非 HTTPS 非 localhost 时浏览器禁止使用麦克风
         if (!isSupported) {
             const isLocalhost = typeof location !== 'undefined' &&
                 (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+            if (!mountedRef.current) return false;
             if (!isLocalhost && location.protocol !== 'https:') {
                 setError('录音需要 HTTPS 连接，请使用 HTTPS 部署或 localhost 测试');
             } else {
@@ -149,6 +186,10 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
                     sampleRate: 16000, // request 16kHz (browser may ignore)
                 },
             });
+            if (!mountedRef.current || resourceGenerationRef.current !== generation) {
+                stream.getTracks().forEach(t => t.stop());
+                return false;
+            }
             streamRef.current = stream;
 
             // Set up Web Audio API for real-time waveform
@@ -161,6 +202,11 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
                 analyser.maxDecibels = -30; // lower peak threshold so normal talking hits max height
                 const source = ctx.createMediaStreamSource(stream);
                 source.connect(analyser);
+                if (!mountedRef.current || resourceGenerationRef.current !== generation) {
+                    ctx.close().catch(() => { });
+                    stream.getTracks().forEach(t => t.stop());
+                    return false;
+                }
                 audioCtxRef.current = ctx;
                 setAnalyserNode(analyser);
             } catch (audioErr) {
@@ -194,13 +240,21 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
                         redemptionMs: 500,
                         onSpeechStart: () => {
                             console.log('🎤 [VAD] Speech start');
-                            setIsSpeaking(true);
+                            if (mountedRef.current) setIsSpeaking(true);
                         },
                         onSpeechEnd: () => {
                             console.log('🎤 [VAD] Speech end');
-                            setIsSpeaking(false);
+                            if (mountedRef.current) setIsSpeaking(false);
                         },
                     }));
+                    if (!mountedRef.current || resourceGenerationRef.current !== generation || streamRef.current !== stream) {
+                        try {
+                            vad.destroy();
+                        } catch (e) {
+                            console.warn('🎤 [VAD] destroy stale instance error (non-fatal):', e);
+                        }
+                        return;
+                    }
                     vadRef.current = vad;
                     vad.start();
                     console.log('🎤 [VAD] Silero VAD initialized successfully');
@@ -211,6 +265,13 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
 
             const mimeType = getSupportedMime();
             const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+            if (!mountedRef.current || resourceGenerationRef.current !== generation || streamRef.current !== stream) {
+                recorder.ondataavailable = null;
+                recorder.onstop = null;
+                recorder.onerror = null;
+                stream.getTracks().forEach(t => t.stop());
+                return false;
+            }
             mediaRecorderRef.current = recorder;
             chunksRef.current = [];
 
@@ -218,6 +279,7 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
             console.log(`🎤 [Recorder] MediaRecorder actual mimeType: ${recorder.mimeType || '(default)'}`);
 
             recorder.ondataavailable = (e) => {
+                if (!mountedRef.current) return;
                 if (e.data.size > 0) {
                     chunksRef.current.push(e.data);
                 }
@@ -225,9 +287,7 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
 
             recorder.onstop = () => {
                 if (cancelledRef.current) {
-                    cleanup();
-                    resolveRef.current?.(null);
-                    resolveRef.current = null;
+                    cleanup({ resolvePending: true });
                     return;
                 }
 
@@ -239,30 +299,30 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
                 console.log(`🎤 [Recorder] Blob created: ${blob.size} bytes, type=${actualMime}`);
                 const finalDuration = Math.round((Date.now() - startTimeRef.current) / 1000);
                 cleanup();
-                setState('idle');
+                if (mountedRef.current) setState('idle');
                 resolveRef.current?.({ blob, duration: Math.max(1, finalDuration) });
                 resolveRef.current = null;
             };
 
             recorder.onerror = (e: any) => {
                 console.error('🎤 [Recorder] Error:', e);
-                setError('录音出错');
-                cleanup();
-                setState('idle');
-                resolveRef.current?.(null);
-                resolveRef.current = null;
+                if (mountedRef.current) setError('录音出错');
+                cleanup({ resolvePending: true });
+                if (mountedRef.current) setState('idle');
             };
 
             // Start recording
             recorder.start(250); // collect data every 250ms
             startTimeRef.current = Date.now();
-            setState('recording');
-            setDuration(0);
+            if (mountedRef.current) {
+                setState('recording');
+                setDuration(0);
+            }
 
             // Duration timer
             timerRef.current = setInterval(() => {
                 const elapsed = Math.round((Date.now() - startTimeRef.current) / 1000);
-                setDuration(elapsed);
+                if (mountedRef.current) setDuration(elapsed);
 
                 // Auto-stop at max duration
                 if (elapsed >= MAX_DURATION) {
@@ -275,15 +335,17 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
             return true;
         } catch (err: any) {
             console.error('🎤 [Recorder] Failed to start:', err);
-            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-                setError('请允许麦克风权限');
-            } else if (err.name === 'NotFoundError') {
-                setError('未检测到麦克风');
-            } else {
-                setError('无法启动录音');
+            if (mountedRef.current) {
+                if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                    setError('请允许麦克风权限');
+                } else if (err.name === 'NotFoundError') {
+                    setError('未检测到麦克风');
+                } else {
+                    setError('无法启动录音');
+                }
             }
             cleanup();
-            setState('idle');
+            if (mountedRef.current) setState('idle');
             return false;
         }
     }, [state, cleanup]);
@@ -308,13 +370,15 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
         if (mediaRecorderRef.current?.state === 'recording') {
             mediaRecorderRef.current.stop();
         }
-        cleanup();
-        setState('idle');
-        setDuration(0);
+        cleanup({ resolvePending: true });
+        if (mountedRef.current) {
+            setState('idle');
+            setDuration(0);
+        }
     }, [cleanup]);
 
     const setProcessing = useCallback((v: boolean) => {
-        setState(v ? 'processing' : 'idle');
+        if (mountedRef.current) setState(v ? 'processing' : 'idle');
     }, []);
 
     return {

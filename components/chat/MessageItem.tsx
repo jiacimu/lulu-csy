@@ -1,9 +1,9 @@
 
 
 
-import React,{ useEffect,useRef,useState } from 'react';
+import React,{ useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState } from 'react';
 import ReactDOM from 'react-dom';
-import { ArrowsOutSimple, DownloadSimple, DeviceMobileCamera, X } from '@phosphor-icons/react';
+import { ArrowsOutSimple, DownloadSimple, DeviceMobileCamera, Sparkle, X } from '@phosphor-icons/react';
 import { Message,ChatTheme } from '../../types';
 import { StatusCardData } from '../../types/statusCard';
 import { haptic } from '../../utils/haptics';
@@ -12,6 +12,15 @@ import DefaultTransferCard from './plugins/DefaultTransferCard';
 import { stripJunk } from '../../utils/markdownLite';
 import { parseBilingual } from '../../utils/chatParser';
 import { getImageMessageDisplayUrl,resolveOriginalImageUrl } from '../../utils/generatedImageStorage';
+import {
+    deleteAfterglowCustomMotif,
+    loadAfterglowCustomMotifs,
+    parseAfterglowMotifInput,
+    saveAfterglowCustomMotifsFromText,
+    sanitizeAfterglowMotif,
+    type AfterglowCustomMotif,
+    type AfterglowGenerationOptions,
+} from '../../utils/afterglowMotifs';
 import XhsCard from './cards/XhsCard';
 import SocialCard from './cards/SocialCard';
 import SystemNoticeCard from './cards/SystemNoticeCard';
@@ -38,6 +47,473 @@ type ImagePreviewState = {
     alt: string;
     summary?: string;
     isLoadingOriginal?: boolean;
+};
+
+type AfterglowAtom = {
+    t: string;
+    np: boolean;
+    first?: boolean;
+    kind?: 'paragraph' | 'heading' | 'snippet' | 'tail';
+};
+
+type AfterglowCoverMeta = {
+    theme?: string;
+    themeSource?: string;
+    type?: string;
+    tone?: string;
+    snacks?: string[];
+};
+
+const escapeAfterglowHtml = (value: string): string =>
+    (value || '').replace(/[&<>]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[char] || char));
+
+function splitAfterglowSentences(paragraph: string): string[] {
+    const matcher = /[^。！？…]*[。！？…]+[”’"')）】\]]*/g;
+    const sentences: string[] = [];
+    let match: RegExpExecArray | null;
+    let lastIndex = 0;
+
+    while ((match = matcher.exec(paragraph)) !== null) {
+        sentences.push(match[0]);
+        lastIndex = matcher.lastIndex;
+    }
+
+    if (lastIndex < paragraph.length) {
+        const rest = paragraph.slice(lastIndex).trim();
+        if (rest) sentences.push(rest);
+    }
+
+    return sentences.length ? sentences : [paragraph];
+}
+
+function renderAfterglowAtoms(list: AfterglowAtom[]): string {
+    let paragraphs = '';
+    let open = false;
+    const closeParagraph = () => {
+        if (open) {
+            paragraphs += '</p>';
+            open = false;
+        }
+    };
+
+    list.forEach((atom, index) => {
+        if (atom.kind === 'heading') {
+            closeParagraph();
+            paragraphs += `<div class="ag-section-heading">${escapeAfterglowHtml(atom.t)}</div>`;
+            return;
+        }
+
+        if (atom.kind === 'snippet') {
+            closeParagraph();
+            paragraphs += `<div class="ag-snippet-heading">${escapeAfterglowHtml(atom.t)}</div>`;
+            return;
+        }
+
+        if (atom.kind === 'tail') {
+            closeParagraph();
+            paragraphs += `<div class="ag-tail">${escapeAfterglowHtml(atom.t)}</div>`;
+            return;
+        }
+
+        if (index === 0) {
+            paragraphs += `<p class="${atom.np ? (atom.first ? 'ag-p ag-p--first' : 'ag-p') : 'ag-p ag-p--cont'}">`;
+            open = true;
+        } else if (atom.np) {
+            closeParagraph();
+            paragraphs += `<p class="${atom.first ? 'ag-p ag-p--first' : 'ag-p'}">`;
+            open = true;
+        }
+
+        if (atom.first) {
+            const first = atom.t.charAt(0);
+            const rest = atom.t.slice(1);
+            paragraphs += /[\u4e00-\u9fff]/.test(first)
+                ? `<span class="ag-initial">${escapeAfterglowHtml(first)}</span>${escapeAfterglowHtml(rest)}`
+                : escapeAfterglowHtml(atom.t);
+        } else {
+            paragraphs += escapeAfterglowHtml(atom.t);
+        }
+    });
+
+    closeParagraph();
+    const body = paragraphs;
+    return body
+        ? `<div class="ag-body-wrap"><div class="ag-body-rule"><i></i></div><div class="ag-body-copy">${body}</div></div>`
+        : '';
+}
+
+function normalizeAfterglowCoverMeta(value: unknown): AfterglowCoverMeta | null {
+    if (!value || typeof value !== 'object') return null;
+    const meta = value as Record<string, unknown>;
+    const clean = (input: unknown, maxLength = 42): string => {
+        const text = String(input || '').replace(/\s+/g, ' ').trim();
+        return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+    };
+    const snacks = Array.isArray(meta.snacks)
+        ? meta.snacks
+            .map(item => clean(item, 16))
+            .filter((item, index, list) => item && list.indexOf(item) === index)
+            .slice(0, 3)
+        : [];
+    return {
+        theme: clean(meta.theme),
+        themeSource: clean(meta.themeSource, 18),
+        type: clean(meta.type, 18),
+        tone: clean(meta.tone, 18),
+        snacks,
+    };
+}
+
+function renderAfterglowCoverMeta(meta: AfterglowCoverMeta | null): string {
+    if (!meta?.theme) return '';
+    const source = meta.themeSource || '本轮主题';
+
+    return `<div class="ag-seed" data-testid="afterglow-reader-core-seed">` +
+        `<div class="ag-seed-label">${escapeAfterglowHtml(source)}</div>` +
+        `<div class="ag-seed-value">${escapeAfterglowHtml(meta.theme)}</div>` +
+        `</div>`;
+}
+
+function parseAfterglowRaw(rawInput: string, coverMeta: AfterglowCoverMeta | null): { title: string; coverHTML: string; atoms: AfterglowAtom[] } {
+    const raw = String(rawInput || '').replace(/\r/g, '');
+    const lines = raw.split('\n');
+    const findLineIndex = (tester: (line: string) => boolean): number => {
+        for (let index = 0; index < lines.length; index += 1) {
+            const line = lines[index].trim();
+            if (line && tester(line)) return index;
+        }
+        return -1;
+    };
+    const findNextNonEmpty = (from: number): number => {
+        for (let index = from; index < lines.length; index += 1) {
+            if (lines[index].trim()) return index;
+        }
+        return -1;
+    };
+
+    const typeIndex = findLineIndex(line => /^🎭/.test(line));
+    let title = '';
+    let epigraphQuote = '';
+    let epigraphSource = '';
+    let epigraphIndex = -1;
+    const titleIndex = findLineIndex(line => /^《.+?》/.test(line));
+
+    if (titleIndex > -1) {
+        title = (lines[titleIndex].trim().match(/^《\s*(.+?)\s*》/)?.[1] || '').trim();
+        const nextLineIndex = findNextNonEmpty(titleIndex + 1);
+        if (nextLineIndex > -1) {
+            const line = lines[nextLineIndex].trim();
+            if (line.length <= 100 && !/^〔/.test(line) && !/^━+$/.test(line) && !/^【/.test(line)) {
+                epigraphIndex = nextLineIndex;
+                const dividerMatch = line.match(/^(.+?)\s*[—–-]{1,}\s*(.+)$/);
+                if (dividerMatch) {
+                    epigraphQuote = dividerMatch[1].trim();
+                    epigraphSource = dividerMatch[2].trim();
+                } else {
+                    epigraphQuote = line;
+                }
+            }
+        }
+    }
+
+    const lastHeaderIndex = Math.max(typeIndex, titleIndex, epigraphIndex);
+    let body = lastHeaderIndex >= 0 ? lines.slice(lastHeaderIndex + 1).join('\n') : raw;
+    body = body.replace(/^\s+|\s+$/g, '');
+    const bodyLines = body
+        .split(/\n+/)
+        .map(paragraph => paragraph.trim())
+        .filter(paragraph => paragraph);
+
+    const coverHTML =
+        `<div class="ag-cover-wrap"><div class="ag-cover-inner">` +
+        `<div class="ag-orn"><i></i></div>` +
+        (title ? `<h1 class="ag-title">${escapeAfterglowHtml(title)}</h1>` : '') +
+        `<div class="ag-orn ag-orn--sm"><i></i></div>` +
+        (epigraphQuote
+            ? `<div class="ag-ep"><div class="ag-ep-q">${escapeAfterglowHtml(epigraphQuote)}</div>${epigraphSource ? `<div class="ag-ep-s">${escapeAfterglowHtml(epigraphSource)}</div>` : ''}</div>`
+            : '') +
+        renderAfterglowCoverMeta(coverMeta) +
+        `</div></div>`;
+
+    const atoms: AfterglowAtom[] = [];
+    bodyLines.forEach(line => {
+        if (/^🎭/.test(line) || /^━+$/.test(line)) return;
+        const snackDivider = line.match(/^——\s*(番外小料|小料|Side\s*Stories?)\s*——$/i);
+        if (snackDivider) {
+            atoms.push({ t: snackDivider[1], np: true, kind: 'heading' });
+            return;
+        }
+
+        const snippetMatch = line.match(/^◆\s*〈(.+?)〉\s*$/);
+        if (snippetMatch) {
+            atoms.push({ t: snippetMatch[1].trim(), np: true, kind: 'snippet' });
+            return;
+        }
+
+        const mainMatch = line.match(/^【(.+?)】\s*$/);
+        if (mainMatch) {
+            atoms.push({ t: mainMatch[1].trim(), np: true, kind: 'heading' });
+            return;
+        }
+
+        const tailMatch = line.match(/^〔尾声〕\s*(.*)$/);
+        if (tailMatch) {
+            const tailText = tailMatch[1].trim();
+            atoms.push({ t: tailText ? `尾声｜${tailText}` : '尾声', np: true, kind: 'tail' });
+            return;
+        }
+
+        if (/^〔/.test(line)) return;
+
+        splitAfterglowSentences(line).forEach((sentence, index) => {
+            const text = sentence.trim();
+            if (text) atoms.push({ t: text, np: index === 0 });
+        });
+    });
+
+    const firstParagraphAtom = atoms.find(atom => !atom.kind);
+    if (firstParagraphAtom) firstParagraphAtom.first = true;
+    return { title, coverHTML, atoms };
+}
+
+export const AfterglowReaderModal: React.FC<{
+    data: StatusCardData;
+    onClose: () => void;
+    brand?: string;
+}> = ({ data, onClose, brand = '番外篇' }) => {
+    const stageRef = useRef<HTMLDivElement | null>(null);
+    const pageRef = useRef<HTMLDivElement | null>(null);
+    const coverMeta = useMemo(() => normalizeAfterglowCoverMeta(data.meta?.afterglowCover), [data.meta?.afterglowCover]);
+    const { title, coverHTML, atoms } = useMemo(() => parseAfterglowRaw(data.body, coverMeta), [coverMeta, data.body]);
+    const [pages, setPages] = useState<string[]>([coverHTML]);
+    const [pageIndex, setPageIndex] = useState(0);
+    const [direction, setDirection] = useState(1);
+
+    const paginate = useCallback(() => {
+        const page = pageRef.current;
+        const stage = stageRef.current;
+        if (!page || !stage) return;
+
+        const measure = document.createElement('div');
+        measure.className = 'afterglow-reader-page';
+        const measureWidth = page.clientWidth || stage.clientWidth || 320;
+        const measureHeight = page.clientHeight || stage.clientHeight || 420;
+        Object.assign(measure.style, {
+            position: 'absolute',
+            visibility: 'hidden',
+            pointerEvents: 'none',
+            left: '-9999px',
+            top: '0',
+            width: `${measureWidth}px`,
+            height: `${measureHeight}px`,
+            overflow: 'hidden',
+            whiteSpace: 'normal',
+        });
+        stage.appendChild(measure);
+
+        const bodyPages: AfterglowAtom[][] = [];
+        let currentAtoms: AfterglowAtom[] = [];
+
+        atoms.forEach(atom => {
+            currentAtoms.push(atom);
+            measure.innerHTML = renderAfterglowAtoms(currentAtoms);
+            if (measure.scrollHeight > measure.clientHeight + 2 && currentAtoms.length > 1) {
+                currentAtoms.pop();
+                bodyPages.push(currentAtoms.slice());
+                currentAtoms = [atom];
+            }
+        });
+
+        if (currentAtoms.length) bodyPages.push(currentAtoms.slice());
+        stage.removeChild(measure);
+
+        const nextPages = [coverHTML, ...bodyPages.map(renderAfterglowAtoms)];
+        setPages(nextPages);
+        setPageIndex(index => Math.min(index, nextPages.length - 1));
+    }, [atoms, coverHTML]);
+
+    useLayoutEffect(() => {
+        paginate();
+    }, [paginate]);
+
+    useEffect(() => {
+        setPageIndex(0);
+    }, [data.body]);
+
+    useEffect(() => {
+        const handleResize = () => paginate();
+        window.addEventListener('resize', handleResize);
+        if (document.fonts?.ready) {
+            document.fonts.ready.then(() => setTimeout(paginate, 0));
+        }
+        return () => window.removeEventListener('resize', handleResize);
+    }, [paginate]);
+
+    const go = useCallback((delta: number) => {
+        setPageIndex(index => {
+            const nextIndex = Math.min(Math.max(index + delta, 0), pages.length - 1);
+            if (nextIndex !== index) setDirection(nextIndex > index ? 1 : -1);
+            return nextIndex;
+        });
+    }, [pages.length]);
+
+    const jump = useCallback((targetIndex: number) => {
+        setPageIndex(index => {
+            const nextIndex = Math.min(Math.max(targetIndex, 0), pages.length - 1);
+            if (nextIndex !== index) setDirection(nextIndex > index ? 1 : -1);
+            return nextIndex;
+        });
+    }, [pages.length]);
+
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                onClose();
+            } else if (event.key === 'ArrowLeft') {
+                go(-1);
+            } else if (event.key === 'ArrowRight') {
+                go(1);
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [go, onClose]);
+
+    const touchStart = useRef({ x: 0, y: 0 });
+    const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+        touchStart.current = {
+            x: event.touches[0].clientX,
+            y: event.touches[0].clientY,
+        };
+    };
+
+    const handleTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+        const dx = event.changedTouches[0].clientX - touchStart.current.x;
+        const dy = event.changedTouches[0].clientY - touchStart.current.y;
+        if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+            go(dx < 0 ? 1 : -1);
+        }
+    };
+
+    const goPrev = (event?: React.MouseEvent) => {
+        event?.stopPropagation();
+        go(-1);
+    };
+
+    const goNext = (event?: React.MouseEvent) => {
+        event?.stopPropagation();
+        go(1);
+    };
+
+    const canGoPrev = pageIndex > 0;
+    const canGoNext = pageIndex < pages.length - 1;
+
+    return (
+        <div
+            data-testid="afterglow-reader-backdrop"
+            className="afterglow-reader-backdrop"
+            onClick={(event) => {
+                if (event.target === event.currentTarget) onClose();
+            }}
+        >
+            <section
+                data-testid="afterglow-reader-shell"
+                className="afterglow-reader-shell"
+                role="dialog"
+                aria-modal="true"
+                aria-label="番外篇阅读器"
+                onClick={(event) => event.stopPropagation()}
+            >
+                <button
+                    type="button"
+                    data-testid="afterglow-reader-close-button"
+                    className="afterglow-reader-close"
+                    aria-label="关闭番外篇"
+                    title="关闭番外篇"
+                    onClick={onClose}
+                >
+                    ✕
+                </button>
+
+                <div className="ag-head">
+                    <div className="ag-brand">{pageIndex === 0 ? brand : title || brand}</div>
+                </div>
+
+                <div
+                    className="afterglow-reader-stage"
+                    ref={stageRef}
+                    onTouchStart={handleTouchStart}
+                    onTouchEnd={handleTouchEnd}
+                >
+                    <button
+                        type="button"
+                        data-testid="afterglow-reader-left-zone"
+                        className="afterglow-reader-turn-zone afterglow-reader-turn-zone--left"
+                        aria-label="上一页"
+                        disabled={!canGoPrev}
+                        onClick={goPrev}
+                    />
+                    <div
+                        data-testid="afterglow-reader-page"
+                        className="afterglow-reader-page"
+                        ref={pageRef}
+                        key={pageIndex}
+                        data-dir={direction}
+                        dangerouslySetInnerHTML={{ __html: pages[pageIndex] || '' }}
+                    />
+                    <button
+                        type="button"
+                        data-testid="afterglow-reader-right-zone"
+                        className="afterglow-reader-turn-zone afterglow-reader-turn-zone--right"
+                        aria-label="下一页"
+                        disabled={!canGoNext}
+                        onClick={goNext}
+                    />
+                </div>
+
+                <footer className="ag-foot">
+                    <button
+                        type="button"
+                        data-testid="afterglow-reader-prev"
+                        className="ag-chev"
+                        disabled={!canGoPrev}
+                        aria-label="上一页"
+                        onClick={goPrev}
+                    >
+                        ‹
+                    </button>
+                    <div className="ag-ind" data-testid="afterglow-reader-counter">
+                        {pages.length <= 7 ? (
+                            pages.map((_, index) => (
+                                <button
+                                    key={index}
+                                    type="button"
+                                    className={`ag-dot${index === pageIndex ? ' on' : ''}`}
+                                    aria-label={`第 ${index + 1} 页`}
+                                    onClick={() => jump(index)}
+                                />
+                            ))
+                        ) : (
+                            <span className="ag-count">
+                                {pageIndex + 1} / {pages.length}
+                            </span>
+                        )}
+                    </div>
+                    <button
+                        type="button"
+                        data-testid="afterglow-reader-next"
+                        className="ag-chev"
+                        disabled={!canGoNext}
+                        aria-label="下一页"
+                        onClick={goNext}
+                    >
+                        ›
+                    </button>
+                </footer>
+            </section>
+        </div>
+    );
 };
 
 // --- Deduplicated Selection Checkbox ---
@@ -93,6 +569,9 @@ interface MessageItemProps {
     innerVoice?: string;
     statusCardData?: StatusCardData;
     onRetryInnerVoice?: () => void;
+    afterglowCardData?: StatusCardData;
+    isAfterglowLoading?: boolean;
+    onRequestAfterglow?: (message: Message, options?: AfterglowGenerationOptions) => Promise<StatusCardData | null>;
     onOpenStoryPhone?: (message: Message) => void;
     // Thinking chain visibility
     showThinking?: boolean;
@@ -125,6 +604,9 @@ const MessageItem = React.memo(({
     innerVoice,
     statusCardData,
     onRetryInnerVoice,
+    afterglowCardData,
+    isAfterglowLoading,
+    onRequestAfterglow,
     onOpenStoryPhone,
     showThinking,
 }: MessageItemProps) => {
@@ -135,6 +617,12 @@ const MessageItem = React.memo(({
     const startPos = useRef({ x: 0, y: 0 }); // Track touch start position
     const [showInnerVoice, setShowInnerVoice] = useState(false);
     const [isClassicInnerVoiceExpanded, setIsClassicInnerVoiceExpanded] = useState(false);
+    const [showAfterglow, setShowAfterglow] = useState(false);
+    const [localAfterglowCard, setLocalAfterglowCard] = useState<StatusCardData | null>(null);
+    const [showAfterglowComposer, setShowAfterglowComposer] = useState(false);
+    const [afterglowMotifDraft, setAfterglowMotifDraft] = useState('');
+    const [saveMotifToPool, setSaveMotifToPool] = useState(false);
+    const [customAfterglowMotifs, setCustomAfterglowMotifs] = useState<AfterglowCustomMotif[]>([]);
     const [imagePreview, setImagePreview] = useState<ImagePreviewState | null>(null);
     const imagePreviewRequestRef = useRef(0);
 
@@ -230,11 +718,81 @@ const MessageItem = React.memo(({
     const trimmedInnerVoice = innerVoice?.trim() || '';
     const hasClassicInnerVoice = trimmedInnerVoice.length > 0;
     const hasAnyVoice = hasClassicInnerVoice || !!statusCardData;
+    const visibleAfterglowCard = localAfterglowCard || afterglowCardData || null;
     const showClassicInnerVoiceToggle = !statusCardData && trimmedInnerVoice.length > CLASSIC_INNER_VOICE_PREVIEW_THRESHOLD;
+    const hasAfterglowMotifDraft = sanitizeAfterglowMotif(afterglowMotifDraft).length > 0;
+    const hasMotifsToAdd = parseAfterglowMotifInput(afterglowMotifDraft).length > 0;
 
     const handleAvatarClick = () => {
         if (!hasAnyVoice || selectionMode) return;
         setShowInnerVoice(prev => !prev);
+    };
+
+    const openAfterglowComposer = (event: React.MouseEvent) => {
+        event.stopPropagation();
+        event.preventDefault();
+        if (isAfterglowLoading || selectionMode) return;
+
+        if (!onRequestAfterglow) {
+            if (visibleAfterglowCard) setShowAfterglow(true);
+            return;
+        }
+
+        setCustomAfterglowMotifs(loadAfterglowCustomMotifs());
+        setShowAfterglowComposer(true);
+    };
+
+    const requestAfterglow = async (options?: AfterglowGenerationOptions) => {
+        if (!onRequestAfterglow || isAfterglowLoading || selectionMode) return;
+
+        try {
+            setShowAfterglowComposer(false);
+            setShowAfterglow(false);
+            const card = await onRequestAfterglow(m, options);
+            if (card) {
+                setLocalAfterglowCard(card);
+                setShowAfterglow(true);
+            }
+        } catch (error) {
+            console.error('[Afterglow] request failed:', error);
+        }
+    };
+
+    const handleAddMotifsToPool = () => {
+        if (parseAfterglowMotifInput(afterglowMotifDraft).length === 0) return;
+        const next = saveAfterglowCustomMotifsFromText(afterglowMotifDraft);
+        setCustomAfterglowMotifs(next);
+        setSaveMotifToPool(false);
+    };
+
+    const handleDeleteCustomMotif = (id: string) => {
+        setCustomAfterglowMotifs(deleteAfterglowCustomMotif(id));
+    };
+
+    const handleGenerateRandomAfterglow = () => {
+        const customMotifs = customAfterglowMotifs.map(motif => motif.text);
+        requestAfterglow(customMotifs.length > 0 ? { customMotifs } : {});
+    };
+
+    const handleGenerateWithMotif = () => {
+        const userMotif = sanitizeAfterglowMotif(afterglowMotifDraft);
+        if (!userMotif) {
+            handleGenerateRandomAfterglow();
+            return;
+        }
+
+        const nextMotifs = saveMotifToPool
+            ? saveAfterglowCustomMotifsFromText(afterglowMotifDraft)
+            : customAfterglowMotifs;
+        if (saveMotifToPool) {
+            setCustomAfterglowMotifs(nextMotifs);
+            setSaveMotifToPool(false);
+        }
+
+        requestAfterglow({
+            userMotif,
+            customMotifs: nextMotifs.map(motif => motif.text),
+        });
     };
 
     const closeImagePreview = () => {
@@ -292,41 +850,63 @@ const MessageItem = React.memo(({
                     }}
                 />
             )}
-            {/* Indicator when inner voice / creative card is available */}
-            {isCharAvatar && hasAnyVoice && !showInnerVoice && (
-                <div className="absolute -top-1 -right-1 w-3.5 h-3.5 flex items-center justify-center animate-pulse" style={{ filter: statusCardData ? 'drop-shadow(0 1px 2px rgba(100,60,180,0.4))' : 'drop-shadow(0 1px 2px rgba(180,60,60,0.3))' }}>
-                    {statusCardData
-                        ? <span style={{ fontSize: '10px' }}>🎴</span>
-                        : <svg viewBox="0 0 24 24" fill="#c44d4d" className="w-3 h-3"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg>
-                    }
-                </div>
-            )}
-            {isCharAvatar && onOpenStoryPhone && !selectionMode && (
-                <button
-                    type="button"
-                    className="absolute -bottom-1 -right-1 z-20 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-red-500 text-white shadow-sm active:scale-90"
-                    aria-label={`查看${charName}的手机`}
-                    title={`查看${charName}的手机`}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenStoryPhone(m);
-                    }}
-                >
-                    <DeviceMobileCamera className="h-2.5 w-2.5" weight="bold" />
-                </button>
-            )}
-            {/* Retry indicator when inner voice failed/missing */}
-            {isCharAvatar && !hasAnyVoice && onRetryInnerVoice && !showInnerVoice && (
-                <div
-                    className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center rounded-full bg-black/60 backdrop-blur-sm cursor-pointer active:scale-90 transition-transform"
-                    style={{ border: '1px solid rgba(212,165,71,0.3)' }}
-                    onClick={(e) => { e.stopPropagation(); onRetryInnerVoice(); }}
-                    title="重试生成心声"
-                >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#d4a547" strokeWidth="2.5" className="w-2.5 h-2.5">
-                        <path d="M1 4v6h6" strokeLinecap="round" strokeLinejoin="round" />
-                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
+            {isCharAvatar && !showInnerVoice && (hasAnyVoice || onRequestAfterglow || onOpenStoryPhone || (!hasAnyVoice && onRetryInnerVoice)) && (
+                <div className="absolute -top-1 -right-1 z-20 flex items-center gap-0.5">
+                    {onOpenStoryPhone ? (
+                        <button
+                            type="button"
+                            className="flex h-4 w-4 items-center justify-center bg-transparent p-0 text-red-500 drop-shadow-[0_1px_1px_rgba(255,255,255,0.85)] transition-transform active:scale-90"
+                            aria-label={`查看${charName}的手机`}
+                            title={`查看${charName}的手机`}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenStoryPhone(m);
+                            }}
+                        >
+                            <DeviceMobileCamera className="h-2.5 w-2.5" weight="bold" />
+                        </button>
+                    ) : onRequestAfterglow ? (
+                        <button
+                            type="button"
+                            className="flex h-4 w-4 items-center justify-center bg-transparent p-0 text-amber-300 drop-shadow-[0_1px_1px_rgba(0,0,0,0.55)] transition-transform active:scale-90 disabled:cursor-wait disabled:opacity-80"
+                            aria-label="生成番外篇"
+                            title="生成番外篇"
+                            disabled={isAfterglowLoading}
+                            onClick={openAfterglowComposer}
+                        >
+                            <Sparkle className={`h-2.5 w-2.5 ${isAfterglowLoading ? 'animate-spin' : ''}`} weight="bold" />
+                        </button>
+                    ) : hasAnyVoice ? (
+                        <button
+                            type="button"
+                            className="flex h-4 w-4 items-center justify-center bg-transparent p-0 transition-transform active:scale-90"
+                            style={{ filter: statusCardData ? 'drop-shadow(0 1px 2px rgba(100,60,180,0.4))' : 'drop-shadow(0 1px 2px rgba(180,60,60,0.3))' }}
+                            aria-label={statusCardData ? '打开状态卡片' : '打开心声卡片'}
+                            title={statusCardData ? '打开状态卡片' : '打开心声卡片'}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowInnerVoice(true);
+                            }}
+                        >
+                            {statusCardData
+                                ? <span style={{ fontSize: '10px', lineHeight: 1 }}>🎴</span>
+                                : <svg viewBox="0 0 24 24" fill="#c44d4d" className="h-2.5 w-2.5"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg>
+                            }
+                        </button>
+                    ) : !hasAnyVoice && onRetryInnerVoice ? (
+                        <button
+                            type="button"
+                            className="flex h-4 w-4 items-center justify-center bg-transparent p-0 drop-shadow-[0_1px_1px_rgba(0,0,0,0.55)] transition-transform active:scale-90"
+                            onClick={(e) => { e.stopPropagation(); onRetryInnerVoice(); }}
+                            title="重试生成心声"
+                            aria-label="重试生成心声"
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="#d4a547" strokeWidth="2.5" className="h-2.5 w-2.5">
+                                <path d="M1 4v6h6" strokeLinecap="round" strokeLinejoin="round" />
+                                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                        </button>
+                    ) : null}
                 </div>
             )}
         </div>
@@ -649,6 +1229,135 @@ const MessageItem = React.memo(({
                             >
                                 <div className="text-[10px] text-white/90 font-serif tracking-widest px-3 py-1 rounded-full border border-white/20 bg-black/20 backdrop-blur-sm">
                                     TAP ANYWHERE TO CLOSE
+                                </div>
+                            </div>
+                        </div>,
+                        document.body
+                    )}
+                    {!isUser && showAfterglow && visibleAfterglowCard && ReactDOM.createPortal(
+                        <AfterglowReaderModal
+                            data={visibleAfterglowCard}
+                            onClose={() => setShowAfterglow(false)}
+                        />,
+                        document.body
+                    )}
+                    {!isUser && showAfterglowComposer && ReactDOM.createPortal(
+                        <div
+                            data-testid="afterglow-composer-backdrop"
+                            className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/35 px-3 pb-4 pt-12 backdrop-blur-sm sm:items-center sm:p-6"
+                            onClick={() => setShowAfterglowComposer(false)}
+                        >
+                            <div
+                                data-testid="afterglow-composer-dialog"
+                                role="dialog"
+                                aria-modal="true"
+                                aria-label="番外篇命题"
+                                className="w-full max-w-md overflow-hidden rounded-2xl border border-white/70 bg-[#fffaf2] shadow-2xl"
+                                onClick={(event) => event.stopPropagation()}
+                            >
+                                <div className="flex items-center justify-between border-b border-[#eadcc8] px-4 py-3">
+                                    <div>
+                                        <div className="text-[13px] font-bold tracking-[0.18em] text-[#7a4b22]">番外篇命题</div>
+                                        <div className="mt-0.5 text-[11px] text-[#a2774d]">番外篇</div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="flex h-8 w-8 items-center justify-center rounded-full text-[#8a6849] transition-colors hover:bg-[#eadcc8]/70"
+                                        aria-label="关闭番外篇命题"
+                                        onClick={() => setShowAfterglowComposer(false)}
+                                    >
+                                        <X className="h-4 w-4" />
+                                    </button>
+                                </div>
+
+                                <div className="space-y-3 px-4 py-4">
+                                    <textarea
+                                        data-testid="afterglow-motif-input"
+                                        value={afterglowMotifDraft}
+                                        onChange={(event) => setAfterglowMotifDraft(event.target.value)}
+                                        rows={4}
+                                        maxLength={600}
+                                        className="w-full resize-none rounded-xl border border-[#e3d1bb] bg-white/80 p-3 text-[13px] leading-6 text-[#4b3324] outline-none transition focus:border-[#b77b45] focus:ring-2 focus:ring-[#f0d2ad]"
+                                        placeholder="例如：雨夜误会、他听见你梦话、一封没寄出的信"
+                                    />
+
+                                    <label className="flex items-center gap-2 text-[12px] font-medium text-[#7c5a3d]">
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 accent-[#9b5f2f]"
+                                            checked={saveMotifToPool}
+                                            onChange={(event) => setSaveMotifToPool(event.target.checked)}
+                                        />
+                                        同时存入随机池
+                                    </label>
+
+                                    <div className={`grid gap-2 ${visibleAfterglowCard ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                                        {visibleAfterglowCard && (
+                                            <button
+                                                type="button"
+                                                className="flex min-h-10 items-center justify-center rounded-xl border border-[#dbc4a9] bg-white px-2 text-[12px] font-bold text-[#81552f] transition hover:bg-[#fff4e4]"
+                                                onClick={() => {
+                                                    setShowAfterglowComposer(false);
+                                                    setShowAfterglow(true);
+                                                }}
+                                            >
+                                                打开已有
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            className="flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-[#dbc4a9] bg-white px-2 text-[12px] font-bold text-[#81552f] transition hover:bg-[#fff4e4] disabled:cursor-wait disabled:opacity-60"
+                                            disabled={isAfterglowLoading}
+                                            onClick={handleGenerateRandomAfterglow}
+                                        >
+                                            <Sparkle className="h-3.5 w-3.5" weight="bold" />
+                                            随机生成
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="min-h-10 rounded-xl bg-[#2d2118] px-2 text-[12px] font-bold text-[#ffe4bb] transition hover:bg-[#3b2b1f] disabled:cursor-not-allowed disabled:opacity-45"
+                                            disabled={isAfterglowLoading || !hasAfterglowMotifDraft}
+                                            onClick={handleGenerateWithMotif}
+                                        >
+                                            按这个梗生成
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="min-h-10 rounded-xl border border-dashed border-[#c79f75] bg-[#fff7ea] px-2 text-[12px] font-bold text-[#8f5b2e] transition hover:bg-[#ffedcf] disabled:cursor-not-allowed disabled:opacity-45"
+                                            disabled={!hasMotifsToAdd}
+                                            onClick={handleAddMotifsToPool}
+                                        >
+                                            加入随机池
+                                        </button>
+                                    </div>
+
+                                    <div className="rounded-xl border border-[#eadcc8] bg-white/55 p-3">
+                                        <div className="mb-2 flex items-center justify-between text-[11px] font-bold tracking-[0.12em] text-[#9c7148]">
+                                            <span>随机池</span>
+                                            <span>{customAfterglowMotifs.length}</span>
+                                        </div>
+                                        {customAfterglowMotifs.length > 0 ? (
+                                            <div className="max-h-36 space-y-1.5 overflow-y-auto pr-1">
+                                                {customAfterglowMotifs.map(motif => (
+                                                    <div key={motif.id} className="flex items-start gap-2 rounded-lg bg-[#fffaf2] px-2 py-1.5 text-[12px] text-[#5a3a24]">
+                                                        <span className="min-w-0 flex-1 break-words leading-5">{motif.text}</span>
+                                                        <button
+                                                            type="button"
+                                                            className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#a58062] hover:bg-[#eadcc8] hover:text-[#6a3f1f]"
+                                                            aria-label={`删除梗：${motif.text}`}
+                                                            onClick={() => handleDeleteCustomMotif(motif.id)}
+                                                        >
+                                                            <X className="h-3 w-3" />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="rounded-lg border border-dashed border-[#e4cfb7] px-3 py-4 text-center text-[12px] text-[#b08b67]">
+                                                暂无自定义梗
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </div>,
@@ -1081,6 +1790,9 @@ const MessageItem = React.memo(({
         prev.innerVoice === next.innerVoice &&
         prev.statusCardData === next.statusCardData &&
         prev.onRetryInnerVoice === next.onRetryInnerVoice &&
+        prev.afterglowCardData === next.afterglowCardData &&
+        prev.isAfterglowLoading === next.isAfterglowLoading &&
+        prev.onRequestAfterglow === next.onRequestAfterglow &&
         prev.onOpenStoryPhone === next.onOpenStoryPhone &&
         prev.showThinking === next.showThinking &&
         prev.msg.metadata?.thinking === next.msg.metadata?.thinking &&

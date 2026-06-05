@@ -8,7 +8,7 @@
  *   - 与主聊天逻辑解耦，仅通过回调暴露状态
  */
 
-import { useState,useRef,useCallback } from 'react';
+import { useState,useRef,useCallback,useEffect } from 'react';
 import { MinimaxTts,TtsSynthesisStatus } from '../utils/minimaxTts';
 import { TtsConfig } from '../types/tts';
 import { DB } from '../utils/db';
@@ -52,10 +52,12 @@ export function useVoiceTts() {
     const [playingMsgId, setPlayingMsgId] = useState<number | null>(null);
     const playingMsgIdRef = useRef<number | null>(null);
     const [loadingMsgIds, setLoadingMsgIds] = useState<Set<number>>(new Set());
+    const mountedRef = useRef(true);
 
     // AudioElement ref — only one at a time
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const currentUrlRef = useRef<string | null>(null);
+    const playVersionRef = useRef(0);
 
     // Per-msgId AbortController map — prevents concurrent auto-TTS calls from cancelling each other
     const abortMapRef = useRef<Map<number, AbortController>>(new Map());
@@ -67,9 +69,12 @@ export function useVoiceTts() {
     const synthQueueRef = useRef<Promise<void>>(Promise.resolve());
 
     // ── Stop any currently playing audio ──────────────────────────────
-    const stopVoice = useCallback(() => {
+    const cleanupPlayback = useCallback((updateState: boolean) => {
+        playVersionRef.current += 1;
         if (audioRef.current) {
             audioRef.current.pause();
+            audioRef.current.onended = null;
+            audioRef.current.onerror = null;
             audioRef.current.currentTime = 0;
             audioRef.current = null;
         }
@@ -78,8 +83,22 @@ export function useVoiceTts() {
             currentUrlRef.current = null;
         }
         playingMsgIdRef.current = null;
-        setPlayingMsgId(null);
+        if (updateState && mountedRef.current) setPlayingMsgId(null);
     }, []);
+
+    const stopVoice = useCallback(() => {
+        cleanupPlayback(true);
+    }, [cleanupPlayback]);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+            cleanupPlayback(false);
+            abortMapRef.current.forEach(controller => controller.abort());
+            abortMapRef.current.clear();
+        };
+    }, [cleanupPlayback]);
 
     // ── Play audio for a given message ID (from IDB) ─────────────────
     const playVoice = useCallback(async (msgId: number) => {
@@ -90,8 +109,10 @@ export function useVoiceTts() {
         }
         // Stop any previous playback
         stopVoice();
+        const version = playVersionRef.current;
 
         const blob = await DB.getVoiceAudio(msgId);
+        if (!mountedRef.current || version !== playVersionRef.current) return;
         if (!blob) {
             console.warn('[VoiceTts] No audio blob found for msgId:', msgId);
             return;
@@ -103,7 +124,7 @@ export function useVoiceTts() {
         const audio = new Audio(url);
         audioRef.current = audio;
         playingMsgIdRef.current = msgId;
-        setPlayingMsgId(msgId);
+        if (mountedRef.current) setPlayingMsgId(msgId);
 
         audio.onended = () => {
             stopVoice();
@@ -130,11 +151,13 @@ export function useVoiceTts() {
         trace?: ApiRequestTraceMeta,
     ): Promise<{ duration: number } | null> => {
         // Mark as loading immediately (before queuing) so the UI spinner appears at once
-        setLoadingMsgIds(prev => {
-            const next = new Set(prev);
-            next.add(msgId);
-            return next;
-        });
+        if (mountedRef.current) {
+            setLoadingMsgIds(prev => {
+                const next = new Set(prev);
+                next.add(msgId);
+                return next;
+            });
+        }
 
         // Cancel any previous in-progress synthesis for THIS msgId (e.g. retry scenario)
         abortMapRef.current.get(msgId)?.abort();
@@ -144,10 +167,9 @@ export function useVoiceTts() {
         // Chain onto the serial queue — ensures only ONE MiniMax request is active at a time.
         // Each job waits for the previous one to settle (resolve or reject) before starting.
         const job = synthQueueRef.current.then(async () => {
-            // If aborted while waiting in queue (e.g. user navigated away), skip gracefully
-            if (controller.signal.aborted) return null;
-
             try {
+                // If aborted while waiting in queue (e.g. user navigated away), skip gracefully
+                if (controller.signal.aborted) return null;
                 const result = await MinimaxTts.synthesizeSync(text, ttsConfig, onStatus, controller.signal, {
                     ...trace,
                     feature: 'tts',
@@ -171,11 +193,13 @@ export function useVoiceTts() {
                 throw friendlyError;
             } finally {
                 abortMapRef.current.delete(msgId);
-                setLoadingMsgIds(prev => {
-                    const next = new Set(prev);
-                    next.delete(msgId);
-                    return next;
-                });
+                if (mountedRef.current) {
+                    setLoadingMsgIds(prev => {
+                        const next = new Set(prev);
+                        next.delete(msgId);
+                        return next;
+                    });
+                }
             }
         });
 

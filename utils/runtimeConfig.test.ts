@@ -7,9 +7,13 @@ import {
     EMBEDDING_MODEL_KEY,
     EMBEDDING_PROVIDER_KEY,
     DEFAULT_CHAT_TEMPERATURE,
+    GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS,
+    GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     LEGACY_SUB_API_BASE_URL_KEY,
     LEGACY_SUB_API_KEY,
     LEGACY_SUB_API_MODEL_KEY,
+    PHOTO_STYLE_PRESETS_KEY,
+    PHOTO_STYLE_PROVIDER_SCOPES,
     REALTIME_CONFIG_KEY,
     SECONDARY_API_CONFIG_KEY,
     SECONDARY_API_POOL_CURSOR_KEY,
@@ -18,6 +22,7 @@ import {
     STT_CONFIG_KEY,
     TTS_CONFIG_KEY,
     getEmbeddingConfig,
+    getPhotoStylePresets,
     getRealtimeConfig,
     getSecondaryApiConfig,
     getSecondaryApiPool,
@@ -70,6 +75,63 @@ describe('runtimeConfig', () => {
         expect(normalizeChatTemperature('1.234')).toBe(1.23);
         expect(normalizeChatTemperature('-1')).toBe(0);
         expect(normalizeChatTemperature(9)).toBe(2);
+    });
+
+    it('exposes split GPT and Gemini photo style scopes', () => {
+        expect(PHOTO_STYLE_PROVIDER_SCOPES).toEqual(['all', 'novelai', 'openai-gpt', 'openai-gemini']);
+    });
+
+    it('migrates built-in GPT and Gemini photo style presets into saved style lists', () => {
+        localStorage.setItem(PHOTO_STYLE_PRESETS_KEY, JSON.stringify([
+            {
+                id: 'custom-style',
+                name: 'Custom Style',
+                providerScope: 'openai-compatible',
+                positivePrompt: 'soft light',
+                negativePrompt: '',
+            },
+        ]));
+
+        const presets = getPhotoStylePresets();
+        const ids = presets.map(preset => preset.id);
+
+        expect(presets.find(preset => preset.id === 'custom-style')?.providerScope).toBe('openai-gpt');
+        expect(ids).toContain('loveshow-solo-guoman');
+        expect(ids).toContain('loveshow-gemini-solo-guoman');
+        expect(ids).toContain('gemini-nano-banana-natural-snapshot');
+    });
+
+    it('uses the latest Gemini default model for compatible image defaults', () => {
+        expect(GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL).toBe('gemini-3.1-flash-image-preview');
+        expect(GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS.model).toBe('gemini-3.1-flash-image-preview');
+    });
+
+    it('migrates only built-in Gemini style presets from the old Gemini image model', () => {
+        localStorage.setItem(PHOTO_STYLE_PRESETS_KEY, JSON.stringify([
+            {
+                id: 'gemini-nano-banana-natural-snapshot',
+                name: 'Gemini / Nano Banana 自然随拍',
+                providerScope: 'openai-gemini',
+                model: 'gemini-2.5-flash-image',
+                positivePrompt: 'natural snapshot',
+                negativePrompt: '',
+            },
+            {
+                id: 'custom-gemini-style',
+                name: 'Custom Gemini Style',
+                providerScope: 'openai-gemini',
+                model: 'gemini-2.5-flash-image',
+                positivePrompt: 'custom snapshot',
+                negativePrompt: '',
+            },
+        ]));
+
+        const presets = getPhotoStylePresets();
+
+        expect(presets.find(preset => preset.id === 'gemini-nano-banana-natural-snapshot')?.model)
+            .toBe(GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL);
+        expect(presets.find(preset => preset.id === 'custom-gemini-style')?.model)
+            .toBe('gemini-2.5-flash-image');
     });
 
     it('writes the secondary API config to both the structured key and legacy keys', () => {

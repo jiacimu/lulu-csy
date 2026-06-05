@@ -7,6 +7,7 @@
  *   3. custom   — 用户自定义模板
  *   4. freeform — 自由 HTML 卡片
  *   5. story_phone — 剧情查手机入口
+ *   6. afterglow — 余韵长文入口
  */
 
 /** AI 输出的统一卡片数据结构 */
@@ -94,7 +95,7 @@ export interface CustomStatusTemplate {
 }
 
 /** 状态栏模式类型 */
-export type StatusBarMode = 'off' | 'classic' | 'creative' | 'custom' | 'freeform' | 'story_phone';
+export type StatusBarMode = 'off' | 'classic' | 'creative' | 'custom' | 'freeform' | 'story_phone' | 'afterglow';
 
 /** 可用的骨架类型 ID 列表 */
 export const SKELETON_TYPES = [

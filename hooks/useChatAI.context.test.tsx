@@ -271,6 +271,62 @@ describe('useChatAI context loading', () => {
         ]);
     });
 
+    it('normalizes leaked reply context into a saved quote reply', async () => {
+        const quotedUserMessage = makeMessage(7, '你刚刚叫我什么？');
+        mockedDB.getRecentMessagesByCharId.mockResolvedValueOnce([quotedUserMessage]);
+        mockedSafeFetchJson.mockResolvedValueOnce({
+            choices: [{
+                message: {
+                    content: '引用回复上下文：这条消息正在回复Tester的消息「你刚刚叫我什么？」。本条消息正文：我的错，一时嘴快。',
+                },
+            }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+        } as any);
+
+        const char = {
+            id: 'char-1',
+            name: 'Sully',
+            avatar: '',
+            description: '',
+            systemPrompt: '',
+            memories: [],
+            contextLimit: 777,
+            statusBarMode: 'off',
+        } as CharacterProfile;
+
+        const { result } = renderHook(() => useChatAI({
+            char,
+            userProfile: { name: 'Tester', avatar: '' } as any,
+            apiConfig: {
+                baseUrl: 'https://example.test',
+                apiKey: 'sk-test',
+                model: 'test-model',
+                disablePrefill: true,
+            },
+            groups: [],
+            emojis: [],
+            categories: [],
+            addToast: vi.fn(),
+            setMessages: vi.fn(),
+        }));
+
+        await act(async () => {
+            await result.current.triggerAI([quotedUserMessage]);
+        });
+
+        expect(mockedDB.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
+            charId: 'char-1',
+            role: 'assistant',
+            type: 'text',
+            content: '我的错，一时嘴快。',
+            replyTo: {
+                id: 7,
+                content: '你刚刚叫我什么？',
+                name: 'Tester',
+            },
+        }));
+    });
+
     it('passes the previous assistant thinking chain to pre-reply state sensing', async () => {
         mockedSelectSecondaryApiConfig.mockReturnValue({
             baseUrl: 'https://secondary.example.test',

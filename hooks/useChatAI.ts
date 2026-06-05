@@ -8,7 +8,7 @@ import { safeFetchJson,safeResponseJson } from '../utils/safeApi';
 import { haptic,playThemeNotification } from '../utils/haptics';
 import { THEME_PLUGINS } from '../components/chat/ThemeRegistry';
 import { VectorMemoryExtractor } from '../utils/vectorMemoryExtractor';
-import { MindSnapshotExtractor,type SecondaryFullContextOptions } from '../utils/mindSnapshotExtractor';
+import { MindSnapshotExtractor,type AfterglowGenerationOptions,type SecondaryFullContextOptions } from '../utils/mindSnapshotExtractor';
 import { loadCharacterGoals, formatGoalListStr } from '../utils/goalService';
 import { EventExtractor } from '../utils/eventExtractor';
 import { extractThinking, safeThinkingFallbackReply } from '../utils/thinkingExtractor';
@@ -54,6 +54,7 @@ import { showLocalNotification } from '../utils/localNotification';
 import { getChatBackgroundNotificationsEnabled } from '../utils/chatBackgroundNotifications';
 import { saveChatContextMirror } from '../utils/chatContextMirror';
 import { formatNotificationBody } from '../utils/notificationPreview';
+import type { StatusCardData } from '../types/statusCard';
 
 interface UseChatAIProps {
     char: CharacterProfile | undefined;
@@ -79,6 +80,14 @@ interface UseChatAIProps {
 
 interface TriggerAIOptions {
     transientUserPrompt?: string;
+}
+
+interface AfterglowTriggerOptions {
+    sourceMessage?: Message;
+    currentMsgs?: Message[];
+    afterglowOptions?: AfterglowGenerationOptions;
+    userInitiated?: boolean;
+    silent?: boolean;
 }
 
 class ChatStreamError extends Error {
@@ -295,6 +304,16 @@ function getPreviousAssistantThinking(messages: Message[], maxLength = 1200): st
         if (trimmed) return trimmed.slice(0, maxLength);
     }
     return undefined;
+}
+
+const LEAKED_REPLY_CONTEXT_RE = /(?:引用回复上下文[：:]\s*)?这条消息正在回复[^「」\r\n]{0,60}的消息「([^」\r\n]{1,220})」[。.]?\s*本条消息正文[：:]\s*([\s\S]*)/;
+
+function normalizeLeakedReplyContextForQuote(text: string): string {
+    return text.replace(LEAKED_REPLY_CONTEXT_RE, (_match, quotedText: string, body: string) => {
+        const quoted = quotedText.trim();
+        const content = body.trim();
+        return `[[QUOTE: ${quoted}]]${content ? `\n${content}` : ''}`;
+    });
 }
 
 export const useChatAI = ({
@@ -951,6 +970,8 @@ export const useChatAI = ({
 
             aiContent = await handleXhsActions(aiContent, handlerContext);
 
+            aiContent = normalizeLeakedReplyContextForQuote(aiContent);
+
             // 6.5 Detect AI-initiated incoming call [[CALL: mode]]
             const callMatch = aiContent.match(/\[\[CALL:\s*(\w+)\]\]/);
             if (callMatch) {
@@ -1413,7 +1434,7 @@ export const useChatAI = ({
                             if (allChunks.length === 0 && part.content.trim()) allChunks.push(part.content.trim());
 
                             for (let i = 0; i < allChunks.length; i++) {
-                                let chunk = allChunks[i];
+                                let chunk = normalizeLeakedReplyContextForQuote(allChunks[i]);
                                 const delay = Math.min(Math.max(chunk.length * 50, 500), 2000);
                                 await new Promise(r => setTimeout(r, delay));
 
@@ -1491,7 +1512,7 @@ export const useChatAI = ({
                 lastMindSnapshotCtx.current = { char: charSnapshot, aiContent, msgs: promptContextMsgs, config: mindSecondaryConfig, goalListStr, contextOptions: secondaryFullContextOptions };
                 const statusMode = char.statusBarMode || 'classic';
                 // Skip card generation for modes that do not need a background status task.
-                if (statusMode === 'off' || statusMode === 'story_phone') { /* noop — bionic engine still runs */ }
+                if (statusMode === 'off' || statusMode === 'story_phone' || statusMode === 'afterglow') { /* noop — bionic engine still runs */ }
                 else {
                 // Delay 2s to reduce resource contention on mobile
                 setTimeout(() => {
@@ -1594,6 +1615,49 @@ export const useChatAI = ({
         }
     };
 
+    const generateAfterglow = useCallback(async (options: AfterglowTriggerOptions = {}): Promise<StatusCardData | null> => {
+        if (!char) return null;
+
+        const ctx = lastMindSnapshotCtx.current;
+        const secondaryConfig = selectSecondaryApiConfig();
+        if (!secondaryConfig?.baseUrl || !secondaryConfig.apiKey || !secondaryConfig.model) {
+            if (!options.silent) addToast('副 API 未配置，无法生成番外篇', 'error');
+            return null;
+        }
+
+        const sourceReply = options.sourceMessage?.content || ctx?.aiContent || '';
+        if (!sourceReply.trim()) {
+            if (!options.silent) addToast('还没有可生成番外篇的角色回复', 'info');
+            return null;
+        }
+
+        const charSnapshot = ctx?.char?.id === char.id
+            ? ctx.char
+            : { ...char };
+        const contextMsgs = options.currentMsgs?.length
+            ? options.currentMsgs
+            : (ctx?.msgs?.length ? ctx.msgs : []);
+        const contextOptions = ctx?.contextOptions || {
+            userProfile,
+            contextLimit: char.contextLimit || 500,
+            allowMirrorLookup: true,
+        };
+
+        return MindSnapshotExtractor.generateAfterglowCard(
+            charSnapshot,
+            sourceReply,
+            contextMsgs,
+            secondaryConfig,
+            (reason) => addToast(reason, 'error'),
+            contextOptions,
+            options.afterglowOptions,
+            {
+                userInitiated: options.userInitiated !== false,
+                reason: options.userInitiated === false ? '番外篇生成（自动）' : undefined,
+            },
+        );
+    }, [addToast, char, userProfile]);
+
     const retryMindSnapshot = useCallback(() => {
         const ctx = lastMindSnapshotCtx.current;
         if (!ctx) { console.warn('💭 [InnerVoice] No context to retry'); return; }
@@ -1605,6 +1669,10 @@ export const useChatAI = ({
         }
         if (statusMode === 'story_phone') {
             addToast('查手机模式不需要重试心声，点头像旁的小手机进入', 'info');
+            return;
+        }
+        if (statusMode === 'afterglow') {
+            addToast('番外篇模式不需要重试心声，点头像旁的星星生成', 'info');
             return;
         }
         if (statusMode === 'classic') {
@@ -1672,6 +1740,7 @@ export const useChatAI = ({
         tokenBreakdown,
         setLastTokenUsage,
         triggerAI,
-        retryMindSnapshot
+        retryMindSnapshot,
+        generateAfterglow
     };
 };

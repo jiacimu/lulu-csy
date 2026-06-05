@@ -26,6 +26,7 @@ import {
     testOpenAICompatibleImageConnection,
 } from '../utils/photoGeneration';
 import {
+    GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     getImageGenerationConfig,
     getPhotoStylePresets,
     IMAGE_GENERATION_CONFIG_KEY,
@@ -408,6 +409,7 @@ describe('photoGeneration helpers', () => {
 
         expect(getPhotoStylePresets()[0]).toMatchObject({
             id: 'param-style',
+            providerScope: 'openai-gpt',
             size: 'auto',
             responseFormat: 'url',
             n: 2,
@@ -422,6 +424,25 @@ describe('photoGeneration helpers', () => {
             extraRequestBody: '{"seed":42}',
             sampler: 'k_dpmpp_2m',
             noiseSchedule: 'polyexponential',
+        });
+    });
+
+    it('normalizes legacy Gemini compatible style presets to Gemini scope', () => {
+        localStorage.setItem(PHOTO_STYLE_PRESETS_KEY, JSON.stringify([
+            {
+                id: 'nano-banana-soft',
+                name: 'Gemini Soft',
+                providerScope: 'openai-compatible',
+                model: 'gemini-2.5-flash-image',
+                positivePrompt: 'natural snapshot',
+                negativePrompt: '',
+            },
+        ]));
+
+        expect(getPhotoStylePresets()[0]).toMatchObject({
+            id: 'nano-banana-soft',
+            providerScope: 'openai-gemini',
+            model: 'gemini-2.5-flash-image',
         });
     });
 
@@ -449,20 +470,26 @@ describe('photoGeneration helpers', () => {
         expect(ids).not.toContain('soft-polaroid');
         expect(ids).toContain('custom-openai');
         expect(ids).toContain('loveshow-solo-guoman');
+        expect(ids).toContain('loveshow-gemini-solo-guoman');
         expect(ids).toContain('loveshow-couple-real');
+        expect(ids).toContain('loveshow-gemini-couple-real');
         expect(ids).toContain('style-openai-compatible-1779814872010');
         expect(ids).toContain('style-openai-compatible-mature-male-real-couple');
+        expect(presets.find(preset => preset.id === 'custom-openai')?.providerScope).toBe('openai-gpt');
     });
 
     it('filters style presets by the active provider without mixing shared presets', () => {
         const presets: PhotoStylePreset[] = [
             { ...style, id: 'nai-only', providerScope: 'novelai' },
-            { ...style, id: 'compat-only', providerScope: 'openai-compatible' },
+            { ...style, id: 'gpt-only', providerScope: 'openai-gpt' },
+            { ...style, id: 'gemini-only', providerScope: 'openai-gemini' },
             { ...style, id: 'shared', providerScope: 'all' },
         ];
 
-        expect(getCompatiblePhotoStylePresets(presets, 'openai-compatible').map(preset => preset.id)).toEqual(['compat-only']);
-        expect(resolvePhotoStylePreset('nai-only', presets, undefined, 'openai-compatible').id).toBe('compat-only');
+        expect(getCompatiblePhotoStylePresets(presets, 'openai-compatible', 'gpt').map(preset => preset.id)).toEqual(['gpt-only']);
+        expect(getCompatiblePhotoStylePresets(presets, 'openai-compatible', 'gemini').map(preset => preset.id)).toEqual(['gemini-only']);
+        expect(resolvePhotoStylePreset('nai-only', presets, undefined, 'openai-compatible', { openAIStyleFamily: 'gpt' }).id).toBe('gpt-only');
+        expect(resolvePhotoStylePreset('gpt-only', presets, undefined, 'openai-compatible', { openAIStyleFamily: 'gemini' }).id).toBe('gemini-only');
     });
 
     it('falls back to legacy shared style presets when no provider-specific preset exists', () => {
@@ -507,15 +534,31 @@ describe('photoGeneration helpers', () => {
 
     it('uses the global LoveShow image style preset for OpenAI-compatible generation without an explicit style', () => {
         const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible', imageStyle: 'cg' };
+        const geminiConfig: ImageGenerationConfig = {
+            ...baseConfig,
+            activeProvider: 'openai-compatible',
+            imageStyle: 'real',
+            openaiCompatible: {
+                ...baseConfig.openaiCompatible,
+                baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+                model: 'gemini-2.5-flash-image',
+            },
+        };
         const presets = getPhotoStylePresets();
 
         expect(resolveImageStylePhotoPreset(undefined, presets, undefined, config, false).id).toBe('loveshow-solo-cg');
         expect(resolveImageStylePhotoPreset(undefined, presets, undefined, config, true).id).toBe('loveshow-couple-cg');
+        const geminiSoloPreset = resolveImageStylePhotoPreset(undefined, presets, undefined, geminiConfig, false);
+        const geminiCouplePreset = resolveImageStylePhotoPreset(undefined, presets, undefined, geminiConfig, true);
+        expect(geminiSoloPreset.id).toBe('loveshow-gemini-solo-real');
+        expect(geminiSoloPreset.model).toBe(GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL);
+        expect(geminiCouplePreset.id).toBe('loveshow-gemini-couple-real');
+        expect(geminiCouplePreset.model).toBe(GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL);
         expect(resolveImageStylePhotoPreset('custom-style', [
             {
                 id: 'custom-style',
                 name: 'Custom',
-                providerScope: 'openai-compatible',
+                providerScope: 'openai-gpt',
                 positivePrompt: 'custom',
                 negativePrompt: '',
             },
@@ -638,7 +681,7 @@ describe('photoGeneration helpers', () => {
         const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
         const compatStyle: PhotoStylePreset = {
             ...style,
-            providerScope: 'openai-compatible',
+            providerScope: 'openai-gpt',
             positivePrompt: '柔和胶片感，生活化抓拍',
             negativePrompt: '过曝',
         };
@@ -656,7 +699,7 @@ describe('photoGeneration helpers', () => {
         const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
         const compatStyle: PhotoStylePreset = {
             ...style,
-            providerScope: 'openai-compatible',
+            providerScope: 'openai-gpt',
             positivePrompt: '生活化抓拍',
             negativePrompt: '',
         };
@@ -749,7 +792,7 @@ describe('photoGeneration helpers', () => {
 
         expect(preset).toMatchObject({
             id: 'community-soft',
-            providerScope: 'openai-compatible',
+            providerScope: 'openai-gpt',
             positivePrompt: 'soft focus, gentle color',
             negativePrompt: 'blur, watermark',
             width: 1024,
@@ -780,7 +823,7 @@ describe('photoGeneration helpers', () => {
             'size: 832x1216',
         ].join('\n'), 'openai-compatible');
 
-        expect(preset.providerScope).toBe('openai-compatible');
+        expect(preset.providerScope).toBe('openai-gpt');
         expect(preset.positivePrompt).toBe('cinematic portrait, window light');
         expect(preset.negativePrompt).toBe('lowres, bad anatomy');
         expect(preset.steps).toBe(24);
@@ -1069,7 +1112,7 @@ describe('photoGeneration helpers', () => {
         };
         const compatStyle: PhotoStylePreset = {
             ...style,
-            providerScope: 'openai-compatible',
+            providerScope: 'openai-gpt',
             model: 'style-image',
             size: 'auto',
             responseFormat: 'url',

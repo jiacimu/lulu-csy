@@ -84,6 +84,26 @@ function Get-GitDirty {
     return @($output).Count -gt 0
 }
 
+function Invoke-BetaBuild {
+    $viteCmd = Join-Path $scriptDir 'node_modules\.bin\vite.cmd'
+    $viteJs = Join-Path $scriptDir 'node_modules\vite\bin\vite.js'
+
+    if (Test-Path -LiteralPath $viteCmd) {
+        & $viteCmd build --mode staging
+        $script:BetaBuildExitCode = $LASTEXITCODE
+        return
+    }
+
+    if (Test-Path -LiteralPath $viteJs) {
+        & node $viteJs build --mode staging
+        $script:BetaBuildExitCode = $LASTEXITCODE
+        return
+    }
+
+    npm run build -- --mode staging
+    $script:BetaBuildExitCode = $LASTEXITCODE
+}
+
 function Invoke-NativeCapture {
     param(
         [string]$FilePath,
@@ -162,9 +182,9 @@ try {
     }
 
     Write-Host "Precheck: building beta bundle (staging mode)..." -ForegroundColor Cyan
-    npm run build -- --mode staging
-    if ($LASTEXITCODE -ne 0) {
-        throw "Staging build precheck failed with exit code $LASTEXITCODE"
+    Invoke-BetaBuild
+    if ($script:BetaBuildExitCode -ne 0) {
+        throw "Staging build precheck failed with exit code $script:BetaBuildExitCode"
     }
 
     if ($PrecheckOnly) {

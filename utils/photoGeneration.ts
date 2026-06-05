@@ -9,6 +9,7 @@ import type {
     Message,
     NaiImageModel,
     OpenAICompatibleImageProviderConfig,
+    OpenAICompatibleStyleFamily,
     PhotoDirectorResult,
     PhotoGenerationOptions,
     PhotoHint,
@@ -26,8 +27,11 @@ import {
     DEFAULT_NOVELAI_IMAGE_CONFIG,
     DEFAULT_PHOTO_STYLE_PRESETS,
     NAI_IMAGE_MODELS,
+    getOpenAICompatibleStyleFamily,
+    getOpenAIPhotoStyleProviderScope,
     markSecondaryApiConfigFailure,
     markSecondaryApiConfigSuccess,
+    normalizePhotoStyleProviderScope,
     normalizeNaiNoiseSchedule,
     normalizeNaiSampler,
     normalizeOpenAIImageSize,
@@ -617,16 +621,35 @@ export function getImageProviderLabel(provider: ImageProviderType): string {
     return provider === 'openai-compatible' ? 'OpenAI 兼容' : 'NovelAI';
 }
 
-export function isPhotoStyleCompatible(style: PhotoStylePreset, providerType: ImageProviderType): boolean {
-    return style.id === NO_PHOTO_STYLE_PRESET_ID || style.providerScope === providerType;
+export function getOpenAIStyleFamilyForConfig(config: ImageGenerationConfig): OpenAICompatibleStyleFamily {
+    return getOpenAICompatibleStyleFamily(config.openaiCompatible);
+}
+
+function getPhotoStyleProviderScopeForRuntime(
+    providerType: ImageProviderType,
+    openAIStyleFamily: OpenAICompatibleStyleFamily = 'gpt',
+): PhotoStyleProviderScope {
+    return providerType === 'openai-compatible'
+        ? getOpenAIPhotoStyleProviderScope(openAIStyleFamily)
+        : 'novelai';
+}
+
+export function isPhotoStyleCompatible(
+    style: PhotoStylePreset,
+    providerType: ImageProviderType,
+    openAIStyleFamily: OpenAICompatibleStyleFamily = 'gpt',
+): boolean {
+    if (style.id === NO_PHOTO_STYLE_PRESET_ID) return true;
+    return style.providerScope === getPhotoStyleProviderScopeForRuntime(providerType, openAIStyleFamily);
 }
 
 export function getCompatiblePhotoStylePresets(
     presets: PhotoStylePreset[],
     providerType: ImageProviderType,
+    openAIStyleFamily: OpenAICompatibleStyleFamily = 'gpt',
 ): PhotoStylePreset[] {
     const available = presets.length > 0 ? presets : DEFAULT_PHOTO_STYLE_PRESETS;
-    const compatible = available.filter(style => isPhotoStyleCompatible(style, providerType));
+    const compatible = available.filter(style => isPhotoStyleCompatible(style, providerType, openAIStyleFamily));
     return compatible.length > 0 ? compatible : available.filter(style => style.providerScope === 'all');
 }
 
@@ -635,12 +658,15 @@ export function resolvePhotoStylePreset(
     presets: PhotoStylePreset[],
     char?: CharacterProfile,
     providerType: ImageProviderType = 'novelai',
-    options: { allowUnboundRequested?: boolean } = {},
+    options: { allowUnboundRequested?: boolean; openAIStyleFamily?: OpenAICompatibleStyleFamily } = {},
 ): PhotoStylePreset {
     if (isNoPhotoStylePresetId(requestedId)) return NO_PHOTO_STYLE_PRESET;
     if (!requestedId && isNoPhotoStylePresetId(char?.defaultPhotoStylePresetId)) return NO_PHOTO_STYLE_PRESET;
-    const compatible = getCompatiblePhotoStylePresets(presets, providerType);
-    const available = compatible.length > 0 ? compatible : DEFAULT_PHOTO_STYLE_PRESETS.filter(style => isPhotoStyleCompatible(style, providerType));
+    const openAIStyleFamily = options.openAIStyleFamily || 'gpt';
+    const compatible = getCompatiblePhotoStylePresets(presets, providerType, openAIStyleFamily);
+    const available = compatible.length > 0
+        ? compatible
+        : DEFAULT_PHOTO_STYLE_PRESETS.filter(style => isPhotoStyleCompatible(style, providerType, openAIStyleFamily));
     if (available.length === 0) return NO_PHOTO_STYLE_PRESET;
     const fallbackPool = available;
     const requestedStyleId = String(requestedId || '').trim();
@@ -669,13 +695,18 @@ export function resolveImageStylePhotoPreset(
     includeUserAppearance: boolean,
     options: { allowUnboundRequested?: boolean } = {},
 ): PhotoStylePreset {
+    const openAIStyleFamily = getOpenAIStyleFamilyForConfig(config);
     if (config.activeProvider !== 'openai-compatible' || requestedId) {
-        return resolvePhotoStylePreset(requestedId, presets, char, config.activeProvider, options);
+        return resolvePhotoStylePreset(requestedId, presets, char, config.activeProvider, {
+            ...options,
+            openAIStyleFamily,
+        });
     }
     const mode = includeUserAppearance ? 'couple' : 'solo';
-    const imageStylePresetId = getLoveShowImagePresetId(mode, config.imageStyle);
+    const imageStylePresetId = getLoveShowImagePresetId(mode, config.imageStyle, openAIStyleFamily);
     return resolvePhotoStylePreset(imageStylePresetId, presets, char, config.activeProvider, {
         ...options,
+        openAIStyleFamily,
         allowUnboundRequested: true,
     });
 }
@@ -1715,6 +1746,7 @@ export async function runPhotoDirector(args: {
     stylePresets: PhotoStylePreset[];
     recentPhotoMetas: PhotoMeta[];
     providerType: ImageProviderType;
+    openAIStyleFamily?: OpenAICompatibleStyleFamily;
     appearanceTags?: string;
     appearanceNegativeTags?: string;
     userAppearanceTags?: string;
@@ -1725,7 +1757,7 @@ export async function runPhotoDirector(args: {
 }): Promise<PhotoDirectorResult | null> {
     const { apiConfig, char, userProfile, aiReply, thinking, hint, stylePresets, recentPhotoMetas, providerType, contextOptions } = args;
     const baseUrl = apiConfig.baseUrl.replace(/\/+$/, '');
-    const compatibleStyles = getCompatiblePhotoStylePresets(stylePresets, providerType);
+    const compatibleStyles = getCompatiblePhotoStylePresets(stylePresets, providerType, args.openAIStyleFamily || 'gpt');
     const styleLines = compatibleStyles.map(preset => `- ${preset.id}: ${preset.name}`).join('\n') || '- no-style: 不使用风格预设';
     const recentLines = recentPhotoMetas.slice(-8).map((meta, index) => {
         const director = meta.directorResult;
@@ -1909,6 +1941,7 @@ export async function runManualPhotoDirector(args: {
     stylePresets: PhotoStylePreset[];
     recentPhotoMetas: PhotoMeta[];
     providerType: ImageProviderType;
+    openAIStyleFamily?: OpenAICompatibleStyleFamily;
     appearanceTags?: string;
     appearanceNegativeTags?: string;
     userAppearanceTags?: string;
@@ -1926,6 +1959,7 @@ export async function runManualPhotoDirector(args: {
         stylePresets,
         recentPhotoMetas,
         providerType,
+        openAIStyleFamily,
         appearanceTags,
         appearanceNegativeTags,
         userAppearanceTags,
@@ -1935,7 +1969,7 @@ export async function runManualPhotoDirector(args: {
         contextOptions,
     } = args;
     const baseUrl = apiConfig.baseUrl.replace(/\/+$/, '');
-    const compatibleStyles = getCompatiblePhotoStylePresets(stylePresets, providerType);
+    const compatibleStyles = getCompatiblePhotoStylePresets(stylePresets, providerType, openAIStyleFamily || 'gpt');
     const styleLines = compatibleStyles.map(preset => `- ${preset.id}: ${preset.name}`).join('\n') || '- no-style: 不使用风格预设';
     const recentLines = recentPhotoMetas.slice(-8).map((meta, index) => {
         const director = meta.directorResult;
@@ -2092,13 +2126,6 @@ export async function runManualPhotoDirector(args: {
     }
 }
 
-function normalizeProviderScope(value: unknown, fallback: PhotoStyleProviderScope): PhotoStyleProviderScope {
-    const scope = String(value || '').trim();
-    return scope === 'all' || scope === 'novelai' || scope === 'openai-compatible'
-        ? scope
-        : fallback;
-}
-
 function normalizeOptionalIntegerParam(value: unknown, min: number, max: number): number | null | undefined {
     if (value === undefined) return undefined;
     if (value === null || value === '') return null;
@@ -2114,7 +2141,10 @@ function parseTextParam(text: string, names: string[]): string | undefined {
     return text.match(new RegExp(`(?:${escaped})\\s*[:：]\\s*([^\\n,]+)`, 'i'))?.[1]?.trim();
 }
 
-export function parsePhotoStylePaste(text: string, defaultScope: PhotoStyleProviderScope = 'novelai'): PhotoStylePreset {
+export function parsePhotoStylePaste(
+    text: string,
+    defaultScope: PhotoStyleProviderScope | 'openai-compatible' = 'novelai',
+): PhotoStylePreset {
     const trimmed = text.trim();
     if (!trimmed) throw new Error('请先粘贴风格内容');
 
@@ -2124,7 +2154,11 @@ export function parsePhotoStylePaste(text: string, defaultScope: PhotoStyleProvi
             return {
                 id: String(parsed.id || randomId('style')),
                 name: String(parsed.name || '导入风格'),
-                providerScope: normalizeProviderScope(parsed.providerScope, defaultScope),
+                providerScope: normalizePhotoStyleProviderScope(
+                    parsed.providerScope,
+                    normalizePhotoStyleProviderScope(defaultScope),
+                    parsed as Partial<PhotoStylePreset> & Record<string, unknown>,
+                ),
                 positivePrompt: String(parsed.positivePrompt || parsed.positive || parsed.prompt || '').trim(),
                 negativePrompt: String(parsed.negativePrompt || parsed.negative || parsed.uc || '').trim(),
                 model: parsed.model ? String(parsed.model) : undefined,
@@ -2168,7 +2202,7 @@ export function parsePhotoStylePaste(text: string, defaultScope: PhotoStyleProvi
     return {
         id: randomId('style'),
         name: '粘贴导入风格',
-        providerScope: defaultScope,
+        providerScope: normalizePhotoStyleProviderScope(defaultScope),
         positivePrompt: positiveText,
         negativePrompt: negativeText,
         model: parseTextParam(trimmed, ['model', '模型']),

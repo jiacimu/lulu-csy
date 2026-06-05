@@ -366,7 +366,7 @@ describe('system backup coverage', () => {
         state.photoStylePresets = [{
             id: 'style-a',
             name: '测试风格',
-            providerScope: 'openai-compatible',
+            providerScope: 'openai-gpt',
             positivePrompt: 'soft light',
             negativePrompt: '',
         }];

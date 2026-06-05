@@ -589,7 +589,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                 </div>
                             </div>
                             <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                                开启后，支持思考的模型（DeepSeek-R1, Qwen3 等）的推理过程将显示在气泡中的可折叠区域内。
+                                开启后，支持思考的模型的推理过程将显示在气泡中的可折叠区域内。
                             </p>
                         </div>
                     )}
@@ -640,7 +640,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                             </div>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                            打开后，聊天页才会同步并显示今日行程入口。默认关闭。
+                            打开后，聊天页才会同步并显示今日行程入口。默认关闭UI显示，但日程仍会同步更新。
                         </p>
                     </div>
 
@@ -677,7 +677,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 mb-1.5 block">选（气泡显示语言）</label>
                                     <div className="flex flex-wrap gap-1.5">
-                                        {['中文', 'English', '日本語', '한국어', 'Français', 'Español'].map(lang => (
+                                        {['中文', '粤语', 'English', '日本語', '한국어', 'Français', 'Español'].map(lang => (
                                             <button
                                                 key={`src-${lang}`}
                                                 onClick={() => onSetTranslateSourceLang?.(lang)}
@@ -692,7 +692,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 mb-1.5 block">译（翻译目标语言）</label>
                                     <div className="flex flex-wrap gap-1.5">
-                                        {['中文', 'English', '日本語', '한국어', 'Français', 'Español'].map(lang => (
+                                        {['中文', '粤语', 'English', '日本語', '한국어', 'Français', 'Español'].map(lang => (
                                             <button
                                                 key={`tgt-${lang}`}
                                                 onClick={() => onSetTranslateLang?.(lang)}
@@ -735,6 +735,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                 { id: 'freeform', title: '自由创作', desc: '即兴生成独一无二的 HTML 碎片' },
                                 { id: 'custom', title: '自定义模板', desc: '自己写提示词和正则，完全自由' },
                                 { id: 'story_phone', title: '查手机', desc: '头像旁出现手机入口，按剧情随机查看一个 App' },
+                                { id: 'afterglow', title: '番外篇', desc: '每轮回复后自动生成，星星入口可手动加梗' },
                             ].map(opt => {
                                 const isActive = (statusBarMode || 'classic') === opt.id;
                                 return (
@@ -839,7 +840,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                             </div>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                            开启后，对方每次回复时都会附上一条语音消息。需要先在全局设置中配置 TTS。
+                            开启后，对方可以给你发送语音消息。
                         </p>
                     </div>
 
@@ -871,7 +872,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                             <div className={`flex justify-between items-center ${onToggleAutoPhoto ? 'cursor-pointer' : 'opacity-60'}`} onClick={onToggleAutoPhoto}>
                                 <div>
                                     <div className="text-xs font-bold text-slate-500">角色主动发照片</div>
-                                    <p className="text-[10px] text-slate-400 mt-1">主模型只给 photo_hint，副模型决定是否真的发图。</p>
+                                    <p className="text-[10px] text-slate-400 mt-1">开启后，对方可以给你发送图片。</p>
                                 </div>
                                 <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${activeCharacter.autoPhotoEnabled ? 'bg-primary' : 'bg-slate-200'}`}>
                                     <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${activeCharacter.autoPhotoEnabled ? 'translate-x-4' : ''}`}></div>
@@ -1023,19 +1024,19 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                             </div>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                            开启后，对方在聊天里可以自然发出歌曲分享卡片。默认关闭，让对话更克制一点。
+                            开启后，对方在聊天里可以自然发出歌曲分享卡片。
                         </p>
                     </div>
 
                     <div className="pt-2 border-t border-slate-100">
                         <div className="flex justify-between items-center cursor-pointer" onClick={onToggleInjectPlaybackContext}>
-                            <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">一起听歌氛围</label>
+                            <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">一起听歌</label>
                             <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${injectPlaybackContext ? 'bg-primary' : 'bg-slate-200'}`}>
                                 <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${injectPlaybackContext ? 'translate-x-4' : ''}`}></div>
                             </div>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                            开启后，如果你们此刻正听着同一首歌，对话会自然沾上一点旋律、情绪和歌词余韵；不会自动发出歌曲卡片。
+                            开启后，char能和你实时同步听歌
                         </p>
                     </div>
 

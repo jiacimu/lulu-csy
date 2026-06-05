@@ -1,5 +1,5 @@
 import type { CharacterProfile } from '../types';
-import type { ImageGenerationConfig, ImageGenerationStyle } from '../types/photo';
+import type { ImageGenerationConfig, ImageGenerationStyle, OpenAICompatibleStyleFamily } from '../types/photo';
 import type {
     DirectorMission,
     LoveShowFeedAuthorType,
@@ -337,6 +337,7 @@ export function markLoveShowSocialSignalsConsumed(signals: SocialSignal[], consu
 export function getLoveShowSocialImagePlan(
     intent: SocialImageIntent,
     imageStyle: ImageGenerationStyle,
+    family: OpenAICompatibleStyleFamily = 'gpt',
 ): LoveShowSocialImagePlan {
     const coupleIntent = intent === 'guest_couple_moment' || intent === 'date_scene';
     const noCharacterIntent = intent === 'object_clue' || intent === 'alt_account_mood';
@@ -346,7 +347,7 @@ export function getLoveShowSocialImagePlan(
         mode,
         includeAppearance: !noCharacterIntent,
         includeUserAppearance: coupleIntent || userSelfPostIntent,
-        presetId: getLoveShowImagePresetId(mode, imageStyle),
+        presetId: getLoveShowImagePresetId(mode, imageStyle, family),
     };
 }
 

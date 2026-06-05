@@ -119,6 +119,8 @@ describe('character TTS voice binding', () => {
         expect(buildVoiceCallTtsConfig(base, { sourceLang: '日本語', targetLang: '中文' }).elevenLabs.languageCode).toBe('ja');
         expect(buildVoiceCallTtsConfig(base, { sourceLang: '中文', targetLang: 'English' }).languageBoost).toBe('Chinese');
         expect(buildVoiceCallTtsConfig(base, { sourceLang: '中文', targetLang: 'English' }).elevenLabs.languageCode).toBe('zh');
+        expect(buildVoiceCallTtsConfig(base, { sourceLang: '粤语', targetLang: '中文' }).languageBoost).toBe('Chinese,Yue');
+        expect(buildVoiceCallTtsConfig(base, { sourceLang: '粤语', targetLang: '中文' }).elevenLabs.languageCode).toBe('zh');
     });
 
     it('keeps translation paired with the sentence that is currently playing', () => {

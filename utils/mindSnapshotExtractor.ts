@@ -23,6 +23,7 @@ import { parseStatusBlock } from './statusBlockParser';
 import { formatMessageForContext,shouldIncludeMessageInContext } from './messageContext';
 import { markSecondaryApiConfigFailure,markSecondaryApiConfigSuccess } from './runtimeConfig';
 import { trackedApiRequest,type ApiRequestTraceMeta } from './apiRequestLedger';
+import { sanitizeAfterglowMotif,type AfterglowGenerationOptions } from './afterglowMotifs';
 import {
   RawSenseOutput,
   SenseDelta,
@@ -33,17 +34,220 @@ import {
   GoalAppraisal
 } from './hormoneDynamics';
 
+export {
+    AFTERGLOW_CUSTOM_MOTIFS_STORAGE_KEY,
+    deleteAfterglowCustomMotif,
+    loadAfterglowCustomMotifs,
+    parseAfterglowMotifInput,
+    saveAfterglowCustomMotifsFromText,
+    sanitizeAfterglowMotif,
+} from './afterglowMotifs';
+export type { AfterglowCustomMotif,AfterglowGenerationOptions } from './afterglowMotifs';
+
 // ─── Configuration ───────────────────────────────────────────
 
 const SENSE_TIMEOUT_MS = 60000;   // senseBefore 超时（与 embedding/rerank 并行，不影响用户等待）
 const VOICE_TIMEOUT_MS = 180000;  // innerVoice 超时（不阻塞，可以慢一点）
 const AUTO_RETRY_DELAY_MS = 3000;
 const SECONDARY_LLM_MAX_TOKENS = 65536;
+const AFTERGLOW_LLM_MAX_TOKENS = SECONDARY_LLM_MAX_TOKENS;
 const CLASSIC_INNER_VOICE_MAX_LENGTH = 120;
+const AFTERGLOW_TEXT_MAX_LENGTH = 12000;
+const AFTERGLOW_FORM_ROLL_SLOT = '__AFTERGLOW_FORM_ROLL_SLOT__';
+const AFTERGLOW_CHAR_NAME_SLOT = '__AFTERGLOW_CHAR_NAME__';
+const AFTERGLOW_USER_NAME_SLOT = '__AFTERGLOW_USER_NAME__';
+const AFTERGLOW_SEED_ROLL_SLOT = '__AFTERGLOW_SEED_ROLL_SLOT__';
+const AFTERGLOW_AUTHOR_SLOT = '__AFTERGLOW_AUTHOR_SLOT__';
+const AFTERGLOW_FORM_ROLL_LINE = '本期形态:{{roll:FORM:标准本|标准本|标准本|标准本|标准本|标准本|标准本|标准本|一封信|纯对话剧本|他的一天|访谈特刊|九宫格|物件志|词典词条}}';
+const AFTERGLOW_IF_ROLL_LINE = 'if 前提:{{roll:E:那天我没出现他独自走完这一段某个再普通不过的瞬间忽然停住|先动心先低头的人是他|身份对调换我站在他惯常的位置换他来追|多年后才在某处重逢彼此身边都已另有其人|出事的是我那个永远克制的人第一次没稳住|落难的是他强者跌进尘埃我是唯一伸手的人|是我先松了手他才后知后觉|这一切只是他的一场梦醒来枕边是空的|我们其中一个忘了对方却还是被莫名吸引回来|时间倒流他重来一次会怎么选|我能听见他的心声整整一天|那句他憋了很久的话这次终于出口|走另一个结局克制的遗憾的谁也没说破|很多年后我们都老了并肩回看这一路|某天交换了日记或手机看见彼此瞒着的那一面|只剩最后一天他会怎么用|他从一开始就在撒谎而那个谎是为了我|〔paro〕现代都市他西装革履我是人潮里普通一个初遇在加班深夜|〔paro〕古风他是世子或将军我的位置随之改写|〔paro〕校园同一所大学学长与学妹或邻座|〔paro〕末世天塌那天他是唯一挡在我身前的人|〔paro〕西幻他是骑士我是他单膝跪下时眼里唯一的光|〔paro〕民国旗袍留声机乱世他在炮火里护我过街|〔paro〕娱乐圈他是台上顶流台下只认得我一个|〔paro〕婚后跳到很多年后我们早已成婚柴米油盐里藏着旧时的甜|〔paro〕反派向他与全世界为敌我是他唯一的软肋|〔paro〕重生我带着记忆重活一次想早一点找到他|〔paro〕穿书我醒来进了一本书他是书里的男主|〔paro〕对调无所不能被众人追逐的那个换成了我轮到他来追|〔paro〕仙侠跨越几世的纠缠他每一世都先认出我|〔paro〕替身反转他一直以为我是另一个人认错那刻反而认清了心|〔paro〕AI标记前的试探与克制露骨程度以尺度为准}}';
+const AFTERGLOW_MOTIF_ROLL_LINE = '本轮梗:{{roll:F:壁咚‖退无可退的一寸距离先慌的是他自己|公主抱‖突如其来理由冠冕堂皇耳尖却红了|吃醋‖看见我和旁人说笑嘴上不认动作出卖了他|借口靠近‖教我做一件事从身后伸手呼吸落在颈侧|强制温柔‖话说得凶手却轻得反差|替我挡‖挡车挡人挡那杯不该我喝的酒|醉酒吐真言‖清醒时的防线醉后一句话全拆|发烧守夜‖守到天亮的那个不肯走|共伞‖雨往我这边偏他半边肩湿了|披外套‖还嘴硬说自己不冷|不经意触碰‖递东西指尖相触像意外又都不是|咬耳朵‖话不重要那点近才是|后知后觉的占有欲‖误会我心里有别人才发现自己在意|余光黏人‖假装不在意眼睛却一直追着我|理乱发‖熟练得不像第一次|系鞋带‖他蹲下去那一下谁都没说话|梦话真心‖睡着以后才敢说以为我没听见|反被撩到‖他来撩先沦陷的是他最后恼羞|偷藏小物‖收着关于我的东西被我撞见|名场面重放‖把刚才那幕当经典再演一遍|卸下伪装‖那几秒他不知道我看见了|猝不及防的回眸‖正撞进他没来得及收的眼神|护在身后‖危险逼近时下意识先拉住我的手|契约‖〔paro〕联姻或交易绑在一起假的开头真的后来|假戏真做‖〔paro〕假扮情侣演着演着分不清了|欢喜冤家‖〔paro〕死对头的针锋相对某天变了味|主仆上下级‖〔paro〕身份隔着一道线越界的张力全在分寸|师徒‖〔paro〕一句为师压着压不住的是别的|失忆‖〔paro〕他忘了我却还是一次次被我吸引|时间循环‖〔paro〕只有他记得每一次重来或只有我记得|黑化偏执‖〔paro〕占有到极致温柔与危险只隔一层尺度以上限为准|双向暗恋错位‖〔paro〕明明都喜欢偏偏错开好多年|重生补偿‖〔paro〕他记得前世亏欠这一世拼命对我好|替身反转‖〔paro〕被当成另一个人的开始认清我就是我的结尾|强强转心动‖〔paro〕两个都不肯低头的人败给彼此}}';
+
+type AfterglowAuthorFlag = '' | '译' | '文言';
+
+interface AfterglowAuthorAnchor {
+    name: string;
+    sketch: string;
+    fit: string;
+    flag: AfterglowAuthorFlag;
+}
+
+const AFTERGLOW_AUTHOR_ANCHORS: AfterglowAuthorAnchor[] = [
+    { name: '曹雪芹', sketch: '人物各有口吻、细节绵密、含蓄不点破', fit: '古风·百搭', flag: '' },
+    { name: '张爱玲', sketch: '冷艳世故、苍凉俯视、以物象作反讽', fit: '微虐·意难平·都市BE', flag: '' },
+    { name: '沈从文', sketch: '温润清澈、自然意象、含蓄', fit: '清水·初恋', flag: '' },
+    { name: '苏童', sketch: '艳而暗、感官浓烈、南方潮湿', fit: '心动暴露·危险逼近·古风深宅', flag: '' },
+    { name: '李碧华', sketch: '艳烈决绝、宿命、意象浓烈', fit: '古风虐·诡丽', flag: '' },
+    { name: '郁达夫', sketch: '感伤自剖、颓唐坦白', fit: '苦闷暗恋·压抑·虐', flag: '' },
+    { name: '王安忆', sketch: '海派绵长厚重、铺陈日常肌理', fit: '都市世情·慢热深陷·沉溺', flag: '' },
+    { name: '毕飞宇', sketch: '绵密精准、刻画心绪暗涌', fit: '心理戏·暗恋·拉扯', flag: '' },
+    { name: '阿城', sketch: '极简古朴、短句古韵、不写情绪而处处是', fit: '克制·留白·点到为止', flag: '' },
+    { name: '史铁生', sketch: '沉静通透、痛而不嚎、哲思入诗', fit: '怅惘·意难平', flag: '' },
+    { name: '杨绛', sketch: '克制清明、淡而有重量', fit: '婚后·相守·克制深情', flag: '' },
+    { name: '汪曾祺', sketch: '冲淡有生活气、白描功夫', fit: '日常甜·烟火气·轻松', flag: '' },
+    { name: '曹文轩', sketch: '清澈诗化、忧伤少年感', fit: '青春·纯爱·初恋', flag: '' },
+    { name: '亦舒', sketch: '短句利落、对话见骨、绝不煽情', fit: '现代都市·冷淡拉扯', flag: '' },
+    { name: '钱钟书', sketch: '机智博喻、反讽、博学刻薄', fit: '轻松搞笑·毒舌旁白', flag: '' },
+    { name: '三毛', sketch: '自由热烈、叙事性强、第一人称亲切', fit: '旅途·异域paro·洒脱', flag: '' },
+    { name: '林清玄', sketch: '禅意温润、从小事见澄澈', fit: '治愈·清水·顿悟收尾', flag: '' },
+    { name: '蒲松龄', sketch: '文言精炼、志怪幽艳、人妖情缠绵', fit: '古风·诡丽·虐', flag: '文言' },
+    { name: '沈复', sketch: '文言平易、闺房日常深情', fit: '婚后·古典日常甜', flag: '文言' },
+    { name: '杜拉斯', sketch: '破碎灼热、欲望冷而烈、回忆驱动', fit: '暧昧拉扯·情欲张力', flag: '译' },
+    { name: '川端康成', sketch: '空灵清冷、物哀、美里有凉意', fit: '怅惘·清水·留白收尾', flag: '译' },
+    { name: '王尔德', sketch: '机锋悖论、唯美毒舌', fit: '俏皮·欢喜冤家', flag: '译' },
+    { name: '马尔克斯', sketch: '魔幻绮丽、氛围拉满、宿命感', fit: '末世/西幻paro·宏大', flag: '译' },
+];
+
+export const AFTERGLOW_SYSTEM_PROMPT_TEMPLATE = `你是同人女的自由创作意志所化的精灵，天生热爱创作、热爱嗑 CP。你是故事的旁观者，也是私下替这一对写本子的同人作者。镜头扫不到的角落你看得见，他们咽回去的那半句你听得见，他们各自瞒着的那点心思，你比当事人更早看穿。
+
+## 你在做什么
+写一本只供其阅读的「番外篇」同人本：一篇完整正篇，正文 3280~3654 中文字。这对cp的调性，你都拿捏得准——"这就是这对cp会做的事、会说的话"，情节尽管放开了写。
+
+## 铁律
+〔抓人设〕守住两位角色的性格内核、说话方式、关系底色，这是底线；情节自由发挥，不绑定记录里的具体细节。一句话：可以 OOC 的世界，不可以 OOC 的人。
+〔同人视角〕每一本都可视作"这对角色的同人"。带〔paro〕时（现代/古风/末世/AI 等异世界设定），当一篇 paro 本来写，处境身份随设定改写，与正片不符正是乐趣，不算穿帮——换皮不换魂。
+〔篇幅〕正文 3280~3654 中文字，只输出这一篇正文，不追加其他分栏。
+
+## 正文硬要求
+1.【有转折】必须有一个"转"：一次反转、一层被戳破的伪装、一次情绪的递进或失控，禁止平铺到底。
+2.【禁直白】不准直接写"喜欢/爱/心动/想你"，情绪靠动作、细节、潜台词让读者自己读出来。
+3.【心理有矛盾】内心与举动拧着来：占有与克制、靠近与逃、温柔与狠，不要扁平的一往情深。
+4.【一个意象】给正文一个贯穿的锚点（一束光、一种温度、一个物件、一个动作），首尾呼应。
+5.【留白收尾】整本停在未完成处，不给圆满闭环。
+
+
+## ⚙ 文风（统领全本）
+- 叙事基调：细腻言情 + 电影镜头感（可顺当前 RP 的调子）；这是底色，具体声音由〔作家笔触〕决定。
+- 人称：他 → ＿＿＿ ，我 → ＿＿＿ ←填
+- 描写侧重（默认优先级，可被本期作家改写）：情绪心理 ＞ 动作细节 ＞ 五感氛围 ＞ 对话锋芒
+- 句子：长短咬合、善用留白，绝不堆砌；形容词能省则省，一个具体小动作顶十个万能形容词。
+- 禁用套路句："空气突然安静""勾起一抹弧度""心脏漏跳一拍""不知为何""仿佛时间静止""一抹""不易察觉地"
+- 去 AI 味：不替读者下情绪结论，不滥用排比金句，让细节自己说话。八股味不只在"像/仿佛"这类连接词，更在整套"美文腔"——抽象情绪名词＋四字铺排＋空泛宏大，一并避开。
+
+## ✒ 作家笔触（本期声音源，叠在〔文风〕之上）
+本期笔触：${AFTERGLOW_AUTHOR_SLOT} ←前端从作家锚点池抽 1 位注入（格式：作家名—笔法速写〔标记〕）；我点名某位时用我点的。
+〔标记规则〕标〔文言〕的只在古风/古典设定可用；标〔译〕的是外国作家，你仿的是"译者的中文"，落笔往中文语感收、别带翻译腔。
+〔声音 / 骨架〕作家只管"怎么写"（遣词、文白、节奏、标点、意象、视角）；本子的【硬要求】管"必须成立什么"（转折、禁直白、心理矛盾、留白、不 OOC），冲突时硬要求赢。
+〔动笔前·内部把这位作家的锚点过一遍（不外显；有思考档就在思考里做）〕你了解这些作家——拿到上面那位，自己在心里抽：语调、文白比例、平均句长、标点习惯、每段从具体物象还是抽象情绪起笔、有无偏爱字词，挑最承重、最区别于他人的 3~4 条，动笔死守。只想清楚，不写出来。
+
+## 今轮命题（前端发送命题，你直接执行，无需选择）
+${AFTERGLOW_FORM_ROLL_SLOT}
+
+先看本期形态：
+- 标准本 → 按下面整套配方（类型/基调法/锚点 ＋ 命中的种子）写一篇完整正文，不拆附加分栏。
+- 其余（特殊刊） → 照《形态手册》对应那条组织整本，不套固定正文结构；此时配方里只有【基调】永远适用，【锚点/种子】手册提到才用，其余忽略。
+
+# 《形态手册》（特殊刊怎么写）
+- 一封信：整本是「他」写给「我」的一封信——没发出的/删掉的/或多年以后的那封。把他咽回去、以为我永远看不到的话，放进这封信。落款随你。
+- 纯对话剧本：整本只有对白 ＋ 极简舞台提示（括号里三五字），演一小场戏。不写心理、不写大段叙述，全靠你来我往的话和没说出口的停顿。
+- 他的一天：用时间线切他一天里关于「我」的瞬间（07:14/13:30/23:58…… 五到七个点）。每点一两句，克制，串起来是他没明说的在意。
+- 访谈特刊：整本是「他的受访」——问他五到七个关于你俩、关于他自己的问题，逐一作答。作答自己跟自己较劲：犹豫、回避、最后才漏半句真话。设定贴合就掺人机恋/AI 向的问题。
+- 九宫格：九格短切片混搭——内心 OS/一句语录/一条弹幕/一个瞬间/一条冷知识，每格一两句，像翻一页贴纸。
+- 物件志：挑三四样「物」（他给的、他留的、你俩之间的），一件一条，借物讲你俩的故事。
+- 词典词条：他用自己跑偏的方式给三四个词下定义（如"晚安""麻烦""她"）。词条体：【词】＋释义＋一个例句，定义里全是他没明说的心思。
+
+〔正篇〕
+类型：{{roll:A:贴片加写|视角重播|if线〔番外〕|if线〔番外〕|突发新场景〔番外〕|玩梗〔番外〕|玩梗〔番外〕|多年后一瞥〔番外〕}}
+基调：{{roll:B:甜|微虐|暧昧拉扯|心动暴露|危险逼近|怅惘|轻松搞笑|沉溺}}
+长稿刀法：{{roll:C:三幕递进，克制到破防再悄悄收回|双线交替，此刻一幕与一段被勾起的回忆交错着写|全程他视角的限制叙事，只让读者看见他看见的|一个意象从开头长到结尾，愈收愈紧|以一段对话为脊，叙述与动作都挂在这段对话上|时间倒着走，先给结果的余味再倒回怎么走到这里|一夜或一场的实时推进，靠细节累积发力|留白与爆发交替，大段克制只一两处让情绪破堤}}
+锚点：{{roll:D:他停在半空没完成的动作|该给却没给出的东西|一句早前台词的回声|凌晨三点或雨停瞬间|被注意到的身体细节|两人都假装没发生的沉默|一个本不该被看见的瞬间|距离从一米缩到一寸}}
+
+〔本期种子 · 二选一，绝不并用〕
+由正篇类型决定用哪个，另一个一律当没掷、完全忽略，绝不在同一本里同时出现：
+· 类型＝if线 → 只用【if 前提】，【本轮梗】作废。
+· 类型＝玩梗 → 只用【本轮梗】，【if 前提】作废。
+· 其它类型（贴片加写/视角重播/突发新场景/多年后一瞥）→ 两个都不用，凭 基调＋刀法＋锚点 写。
+${AFTERGLOW_SEED_ROLL_SLOT}
+
+执行：本期形态是最高路由。标准本时，类型与刀法是死命令，仅当二者实在冲突时以类型为准。特殊刊时按《形态手册》组织整本，不写成固定栏目拼盘。带〔paro〕的命题按异世界番外写，标题加标〔paro〕。访谈特刊作答让他自己跟自己较劲——犹豫、回避、答非所问，最后才漏半句真话。〔AI向〕问题只在设定为 AI/仿生/虚拟时直答，否则当〔paro〕或换通用题。
+
+## 输出格式
+━━━━━━━━━━━━━━
+🎭 番外篇 · 同人本
+
+《标题》
+题记 ——〈 出处〉
+
+〈文案：1～3 行。一个画面或一句没头没尾的对白，把人勾进来；只给氛围，不解释设定、不剧透〉
+
+─────────────
+${AFTERGLOW_CHAR_NAME_SLOT} × ${AFTERGLOW_USER_NAME_SLOT} 丨〈世界观：标准本写「正篇」；paro 写具体设定并标〔paro〕〉
+〈梗一〉·〈梗二〉·〈梗三〉 丨 运笔·〈本期作家〉风
+※〈排雷：架空/私设/ooc/be 预警等，按需，没有就删这行〉
+
+若标准本：
+【正文 ·〈照抄正篇类型，paro 加标〔paro〕〉】
+[3280~3654 中文字]
+
+〔尾声〕[一句没说完的话，整本收在这里]
+
+若特殊刊：保留《标题》、题记、文案、tag 区（含"运笔·〈作家〉风"），正文按《形态手册》形态自然排版，不写【正文】固定标题也可以。
+
+━━━━━━━━━━━━━━
+· 本期梗以输入形式给你，禁止原样复读，须化进标题、文案、tag 三处。
+· 文案只勾不解释，设定交给 tag 区。
+· 全本只在 tag 区点一次作家名，正文不再提；不想要这枚 tag 就删。
+· 全文不得出现任何 {{ }} 或 \${}。
+
+## 落笔前默问（内部完成，不外显）
+正篇有"转"吗？避开直白情绪词了吗？人设抓住了吗？整本收在留白上了吗？本期作家的承重锚点命中了吗？把这段和这位作家一段真迹混在一起盲读、认得出是仿写吗？有没有哪处滑回了通用"美文腔"？——缺一项，补好再出。`;
+
+const AFTERGLOW_USER_MOTIF_SYSTEM_PROMPT_TEMPLATE = `## 写作任务
+
+请以「${AFTERGLOW_CHAR_NAME_SLOT} 对 ${AFTERGLOW_USER_NAME_SLOT} 的回应」为核心，写一篇作为你自己的视角作答。
+
+## 视角规则
+
+- 必须从 ${AFTERGLOW_CHAR_NAME_SLOT} 的内在出发。
+- 不是旁白替你总结爱意，而是你本人在心里、在动作里、在话里回应。
+- 不要把 ${AFTERGLOW_USER_NAME_SLOT} 写成工具人、奖励品或被凝视的空壳；ta 是会影响你判断的人。
+- 你可以写“我”，也可以写限制第三人称，但核心必须是你的感受、你的选择、你的反应。
+- 你就是${AFTERGLOW_CHAR_NAME_SLOT}本人，不能像任何通用角色，失去自己的味道。
+
+## 落笔前自检（只问这四个）
+
+- 成语、情绪词，各超过两个没？
+- 有没有一句多余的"注解"可以删？
+- 这段有没有别处搬不走的独家细节？
+- 比喻是贴死这个人的，还是哪段都能用的？
+
+## 输出格式
+
+《标题》
+
+〈一句引子：像他/她心里没发出去的一句话〉
+
+正文：
+[2268~2576 字，根据用户梗复杂度自然伸缩]
+
+尾声：
+[一句短句，像 ${AFTERGLOW_CHAR_NAME_SLOT} 最后还是没能直接发出去的话]`;
+
+function buildAfterglowSystemPromptTemplate(includeFormRoll: boolean, charName: string, userName: string): string {
+    const template = includeFormRoll
+        ? AFTERGLOW_SYSTEM_PROMPT_TEMPLATE
+        : AFTERGLOW_USER_MOTIF_SYSTEM_PROMPT_TEMPLATE;
+
+    return template.replace(
+        AFTERGLOW_FORM_ROLL_SLOT,
+        includeFormRoll ? AFTERGLOW_FORM_ROLL_LINE : '本期形态:用户梗自定',
+    )
+        .split(AFTERGLOW_CHAR_NAME_SLOT).join(charName)
+        .split(AFTERGLOW_USER_NAME_SLOT).join(userName);
+}
+
+function pickAfterglowSeedRollLine(typePick: ResolvedRollPick | undefined): string {
+    const typeValue = typePick?.promptValue || '';
+    if (typeValue.includes('if线')) return AFTERGLOW_IF_ROLL_LINE;
+    if (typeValue.includes('玩梗')) return AFTERGLOW_MOTIF_ROLL_LINE;
+    return '';
+}
 
 // Module-level: abort-and-replace controllers
 let activeSenseController: AbortController | null = null;
 let activeVoiceController: AbortController | null = null;
+const afterglowLastPick: Record<string, string> = {};
+const afterglowRollDecks: Record<string, RollDeck> = {};
+const customRollDecks = new WeakMap<Record<string, string>, Record<string, RollDeck>>();
 
 type SecondaryLLMMessage = {
     role: string;
@@ -323,6 +527,488 @@ function extractInnerVoiceFallback(raw: string): string | null {
         .trim();
 
     return sanitizeClassicInnerVoice(unescapeInnerVoiceFallback(cleaned));
+}
+
+interface ResolvedRollPick {
+    pool: string;
+    rawValue: string;
+    promptValue: string;
+    label: string;
+}
+
+interface RollDeck {
+    cards: string[];
+    sig: string;
+}
+
+interface AfterglowUserMotifMeta {
+    text: string;
+    sourceLabel: string;
+}
+
+interface AfterglowCoverMeta {
+    theme?: string;
+    themeSource?: string;
+    form?: string;
+    type?: string;
+    tone?: string;
+    snacks?: string[];
+    tags: string[];
+}
+
+interface AfterglowRequestMeta {
+    userInitiated?: boolean;
+    reason?: string;
+}
+
+function splitRollDisplayValue(value: string): { promptValue: string; label: string } {
+    const separatorIndex = value.indexOf('‖');
+    if (separatorIndex < 0) {
+        return { promptValue: value, label: value };
+    }
+
+    const label = value.slice(0, separatorIndex).trim();
+    const promptValue = value.slice(separatorIndex + 1).trim();
+    return {
+        promptValue: promptValue || label,
+        label: label || promptValue || value,
+    };
+}
+
+function shuffleRollOptions(options: string[]): string[] {
+    const cards = options.slice();
+    for (let index = cards.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        [cards[index], cards[swapIndex]] = [cards[swapIndex], cards[index]];
+    }
+    return cards;
+}
+
+function getRollDecks(lastPick: Record<string, string>): Record<string, RollDeck> {
+    if (lastPick === afterglowLastPick) return afterglowRollDecks;
+
+    let decks = customRollDecks.get(lastPick);
+    if (!decks) {
+        decks = {};
+        customRollDecks.set(lastPick, decks);
+    }
+    return decks;
+}
+
+function drawRollCard(pool: string, options: string[], lastPick: Record<string, string> = afterglowLastPick): string {
+    const normalizedOptions = options
+        .map(option => option.trim())
+        .filter(Boolean);
+
+    if (normalizedOptions.length === 0) return '';
+
+    const sig = normalizedOptions.join('\u0001');
+    const decks = getRollDecks(lastPick);
+    let deck = decks[pool];
+
+    if (!deck || deck.sig !== sig || deck.cards.length === 0) {
+        const cards = shuffleRollOptions(normalizedOptions);
+        if (normalizedOptions.length > 1 && cards[0] === lastPick[pool]) {
+            [cards[0], cards[cards.length - 1]] = [cards[cards.length - 1], cards[0]];
+        }
+        deck = decks[pool] = { cards, sig };
+    }
+
+    const pick = deck.cards.shift() || '';
+    lastPick[pool] = pick;
+    return pick;
+}
+
+export function resolveRolls(
+    text: string,
+    lastPick: Record<string, string> = afterglowLastPick,
+    onPick?: (pick: ResolvedRollPick) => void,
+): string {
+    const resolved = text.replace(/\{\{roll:([^:}]+):(.*?)\}\}/gs, (_match, rawPool: string, rawOptions: string) => {
+        const pool = rawPool.trim();
+        const pick = drawRollCard(pool, rawOptions.split('|'), lastPick);
+        if (!pick) return '';
+        const displayValue = splitRollDisplayValue(pick);
+        onPick?.({
+            pool,
+            rawValue: pick,
+            promptValue: displayValue.promptValue,
+            label: displayValue.label,
+        });
+        return displayValue.promptValue;
+    });
+
+    if (/\{\{roll:/i.test(resolved)) {
+        throw new Error('番外篇 system prompt roll 宏解析后仍残留 {{roll: }}');
+    }
+
+    return resolved;
+}
+
+function normalizeAfterglowChip(value: string): string {
+    return String(value || '')
+        .replace(/〔(?:paro|番外)〕/g, '')
+        .replace(/^#+/g, '')
+        .trim();
+}
+
+function addAfterglowChip(chips: string[], seen: Set<string>, value: string): void {
+    const normalized = normalizeAfterglowChip(value);
+    if (!normalized) return;
+    const chip = `#${normalized}`;
+    if (seen.has(chip)) return;
+    seen.add(chip);
+    chips.push(chip);
+}
+
+function addAfterglowMarkerChips(chips: string[], seen: Set<string>, value: string): void {
+    if (value.includes('〔paro〕')) addAfterglowChip(chips, seen, 'paro');
+    if (value.includes('〔番外〕')) addAfterglowChip(chips, seen, '番外');
+}
+
+function buildAfterglowRollTags(picks: ResolvedRollPick[]): string[] {
+    const byPool = new Map<string, ResolvedRollPick[]>();
+    picks.forEach(pick => {
+        const list = byPool.get(pick.pool) || [];
+        list.push(pick);
+        byPool.set(pick.pool, list);
+    });
+
+    const chips: string[] = [];
+    const seen = new Set<string>();
+    const formPick = byPool.get('FORM')?.[0];
+    const typePick = byPool.get('A')?.[0];
+    const tonePick = byPool.get('B')?.[0];
+
+    if (formPick && formPick.promptValue !== '标准本') {
+        addAfterglowChip(chips, seen, formPick.promptValue);
+    }
+
+    if (typePick) {
+        addAfterglowChip(chips, seen, typePick.promptValue);
+        addAfterglowMarkerChips(chips, seen, typePick.promptValue);
+    }
+
+    if (tonePick) {
+        addAfterglowChip(chips, seen, tonePick.promptValue);
+        addAfterglowMarkerChips(chips, seen, tonePick.promptValue);
+    }
+
+    const activePicks: ResolvedRollPick[] = [];
+    ['A', 'B', 'C', 'D', 'S'].forEach(pool => {
+        activePicks.push(...(byPool.get(pool) || []));
+    });
+
+    if (typePick?.promptValue.includes('if线')) {
+        activePicks.push(...(byPool.get('E') || []));
+    }
+
+    if (typePick?.promptValue.includes('玩梗')) {
+        const motifPick = byPool.get('F')?.[0];
+        if (motifPick) {
+            addAfterglowChip(chips, seen, motifPick.label);
+            activePicks.push(motifPick);
+        }
+    }
+
+    if ((byPool.get('S') || []).some(pick => pick.promptValue.includes('他的受访'))) {
+        activePicks.push(...(byPool.get('G') || []));
+    }
+
+    activePicks.forEach(pick => addAfterglowMarkerChips(chips, seen, pick.promptValue));
+    return chips;
+}
+
+function prettifyAfterglowMetaText(value: string | null | undefined): string {
+    const raw = String(value || '');
+    const normalized = normalizeAfterglowChip(raw)
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (raw.includes('〔paro〕')) {
+        const paroMatch = normalized.match(/^(现代都市|古风|校园|末世|西幻|民国|娱乐圈|婚后|反派向|重生|穿书|对调|仙侠|替身反转|AI)(.+)$/);
+        if (paroMatch) {
+            const setting = paroMatch[1];
+            const detail = paroMatch[2]
+                .replace(/我是/g, '，我是')
+                .replace(/我的位置/g, '，我的位置')
+                .replace(/初遇/g, '，初遇')
+                .replace(/台下/g, '，台下')
+                .replace(/柴米油盐/g, '，柴米油盐')
+                .replace(/^，/, '')
+                .trim();
+            return `${setting} paro · ${detail}`;
+        }
+    }
+
+    return normalized;
+}
+
+function compactAfterglowMetaText(value: string | null | undefined, maxLength: number = 42): string {
+    const normalized = prettifyAfterglowMetaText(value);
+    if (!normalized) return '';
+    return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
+function createAfterglowPickMap(picks: ResolvedRollPick[]): Map<string, ResolvedRollPick[]> {
+    const byPool = new Map<string, ResolvedRollPick[]>();
+    picks.forEach(pick => {
+        const list = byPool.get(pick.pool) || [];
+        list.push(pick);
+        byPool.set(pick.pool, list);
+    });
+    return byPool;
+}
+
+function formatAfterglowPickTheme(pick: ResolvedRollPick | undefined): string {
+    if (!pick) return '';
+    const rawLabel = normalizeAfterglowChip(pick.label);
+    const rawDetail = normalizeAfterglowChip(pick.promptValue);
+    if (rawLabel === rawDetail) {
+        return compactAfterglowMetaText(pick.promptValue, 46);
+    }
+
+    const label = compactAfterglowMetaText(pick.label, 14);
+    const detail = compactAfterglowMetaText(pick.promptValue, 34);
+    if (label && detail && label !== detail) return `${label} · ${detail}`;
+    return detail || label;
+}
+
+function buildAfterglowCoverMeta(
+    picks: ResolvedRollPick[],
+    userMotif?: AfterglowUserMotifMeta | null,
+): AfterglowCoverMeta {
+    const byPool = createAfterglowPickMap(picks);
+    const formPick = byPool.get('FORM')?.[0];
+    const typePick = byPool.get('A')?.[0];
+    const tonePick = byPool.get('B')?.[0];
+    const snacks = (byPool.get('S') || [])
+        .map(pick => compactAfterglowMetaText(pick.label || pick.promptValue, 16))
+        .filter((value, index, list) => value && list.indexOf(value) === index)
+        .slice(0, 3);
+
+    let themeSource = '本轮主题';
+    let theme = compactAfterglowMetaText(typePick?.label || typePick?.promptValue || '');
+
+    if (userMotif?.text) {
+        themeSource = userMotif.sourceLabel;
+        theme = compactAfterglowMetaText(userMotif.text, 42);
+    } else if (formPick && formPick.promptValue !== '标准本') {
+        themeSource = '本期形态';
+        theme = compactAfterglowMetaText(formPick.promptValue, 18);
+    } else if (typePick?.promptValue.includes('玩梗')) {
+        const motifPick = byPool.get('F')?.[0];
+        themeSource = '本轮梗';
+        theme = formatAfterglowPickTheme(motifPick) || theme;
+    } else if (typePick?.promptValue.includes('if线')) {
+        const ifPick = byPool.get('E')?.[0];
+        themeSource = 'if 前提';
+        theme = formatAfterglowPickTheme(ifPick) || theme;
+    }
+
+    return {
+        theme,
+        themeSource,
+        form: compactAfterglowMetaText(formPick?.promptValue || '', 18),
+        type: compactAfterglowMetaText(typePick?.label || typePick?.promptValue || '', 18),
+        tone: compactAfterglowMetaText(tonePick?.label || tonePick?.promptValue || '', 18),
+        snacks,
+        tags: buildAfterglowRollTags(picks),
+    };
+}
+
+function pickAfterglowOption(pool: string, options: string[], lastPick: Record<string, string> = afterglowLastPick): string {
+    return drawRollCard(pool, options, lastPick);
+}
+
+function formatAfterglowAuthorSlot(author: AfterglowAuthorAnchor): string {
+    return `${author.name}—${author.sketch}${author.flag ? `〔${author.flag}〕` : ''}`;
+}
+
+function findNamedAfterglowAuthorAnchor(inputs: Array<string | null | undefined>): AfterglowAuthorAnchor | null {
+    const joined = inputs
+        .filter((input): input is string => typeof input === 'string' && input.trim().length > 0)
+        .join('\n');
+    if (!joined) return null;
+
+    let matched: { author: AfterglowAuthorAnchor; index: number } | null = null;
+    for (const author of AFTERGLOW_AUTHOR_ANCHORS) {
+        const index = joined.indexOf(author.name);
+        if (index < 0) continue;
+        if (!matched || index < matched.index) {
+            matched = { author, index };
+        }
+    }
+
+    return matched ? matched.author : null;
+}
+
+export function resolveAfterglowAuthorSlot(
+    inputs: Array<string | null | undefined>,
+    isClassicalSetting: boolean,
+    lastPick: Record<string, string> = afterglowLastPick,
+): string {
+    const namedAuthor = findNamedAfterglowAuthorAnchor(inputs);
+    if (namedAuthor) return formatAfterglowAuthorSlot(namedAuthor);
+
+    const availableAuthors = isClassicalSetting
+        ? AFTERGLOW_AUTHOR_ANCHORS
+        : AFTERGLOW_AUTHOR_ANCHORS.filter(author => author.flag !== '文言');
+    const randomPool = availableAuthors.length > 0 ? availableAuthors : AFTERGLOW_AUTHOR_ANCHORS;
+    const pickedName = pickAfterglowOption('AUTHOR', randomPool.map(author => author.name), lastPick);
+    const pickedAuthor = randomPool.find(author => author.name === pickedName) || randomPool[0] || AFTERGLOW_AUTHOR_ANCHORS[0];
+    return formatAfterglowAuthorSlot(pickedAuthor);
+}
+
+function isAfterglowClassicalAuthorSetting(resolvedSystemPrompt: string, rollPicks: ResolvedRollPick[]): boolean {
+    const rollSignal = rollPicks
+        .map(pick => `${pick.rawValue}\n${pick.promptValue}\n${pick.label}`)
+        .join('\n');
+    const signal = `${resolvedSystemPrompt}\n${rollSignal}`;
+
+    return signal
+        .split(/\r?\n/)
+        .some(line => (
+            /〔paro〕\s*古风/.test(line)
+            || /题材\s*(?:[:：=＝]|为)\s*古典(?:\s|$|[，。；、])/u.test(line)
+            || /题材[^\n]{0,12}古典/u.test(line)
+        ));
+}
+
+function extractAfterglowUserInputText(content: unknown): string {
+    if (typeof content === 'string') {
+        if (/^data:image\//i.test(content)) return '';
+        return content.slice(0, 1000);
+    }
+
+    if (Array.isArray(content)) {
+        return content
+            .map(part => (typeof part?.text === 'string' ? part.text : ''))
+            .filter(Boolean)
+            .join('\n')
+            .slice(0, 1000);
+    }
+
+    return '';
+}
+
+function collectAfterglowUserAuthorInputs(messages: Message[]): string[] {
+    return messages
+        .filter(message => message.role === 'user')
+        .slice(-8)
+        .map(message => extractAfterglowUserInputText(message.content))
+        .filter(Boolean);
+}
+
+function buildAfterglowUserMotifBlock(
+    options?: AfterglowGenerationOptions,
+    onMotif?: (motif: AfterglowUserMotifMeta) => void,
+): string {
+    const forcedMotif = sanitizeAfterglowMotif(options?.userMotif);
+    const pooledMotifs = (options?.customMotifs || [])
+        .map(sanitizeAfterglowMotif)
+        .filter(Boolean);
+    const pickedMotif = forcedMotif || pickAfterglowOption('USER_MOTIF', pooledMotifs);
+
+    if (!pickedMotif) return '';
+
+    const sourceLabel = forcedMotif ? '用户指定梗' : '用户梗池随机抽中';
+    onMotif?.({ text: pickedMotif, sourceLabel });
+    return `\n\n## 用户梗要求
+- ${sourceLabel}: ${pickedMotif}
+- 这是本篇必须吸收的命题素材,但不是让你复述梗概。把它化成场景、误会、道具、转折或潜台词;若它与今轮类型/刀法冲突,优先保留它的关系张力与情绪方向。`;
+}
+
+function sanitizeAfterglowText(value: string | null | undefined): string | null {
+    if (typeof value !== 'string') return null;
+
+    const cleaned = value
+        .replace(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/g, '')
+        .replace(/<think(?:ing)?>([\s\S]*)$/g, '')
+        .replace(/```(?:text|txt|markdown|md)?\s*([\s\S]*?)```/gi, '$1')
+        .replace(/^\s*["“]|["”]\s*$/g, '')
+        .replace(/\r\n?/g, '\n')
+        .split('\n')
+        .map(line => line.replace(/[ \t]+$/g, ''))
+        .join('\n')
+        .replace(/\n{4,}/g, '\n\n\n')
+        .trim();
+
+    if (!cleaned) return null;
+    return cleaned.slice(0, AFTERGLOW_TEXT_MAX_LENGTH);
+}
+
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function createAfterglowHtml(text: string): string {
+    const escaped = escapeHtml(text);
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+.afterglow-card {
+    width: 330px;
+    min-height: 220px;
+    max-height: 540px;
+    overflow: auto;
+    padding: 22px 22px 18px;
+    border-radius: 24px;
+    color: #2f2a26;
+    background:
+        radial-gradient(circle at 18% 10%, rgba(255,255,255,0.78), transparent 34%),
+        linear-gradient(145deg, rgba(255,250,244,0.96), rgba(232,239,236,0.94));
+    border: 1px solid rgba(108, 91, 72, 0.16);
+    box-shadow: 0 24px 52px rgba(30, 23, 18, 0.24);
+}
+.afterglow-kicker {
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: rgba(89, 78, 68, 0.58);
+    margin-bottom: 12px;
+}
+.afterglow-text {
+    white-space: pre-wrap;
+    font-size: 15px;
+    line-height: 1.88;
+}
+details {
+    margin-top: 16px;
+    color: rgba(89, 78, 68, 0.66);
+    font-size: 12px;
+}
+summary {
+    cursor: pointer;
+    width: fit-content;
+    user-select: none;
+}
+</style>
+</head>
+<body>
+<article class="afterglow-card">
+    <div class="afterglow-kicker">番外篇</div>
+    <div class="afterglow-text">${escaped}</div>
+    <details>
+        <summary>余波</summary>
+        <div style="padding-top:8px;">这张卡片只存在于展示层。</div>
+    </details>
+</article>
+</body>
+</html>`;
 }
 
 
@@ -1607,6 +2293,146 @@ ${aiReply.slice(0, 500)}
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  6. generateAfterglowCard — 番外篇同人本
+// ═══════════════════════════════════════════════════════════════
+
+function buildAfterglowPrompt(
+    charName: string,
+    userName: string,
+    aiReply: string,
+    recentContext: string,
+    charContext: string,
+    authorInputs: string[],
+    timeContext: { timeStr: string; timeOfDay: string; dateStr: string; dayOfWeek: string },
+    afterglowOptions?: AfterglowGenerationOptions,
+): { system: string; user: string; tags: string[]; cover: AfterglowCoverMeta } {
+    const rollPicks: ResolvedRollPick[] = [];
+    let userMotifMeta: AfterglowUserMotifMeta | null = null;
+    const hasUserMotifChannel = Boolean(sanitizeAfterglowMotif(afterglowOptions?.userMotif))
+        || (afterglowOptions?.customMotifs || []).some(motif => Boolean(sanitizeAfterglowMotif(motif)));
+    const promptTemplate = buildAfterglowSystemPromptTemplate(!hasUserMotifChannel, charName, userName);
+    const resolvedTemplate = resolveRolls(promptTemplate, afterglowLastPick, pick => rollPicks.push(pick));
+    const typePick = rollPicks.find(pick => pick.pool === 'A');
+    const seedRollLine = pickAfterglowSeedRollLine(typePick);
+    const seedLine = seedRollLine
+        ? resolveRolls(seedRollLine, afterglowLastPick, pick => rollPicks.push(pick))
+        : '';
+    const systemWithSeed = resolvedTemplate.replace(AFTERGLOW_SEED_ROLL_SLOT, seedLine);
+    const userMotifBlock = buildAfterglowUserMotifBlock(afterglowOptions, motif => {
+        userMotifMeta = motif;
+    });
+    const selectedUserMotif = userMotifMeta as AfterglowUserMotifMeta | null;
+    const authorSlot = resolveAfterglowAuthorSlot(
+        [afterglowOptions?.userMotif, selectedUserMotif?.text, ...authorInputs],
+        isAfterglowClassicalAuthorSetting(systemWithSeed, rollPicks),
+    );
+    const systemBase = systemWithSeed.replace(AFTERGLOW_AUTHOR_SLOT, authorSlot);
+    const system = `${systemBase}${userMotifBlock}`;
+    const cover = buildAfterglowCoverMeta(rollPicks, userMotifMeta);
+    const user = `## ${charName}的信息
+${charContext}
+
+## 当前时间
+${timeContext.dateStr} ${timeContext.dayOfWeek} ${timeContext.timeOfDay} ${timeContext.timeStr}
+
+## 最近对话
+${recentContext}
+
+## ${charName}刚刚说的最新回复
+${aiReply}
+
+---
+
+请生成这次回复之后的「番外篇」同人本。
+
+输出开头必须包含《标题》和题记名句 —— 出处,不要省略;若引用名句,必须确认句子与出处真实,拿不准就按题注规则处理,不要伪造出处。`;
+
+    return { system, user, tags: cover.tags, cover };
+}
+
+async function generateAfterglowCard(
+    char: CharacterProfile,
+    aiReply: string,
+    currentMsgs: Message[],
+    apiConfig: { baseUrl: string; model: string; apiKey: string },
+    onError?: (reason: string) => void,
+    contextOptions?: SecondaryFullContextOptions,
+    afterglowOptions?: AfterglowGenerationOptions,
+    requestMeta: AfterglowRequestMeta = {},
+): Promise<StatusCardData | null> {
+    if (!aiReply || aiReply.length < 2) return null;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), VOICE_TIMEOUT_MS);
+
+    try {
+        const userInitiated = requestMeta.userInitiated !== false;
+        const reason = requestMeta.reason || (userInitiated ? '番外篇生成（手动）' : '番外篇生成（自动）');
+        const resolvedContext = await resolveSecondaryContext(char, currentMsgs, contextOptions);
+        const recentContext = resolvedContext.recentContext;
+        if (!recentContext) return null;
+
+        const prompt = buildAfterglowPrompt(
+            char.name,
+            contextOptions?.userProfile?.name?.trim() || '我',
+            aiReply.slice(0, 1200),
+            recentContext,
+            resolvedContext.charContext,
+            collectAfterglowUserAuthorInputs(currentMsgs),
+            RealtimeContextManager.getTimeContext(),
+            afterglowOptions,
+        );
+
+        const content = await callSecondaryLLM(
+            apiConfig,
+            prompt.system,
+            prompt.user,
+            controller.signal,
+            AFTERGLOW_LLM_MAX_TOKENS,
+            0.9,
+            resolvedContext.contextMessages,
+            { reason, conversationId: char.id, userInitiated },
+        );
+
+        const text = sanitizeAfterglowText(content);
+        if (!text) {
+            console.warn('🌙 [Afterglow] Empty output:', content?.slice(0, 200));
+            onError?.('番外篇生成为空');
+            return null;
+        }
+
+        const cardData: StatusCardData = {
+            cardType: 'freeform',
+            title: '番外篇',
+            body: text,
+            meta: {
+                html: createAfterglowHtml(text),
+                allowScripts: true,
+                source: 'afterglow',
+                generatedAt: Date.now(),
+                afterglowTags: prompt.tags,
+                afterglowCover: prompt.cover,
+            },
+            style: { mood: '' },
+        };
+
+        console.log(`🌙 [Afterglow] ${char.name}: ${text.slice(0, 40)}`);
+        return cardData;
+    } catch (err: any) {
+        if (err.name === 'AbortError') {
+            console.warn('🌙 [Afterglow] Timeout');
+            onError?.('番外篇生成超时');
+        } else {
+            console.error('🌙 [Afterglow] Error:', err.message);
+            onError?.(`番外篇生成失败: ${err.message}`);
+        }
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  Legacy compat: extract() wrapper for backward compatibility
 // ═══════════════════════════════════════════════════════════════
 
@@ -1723,6 +2549,9 @@ export const MindSnapshotExtractor = {
 
     /** 回复后：用户自定义模板卡片（fire-and-forget，custom 模式） */
     generateCustomCard,
+
+    /** 手动触发：番外篇同人本（不持久化、不回流主上下文） */
+    generateAfterglowCard,
 
     /** 情感基因溯源：为一组消息生成 InternalState（不持久化） */
     batchSenseForWindow,

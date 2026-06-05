@@ -8,6 +8,22 @@
 export type NianNianStage = '初遇' | '拉扯' | '心意渐明' | '情动' | '厮守' | '别离';
 
 export type NianNianStatusFieldType = 'number' | 'text';
+export type NianNianEventWeights = Record<string, number | Record<string, number>>;
+
+export interface NianNianEventPrototype {
+    id: string;
+    名称: string;
+    功能: string;
+    情绪: string;
+    适配stage: NianNianStage[];
+    基础权重: number;
+    跨题材示例: {
+        古代: string;
+        仙侠: string;
+        武侠: string;
+        民国: string;
+    };
+}
 
 export interface NianNianStatusField {
     key: string;
@@ -24,8 +40,18 @@ export interface NianNianWorldBible {
     protagonistIdentity: string;
     opening: string;
     statusSchema: NianNianStatusField[];
-    eventWeights: Record<string, number>;
+    eventWeights: NianNianEventWeights;
     customPrompt?: string;
+    worldStyle?: string;
+    seedStatus?: Record<string, any>;
+    openingStep?: NianNianWorldOpeningStep;
+    hiddenVarsSeed?: Record<string, number>;
+}
+
+export interface NianNianWorldOpeningStep {
+    sceneText: string;
+    options: NianNianChoiceOption[];
+    allowFreeInput?: boolean;
 }
 
 export interface NianNianStatusState {
@@ -61,6 +87,16 @@ export interface NianNianDirectorState {
     turn: number;
     stage: NianNianStage;
     hiddenVars: Record<string, number>;
+    recentEventIds?: string[];
+    eventHistory?: NianNianDirectorEventRecord[];
+    endingReady?: boolean;
+}
+
+export interface NianNianDirectorEventRecord {
+    id: string;
+    name: string;
+    raw: string;
+    turn: number;
 }
 
 export type NianNianInputBeatKind = 'speech' | 'action';
@@ -69,6 +105,31 @@ export interface NianNianInputBeat {
     kind: NianNianInputBeatKind;
     text: string;
 }
+
+export type BeatType = '白' | '话';
+export type BeatAnchor = '开' | '动作' | '台词' | '选项' | '收';
+export type PlayerSegmentAnchor = '选项' | '动作' | '台词';
+
+export interface Beat {
+    type: BeatType;
+    anchor: BeatAnchor | null;
+    text: string;
+}
+
+export interface PlayerSegment {
+    kind: 'player';
+    anchor: PlayerSegmentAnchor;
+    text: string;
+}
+
+export type DisplayItem =
+    | PlayerSegment
+    | {
+        kind: 'beat';
+        type: BeatType;
+        anchor: BeatAnchor | null;
+        text: string;
+    };
 
 export interface NianNianChoiceOption {
     id: string;
@@ -92,6 +153,8 @@ export interface NianNianRawMessage {
     content: string;
     createdAt: number;
     beats?: NianNianInputBeat[];
+    playerSegments?: PlayerSegment[];
+    assistantBeats?: Beat[];
     choiceId?: string;
 }
 
@@ -105,9 +168,12 @@ export interface NianNianSession {
     milestones: string[];
     segments: NianNianFrozenSegment[];
     rawBuffer: NianNianRawMessage[];
+    pendingCompressionBuffer?: NianNianRawMessage[];
+    pendingCompressionTurnStart?: number;
     director: NianNianDirectorState;
     currentStep: NianNianInteractionStep;
     ended: boolean;
+    retrospect?: string;
     ending?: string;
     createdAt: number;
     updatedAt: number;
@@ -146,4 +212,31 @@ export interface NianNianTurnPlan {
 export interface NianNianParsedStatusBlock {
     statusPatch: Record<string, any>;
     raw: string;
+}
+
+export interface NianNianParsedDirectorOption {
+    key: string;
+    label: string;
+    directorHint?: string;
+    raw: string;
+}
+
+export interface NianNianParsedDirectorOutput {
+    sceneText: string;
+    options: NianNianParsedDirectorOption[];
+    stage?: NianNianStage;
+    hiddenDeltas: Record<string, number>;
+    eventUsed?: string;
+    milestone?: string;
+    endingReady?: boolean;
+    rawDirector: string;
+}
+
+export interface NianNianParsedCompressionOutput {
+    segment: string;
+}
+
+export interface NianNianParsedSettlementOutput {
+    retrospect: string;
+    ending: string;
 }

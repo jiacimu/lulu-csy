@@ -95,6 +95,12 @@ function stripLeakedVoiceHistoryLabels(text: string): string {
         .replace(/[【\[]\s*(?:你上一条语音|你上一條語音|上一条语音|上一條語音|你刚才的语音|你剛才的語音|你发出的语音|你發出的語音)(?:消息)?(?:[（(]\s*\d+\s*秒\s*[）)])?\s*[】\]]\s*/g, '');
 }
 
+const LEAKED_REPLY_CONTEXT_LABEL_RE = /(?:引用回复上下文[：:]\s*)?这条消息正在回复[^「」\r\n]{0,60}的消息「[^」\r\n]{1,220}」[。.]?\s*本条消息正文[：:]\s*/g;
+
+function stripLeakedReplyContextLabels(text: string): string {
+    return text.replace(LEAKED_REPLY_CONTEXT_LABEL_RE, '');
+}
+
 const PHOTO_DIRECTOR_LEAK_LINE_RE = /^\s*(?:[-*+]\s*)?(?:配文|连续性|画面|镜头|氛围|视觉标签|生成意图|正向提示词|负向提示词|positive\s+prompt|negative\s+prompt|final\s+prompt|prompt|scene|camera|mood)\s*[：:]/i;
 const STRONG_PHOTO_DIRECTOR_LEAK_LINE_RE = /^\s*(?:[-*+]\s*)?(?:视觉标签|生成意图|正向提示词|负向提示词|positive\s+prompt|negative\s+prompt|final\s+prompt|prompt)\s*[：:]/i;
 
@@ -534,8 +540,8 @@ export const ChatParser = {
      * Preserves [[SEND_EMOJI:]] and [[SHARE_SONG:]] for downstream splitResponse.
      */
     sanitize: (text: string): string => {
-        const normalized = stripLeakedPhotoDirectorSummary(stripLeakedVoiceHistoryLabels(stripLeakedChatLinePrefixes(normalizeChatTextEnvelope(text))));
-        return stripLeakedPhotoDirectorSummary(normalized
+        const normalized = stripLeakedReplyContextLabels(stripLeakedPhotoDirectorSummary(stripLeakedVoiceHistoryLabels(stripLeakedChatLinePrefixes(normalizeChatTextEnvelope(text)))));
+        return stripLeakedReplyContextLabels(stripLeakedPhotoDirectorSummary(normalized
             // ── Strip leaked timestamps ──
             .replace(/\[\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}[：:]\d{2}\]\s*/g, '')
             .replace(/\[\d{1,2}[-/]\d{1,2}\s+\d{1,2}[：:]\d{2}\]\s*/g, '')
@@ -578,7 +584,7 @@ export const ChatParser = {
             .replace(/%%TRANS%%[\s\S]*/gi, '')
             // ── Collapse excessive whitespace ──
             .replace(/\n{3,}/g, '\n\n')
-            .trim());
+            .trim()));
     },
 
     /**
@@ -587,6 +593,7 @@ export const ChatParser = {
      */
     hasDisplayContent: (text: string): boolean => {
         const stripped = text
+            .replace(LEAKED_REPLY_CONTEXT_LABEL_RE, '')
             .replace(/%%\s*BILINGUAL\s*%%/gi, '')
             .replace(/%%TRANS%%[\s\S]*/gi, '')
             .replace(/<\/?翻译>|<\/?原文>|<\/?译文>/g, '')

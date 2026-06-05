@@ -1530,6 +1530,158 @@
   animation: checkphoneDesktopWiggle 0.24s ease-in-out infinite alternate;
 }
 
+.checkphone-desktop-app.is-music-widget {
+  grid-column: span 2;
+  align-items: stretch;
+  gap: 0;
+}
+
+.checkphone-desktop-music-widget {
+  position: relative;
+  display: flex;
+  height: 78px;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 22px;
+  background:
+    linear-gradient(145deg, rgba(24, 24, 29, 0.94), rgba(10, 10, 13, 0.96)),
+    #121216;
+  box-shadow: 0 16px 34px -22px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  color: #fff;
+  cursor: pointer;
+  padding: 9px;
+  text-align: left;
+  transition: transform 0.18s, box-shadow 0.18s;
+}
+
+.checkphone-desktop-music-widget:active {
+  transform: scale(0.96);
+  box-shadow: 0 10px 24px -18px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.checkphone-desktop-music-glow {
+  position: absolute;
+  inset: -40% -20%;
+  pointer-events: none;
+  background:
+    radial-gradient(62% 54% at 24% 30%, rgba(236, 65, 65, 0.46), transparent 68%),
+    radial-gradient(48% 46% at 86% 20%, rgba(245, 198, 118, 0.22), transparent 68%),
+    linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.04));
+  filter: blur(8px);
+  opacity: 0.9;
+}
+
+.checkphone-desktop-music-cover {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #ec4141, #2f1114);
+  box-shadow: 0 8px 16px -10px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.checkphone-desktop-music-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.checkphone-desktop-music-cover svg {
+  width: 21px;
+  height: 21px;
+}
+
+.checkphone-desktop-music-main {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.checkphone-desktop-music-kicker {
+  color: rgba(255, 255, 255, 0.48);
+  font-family: var(--cpd-mono);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.checkphone-desktop-music-title,
+.checkphone-desktop-music-artist {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkphone-desktop-music-title {
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.checkphone-desktop-music-artist {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 9px;
+  line-height: 1.1;
+}
+
+.checkphone-desktop-music-progress {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  margin-top: 4px;
+}
+
+.checkphone-desktop-music-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #fff, #ec4141);
+}
+
+.checkphone-desktop-music-play {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.checkphone-desktop-music-play svg {
+  width: 14px;
+  height: 14px;
+  margin-left: 1px;
+}
+
 .checkphone-desktop-chip {
   position: relative;
   display: flex;
@@ -1807,6 +1959,23 @@
   .checkphone-desktop-chip {
     width: 50px;
     height: 50px;
+  }
+
+  .checkphone-desktop-music-widget {
+    height: 74px;
+    gap: 7px;
+    padding: 8px;
+  }
+
+  .checkphone-desktop-music-cover {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+  }
+
+  .checkphone-desktop-music-play {
+    width: 24px;
+    height: 24px;
   }
 
   .checkphone-desktop-dock {
@@ -3995,6 +4164,490 @@
   100% {
     opacity: 1;
     transform: scale(1) translateY(0);
+  }
+}
+
+.afterglow-reader-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px 28px;
+  background: transparent;
+  animation: agFade 0.18s ease both;
+}
+
+.afterglow-reader-shell {
+  position: relative;
+  --ag-serif: "HuiwenMingchao", "Noto Serif SC", "Songti SC", STSong, SimSun, serif;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(82vw, 420px);
+  height: min(70vh, 640px);
+  overflow: hidden;
+  border-radius: 22px;
+  color: #2d2722;
+  background:
+    radial-gradient(120% 55% at 50% 0%, rgba(255, 255, 255, 0.8), transparent 60%),
+    linear-gradient(178deg, #fefcf8, #f4efe6);
+  box-shadow:
+    0 30px 64px -12px rgba(20, 16, 12, 0.42),
+    0 10px 26px -8px rgba(20, 16, 12, 0.22);
+  animation: agShell 0.24s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.afterglow-reader-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: 22px;
+  box-shadow:
+    inset 0 0 0 1px rgba(120, 96, 72, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -38px 44px -34px rgba(120, 96, 72, 0.15);
+}
+
+.afterglow-reader-close {
+  position: absolute;
+  top: 11px;
+  right: 11px;
+  z-index: 4;
+  display: flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  color: rgba(67, 55, 46, 0.6);
+  background: transparent;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+
+.afterglow-reader-close:hover {
+  background: rgba(120, 96, 72, 0.08);
+}
+
+.afterglow-reader-close:active {
+  transform: scale(0.92);
+}
+
+.ag-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 9px 44px 6px;
+  color: rgba(67, 55, 46, 0.46);
+}
+
+.ag-brand {
+  font-family: var(--ag-serif);
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+}
+
+.afterglow-reader-stage {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.afterglow-reader-page {
+  box-sizing: border-box;
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px 18px 14px;
+  color: #2d2722;
+  font-family: var(--ag-serif);
+  font-size: 14.4px;
+  line-height: 1.68;
+  white-space: normal;
+  word-break: break-word;
+  -webkit-overflow-scrolling: touch;
+}
+
+.afterglow-reader-page::-webkit-scrollbar {
+  width: 0;
+}
+
+.afterglow-reader-turn-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 20%;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.afterglow-reader-turn-zone:disabled {
+  pointer-events: none;
+}
+
+.afterglow-reader-turn-zone--left {
+  left: 0;
+}
+
+.afterglow-reader-turn-zone--right {
+  right: 0;
+}
+
+.ag-foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  height: 50px;
+  padding: 0 20px;
+}
+
+.ag-chev {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  color: rgba(67, 55, 46, 0.56);
+  background: transparent;
+  font-family: Georgia, serif;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition: opacity 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.ag-chev:hover {
+  background: rgba(120, 96, 72, 0.07);
+}
+
+.ag-chev:active {
+  transform: scale(0.9);
+}
+
+.ag-chev:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+.ag-ind {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 54px;
+}
+
+.ag-dot {
+  width: 5px;
+  height: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(120, 96, 72, 0.26);
+  cursor: pointer;
+  transition: all 0.24s ease;
+}
+
+.ag-dot.on {
+  width: 17px;
+  background: #b38a6d;
+}
+
+.ag-count {
+  color: rgba(67, 55, 46, 0.5);
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+.afterglow-reader-page[data-dir="1"] {
+  animation: agR 0.34s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.afterglow-reader-page[data-dir="-1"] {
+  animation: agL 0.34s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes agFade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes agShell {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes agR {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes agL {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ag-cover-wrap {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.ag-cover-inner {
+  text-align: center;
+}
+
+.ag-orn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin: 14px 0;
+}
+
+.ag-orn::before,
+.ag-orn::after {
+  content: "";
+  width: 28px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(179, 138, 109, 0.55));
+}
+
+.ag-orn::after {
+  background: linear-gradient(90deg, rgba(179, 138, 109, 0.55), transparent);
+}
+
+.ag-orn i {
+  display: block;
+  width: 5px;
+  height: 5px;
+  transform: rotate(45deg);
+  background: #b38a6d;
+}
+
+.ag-orn--sm::before,
+.ag-orn--sm::after {
+  width: 18px;
+}
+
+.ag-title {
+  margin: 5px 0;
+  color: #2d2722;
+  font-family: var(--ag-serif);
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 1.4;
+  text-indent: 0.1em;
+}
+
+.ag-ep {
+  max-width: 86%;
+  margin: 8px auto 0;
+}
+
+.ag-ep-q {
+  color: rgba(74, 63, 54, 0.74);
+  font-size: 13.5px;
+  font-style: italic;
+  line-height: 1.82;
+}
+
+.ag-ep-s {
+  margin-top: 12px;
+  color: #b38a6d;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-indent: 0.14em;
+}
+
+.ag-seed {
+  width: min(88%, 300px);
+  margin: 22px auto 0;
+  padding: 13px 16px 12px;
+  border-top: 1px solid rgba(179, 138, 109, 0.24);
+  border-bottom: 1px solid rgba(179, 138, 109, 0.18);
+  color: rgba(67, 55, 46, 0.78);
+}
+
+.ag-seed-label {
+  color: #b38a6d;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+}
+
+.ag-seed-value {
+  margin-top: 8px;
+  color: #2d2722;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.68;
+}
+
+.ag-body-wrap {
+  padding: 0 2px;
+}
+
+.ag-body-rule {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 auto 10px;
+  opacity: 0.58;
+}
+
+.ag-body-rule::before,
+.ag-body-rule::after {
+  content: "";
+  width: 42px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(179, 138, 109, 0.56));
+}
+
+.ag-body-rule::after {
+  background: linear-gradient(90deg, rgba(179, 138, 109, 0.56), transparent);
+}
+
+.ag-body-rule i {
+  display: block;
+  width: 4px;
+  height: 4px;
+  transform: rotate(45deg);
+  background: #b38a6d;
+}
+
+.ag-body-copy {
+  padding: 0 2px;
+}
+
+.ag-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 10px 0 14px;
+  color: #b38a6d;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+}
+
+.ag-section-heading::before,
+.ag-section-heading::after {
+  content: "";
+  width: 28px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(179, 138, 109, 0.45));
+}
+
+.ag-section-heading::after {
+  background: linear-gradient(90deg, rgba(179, 138, 109, 0.45), transparent);
+}
+
+.ag-snippet-heading {
+  margin: 1.2em 0 0.55em;
+  color: #4b3324;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+}
+
+.ag-snippet-heading::before {
+  content: "◆";
+  margin-right: 0.45em;
+  color: #b38a6d;
+  font-size: 0.82em;
+}
+
+.ag-tail {
+  margin: 1.1em 0 0;
+  padding-top: 0.85em;
+  border-top: 1px solid rgba(179, 138, 109, 0.18);
+  color: rgba(67, 55, 46, 0.72);
+  font-size: 13.5px;
+  line-height: 1.78;
+  text-align: center;
+}
+
+.ag-p {
+  margin: 0 0 0.5em;
+  text-align: justify;
+  text-indent: 2em;
+}
+
+.ag-p:last-child {
+  margin-bottom: 0;
+}
+
+.ag-p--first,
+.ag-p--cont {
+  text-indent: 0;
+}
+
+.ag-initial {
+  margin-right: 0.02em;
+  color: #b38a6d;
+  font-size: 1.32em;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .afterglow-reader-backdrop {
+    padding: 14px 30px;
+  }
+
+  .afterglow-reader-shell {
+    width: min(84vw, 390px);
+    height: min(68vh, 580px);
+  }
+
+  .afterglow-reader-page {
+    padding: 15px 16px 13px;
   }
 }
 

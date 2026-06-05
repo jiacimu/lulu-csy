@@ -7,7 +7,7 @@ import { safeResponseJson } from '../utils/safeApi';
 import { parseBilingual } from '../utils/chatParser';
 import { XhsMcpClient,normalizeNote } from '../utils/xhsMcpClient';
 import { unlockAudio } from './voicecall/unlockAudio';
-import MessageItem from '../components/chat/MessageItem';
+import MessageItem,{ AfterglowReaderModal } from '../components/chat/MessageItem';
 import { PRESET_THEMES } from '../components/chat/ChatConstants';
 import { DEFAULT_ARCHIVE_PROMPTS } from '../constants/archivePrompts';
 import { THINKING_CHAIN_UI_ENABLED } from '../constants';
@@ -20,6 +20,7 @@ import {
 } from '../components/chat/newspaper/YesterdayNewspaper';
 import Modal from '../components/os/Modal';
 import { useChatAI } from '../hooks/useChatAI';
+import type { AfterglowGenerationOptions } from '../utils/mindSnapshotExtractor';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { useVoiceTts } from '../hooks/useVoiceTts';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
@@ -49,6 +50,7 @@ import {
     createPhotoMeta,
     generatePhotoImage,
     getCompatiblePhotoStylePresets,
+    getOpenAIStyleFamilyForConfig,
     isImageGenerationConfigured,
     NO_PHOTO_STYLE_PRESET,
     NO_PHOTO_STYLE_PRESET_ID,
@@ -67,6 +69,7 @@ import {
 } from '../utils/vibeReferences';
 import { prepareGeneratedImageStorage,resolveOriginalImageUrl } from '../utils/generatedImageStorage';
 import type { SecondaryFullContextOptions } from '../utils/mindSnapshotExtractor';
+import type { StatusCardData } from '../types/statusCard';
 import { buildLifeProfileContextSnapshot } from '../utils/lifeProfileContextSnapshot';
 import { formatMemoryArchiveLine,selectMessagesForMemoryArchive } from '../utils/archiveMessageSelector';
 import {
@@ -120,11 +123,12 @@ function isMainChatVisibleMessage(message: Message): boolean {
 
 const CHAT_HISTORY_RAW_WINDOW_MAX = 1500;
 const QUICK_SONG_RECENT_MESSAGE_LIMIT = 300;
+const AFTERGLOW_CARD_CACHE_PREFIX = 'chat_afterglow_card';
 const EMPTY_PHOTO_STYLE_PRESETS: PhotoStylePreset[] = [];
 const QUICK_SONG_COVER_STYLE_PRESET: PhotoStylePreset = {
     id: 'quick-song-cover-image2',
     name: '主题曲封面',
-    providerScope: 'openai-compatible',
+    providerScope: 'openai-gpt',
     positivePrompt: '',
     negativePrompt: 'text, typography, logo, watermark, signature, extra text, low quality, blurry, distorted face, malformed hands, bad anatomy',
     size: '1024x1024',
@@ -638,6 +642,65 @@ const Chat: React.FC = () => {
     const [soulReflectionFeedback, setSoulReflectionFeedback] = useState('');
     const [isSoulReflecting, setIsSoulReflecting] = useState(false);
     const [soulReflectionResult, setSoulReflectionResult] = useState<{ reflection: string; anchors: string; mirrorSnippets: string[] } | null>(null);
+    const [afterglowCards, setAfterglowCards] = useState<Record<number, StatusCardData>>({});
+    const [afterglowLoadingIds, setAfterglowLoadingIds] = useState<Set<number>>(new Set());
+    const autoAfterglowRequestedIdsRef = useRef<Set<number>>(new Set());
+    const [showAfterglowPreview, setShowAfterglowPreview] = useState(() => {
+        if (!import.meta.env.DEV || typeof window === 'undefined') return false;
+        return new URLSearchParams(window.location.search).get('afterglowPreview') === '1';
+    });
+    const afterglowPreviewCard = useMemo<StatusCardData>(() => {
+        const previewParagraphs = [
+            '雨停在玻璃外的时候，那盏灯还亮着。他没有立刻回头，只把指节压在杯沿上，像是要把刚才那句被你轻轻带过的话重新按回原处。杯壁上有一圈很淡的水痕，偏偏与你袖口蹭过桌面的方向一致。他看见了，也装作没有看见。',
+            '你说没关系。三个字落下来，比雨声停得更轻。他于是也说没关系，可手没有松开，肩却往你这边偏了一点，偏到伞骨和灯影都替他露出破绽。那一点距离不够越界，只够让呼吸在狭窄处打个结。',
+            '桌上的旧票根被风翻过去一角，露出背面那行铅笔字。那是早前你随口写下的时间，他当时只扫了一眼，像没放在心上，后来却在每一次沉默里反复想起。现在纸边贴着他的掌心，他按得很轻，轻到几乎像是在替那张纸挡雨。',
+            '他本来可以把话说完。说那天之后他其实一直记得，记得你把伞柄让给他半寸，记得你在走廊尽头停了一下，记得你没有回头，却把脚步放慢到刚好能让他追上。可这些话一旦出口，就会把所有分寸都推到灯下。',
+            '所以他只低声问你冷不冷。问完又像后悔，把视线挪到别处，手却已经越过桌面，替你把那只快要滑落的杯子扶正。指尖碰到杯壁残余的温度，他停了一瞬，仿佛碰到的不是瓷，而是你刚刚离开的地方。',
+            '你没有拆穿他。你只是把那张票根推回去，推到他面前，说这东西该还给你了。他看着纸面，喉结很慢地动了一下。那一刻灯光像被雨水洗薄，所有声音都退到很远，只剩下他呼吸里一点压不住的乱。',
+            '他伸手去拿，却没有拿走。指腹停在票根边缘，离你的手背只有一线。那一线太窄，窄到理智站不稳，窄到他几乎能听见自己身体里某根绷了太久的弦发出细响。可他还是没有碰你，只把那张纸往自己这边拖了一寸。',
+            '你笑了一下，问他是不是还有话。他抬眼看你，眼神来不及收，像雨停之后檐下一滴水终于坠下来。那滴水没有砸出声响，却在两个人之间溅开极小的涟漪。他说没有，声音很稳，手背却已经泛起一点薄红。',
+            '后来灯忽然闪了一下。不是停电，只是老旧线路短暂地喘不过气。黑暗落下来的半秒里，他终于越过那一线，掌心覆住你的手背，力道克制得近乎发狠。等灯重新亮起，他已经松开，只剩票根被他攥皱了一角。',
+            '你低头看那一角。他也看见了。谁都没有提那半秒，像那不是发生过的事，只是雨声遗漏在房间里的回音。可他的手垂在身侧，指节一点点收紧，又一点点松开，仿佛还在确认刚才那点温度是不是自己的错觉。',
+            '门口的风铃被晚风碰响，声音细得像一句没说完的称呼。他站起来，把票根收进口袋，动作太慢，慢得像在给自己找最后一个留下的理由。你问他要走了吗。他背对着你嗯了一声，却没有迈步。',
+            '那盏灯在他肩上落下一小片暖色。你看见他抬手，像要替你拨开鬓边被风吹乱的发。手停在半空，很近，很安静。最后他只是把指尖蜷回掌心，低声说，明天如果还下雨，他可以……',
+        ];
+        return {
+            cardType: 'freeform',
+            body: [
+            '━━━━━━━━━━━━━━',
+            '🎭 番外篇 ·【视角重播】',
+            '',
+            '《灯雨》',
+            '山有木兮木有枝 —— 越人歌',
+            '',
+            '【正篇 ·〈视角重播〉】',
+            ...previewParagraphs,
+            '',
+            '—— 番外小料 ——',
+            '◆〈内心OS他没说出口却真实的想法〉',
+            '他把票根收进口袋的时候，想的不是纪念。那纸角太薄，薄到像一个借口，藏起来就可以晚一点承认自己舍不得。可是指腹碰到折痕，他又觉得可笑，原来有些东西不必开口，也会把人出卖得一干二净。',
+            '◆〈旁白吐槽毒舌旁白对刚才那幕的解说〉',
+            '请注意这位先生嘴上说没有，手却已经替答案签了字。成年人最体面的谎话，大概就是把所有越界都包装成顺手，把所有不舍都假装成天气原因。',
+            '◆〈私密记录他日记或备忘里关于我的一行〉',
+            '明天如果下雨，记得早一点到。不是为了伞。',
+            '',
+            '〔尾声〕他低声说，明天如果还下雨，他可以',
+            '',
+            '━━━━━━━━━━━━━━',
+            ].join('\n'),
+            meta: {
+                afterglowCover: {
+                    themeSource: '本轮主题',
+                    theme: '雨停之后的票根',
+                    type: '视角重播',
+                    tone: '暧昧拉扯',
+                    snacks: ['内心OS', '旁白吐槽', '私密记录'],
+                    tags: ['#视角重播', '#暧昧拉扯'],
+                },
+            },
+            style: {},
+        };
+    }, []);
 
     // --- Translation State (per-character toggle, global language settings) ---
     const [translationEnabled, setTranslationEnabled] = useState(() => {
@@ -697,11 +760,22 @@ const Chat: React.FC = () => {
     const currentThemeId = char?.bubbleStyle || 'default';
     const effectiveImageGenerationConfig = imageGenerationConfig || DEFAULT_IMAGE_GENERATION_CONFIG;
     const effectivePhotoStylePresets = photoStylePresets || EMPTY_PHOTO_STYLE_PRESETS;
+    const activeOpenAIStyleFamily = useMemo(
+        () => getOpenAIStyleFamilyForConfig(effectiveImageGenerationConfig),
+        [
+            effectiveImageGenerationConfig.openaiCompatible.baseUrl,
+            effectiveImageGenerationConfig.openaiCompatible.model,
+        ],
+    );
     const activePhotoStylePresets = useMemo(() => {
-        const compatibleStyles = getCompatiblePhotoStylePresets(effectivePhotoStylePresets, effectiveImageGenerationConfig.activeProvider)
+        const compatibleStyles = getCompatiblePhotoStylePresets(
+            effectivePhotoStylePresets,
+            effectiveImageGenerationConfig.activeProvider,
+            activeOpenAIStyleFamily,
+        )
             .filter(style => style.id !== NO_PHOTO_STYLE_PRESET_ID);
         return [NO_PHOTO_STYLE_PRESET, ...compatibleStyles];
-    }, [effectivePhotoStylePresets, effectiveImageGenerationConfig.activeProvider]);
+    }, [activeOpenAIStyleFamily, effectivePhotoStylePresets, effectiveImageGenerationConfig.activeProvider]);
     const refreshSavedVibeReferences = useCallback(async () => {
         const vibes = await DB.getSavedVibeReferences();
         setSavedVibeReferences(vibes);
@@ -1262,7 +1336,7 @@ const Chat: React.FC = () => {
     }, [emojis, categories, aiVisibleCategories]);
 
     // --- Initialize Hook ---
-    const { isTyping, recallStatus, searchStatus, diaryStatus, weiboStatus, lastTokenUsage, tokenBreakdown, setLastTokenUsage, triggerAI, retryMindSnapshot } = useChatAI({
+    const { isTyping, recallStatus, searchStatus, diaryStatus, weiboStatus, lastTokenUsage, tokenBreakdown, setLastTokenUsage, triggerAI, retryMindSnapshot, generateAfterglow } = useChatAI({
         char,
         userProfile,
         apiConfig,
@@ -1308,6 +1382,12 @@ const Chat: React.FC = () => {
             updateCharacter(charId, updates);
         },
     });
+
+    useEffect(() => {
+        setAfterglowCards({});
+        setAfterglowLoadingIds(new Set());
+        autoAfterglowRequestedIdsRef.current.clear();
+    }, [activeCharacterId]);
 
     // --- Autonomous Agent: incoming call event bridge ---
     useEffect(() => {
@@ -2385,6 +2465,7 @@ const Chat: React.FC = () => {
                     stylePresets: activePhotoStylePresets,
                     recentPhotoMetas,
                     providerType: effectiveImageGenerationConfig.activeProvider,
+                    openAIStyleFamily: activeOpenAIStyleFamily,
                     appearanceTags,
                     appearanceNegativeTags,
                     userAppearanceTags,
@@ -2459,7 +2540,7 @@ const Chat: React.FC = () => {
             manualPhotoInFlightRef.current = false;
             setManualPhotoGenerating(false);
         }
-    }, [activePhotoStylePresets, addToast, buildDefaultVibeReferencesForChar, char, effectiveImageGenerationConfig, handleVibeReferenceEncoded, prepareVibeReferencesForGeneration, saveGeneratedPhoto, userProfile]);
+    }, [activeOpenAIStyleFamily, activePhotoStylePresets, addToast, buildDefaultVibeReferencesForChar, char, effectiveImageGenerationConfig, handleVibeReferenceEncoded, prepareVibeReferencesForGeneration, saveGeneratedPhoto, userProfile]);
 
     const handlePhotoHint = useCallback((payload: PhotoHintTrigger) => {
         if (!payload?.char?.id || !payload.hint) return;
@@ -2469,6 +2550,7 @@ const Chat: React.FC = () => {
             return;
         }
         const imageConfigForJob = effectiveImageGenerationConfig;
+        const openAIStyleFamilyForJob = getOpenAIStyleFamilyForConfig(imageConfigForJob);
         const photoStylePresetsForJob = effectivePhotoStylePresets;
         const providerBaseUrl = imageConfigForJob.activeProvider === 'openai-compatible'
             ? imageConfigForJob.openaiCompatible.baseUrl.replace(/\/+$/, '')
@@ -2536,6 +2618,7 @@ const Chat: React.FC = () => {
                         stylePresets: photoStylePresetsForJob,
                         recentPhotoMetas,
                         providerType: imageConfigForJob.activeProvider,
+                        openAIStyleFamily: openAIStyleFamilyForJob,
                         appearanceTags: isNaiProvider ? payload.char.naiAppearanceTags : '',
                         appearanceNegativeTags: isNaiProvider ? payload.char.naiAppearanceNegativeTags : '',
                         userAppearanceTags: isNaiProvider && hintIncludesUser ? payload.userProfile.naiAppearanceTags : '',
@@ -3724,6 +3807,68 @@ const Chat: React.FC = () => {
         setModalType('message-options');
     }, []);
 
+    const handleGenerateAfterglow = useCallback(async (
+        sourceMessage: Message,
+        afterglowOptions?: AfterglowGenerationOptions,
+        triggerMeta?: { userInitiated?: boolean; silent?: boolean },
+    ): Promise<StatusCardData | null> => {
+        const charId = char?.id;
+        if (!sourceMessage?.id || !charId) return null;
+        if (!afterglowOptions && afterglowCards[sourceMessage.id]) {
+            return afterglowCards[sourceMessage.id];
+        }
+        const cacheKey = `${AFTERGLOW_CARD_CACHE_PREFIX}_${charId}_${sourceMessage.id}`;
+        if (!afterglowOptions) {
+            try {
+                const cached = localStorage.getItem(cacheKey);
+                if (cached) {
+                    const card = JSON.parse(cached) as StatusCardData;
+                    if (card?.body) {
+                        setAfterglowCards(prev => ({ ...prev, [sourceMessage.id]: card }));
+                        return card;
+                    }
+                }
+            } catch {
+                localStorage.removeItem(cacheKey);
+            }
+        }
+        if (afterglowLoadingIds.has(sourceMessage.id)) return null;
+
+        setAfterglowLoadingIds(prev => {
+            const next = new Set(prev);
+            next.add(sourceMessage.id);
+            return next;
+        });
+
+        try {
+            const card = await generateAfterglow({
+                sourceMessage,
+                currentMsgs: messagesRef.current,
+                afterglowOptions,
+                userInitiated: triggerMeta?.userInitiated !== false,
+                silent: triggerMeta?.silent,
+            });
+            if (card) {
+                setAfterglowCards(prev => ({
+                    ...prev,
+                    [sourceMessage.id]: card,
+                }));
+                try {
+                    localStorage.setItem(cacheKey, JSON.stringify(card));
+                } catch {
+                    // Cache is best-effort only; never block display on storage quota.
+                }
+            }
+            return card;
+        } finally {
+            setAfterglowLoadingIds(prev => {
+                const next = new Set(prev);
+                next.delete(sourceMessage.id);
+                return next;
+            });
+        }
+    }, [afterglowCards, afterglowLoadingIds, char?.id, generateAfterglow]);
+
     // --- Transfer Action ---
     const handleTransferAction = useCallback((msg: Message) => {
         setTransferActionMsg(msg);
@@ -3898,6 +4043,30 @@ const Chat: React.FC = () => {
         }
         return null;
     }, [displayMessages]);
+
+    useEffect(() => {
+        if ((char?.statusBarMode || 'classic') !== 'afterglow') return;
+        if (isTyping || selectionMode) return;
+        if (typeof lastAssistantId !== 'number' || lastAssistantId <= 0) return;
+        if (afterglowCards[lastAssistantId] || afterglowLoadingIds.has(lastAssistantId)) return;
+        if (autoAfterglowRequestedIdsRef.current.has(lastAssistantId)) return;
+
+        const sourceMessage = displayMessages.find(message => message.id === lastAssistantId);
+        if (!sourceMessage || sourceMessage.role !== 'assistant' || sourceMessage.metadata?.streamingPreview) return;
+
+        autoAfterglowRequestedIdsRef.current.add(lastAssistantId);
+        void handleGenerateAfterglow(sourceMessage, undefined, { userInitiated: false, silent: true })
+            .catch(error => console.error('[Afterglow] auto request failed:', error));
+    }, [
+        afterglowCards,
+        afterglowLoadingIds,
+        char?.statusBarMode,
+        displayMessages,
+        handleGenerateAfterglow,
+        isTyping,
+        lastAssistantId,
+        selectionMode,
+    ]);
 
     const scopedTodaySchedule = todaySchedule?.charId === char?.id ? todaySchedule : null;
     const todayScheduleItems = scopedTodaySchedule?.effectiveItems || [];
@@ -4203,6 +4372,14 @@ const Chat: React.FC = () => {
                 onToggleDefaultVibeReference={handleToggleDefaultVibeReference}
                 onSaveNaiAppearance={handleSaveNaiAppearance}
             />
+
+            {showAfterglowPreview && (
+                <AfterglowReaderModal
+                    data={afterglowPreviewCard}
+                    brand="番外篇"
+                    onClose={() => setShowAfterglowPreview(false)}
+                />
+            )}
 
             {showQuickSongPanel ? (
                 <div className="quick-song-overlay">
@@ -4628,8 +4805,11 @@ const Chat: React.FC = () => {
                                 onToggleVoiceText={toggleVoiceText}
                                 innerVoice={isLastAssistant && statusMode === 'classic' ? (char.moodState as any)?.innerVoice : undefined}
                                 statusCardData={isLastAssistant && hasStatusCardMode ? char.lastStatusCard : undefined}
-                                onRetryInnerVoice={isLastAssistant && statusMode !== 'off' && statusMode !== 'story_phone' ? retryMindSnapshot : undefined}
-                                onOpenStoryPhone={isLastAssistant && statusMode === 'story_phone' && !m.metadata?.storyPhoneConsumed ? handleOpenStoryPhone : undefined}
+                                onRetryInnerVoice={isLastAssistant && statusMode !== 'off' && statusMode !== 'story_phone' && statusMode !== 'afterglow' ? retryMindSnapshot : undefined}
+                                afterglowCardData={isLastAssistant && statusMode === 'afterglow' ? afterglowCards[m.id] : undefined}
+                                isAfterglowLoading={isLastAssistant && statusMode === 'afterglow' ? afterglowLoadingIds.has(m.id) : false}
+                                onRequestAfterglow={isLastAssistant && statusMode === 'afterglow' ? handleGenerateAfterglow : undefined}
+                                onOpenStoryPhone={isLastAssistant && statusMode === 'story_phone' && !m.metadata?.storyPhoneConsumed && !selectionMode ? handleOpenStoryPhone : undefined}
                                 showThinking={THINKING_CHAIN_UI_ENABLED && char.showThinking !== false}
                             />
                         </div>

@@ -96,6 +96,19 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     const themeLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const themeTouchMoved = useRef(false);
 
+    useEffect(() => {
+        return () => {
+            if (longPressTimer.current) {
+                clearTimeout(longPressTimer.current);
+                longPressTimer.current = null;
+            }
+            if (themeLongPressTimer.current) {
+                clearTimeout(themeLongPressTimer.current);
+                themeLongPressTimer.current = null;
+            }
+        };
+    }, []);
+
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -629,10 +642,11 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                                 onContextMenu={(e) => { e.preventDefault(); setThemeContextMenuId(t.id); }}
                                                 onTouchStart={() => {
                                                     themeTouchMoved.current = false;
+                                                    if (themeLongPressTimer.current) clearTimeout(themeLongPressTimer.current);
                                                     themeLongPressTimer.current = setTimeout(() => { if (!themeTouchMoved.current) setThemeContextMenuId(t.id); }, 500);
                                                 }}
-                                                onTouchMove={() => { themeTouchMoved.current = true; if (themeLongPressTimer.current) clearTimeout(themeLongPressTimer.current); }}
-                                                onTouchEnd={() => { if (themeLongPressTimer.current) clearTimeout(themeLongPressTimer.current); }}
+                                                onTouchMove={() => { themeTouchMoved.current = true; if (themeLongPressTimer.current) { clearTimeout(themeLongPressTimer.current); themeLongPressTimer.current = null; } }}
+                                                onTouchEnd={() => { if (themeLongPressTimer.current) { clearTimeout(themeLongPressTimer.current); themeLongPressTimer.current = null; } }}
                                                 className={`px-6 py-3 rounded-2xl text-xs font-bold border shrink-0 transition-all ${activeThemeId === t.id ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-indigo-50 border-indigo-100 text-indigo-600'}`}
                                             >
                                                 {t.name} (DIY)

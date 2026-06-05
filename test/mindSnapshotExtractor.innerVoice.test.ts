@@ -20,7 +20,86 @@ vi.mock('../utils/realtimeContext', () => ({
     },
 }));
 
-import { MindSnapshotExtractor } from '../utils/mindSnapshotExtractor';
+import { MindSnapshotExtractor, resolveAfterglowAuthorSlot, resolveRolls } from '../utils/mindSnapshotExtractor';
+
+describe('resolveRolls', () => {
+    it('replaces roll macros and avoids repeating the previous pick in each pool', () => {
+        const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+        const lastPick = { A: '片刻' };
+
+        const result = resolveRolls('{{roll:A:片刻|旁白|切面}} / {{roll:B:安静}}', lastPick);
+
+        expect(result).toBe('旁白 / 安静');
+        expect(lastPick).toEqual({ A: '旁白', B: '安静' });
+        randomSpy.mockRestore();
+    });
+
+    it('allows literal double-brace text while replacing roll macros', () => {
+        const result = resolveRolls('文中不得出现 {{ }}，命题是 {{roll:A:视角重播}}', {});
+        expect(result).toBe('文中不得出现 {{ }}，命题是 视角重播');
+        expect(result).not.toContain('{{roll:');
+    });
+
+    it('deals a shuffled deck per pool before reshuffling', () => {
+        const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+        const lastPick: Record<string, string> = {};
+
+        const firstDeck = resolveRolls('{{roll:S:内心OS|旁白吐槽|私密记录}}/{{roll:S:内心OS|旁白吐槽|私密记录}}/{{roll:S:内心OS|旁白吐槽|私密记录}}', lastPick)
+            .split('/');
+        const nextDeckFirst = resolveRolls('{{roll:S:内心OS|旁白吐槽|私密记录}}', lastPick);
+
+        expect(new Set(firstDeck).size).toBe(3);
+        expect(nextDeckFirst).not.toBe(firstDeck[2]);
+        randomSpy.mockRestore();
+    });
+
+    it('uses the right side of delimited roll options for prompt injection and reports the left side as label', () => {
+        const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+        const picks: any[] = [];
+
+        const result = resolveRolls(
+            '{{roll:F:吃醋‖看见我和旁人说笑嘴上不认动作出卖了他|壁咚‖退无可退的一寸距离先慌的是他自己}}',
+            {},
+            pick => picks.push(pick),
+        );
+
+        expect(result).toBe('看见我和旁人说笑嘴上不认动作出卖了他');
+        expect(picks[0]).toMatchObject({
+            pool: 'F',
+            rawValue: '吃醋‖看见我和旁人说笑嘴上不认动作出卖了他',
+            promptValue: '看见我和旁人说笑嘴上不认动作出卖了他',
+            label: '吃醋',
+        });
+        randomSpy.mockRestore();
+    });
+});
+
+describe('resolveAfterglowAuthorSlot', () => {
+    it('uses a named author from user input before random draw', () => {
+        const result = resolveAfterglowAuthorSlot(['这次想要张爱玲一点，冷一点。'], false, {});
+
+        expect(result).toBe('张爱玲—冷艳世故、苍凉俯视、以物象作反讽');
+    });
+
+    it('keeps classical Chinese anchors out of the modern random pool', () => {
+        const lastPick: Record<string, string> = {};
+        const slots = Array.from({ length: 25 }, () => resolveAfterglowAuthorSlot([], false, lastPick));
+        const joined = slots.join('\n');
+
+        expect(joined).not.toContain('蒲松龄—');
+        expect(joined).not.toContain('沈复—');
+        expect(joined).not.toContain('〔文言〕');
+    });
+
+    it('allows classical Chinese anchors when the issue is classical', () => {
+        const lastPick: Record<string, string> = {};
+        const slots = Array.from({ length: 25 }, () => resolveAfterglowAuthorSlot([], true, lastPick));
+        const joined = slots.join('\n');
+
+        expect(joined).toContain('蒲松龄—文言精炼、志怪幽艳、人妖情缠绵〔文言〕');
+        expect(joined).toContain('沈复—文言平易、闺房日常深情〔文言〕');
+    });
+});
 
 describe('MindSnapshotExtractor.generateInnerVoice', () => {
     const apiConfig = {
@@ -106,6 +185,161 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
         expect(body.messages[2].content).toContain('Secondary Task Instructions');
         expect(body.messages[2].content).toContain('角色刚刚的思考链');
         expect(body.messages[2].content).toContain('请基于上方主聊天完整上下文镜像执行本任务');
+    });
+
+    it('generates afterglow cards with full max_tokens without persisting to character state', async () => {
+        mockFetchContent('他把杯子往窗边推了一点，像是给沉默也留了个座位。');
+
+        const result = await MindSnapshotExtractor.generateAfterglowCard(
+            baseCharacter,
+            '我会提前看材料。',
+            currentMsgs as any,
+            apiConfig,
+            undefined,
+            {
+                mirrorMessages: [
+                    { role: 'system', content: 'FULL SYSTEM PROMPT WITH WORLDBOOKS' },
+                    { role: 'user', content: 'full db context line' },
+                ],
+                contextLimit: 1000000,
+                historyMsgCount: 2,
+                model: 'main-chat-model',
+            },
+        );
+
+        const body = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body));
+        const taskPrompt = body.messages[2].content;
+        expect(body.max_tokens).toBe(65536);
+        expect(taskPrompt).toContain('番外篇');
+        expect(taskPrompt).toContain('本期形态:');
+        expect(taskPrompt).toContain('## ✒ 作家笔触');
+        expect(taskPrompt).toContain('本期笔触：');
+        expect(taskPrompt).toContain('正文 3280~3654 中文字');
+        expect(taskPrompt).toContain('运笔·〈本期作家〉风');
+        expect(taskPrompt).not.toContain('番外小料');
+        expect(taskPrompt).not.toContain('三则小料');
+        expect(taskPrompt).not.toContain('__AFTERGLOW_SEED_ROLL_SLOT__');
+        expect(taskPrompt).not.toContain('__AFTERGLOW_AUTHOR_SLOT__');
+        expect([
+            taskPrompt.includes('if 前提:'),
+            taskPrompt.includes('本轮梗:'),
+        ].filter(Boolean).length).toBeLessThanOrEqual(1);
+        expect(taskPrompt).toContain('Marcus × 我');
+        expect(taskPrompt).not.toContain('__AFTERGLOW_CHAR_NAME__');
+        expect(taskPrompt).not.toContain('__AFTERGLOW_USER_NAME__');
+        expect(taskPrompt).toContain('《标题》');
+        expect(taskPrompt).toContain('题记');
+        expect(taskPrompt).not.toContain('{{roll:');
+        expect(result?.cardType).toBe('freeform');
+        expect(result?.body).toBe('他把杯子往窗边推了一点，像是给沉默也留了个座位。');
+        expect(result?.meta?.html).toContain('番外篇');
+        expect(result?.meta?.afterglowTags).toEqual(expect.arrayContaining([expect.stringMatching(/^#/)]));
+        expect(result?.meta?.afterglowCover).toMatchObject({
+            form: expect.any(String),
+            theme: expect.any(String),
+            themeSource: expect.any(String),
+            tags: expect.arrayContaining([expect.stringMatching(/^#/)]),
+        });
+        expect(dbMocks.saveCharacter).not.toHaveBeenCalled();
+    });
+
+    it('injects only the named author anchor into the afterglow prompt', async () => {
+        mockFetchContent('雨声停在门外，他却没有把那句话说完。');
+
+        await MindSnapshotExtractor.generateAfterglowCard(
+            baseCharacter,
+            '我会提前看材料。',
+            [
+                ...currentMsgs,
+                { role: 'user', type: 'text', content: '随机来一篇，但想要张爱玲式的冷艳反讽。' },
+            ] as any,
+            apiConfig,
+            undefined,
+            {
+                mirrorMessages: [
+                    { role: 'system', content: 'FULL SYSTEM PROMPT WITH WORLDBOOKS' },
+                    { role: 'user', content: 'full db context line' },
+                ],
+                contextLimit: 1000000,
+                historyMsgCount: 2,
+                model: 'main-chat-model',
+            },
+        );
+
+        const body = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body));
+        const taskPrompt = body.messages[2].content;
+
+        expect(taskPrompt).toContain('本期笔触：张爱玲—冷艳世故、苍凉俯视、以物象作反讽');
+        expect(taskPrompt).not.toContain('曹雪芹—');
+        expect(taskPrompt).not.toContain('人物各有口吻、细节绵密、含蓄不点破');
+        expect(taskPrompt).not.toContain('马尔克斯—');
+        expect(taskPrompt).not.toContain('作家 | 笔法速写');
+    });
+
+    it('detects a named author from recent user messages', async () => {
+        mockFetchContent('他把那句玩笑收回去，只留下半个漂亮的停顿。');
+
+        await MindSnapshotExtractor.generateAfterglowCard(
+            baseCharacter,
+            '我会提前看材料。',
+            [
+                ...currentMsgs,
+                { role: 'user', type: 'text', content: '这次能不能有点王尔德那种机锋？' },
+            ] as any,
+            apiConfig,
+            undefined,
+            {
+                mirrorMessages: [
+                    { role: 'system', content: 'FULL SYSTEM PROMPT WITH WORLDBOOKS' },
+                    { role: 'user', content: 'full db context line' },
+                ],
+                contextLimit: 1000000,
+                historyMsgCount: 3,
+                model: 'main-chat-model',
+            },
+        );
+
+        const body = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body));
+        const taskPrompt = body.messages[2].content;
+
+        expect(taskPrompt).toContain('本期笔触：王尔德—机锋悖论、唯美毒舌〔译〕');
+        expect(taskPrompt).not.toContain('张爱玲—冷艳世故、苍凉俯视、以物象作反讽');
+    });
+
+    it('injects user specified afterglow motifs into the secondary task instructions', async () => {
+        mockFetchContent('雨声停在门外，他却没有把那句话说完。');
+
+        await MindSnapshotExtractor.generateAfterglowCard(
+            baseCharacter,
+            '我会提前看材料。',
+            currentMsgs as any,
+            apiConfig,
+            undefined,
+            {
+                mirrorMessages: [
+                    { role: 'system', content: 'FULL SYSTEM PROMPT WITH WORLDBOOKS' },
+                    { role: 'user', content: 'full db context line' },
+                ],
+                contextLimit: 1000000,
+                historyMsgCount: 2,
+                model: 'main-chat-model',
+            },
+            {
+                userMotif: '雨夜误会',
+                customMotifs: ['一封没寄出的信'],
+            },
+        );
+
+        const body = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body));
+        expect(body.messages[2].content).toContain('## 用户梗要求');
+        expect(body.messages[2].content).toContain('请以「Marcus 对 我 的回应」为核心');
+        expect(body.messages[2].content).toContain('你就是Marcus本人，不能像任何通用角色');
+        expect(body.messages[2].content).toContain('[2268~2576 字，根据用户梗复杂度自然伸缩]');
+        expect(body.messages[2].content).toContain('用户指定梗: 雨夜误会');
+        expect(body.messages[2].content).not.toContain('正文 3280~3654 中文字');
+        expect(body.messages[2].content).not.toContain('运笔·〈本期作家〉风');
+        expect(body.messages[2].content).not.toContain('roll:FORM');
+        expect(body.messages[2].content).not.toContain('{{roll:');
     });
 
     it('includes previous assistant thinking in the pre-reply state sensing prompt', async () => {
