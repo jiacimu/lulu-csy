@@ -20,7 +20,7 @@ import type {
   HighlightMemory,
   SocialSignal,
 } from '../types/loveshow';
-import { GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL, type ImageGenerationStyle, type OpenAICompatibleStyleFamily, type PhotoPromptBundle, type PhotoStylePreset } from '../types';
+import type { ImageGenerationStyle, OpenAICompatibleStyleFamily, PhotoPromptBundle, PhotoStylePreset } from '../types';
 
 export type LoveShowImageMode = 'solo' | 'couple';
 
@@ -111,7 +111,6 @@ export const LOVE_SHOW_IMAGE_STYLE_PRESETS: PhotoStylePreset[] = [
     id: LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS.solo.guoman,
     name: 'Gemini 单人 · 国漫风',
     providerScope: 'openai-gemini',
-    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     size: LOVE_SHOW_GEMINI_VERTICAL_SIZE,
     responseFormat: 'b64_json',
     n: 1,
@@ -122,7 +121,6 @@ export const LOVE_SHOW_IMAGE_STYLE_PRESETS: PhotoStylePreset[] = [
     id: LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS.solo.cg,
     name: 'Gemini 单人 · CG质感',
     providerScope: 'openai-gemini',
-    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     size: LOVE_SHOW_GEMINI_VERTICAL_SIZE,
     responseFormat: 'b64_json',
     n: 1,
@@ -133,7 +131,6 @@ export const LOVE_SHOW_IMAGE_STYLE_PRESETS: PhotoStylePreset[] = [
     id: LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS.solo.real,
     name: 'Gemini 单人 · 真人风',
     providerScope: 'openai-gemini',
-    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     size: LOVE_SHOW_GEMINI_VERTICAL_SIZE,
     responseFormat: 'b64_json',
     n: 1,
@@ -144,7 +141,6 @@ export const LOVE_SHOW_IMAGE_STYLE_PRESETS: PhotoStylePreset[] = [
     id: LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS.couple.guoman,
     name: 'Gemini 双人 · 国漫风',
     providerScope: 'openai-gemini',
-    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     size: LOVE_SHOW_GEMINI_VERTICAL_SIZE,
     responseFormat: 'b64_json',
     n: 1,
@@ -155,7 +151,6 @@ export const LOVE_SHOW_IMAGE_STYLE_PRESETS: PhotoStylePreset[] = [
     id: LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS.couple.cg,
     name: 'Gemini 双人 · CG质感',
     providerScope: 'openai-gemini',
-    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     size: LOVE_SHOW_GEMINI_VERTICAL_SIZE,
     responseFormat: 'b64_json',
     n: 1,
@@ -166,7 +161,6 @@ export const LOVE_SHOW_IMAGE_STYLE_PRESETS: PhotoStylePreset[] = [
     id: LOVE_SHOW_GEMINI_IMAGE_PRESET_IDS.couple.real,
     name: 'Gemini 双人 · 真人风',
     providerScope: 'openai-gemini',
-    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     size: LOVE_SHOW_GEMINI_VERTICAL_SIZE,
     responseFormat: 'b64_json',
     n: 1,

@@ -106,7 +106,7 @@ describe('runtimeConfig', () => {
         expect(GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS.model).toBe('gemini-3.1-flash-image-preview');
     });
 
-    it('migrates only built-in Gemini style presets from the old Gemini image model', () => {
+    it('clears app-owned Gemini style preset model locks without changing custom styles', () => {
         localStorage.setItem(PHOTO_STYLE_PRESETS_KEY, JSON.stringify([
             {
                 id: 'gemini-nano-banana-natural-snapshot',
@@ -114,6 +114,14 @@ describe('runtimeConfig', () => {
                 providerScope: 'openai-gemini',
                 model: 'gemini-2.5-flash-image',
                 positivePrompt: 'natural snapshot',
+                negativePrompt: '',
+            },
+            {
+                id: 'loveshow-gemini-solo-real',
+                name: 'Gemini 单人 · 真人风',
+                providerScope: 'openai-gemini',
+                model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+                positivePrompt: 'real portrait',
                 negativePrompt: '',
             },
             {
@@ -129,7 +137,9 @@ describe('runtimeConfig', () => {
         const presets = getPhotoStylePresets();
 
         expect(presets.find(preset => preset.id === 'gemini-nano-banana-natural-snapshot')?.model)
-            .toBe(GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL);
+            .toBeUndefined();
+        expect(presets.find(preset => preset.id === 'loveshow-gemini-solo-real')?.model)
+            .toBeUndefined();
         expect(presets.find(preset => preset.id === 'custom-gemini-style')?.model)
             .toBe('gemini-2.5-flash-image');
     });

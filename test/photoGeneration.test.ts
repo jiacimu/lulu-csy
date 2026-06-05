@@ -551,9 +551,11 @@ describe('photoGeneration helpers', () => {
         const geminiSoloPreset = resolveImageStylePhotoPreset(undefined, presets, undefined, geminiConfig, false);
         const geminiCouplePreset = resolveImageStylePhotoPreset(undefined, presets, undefined, geminiConfig, true);
         expect(geminiSoloPreset.id).toBe('loveshow-gemini-solo-real');
-        expect(geminiSoloPreset.model).toBe(GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL);
+        expect(geminiSoloPreset.model).toBeUndefined();
         expect(geminiCouplePreset.id).toBe('loveshow-gemini-couple-real');
-        expect(geminiCouplePreset.model).toBe(GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL);
+        expect(geminiCouplePreset.model).toBeUndefined();
+        expect(createPhotoMeta('manual', geminiConfig, geminiSoloPreset, buildManualPhotoPrompt('窗边自拍', geminiSoloPreset, geminiConfig), 123).model)
+            .toBe('gemini-2.5-flash-image');
         expect(resolveImageStylePhotoPreset('custom-style', [
             {
                 id: 'custom-style',
@@ -1046,6 +1048,29 @@ describe('photoGeneration helpers', () => {
 
         const [, init] = (fetch as any).mock.calls[0];
         expect(JSON.parse(init.body).model).toBe('gpt-image-2');
+    });
+
+    it('strips provider prefixes from Gemini and GPT image model names before requesting', async () => {
+        const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
+        const cases: Array<[string, string]> = [
+            ['假流/gemini-3.1-flash-image-preview', GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL],
+            ['fake-stream/gemini-3-pro-image-preview', 'gemini-3-pro-image-preview'],
+            ['假流/gemini-3.1-flash-image-preview / gemini-3.1-flash-image-preview', GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL],
+            ['openai/gpt-image-2', 'gpt-image-2'],
+        ];
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({
+            data: [{ b64_json: 'aGVsbG8=' }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+        for (const [storedModel] of cases) {
+            await generatePhotoImage(config, { ...openAICompatibleMeta, model: storedModel });
+        }
+
+        expect(fetchMock).toHaveBeenCalledTimes(cases.length);
+        cases.forEach(([, expectedModel], index) => {
+            const [, init] = fetchMock.mock.calls[index];
+            expect(JSON.parse(String(init?.body || '{}')).model).toBe(expectedModel);
+        });
     });
 
     it('passes OpenAI-compatible optional request params and extra JSON overrides', async () => {
@@ -1679,16 +1704,18 @@ describe('photoGeneration helpers', () => {
             data: [
                 { id: 'image2', name: 'Image 2' },
                 { name: '【0.08】米/gpt-image-2' },
+                { id: 'fake-stream/gemini-3-pro-image-preview', name: '假流/gemini-3-pro-image-preview' },
             ],
         }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
         const result = await testOpenAICompatibleImageConnection(baseConfig.openaiCompatible);
 
         expect(result.ok).toBe(true);
-        expect(result.models).toEqual(['image2', 'gpt-image-2']);
+        expect(result.models).toEqual(['image2', 'gpt-image-2', 'gemini-3-pro-image-preview']);
         expect(result.modelOptions).toEqual([
             { id: 'image2', name: 'Image 2', displayName: 'Image 2 / image2' },
             { id: 'gpt-image-2', name: '【0.08】米/gpt-image-2', displayName: '【0.08】米/gpt-image-2 / gpt-image-2' },
+            { id: 'gemini-3-pro-image-preview', name: '假流/gemini-3-pro-image-preview', displayName: '假流/gemini-3-pro-image-preview / gemini-3-pro-image-preview' },
         ]);
         expect(fetch).toHaveBeenCalledWith('https://imagegen.example/v1/models', expect.objectContaining({
             method: 'GET',

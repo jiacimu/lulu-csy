@@ -1071,6 +1071,15 @@ function logPhotoResponse(label: string, response: Response, text: string, conte
 function normalizeOpenAICompatibleModelId(value: unknown): string {
     const raw = String(value || '').trim();
     if (!raw) return '';
+    const knownImageModelMatches = raw.match(/\b(?:gemini-[a-z0-9][a-z0-9.-]*image[a-z0-9.-]*|gpt-image-[a-z0-9][a-z0-9.-]*)\b/ig);
+    const knownImageModel = knownImageModelMatches && knownImageModelMatches.length > 0
+        ? knownImageModelMatches[knownImageModelMatches.length - 1].trim()
+        : '';
+    if (knownImageModel) return knownImageModel;
+    const displayDelimiterParts = raw.split(/\s+\/\s+/).map(part => part.trim()).filter(Boolean);
+    if (displayDelimiterParts.length > 1) {
+        return displayDelimiterParts[displayDelimiterParts.length - 1];
+    }
     const slashIndex = raw.lastIndexOf('/');
     if (slashIndex > 0 && slashIndex < raw.length - 1) {
         const prefix = raw.slice(0, slashIndex);

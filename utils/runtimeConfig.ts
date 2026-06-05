@@ -154,6 +154,10 @@ export const OPENAI_IMAGE_OUTPUT_FORMATS: OpenAIImageOutputFormat[] = ['', 'png'
 export const OPENAI_IMAGE_MODERATIONS: OpenAIImageModeration[] = ['', 'auto', 'low'];
 export const GEMINI_OPENAI_COMPATIBLE_IMAGE_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai';
 const LEGACY_GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL = 'gemini-2.5-flash-image';
+const APP_OWNED_GEMINI_STYLE_MODEL_IDS = new Set([
+    LEGACY_GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+    GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+]);
 export const GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS: Partial<OpenAICompatibleImageProviderConfig> = {
     baseUrl: GEMINI_OPENAI_COMPATIBLE_IMAGE_BASE_URL,
     model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
@@ -260,7 +264,6 @@ export const DEFAULT_PHOTO_STYLE_PRESETS: PhotoStylePreset[] = [
         providerScope: 'openai-gemini',
         positivePrompt: '自然真实的日常随拍感，保持主体身份一致，光线柔和，细节清晰，构图像手机或相机随手记录下来的亲密瞬间，画面干净、有空气感。',
         negativePrompt: '文字，水印，logo，脸部融合，额外人物，过度磨皮，低质量，模糊，畸形手，比例失衡',
-        model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
         size: '1024x1024',
         responseFormat: 'b64_json',
         n: 1,
@@ -947,13 +950,13 @@ function normalizePhotoStylePresets(value: unknown): PhotoStylePreset[] {
 }
 
 function migrateBuiltInGeminiPhotoStylePresetModel(preset: PhotoStylePreset): PhotoStylePreset {
-    if (preset.model !== LEGACY_GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL) return preset;
     const builtIn = DEFAULT_PHOTO_STYLE_PRESETS.find(defaultPreset =>
         defaultPreset.id === preset.id
         && defaultPreset.providerScope === 'openai-gemini'
-        && defaultPreset.model === GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     );
-    return builtIn ? { ...preset, model: builtIn.model } : preset;
+    if (!builtIn || !preset.model || !APP_OWNED_GEMINI_STYLE_MODEL_IDS.has(preset.model)) return preset;
+    const { model, ...rest } = preset;
+    return rest;
 }
 
 function migratePhotoStylePresetsWithBuiltIns(presets: PhotoStylePreset[]): PhotoStylePreset[] {
