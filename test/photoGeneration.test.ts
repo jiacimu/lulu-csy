@@ -26,7 +26,6 @@ import {
     testOpenAICompatibleImageConnection,
 } from '../utils/photoGeneration';
 import {
-    GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     getImageGenerationConfig,
     getPhotoStylePresets,
     IMAGE_GENERATION_CONFIG_KEY,
@@ -409,7 +408,7 @@ describe('photoGeneration helpers', () => {
 
         expect(getPhotoStylePresets()[0]).toMatchObject({
             id: 'param-style',
-            providerScope: 'openai-gpt',
+            providerScope: 'openai-compatible',
             size: 'auto',
             responseFormat: 'url',
             n: 2,
@@ -427,23 +426,28 @@ describe('photoGeneration helpers', () => {
         });
     });
 
-    it('normalizes legacy Gemini compatible style presets to Gemini scope', () => {
+    it('normalizes legacy split OpenAI-compatible style scopes back to OpenAI-compatible', () => {
         localStorage.setItem(PHOTO_STYLE_PRESETS_KEY, JSON.stringify([
             {
-                id: 'nano-banana-soft',
-                name: 'Gemini Soft',
-                providerScope: 'openai-compatible',
-                model: 'gemini-2.5-flash-image',
+                id: 'legacy-gpt-soft',
+                name: 'Legacy GPT Soft',
+                providerScope: 'openai-' + 'gpt',
+                positivePrompt: 'natural snapshot',
+                negativePrompt: '',
+            },
+            {
+                id: 'legacy-gemini-soft',
+                name: 'Legacy Gemini Soft',
+                providerScope: 'openai-' + 'gemini',
                 positivePrompt: 'natural snapshot',
                 negativePrompt: '',
             },
         ]));
 
-        expect(getPhotoStylePresets()[0]).toMatchObject({
-            id: 'nano-banana-soft',
-            providerScope: 'openai-gemini',
-            model: 'gemini-2.5-flash-image',
-        });
+        expect(getPhotoStylePresets().map(preset => [preset.id, preset.providerScope])).toEqual([
+            ['legacy-gpt-soft', 'openai-compatible'],
+            ['legacy-gemini-soft', 'openai-compatible'],
+        ]);
     });
 
     it('migrates saved style presets to include new OpenAI-compatible defaults and drop retired NAI defaults', () => {
@@ -470,26 +474,21 @@ describe('photoGeneration helpers', () => {
         expect(ids).not.toContain('soft-polaroid');
         expect(ids).toContain('custom-openai');
         expect(ids).toContain('loveshow-solo-guoman');
-        expect(ids).toContain('loveshow-gemini-solo-guoman');
         expect(ids).toContain('loveshow-couple-real');
-        expect(ids).toContain('loveshow-gemini-couple-real');
         expect(ids).toContain('style-openai-compatible-1779814872010');
         expect(ids).toContain('style-openai-compatible-mature-male-real-couple');
-        expect(presets.find(preset => preset.id === 'custom-openai')?.providerScope).toBe('openai-gpt');
+        expect(presets.find(preset => preset.id === 'custom-openai')?.providerScope).toBe('openai-compatible');
     });
 
     it('filters style presets by the active provider without mixing shared presets', () => {
         const presets: PhotoStylePreset[] = [
             { ...style, id: 'nai-only', providerScope: 'novelai' },
-            { ...style, id: 'gpt-only', providerScope: 'openai-gpt' },
-            { ...style, id: 'gemini-only', providerScope: 'openai-gemini' },
+            { ...style, id: 'compat-only', providerScope: 'openai-compatible' },
             { ...style, id: 'shared', providerScope: 'all' },
         ];
 
-        expect(getCompatiblePhotoStylePresets(presets, 'openai-compatible', 'gpt').map(preset => preset.id)).toEqual(['gpt-only']);
-        expect(getCompatiblePhotoStylePresets(presets, 'openai-compatible', 'gemini').map(preset => preset.id)).toEqual(['gemini-only']);
-        expect(resolvePhotoStylePreset('nai-only', presets, undefined, 'openai-compatible', { openAIStyleFamily: 'gpt' }).id).toBe('gpt-only');
-        expect(resolvePhotoStylePreset('gpt-only', presets, undefined, 'openai-compatible', { openAIStyleFamily: 'gemini' }).id).toBe('gemini-only');
+        expect(getCompatiblePhotoStylePresets(presets, 'openai-compatible').map(preset => preset.id)).toEqual(['compat-only']);
+        expect(resolvePhotoStylePreset('nai-only', presets, undefined, 'openai-compatible').id).toBe('compat-only');
     });
 
     it('falls back to legacy shared style presets when no provider-specific preset exists', () => {
@@ -534,33 +533,15 @@ describe('photoGeneration helpers', () => {
 
     it('uses the global LoveShow image style preset for OpenAI-compatible generation without an explicit style', () => {
         const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible', imageStyle: 'cg' };
-        const geminiConfig: ImageGenerationConfig = {
-            ...baseConfig,
-            activeProvider: 'openai-compatible',
-            imageStyle: 'real',
-            openaiCompatible: {
-                ...baseConfig.openaiCompatible,
-                baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-                model: 'gemini-2.5-flash-image',
-            },
-        };
         const presets = getPhotoStylePresets();
 
         expect(resolveImageStylePhotoPreset(undefined, presets, undefined, config, false).id).toBe('loveshow-solo-cg');
         expect(resolveImageStylePhotoPreset(undefined, presets, undefined, config, true).id).toBe('loveshow-couple-cg');
-        const geminiSoloPreset = resolveImageStylePhotoPreset(undefined, presets, undefined, geminiConfig, false);
-        const geminiCouplePreset = resolveImageStylePhotoPreset(undefined, presets, undefined, geminiConfig, true);
-        expect(geminiSoloPreset.id).toBe('loveshow-gemini-solo-real');
-        expect(geminiSoloPreset.model).toBeUndefined();
-        expect(geminiCouplePreset.id).toBe('loveshow-gemini-couple-real');
-        expect(geminiCouplePreset.model).toBeUndefined();
-        expect(createPhotoMeta('manual', geminiConfig, geminiSoloPreset, buildManualPhotoPrompt('窗边自拍', geminiSoloPreset, geminiConfig), 123).model)
-            .toBe('gemini-2.5-flash-image');
         expect(resolveImageStylePhotoPreset('custom-style', [
             {
                 id: 'custom-style',
                 name: 'Custom',
-                providerScope: 'openai-gpt',
+                providerScope: 'openai-compatible',
                 positivePrompt: 'custom',
                 negativePrompt: '',
             },
@@ -683,7 +664,7 @@ describe('photoGeneration helpers', () => {
         const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
         const compatStyle: PhotoStylePreset = {
             ...style,
-            providerScope: 'openai-gpt',
+            providerScope: 'openai-compatible',
             positivePrompt: '柔和胶片感，生活化抓拍',
             negativePrompt: '过曝',
         };
@@ -701,7 +682,7 @@ describe('photoGeneration helpers', () => {
         const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
         const compatStyle: PhotoStylePreset = {
             ...style,
-            providerScope: 'openai-gpt',
+            providerScope: 'openai-compatible',
             positivePrompt: '生活化抓拍',
             negativePrompt: '',
         };
@@ -794,7 +775,7 @@ describe('photoGeneration helpers', () => {
 
         expect(preset).toMatchObject({
             id: 'community-soft',
-            providerScope: 'openai-gpt',
+            providerScope: 'openai-compatible',
             positivePrompt: 'soft focus, gentle color',
             negativePrompt: 'blur, watermark',
             width: 1024,
@@ -825,7 +806,7 @@ describe('photoGeneration helpers', () => {
             'size: 832x1216',
         ].join('\n'), 'openai-compatible');
 
-        expect(preset.providerScope).toBe('openai-gpt');
+        expect(preset.providerScope).toBe('openai-compatible');
         expect(preset.positivePrompt).toBe('cinematic portrait, window light');
         expect(preset.negativePrompt).toBe('lowres, bad anatomy');
         expect(preset.steps).toBe(24);
@@ -1050,13 +1031,13 @@ describe('photoGeneration helpers', () => {
         expect(JSON.parse(init.body).model).toBe('gpt-image-2');
     });
 
-    it('strips provider prefixes from Gemini and GPT image model names before requesting', async () => {
+    it('cleans display model labels but preserves real provider-prefixed model ids before requesting', async () => {
         const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
         const cases: Array<[string, string]> = [
             ['假流/gemini-3.1-flash-image-preview', GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL],
-            ['fake-stream/gemini-3-pro-image-preview', 'gemini-3-pro-image-preview'],
+            ['fake-stream/gemini-3-pro-image-preview', 'fake-stream/gemini-3-pro-image-preview'],
             ['假流/gemini-3.1-flash-image-preview / gemini-3.1-flash-image-preview', GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL],
-            ['openai/gpt-image-2', 'gpt-image-2'],
+            ['openai/gpt-image-2', 'openai/gpt-image-2'],
         ];
         const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({
             data: [{ b64_json: 'aGVsbG8=' }],
@@ -1119,6 +1100,62 @@ describe('photoGeneration helpers', () => {
             partial_images: 2,
             seed: 1234,
             custom_param: 'x',
+        });
+    });
+
+    it('sends a minimal Gemini-compatible image request body even when GPT image params are configured', async () => {
+        const config: ImageGenerationConfig = {
+            ...baseConfig,
+            activeProvider: 'openai-compatible',
+            openaiCompatible: {
+                ...baseConfig.openaiCompatible,
+                model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+                size: '768x1344',
+                responseFormat: 'url',
+                n: 1,
+                quality: 'high',
+                style: 'natural',
+                background: 'transparent',
+                outputFormat: 'webp',
+                outputCompression: 80,
+                moderation: 'low',
+                user: 'user-1',
+                stream: true,
+                partialImages: 2,
+                extraRequestBody: '{"seed":1234,"response_format":"url","custom_param":"x"}',
+            },
+        };
+        const meta: PhotoMeta = {
+            ...openAICompatibleMeta,
+            model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+            width: 768,
+            height: 1344,
+            size: '768x1344',
+            responseFormat: 'url',
+            n: 1,
+            quality: 'high',
+            openAIStyle: 'natural',
+            background: 'transparent',
+            outputFormat: 'webp',
+            outputCompression: 80,
+            moderation: 'low',
+            user: 'user-1',
+            stream: true,
+            partialImages: 2,
+        };
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+            data: [{ b64_json: 'aGVsbG8=' }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+        await generatePhotoImage(config, meta);
+
+        const [, init] = (fetch as any).mock.calls[0];
+        expect(JSON.parse(init.body)).toEqual({
+            model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+            prompt: 'prompt\n避免出现：bad',
+            size: '1024x1536',
+            response_format: 'b64_json',
+            n: 1,
         });
     });
 
@@ -1371,6 +1408,139 @@ describe('photoGeneration helpers', () => {
         await expect(generatePhotoImage(config, meta))
             .rejects
             .toThrow('接口返回了文字说明，未返回图片');
+    });
+
+    it('includes request and response debug details for OpenAI-compatible invalid argument errors', async () => {
+        const config: ImageGenerationConfig = {
+            ...baseConfig,
+            activeProvider: 'openai-compatible',
+            openaiCompatible: {
+                ...baseConfig.openaiCompatible,
+                model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+                responseFormat: 'url',
+            },
+        };
+        const meta: PhotoMeta = {
+            source: 'manual',
+            providerType: 'openai-compatible',
+            stylePresetId: 'compat',
+            model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+            positivePrompt: 'prompt',
+            negativePrompt: 'bad',
+            finalPrompt: 'prompt\n避免出现：bad',
+            width: 1024,
+            height: 1024,
+            size: '1024x1024',
+            n: 1,
+            seed: 1,
+        };
+        const fetchMock = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                error: { message: 'Request contains an invalid argument.' },
+            }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                error: { message: 'Request contains an invalid argument.' },
+            }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                error: { message: 'Request contains an invalid argument.' },
+            }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                error: { message: 'Request contains an invalid argument.' },
+            }), { status: 400, headers: { 'Content-Type': 'application/json' } }));
+
+        await expect(generatePhotoImage(config, meta))
+            .rejects
+            .toThrow(/Gemini 参数降级：移除 size -> 移除 n -> 移除 response_format[\s\S]*请求体：[\s\S]*gemini-3\.1-flash-image-preview[\s\S]*响应原文预览：/);
+        expect(fetchMock).toHaveBeenCalledTimes(4);
+        const firstBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+        const secondBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+        const thirdBody = JSON.parse(String(fetchMock.mock.calls[2][1]?.body));
+        const fourthBody = JSON.parse(String(fetchMock.mock.calls[3][1]?.body));
+        expect(firstBody.size).toBe('1024x1024');
+        expect(firstBody.n).toBe(1);
+        expect(firstBody.response_format).toBe('b64_json');
+        expect(secondBody.size).toBeUndefined();
+        expect(secondBody.n).toBe(1);
+        expect(secondBody.response_format).toBe('b64_json');
+        expect(thirdBody.size).toBeUndefined();
+        expect(thirdBody.n).toBeUndefined();
+        expect(thirdBody.response_format).toBe('b64_json');
+        expect(fourthBody).toEqual({
+            model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+            prompt: 'prompt\n避免出现：bad',
+        });
+    });
+
+    it('reports OpenAI-compatible API key errors as auth failures even when alternate key headers fail', async () => {
+        const config: ImageGenerationConfig = {
+            ...baseConfig,
+            activeProvider: 'openai-compatible',
+            openaiCompatible: { ...baseConfig.openaiCompatible, responseFormat: 'url' },
+        };
+        const meta: PhotoMeta = {
+            source: 'manual',
+            providerType: 'openai-compatible',
+            stylePresetId: 'compat',
+            model: 'image2',
+            positivePrompt: 'prompt',
+            negativePrompt: 'bad',
+            finalPrompt: 'prompt\n避免出现：bad',
+            width: 1024,
+            height: 1024,
+            size: '1024x1024',
+            seed: 1,
+        };
+        vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                error: { message: 'Please pass a valid API key' },
+            }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                error: { message: 'Please pass a valid API key' },
+            }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                error: { message: 'Please pass a valid API key' },
+            }), { status: 400, headers: { 'Content-Type': 'application/json' } }));
+
+        await expect(generatePhotoImage(config, meta))
+            .rejects
+            .toThrow('OpenAI 兼容生图鉴权失败 (400)');
+    });
+
+    it('retries OpenAI-compatible image requests with x-goog-api-key when Bearer is rejected as missing API key', async () => {
+        const config: ImageGenerationConfig = {
+            ...baseConfig,
+            activeProvider: 'openai-compatible',
+            openaiCompatible: { ...baseConfig.openaiCompatible, apiKey: 'gemini-key', responseFormat: 'url' },
+        };
+        const meta: PhotoMeta = {
+            source: 'manual',
+            providerType: 'openai-compatible',
+            stylePresetId: 'compat',
+            model: 'gemini-3.1-flash-image-preview',
+            positivePrompt: 'prompt',
+            negativePrompt: 'bad',
+            finalPrompt: 'prompt\n避免出现：bad',
+            width: 1024,
+            height: 1024,
+            size: '1024x1024',
+            seed: 1,
+        };
+        const fetchMock = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                error: { message: 'Please pass a valid API key' },
+            }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                data: [{ b64_json: 'aGVsbG8=' }],
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+        const result = await generatePhotoImage(config, meta);
+
+        expect(result.dataUrl).toBe('data:image/png;base64,aGVsbG8=');
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(fetchMock.mock.calls[1][1]?.headers).toMatchObject({
+            Authorization: 'Bearer gemini-key',
+            'x-goog-api-key': 'gemini-key',
+        });
     });
 
     it('reports empty OpenAI-compatible responses explicitly', async () => {
@@ -1711,14 +1881,99 @@ describe('photoGeneration helpers', () => {
         const result = await testOpenAICompatibleImageConnection(baseConfig.openaiCompatible);
 
         expect(result.ok).toBe(true);
-        expect(result.models).toEqual(['image2', 'gpt-image-2', 'gemini-3-pro-image-preview']);
+        expect(result.models).toEqual([
+            'image2',
+            'gpt-image-2',
+            'fake-stream/gemini-3-pro-image-preview',
+        ]);
         expect(result.modelOptions).toEqual([
             { id: 'image2', name: 'Image 2', displayName: 'Image 2 / image2' },
             { id: 'gpt-image-2', name: '【0.08】米/gpt-image-2', displayName: '【0.08】米/gpt-image-2 / gpt-image-2' },
-            { id: 'gemini-3-pro-image-preview', name: '假流/gemini-3-pro-image-preview', displayName: '假流/gemini-3-pro-image-preview / gemini-3-pro-image-preview' },
+            { id: 'fake-stream/gemini-3-pro-image-preview', name: '假流/gemini-3-pro-image-preview', displayName: '假流/gemini-3-pro-image-preview / fake-stream/gemini-3-pro-image-preview' },
         ]);
         expect(fetch).toHaveBeenCalledWith('https://imagegen.example/v1/models', expect.objectContaining({
             method: 'GET',
         }));
+    });
+
+    it('does not fake Gemini model ids when /models is unavailable', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('not found', {
+            status: 404,
+            headers: { 'Content-Type': 'text/plain' },
+        }));
+
+        const result = await testOpenAICompatibleImageConnection({
+            ...baseConfig.openaiCompatible,
+            baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+            model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+        });
+
+        expect(result.ok).toBe(false);
+        expect(result.status).toBe(404);
+        expect(result.models).toEqual([]);
+        expect(result.modelOptions).toEqual([]);
+        expect(result.message).toContain('连接失败：404');
+    });
+
+    it('reports /models API key errors as auth failures even when the status is 400', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+            error: { message: 'Please pass a valid API key' },
+        }), { status: 400, headers: { 'Content-Type': 'application/json' } }));
+
+        const result = await testOpenAICompatibleImageConnection(baseConfig.openaiCompatible);
+
+        expect(result.ok).toBe(false);
+        expect(result.status).toBe(400);
+        expect(result.models).toEqual([]);
+        expect(result.modelOptions).toEqual([]);
+        expect(result.message).toContain('OpenAI 兼容模型列表鉴权失败 (400)');
+        expect(result.message).toContain('Please pass a valid API key');
+    });
+
+    it('reads OpenAI-compatible model ids from models arrays without rewriting real prefixed ids', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+            models: [
+                'models/gemini-2.5-flash-image',
+                { name: '假流/gemini-3-pro-image-preview' },
+            ],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+        const result = await testOpenAICompatibleImageConnection({
+            ...baseConfig.openaiCompatible,
+            baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+            model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+        });
+
+        expect(result.models).toEqual([
+            'models/gemini-2.5-flash-image',
+            'gemini-3-pro-image-preview',
+        ]);
+        expect(result.modelOptions).toEqual([
+            { id: 'models/gemini-2.5-flash-image', name: 'models/gemini-2.5-flash-image', displayName: 'models/gemini-2.5-flash-image' },
+            { id: 'gemini-3-pro-image-preview', name: '假流/gemini-3-pro-image-preview', displayName: '假流/gemini-3-pro-image-preview / gemini-3-pro-image-preview' },
+        ]);
+    });
+
+    it('throws a clear error when /models returns HTML instead of model JSON', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('<!doctype html><html></html>', {
+            status: 200,
+            headers: { 'Content-Type': 'text/html' },
+        }));
+
+        await expect(testOpenAICompatibleImageConnection(baseConfig.openaiCompatible)).rejects.toThrow('接口返回 HTML 页面');
+    });
+
+    it('reports a successful but empty /models response without fake fallbacks', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        }));
+
+        const result = await testOpenAICompatibleImageConnection(baseConfig.openaiCompatible);
+
+        expect(result.ok).toBe(true);
+        expect(result.models).toEqual([]);
+        expect(result.modelOptions).toEqual([]);
+        expect(result.message).toBe('连接成功，但接口没有返回模型列表');
     });
 });

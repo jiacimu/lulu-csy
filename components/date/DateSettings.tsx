@@ -299,6 +299,21 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
                     </div>
                 </section>
 
+                <section className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <h3 className="text-xs font-bold text-slate-400 uppercase">线下时间感知</h3>
+                            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">控制本角色在线下见面中是否感知当前时间、时段变化和距离上次互动多久。</p>
+                        </div>
+                        <button
+                            onClick={() => updateCharacter(char.id, { dateTimeAwarenessEnabled: char.dateTimeAwarenessEnabled === false ? true : false })}
+                            className={`w-12 h-7 rounded-full transition-colors relative shrink-0 ${char.dateTimeAwarenessEnabled !== false ? 'bg-primary' : 'bg-slate-200'}`}
+                        >
+                            <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform ${char.dateTimeAwarenessEnabled !== false ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
+                        </button>
+                    </div>
+                </section>
+
                 {/* Output Word Count */}
                 <section className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
                     <h3 className="text-xs font-bold text-slate-400 uppercase mb-1">回复字数</h3>

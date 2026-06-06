@@ -107,6 +107,7 @@ function readStatuses(): Record<string, string | undefined> {
             snapshot.realtime.notionEnabled && 'Notion',
             snapshot.realtime.feishuEnabled && '飞书',
             snapshot.realtime.xhsEnabled && '小红书',
+            snapshot.realtime.canvaEnabled && 'Canva',
         ].filter(Boolean).join(' · ') || '未开启';
 
         const embeddingEngineId = inferEmbeddingEngineId(snapshot.embedding.model);

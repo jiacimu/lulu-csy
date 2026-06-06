@@ -48,6 +48,28 @@ interface BatchExtractOptions {
     onCheckpoint?: (checkpoint: VectorMemoryBatchCheckpoint) => void;
 }
 
+interface DirectExtractOptions {
+    reason?: string;
+    retryReason?: string;
+    userInitiated?: boolean;
+}
+
+function normalizeProvidedExtractionMessages(messages: Message[]): Message[] {
+    return messages
+        .filter(message => (
+            (message.role === 'user' || message.role === 'assistant' || message.role === 'system')
+            && typeof message.content === 'string'
+            && message.content.trim().length > 0
+        ))
+        .map(message => ({
+            ...message,
+            // Date/theater recap compression may hide raw messages from UI, but
+            // explicit L0 extraction still needs the original record.
+            metadata: { ...(message.metadata || {}), hiddenFromUser: false },
+        }))
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+}
+
 export function selectExtractionMemoryHeaders<T extends ExtractionMemoryHeader>(headers: T[]): T[] {
     return [...headers]
         .filter(h => !h.deprecated)
@@ -285,6 +307,79 @@ export const VectorMemoryExtractor = {
                     }
                 }
             } catch { /* silent */ }
+        } finally {
+            releaseExtractionLock(charId);
+        }
+    },
+
+    /**
+     * Direct mode — extract L0 memories from an explicit message list.
+     * Used by flows like offline meeting recap where the source messages are
+     * intentionally excluded from the normal chat auto-extraction path.
+     */
+    async extractFromMessages(
+        charId: string,
+        charName: string,
+        messages: Message[],
+        apiConfig: APIConfig,
+        embeddingApiKey: string,
+        subApiConfig?: { baseUrl: string; model: string; apiKey: string },
+        options: DirectExtractOptions = {},
+    ): Promise<number> {
+        const sourceMessages = normalizeProvidedExtractionMessages(messages);
+        if (sourceMessages.length === 0) return 0;
+
+        if (hasExtractionLock(charId)) {
+            console.log('🧠 [VectorExtract] Direct extract skipped: already extracting for', charId);
+            return 0;
+        }
+        acquireExtractionLock(charId);
+
+        try {
+            const allMems = await DB.getAllVectorMemories(charId);
+            const vectorCache = new Map<string, number[]>(allMems.map(m => [m.id, m.vector]));
+            const emojis = await DB.getEmojis().catch(() => []);
+            const WINDOW_SIZE = 50;
+            const OVERLAP = 10;
+            const STRIDE = WINDOW_SIZE - OVERLAP;
+            const affectedMemIds = new Set<string>();
+
+            for (let i = 0; i < sourceMessages.length; i += STRIDE) {
+                const windowMsgs = sourceMessages.slice(i, i + WINDOW_SIZE);
+                if (windowMsgs.length === 0) break;
+
+                const allHeaders = await DB.getVectorMemoryHeaders(charId);
+                const existingHeaders = selectExtractionMemoryHeaders(allHeaders);
+                const formattedMsgs = formatMessages(windowMsgs, charName, emojis);
+                const prompt = buildExtractionPrompt(charName, existingHeaders, formattedMsgs);
+                const results = await callLLM(prompt, apiConfig, undefined, {
+                    reason: options.reason || '线下见面L0记忆提取',
+                    retryReason: options.retryReason || '线下见面L0记忆提取重试',
+                    conversationId: charId,
+                    userInitiated: options.userInitiated === true,
+                });
+
+                const sourceMessageIds = windowMsgs
+                    .map(m => m.id)
+                    .filter((id): id is number => typeof id === 'number');
+                for (const result of results) {
+                    const memId = await processResult(result, charId, embeddingApiKey, vectorCache, sourceMessageIds, allMems);
+                    if (memId) affectedMemIds.add(memId);
+                }
+            }
+
+            const ids = Array.from(affectedMemIds);
+            if (ids.length > 0 && subApiConfig) {
+                VectorMemoryExtractor.backfillNewMemories(ids, charName, subApiConfig)
+                    .catch(e => console.warn('🧬 [DirectBackfill] Non-fatal:', e));
+            } else if (ids.length > 0) {
+                DB.getVectorMemoriesByIds(ids).then(mems => {
+                    if (mems.length > 0) pushMemories(charId, mems).catch(() => {});
+                }).catch(() => {});
+            }
+
+            console.log(`🧠 [VectorExtract] Direct extract complete: ${ids.length} memories affected`);
+            return ids.length;
         } finally {
             releaseExtractionLock(charId);
         }

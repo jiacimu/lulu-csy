@@ -190,6 +190,10 @@ export interface CharacterProfile {
     bubbleStyle?: string;
     chatBackground?: string;
     contextLimit?: number;
+    /** 主聊天当前时间/日期/日程锚点感知。默认开启；设为 false 时关闭。 */
+    chatTimeAwarenessEnabled?: boolean;
+    /** 主聊天时间流逝、空窗期、时段变迁与待跟进事件感知。默认开启；设为 false 时关闭。 */
+    chatTimePassageAwarenessEnabled?: boolean;
     showThinking?: boolean;
     hideSystemLogs?: boolean;
     hideBeforeMessageId?: number;
@@ -207,6 +211,8 @@ export interface CharacterProfile {
     spriteConfig?: SpriteConfig;
     customDateSprites?: string[]; // User-added custom emotion names for date mode (per-character)
     dateLightReading?: boolean;   // Light reading mode for novel/text view in date
+    /** 线下见面/约会的当前时间与时间流逝感知。默认开启；设为 false 时关闭。 */
+    dateTimeAwarenessEnabled?: boolean;
     datePerspective?: 'second' | 'first' | 'third';  // Narrative POV in date mode (default: 'second')
     dateCharPerspective?: 'first' | 'third';  // Char's narrative POV in date mode (default: 'third'). 'second' excluded when user is also 'second'
     dateSkinSets?: SkinSet[];     // Multiple skin sets for portrait mode

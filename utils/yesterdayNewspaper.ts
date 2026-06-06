@@ -366,7 +366,7 @@ function normalizeMessageContent(message: Message): string {
     if (message.type === 'voice') return cleanText(message.metadata?.transcribedText || base || '[语音消息]', 260);
     if (message.type === 'emoji') return `[表情] ${cleanText(base, 80)}`;
     if (message.type === 'music_card') return `[歌曲卡片] ${cleanText(base, 160)}`;
-    if (message.type === 'html_card' || message.type === 'news_card') return `[卡片] ${cleanText(base, 260)}`;
+    if (message.type === 'html_card' || message.type === 'news_card' || message.type === 'canva_card') return `[卡片] ${cleanText(base, 260)}`;
     if (message.type === 'call_log') return `[通话记录] ${cleanText(base, 260)}`;
     if (message.metadata?.source === 'story_phone') return `[剧情手机] ${cleanText(base, 260)}`;
     return cleanText(base, 360);
@@ -413,7 +413,7 @@ function buildMessageHighlights(messages: Message[], charName: string, userName:
     const charCount = recent.filter(message => message.role === 'assistant').length;
     const hasImage = recent.some(message => message.type === 'image');
     const hasVoice = recent.some(message => message.type === 'voice');
-    const hasCard = recent.some(message => message.type === 'html_card' || message.type === 'news_card' || message.type === 'music_card');
+    const hasCard = recent.some(message => message.type === 'html_card' || message.type === 'news_card' || message.type === 'canva_card' || message.type === 'music_card');
     const scope = includeDate ? '这一段时间' : '昨天';
     const userLabel = userName || '你';
     const highlights = [

@@ -60,7 +60,7 @@ import {
     runPhotoDirector,
     shouldIncludeUserAppearanceForPhoto,
 } from '../utils/photoGeneration';
-import { DEFAULT_IMAGE_GENERATION_CONFIG, selectSecondaryApiConfig } from '../utils/runtimeConfig';
+import { DEFAULT_IMAGE_GENERATION_CONFIG, getImageGenerationDraftConfig, selectSecondaryApiConfig } from '../utils/runtimeConfig';
 import {
     buildSavedVibeFromImage,
     buildVibeInputFromSaved,
@@ -99,6 +99,14 @@ import {
 import { COVER_GRADIENTS,createRecordId,produceMemoryRecordAudio } from '../utils/memoryRecordService';
 import { selectMemoryRecordCover } from '../utils/memoryRecordCovers';
 import { hasPlayableMemoryRecordAudio,memoryRecordToPlayable } from '../utils/memoryRecordPlayable';
+import {
+    buildUserActionSelectorPrompt,
+    parseUserActionChoices,
+    requestUserActionChoices,
+    UserActionSelectorApiError,
+    type UserActionChoice,
+} from '../utils/userActionSelector';
+import { PaperPlaneTilt, Plus, Smiley, Trash, X } from '@phosphor-icons/react';
 
 const DATE_WORLDLINE_ORB_ENABLED: boolean = false;
 const DateWorldlineOrb = DATE_WORLDLINE_ORB_ENABLED
@@ -143,6 +151,13 @@ type QuickSongFlowStatus =
     | 'generating_song'
     | 'ready'
     | 'error';
+
+interface PendingUserActionDraft {
+    sourceMessageId: number;
+    choice: UserActionChoice;
+    segments: string[];
+    emoji: Emoji;
+}
 
 interface QuickSongDraft {
     recordId: string;
@@ -571,6 +586,11 @@ const Chat: React.FC = () => {
     const [categories, setCategories] = useState<EmojiCategory[]>([]);
     const [activeCategory, setActiveCategory] = useState<string>('default');
     const [newCategoryName, setNewCategoryName] = useState('');
+    const [userActionChoices, setUserActionChoices] = useState<UserActionChoice[] | null>(null);
+    const [userActionSelectorMessageId, setUserActionSelectorMessageId] = useState<number | null>(null);
+    const [userActionSelectorLoadingId, setUserActionSelectorLoadingId] = useState<number | null>(null);
+    const [pendingUserActionDraft, setPendingUserActionDraft] = useState<PendingUserActionDraft | null>(null);
+    const [isSendingUserActionDraft, setIsSendingUserActionDraft] = useState(false);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const messageRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -593,10 +613,15 @@ const Chat: React.FC = () => {
     const draftPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingDraftPersistRef = useRef<{ key: string; value: string } | null>(null);
     const openingStoryPhoneMsgIdsRef = useRef<Set<number>>(new Set());
+    const userActionSelectorControllerRef = useRef<AbortController | null>(null);
     const photoHintHandlerRef = useRef<((payload: PhotoHintTrigger) => void) | null>(null);
     const manualPhotoInFlightRef = useRef(false);
     const autoPhotoInFlightRef = useRef<Set<string>>(new Set());
     messagesRef.current = messages;
+
+    useEffect(() => () => {
+        userActionSelectorControllerRef.current?.abort();
+    }, []);
 
     // Reply Logic
     const [replyTarget, setReplyTarget] = useState<Message | null>(null);
@@ -758,7 +783,7 @@ const Chat: React.FC = () => {
     const char = matchedChar || (isDataLoaded ? characters[0] : undefined);
     currentChatCharIdRef.current = char?.id;
     const currentThemeId = char?.bubbleStyle || 'default';
-    const effectiveImageGenerationConfig = imageGenerationConfig || DEFAULT_IMAGE_GENERATION_CONFIG;
+    const effectiveImageGenerationConfig = getImageGenerationDraftConfig() || imageGenerationConfig || DEFAULT_IMAGE_GENERATION_CONFIG;
     const effectivePhotoStylePresets = photoStylePresets || EMPTY_PHOTO_STYLE_PRESETS;
     const activeOpenAIStyleFamily = useMemo(
         () => getOpenAIStyleFamilyForConfig(effectiveImageGenerationConfig),
@@ -2402,7 +2427,17 @@ const Chat: React.FC = () => {
         options?: ManualPhotoGenerationOptions,
     ) => {
         if (!char) return;
-        if (!isImageGenerationConfigured(effectiveImageGenerationConfig)) {
+        const imageConfigForManual = getImageGenerationDraftConfig() || effectiveImageGenerationConfig;
+        const openAIStyleFamilyForManual = getOpenAIStyleFamilyForConfig(imageConfigForManual);
+        const photoStylePresetsForManual = [
+            NO_PHOTO_STYLE_PRESET,
+            ...getCompatiblePhotoStylePresets(
+                effectivePhotoStylePresets,
+                imageConfigForManual.activeProvider,
+                openAIStyleFamilyForManual,
+            ).filter(style => style.id !== NO_PHOTO_STYLE_PRESET_ID),
+        ];
+        if (!isImageGenerationConfigured(imageConfigForManual)) {
             addToast('请先在设置里配置当前生图供应商', 'error');
             return;
         }
@@ -2428,15 +2463,16 @@ const Chat: React.FC = () => {
             const optionUserAppearanceNegativeTags = typeof options?.userAppearanceNegativeTags === 'string' ? options.userAppearanceNegativeTags : undefined;
             const optionAppearancePrompt = typeof options?.appearancePrompt === 'string' ? options.appearancePrompt : undefined;
             const optionUserAppearancePrompt = typeof options?.userAppearancePrompt === 'string' ? options.userAppearancePrompt : undefined;
-            const isNaiProvider = effectiveImageGenerationConfig.activeProvider === 'novelai';
+            const isNaiProvider = imageConfigForManual.activeProvider === 'novelai';
             const appearanceTags = includeAppearance && isNaiProvider ? (optionAppearanceTags ?? char.naiAppearanceTags ?? '').trim() : '';
             const appearanceNegativeTags = includeAppearance && isNaiProvider ? (optionAppearanceNegativeTags ?? char.naiAppearanceNegativeTags ?? '').trim() : '';
             const userAppearanceTags = includeUserAppearance && isNaiProvider ? (optionUserAppearanceTags ?? userProfile.naiAppearanceTags ?? '').trim() : '';
             const userAppearanceNegativeTags = includeUserAppearance && isNaiProvider ? (optionUserAppearanceNegativeTags ?? userProfile.naiAppearanceNegativeTags ?? '').trim() : '';
             const appearancePrompt = includeAppearance ? (optionAppearancePrompt ?? char.photoAppearancePrompt ?? '').trim() : '';
             const userAppearancePrompt = includeUserAppearance ? (optionUserAppearancePrompt ?? userProfile.photoAppearancePrompt ?? '').trim() : '';
-            const style = resolveImageStylePhotoPreset(stylePresetId, activePhotoStylePresets, char, effectiveImageGenerationConfig, includeUserAppearance, {
+            const style = resolveImageStylePhotoPreset(stylePresetId, photoStylePresetsForManual, char, imageConfigForManual, includeUserAppearance, {
                 allowUnboundRequested: Boolean(stylePresetId),
+                openAIStyleFamily: openAIStyleFamilyForManual,
             });
             const seed = Math.floor(Math.random() * 9999999999);
             let directorResult: PhotoDirectorResult | undefined;
@@ -2462,10 +2498,10 @@ const Chat: React.FC = () => {
                     userProfile,
                     currentMsgs: messagesRef.current,
                     userPrompt: cleanPrompt,
-                    stylePresets: activePhotoStylePresets,
+                    stylePresets: photoStylePresetsForManual,
                     recentPhotoMetas,
-                    providerType: effectiveImageGenerationConfig.activeProvider,
-                    openAIStyleFamily: activeOpenAIStyleFamily,
+                    providerType: imageConfigForManual.activeProvider,
+                    openAIStyleFamily: openAIStyleFamilyForManual,
                     appearanceTags,
                     appearanceNegativeTags,
                     userAppearanceTags,
@@ -2477,7 +2513,7 @@ const Chat: React.FC = () => {
                     throw new Error('剧情模式没有返回可用生图结果');
                 }
 
-                const hasDirectorScene = effectiveImageGenerationConfig.activeProvider === 'openai-compatible'
+                const hasDirectorScene = imageConfigForManual.activeProvider === 'openai-compatible'
                     ? Boolean(director.scene_zh.trim())
                     : Boolean(
                         director.scene_zh.trim()
@@ -2498,7 +2534,7 @@ const Chat: React.FC = () => {
                     shouldGeneratePhoto: true,
                     stylePresetId: style.id,
                 };
-                prompts = buildPhotoPromptFromDirector(directorResult, undefined, style, effectiveImageGenerationConfig, {
+                prompts = buildPhotoPromptFromDirector(directorResult, undefined, style, imageConfigForManual, {
                     appearanceTags,
                     appearanceNegativeTags,
                     userAppearanceTags,
@@ -2509,7 +2545,7 @@ const Chat: React.FC = () => {
                     includeUserAppearance,
                 });
             } else {
-                prompts = buildManualPhotoPrompt(cleanPrompt, style, effectiveImageGenerationConfig, {
+                prompts = buildManualPhotoPrompt(cleanPrompt, style, imageConfigForManual, {
                     appearanceTags,
                     appearanceNegativeTags,
                     userAppearanceTags,
@@ -2521,11 +2557,11 @@ const Chat: React.FC = () => {
                 });
             }
 
-            const meta = createPhotoMeta('manual', effectiveImageGenerationConfig, style, prompts, seed, directorResult);
+            const meta = createPhotoMeta('manual', imageConfigForManual, style, prompts, seed, directorResult);
             const selectedVibes = vibeReferences && vibeReferences.length > 0
                 ? vibeReferences
                 : buildDefaultVibeReferencesForChar(char);
-            const result = await generatePhotoImage(effectiveImageGenerationConfig, meta, {
+            const result = await generatePhotoImage(imageConfigForManual, meta, {
                 vibeReferences: prepareVibeReferencesForGeneration(selectedVibes, meta),
                 onVibeReferenceEncoded: handleVibeReferenceEncoded,
             });
@@ -2540,17 +2576,17 @@ const Chat: React.FC = () => {
             manualPhotoInFlightRef.current = false;
             setManualPhotoGenerating(false);
         }
-    }, [activeOpenAIStyleFamily, activePhotoStylePresets, addToast, buildDefaultVibeReferencesForChar, char, effectiveImageGenerationConfig, handleVibeReferenceEncoded, prepareVibeReferencesForGeneration, saveGeneratedPhoto, userProfile]);
+    }, [addToast, buildDefaultVibeReferencesForChar, char, effectiveImageGenerationConfig, effectivePhotoStylePresets, handleVibeReferenceEncoded, prepareVibeReferencesForGeneration, saveGeneratedPhoto, userProfile]);
 
     const handlePhotoHint = useCallback((payload: PhotoHintTrigger) => {
         if (!payload?.char?.id || !payload.hint) return;
         if (!payload.char.autoPhotoEnabled) return;
-        if (!isImageGenerationConfigured(effectiveImageGenerationConfig)) {
+        const imageConfigForJob = getImageGenerationDraftConfig() || effectiveImageGenerationConfig;
+        const openAIStyleFamilyForJob = getOpenAIStyleFamilyForConfig(imageConfigForJob);
+        if (!isImageGenerationConfigured(imageConfigForJob)) {
             addToast('主动发照片已触发，但当前生图供应商还没有配置完整', 'error');
             return;
         }
-        const imageConfigForJob = effectiveImageGenerationConfig;
-        const openAIStyleFamilyForJob = getOpenAIStyleFamilyForConfig(imageConfigForJob);
         const photoStylePresetsForJob = effectivePhotoStylePresets;
         const providerBaseUrl = imageConfigForJob.activeProvider === 'openai-compatible'
             ? imageConfigForJob.openaiCompatible.baseUrl.replace(/\/+$/, '')
@@ -2660,8 +2696,12 @@ const Chat: React.FC = () => {
                     const includeAppearance = true;
                     const includeUserAppearance = shouldIncludeUserAppearanceForPhoto(finalDirector, payload.aiReply, payload.hint);
                     const style = imageConfigForJob.activeProvider === 'openai-compatible'
-                        ? resolveImageStylePhotoPreset(undefined, photoStylePresetsForJob, payload.char, imageConfigForJob, includeUserAppearance)
-                        : resolvePhotoStylePreset(finalDirector.stylePresetId, photoStylePresetsForJob, payload.char, imageConfigForJob.activeProvider);
+                        ? resolveImageStylePhotoPreset(undefined, photoStylePresetsForJob, payload.char, imageConfigForJob, includeUserAppearance, {
+                            openAIStyleFamily: openAIStyleFamilyForJob,
+                        })
+                        : resolvePhotoStylePreset(finalDirector.stylePresetId, photoStylePresetsForJob, payload.char, imageConfigForJob.activeProvider, {
+                            openAIStyleFamily: openAIStyleFamilyForJob,
+                        });
                     console.info('[AutoPhoto] selected preset', {
                         selectedPresetId: style.id,
                         selectedPresetName: style.name,
@@ -3177,7 +3217,17 @@ const Chat: React.FC = () => {
             case 'archive': setModalType('archive-settings'); break;
             case 'settings': setModalType('chat-settings'); break;
             case 'emoji-import': setModalType('emoji-import'); break;
-            case 'send-emoji': if (payload) handleSendText(payload.url, 'emoji', { name: payload.name, categoryId: payload.categoryId }); break;
+            case 'send-emoji':
+                if (payload) {
+                    if (pendingUserActionDraft) {
+                        setPendingUserActionDraft(prev => prev ? { ...prev, emoji: payload } : prev);
+                        setShowPanel('none');
+                        haptic.light();
+                    } else {
+                        handleSendText(payload.url, 'emoji', { name: payload.name, categoryId: payload.categoryId });
+                    }
+                }
+                break;
             case 'delete-emoji-req': setSelectedEmoji(payload); setModalType('delete-emoji'); break;
             case 'delete-emojis-req': {
                 const emojisToDelete = Array.isArray(payload) ? payload.filter(Boolean) : [];
@@ -4044,6 +4094,38 @@ const Chat: React.FC = () => {
         return null;
     }, [displayMessages]);
 
+    const userActionSelectorTarget = useMemo(() => {
+        if (displayMessages.length === 0) return null;
+        const lastIndex = displayMessages.length - 1;
+        if (displayMessages[lastIndex].role !== 'assistant') return null;
+
+        let firstAssistantIndex = lastIndex;
+        while (firstAssistantIndex > 0 && displayMessages[firstAssistantIndex - 1].role === 'assistant') {
+            firstAssistantIndex -= 1;
+        }
+
+        const userTurnEndIndex = firstAssistantIndex - 1;
+        if (userTurnEndIndex < 0 || displayMessages[userTurnEndIndex].role !== 'user') return null;
+
+        let userTurnStartIndex = userTurnEndIndex;
+        while (userTurnStartIndex > 0 && displayMessages[userTurnStartIndex - 1].role === 'user') {
+            userTurnStartIndex -= 1;
+        }
+
+        const assistantTurn = displayMessages.slice(firstAssistantIndex);
+        const latestCharReply = assistantTurn.map(message => {
+            if (message.type === 'emoji') return `[表情包] ${message.metadata?.name || ''}`.trim();
+            if (message.type === 'voice') return `[语音] ${message.metadata?.sourceText || message.content || ''}`.trim();
+            return String(message.content || '').trim();
+        }).filter(Boolean).join('\n');
+
+        return {
+            userMessageIds: new Set(displayMessages.slice(userTurnStartIndex, userTurnEndIndex + 1).map(message => message.id)),
+            sourceMessageId: displayMessages[userTurnEndIndex].id,
+            latestCharReply,
+        };
+    }, [displayMessages]);
+
     useEffect(() => {
         if ((char?.statusBarMode || 'classic') !== 'afterglow') return;
         if (isTyping || selectionMode) return;
@@ -4115,9 +4197,239 @@ const Chat: React.FC = () => {
         return true;
     }), [emojis, hiddenCategoryIds]);
 
+    const resolveUserActionEmoji = useCallback((emojiName: string): Emoji | null => {
+        return allVisibleEmojis.find(emoji => emoji.name === emojiName)
+            || allVisibleEmojis.find(emoji => emoji.name.toLowerCase() === emojiName.toLowerCase())
+            || allVisibleEmojis[0]
+            || null;
+    }, [allVisibleEmojis]);
+
+    const closeUserActionSelector = useCallback(() => {
+        userActionSelectorControllerRef.current?.abort();
+        userActionSelectorControllerRef.current = null;
+        setUserActionChoices(null);
+        setUserActionSelectorMessageId(null);
+        setUserActionSelectorLoadingId(null);
+    }, []);
+
+    const handleUserAvatarAction = useCallback(async (message: Message) => {
+        if (!char) return;
+        if (selectionMode || isTyping) return;
+        if (!userActionSelectorTarget || !userActionSelectorTarget.userMessageIds.has(message.id)) return;
+
+        const secondaryConfig = selectSecondaryApiConfig();
+        if (!secondaryConfig?.baseUrl || !secondaryConfig.apiKey || !secondaryConfig.model) {
+            addToast('副 API 未配置，无法生成回复选择', 'error');
+            return;
+        }
+        if (allVisibleEmojis.length === 0) {
+            addToast('还没有可用表情包', 'info');
+            return;
+        }
+
+        userActionSelectorControllerRef.current?.abort();
+        const controller = new AbortController();
+        userActionSelectorControllerRef.current = controller;
+        setUserActionSelectorLoadingId(message.id);
+        setUserActionSelectorMessageId(message.id);
+        setUserActionChoices(null);
+        setPendingUserActionDraft(null);
+
+        try {
+            const prompt = buildUserActionSelectorPrompt({
+                char,
+                userProfile,
+                messages: displayMessages,
+                latestCharReply: userActionSelectorTarget.latestCharReply,
+                emojis: allVisibleEmojis,
+                contextLimit: char.contextLimit || 80,
+            });
+            const raw = await requestUserActionChoices({
+                apiConfig: secondaryConfig,
+                prompt,
+                signal: controller.signal,
+                trace: {
+                    conversationId: char.id,
+                    messageId: message.id,
+                },
+            });
+            const choices = parseUserActionChoices(raw, allVisibleEmojis);
+            if (!choices) {
+                addToast('回复选择解析失败', 'error');
+                closeUserActionSelector();
+                return;
+            }
+            setUserActionChoices(choices);
+        } catch (error: any) {
+            if (error?.name !== 'AbortError') {
+                console.error('[UserActionSelector] request failed:', error);
+                if (error instanceof UserActionSelectorApiError) {
+                    if (error.code === 'context_length') {
+                        addToast('回复选择上下文超限了', 'error');
+                    } else if (error.code === 'max_tokens') {
+                        addToast('回复选择输出达到 max_tokens 上限', 'error');
+                    } else if (error.status) {
+                        const detail = error.detail ? `: ${error.detail.slice(0, 80)}` : '';
+                        addToast(`回复选择 API 失败 HTTP ${error.status}${detail}`, 'error');
+                    } else {
+                        addToast(error.message || '回复选择生成失败', 'error');
+                    }
+                } else {
+                    addToast('回复选择生成失败', 'error');
+                }
+                closeUserActionSelector();
+            }
+        } finally {
+            if (userActionSelectorControllerRef.current === controller) {
+                userActionSelectorControllerRef.current = null;
+            }
+            setUserActionSelectorLoadingId(current => current === message.id ? null : current);
+        }
+    }, [
+        addToast,
+        allVisibleEmojis,
+        char,
+        closeUserActionSelector,
+        displayMessages,
+        isTyping,
+        selectionMode,
+        userActionSelectorTarget,
+        userProfile,
+    ]);
+
+    const handleSelectUserActionChoice = useCallback((choice: UserActionChoice) => {
+        const emoji = resolveUserActionEmoji(choice.emojiName);
+        if (!emoji || !userActionSelectorMessageId) return;
+        setPendingUserActionDraft({
+            sourceMessageId: userActionSelectorMessageId,
+            choice,
+            segments: choice.segments.map(segment => segment.trim()).filter(Boolean),
+            emoji,
+        });
+        closeUserActionSelector();
+        setReplyTarget(null);
+        handleInputChange('');
+        setShowPanel('none');
+        haptic.light();
+    }, [closeUserActionSelector, resolveUserActionEmoji, userActionSelectorMessageId]);
+
+    const updatePendingUserActionSegment = useCallback((index: number, value: string) => {
+        setPendingUserActionDraft(prev => {
+            if (!prev) return prev;
+            const segments = prev.segments.map((segment, i) => i === index ? value : segment);
+            return { ...prev, segments };
+        });
+    }, []);
+
+    const removePendingUserActionSegment = useCallback((index: number) => {
+        setPendingUserActionDraft(prev => {
+            if (!prev) return prev;
+            const segments = prev.segments.filter((_segment, i) => i !== index);
+            return { ...prev, segments };
+        });
+    }, []);
+
+    const addPendingUserActionSegment = useCallback(() => {
+        setPendingUserActionDraft(prev => {
+            if (!prev) return prev;
+            return { ...prev, segments: [...prev.segments, ''] };
+        });
+        haptic.light();
+    }, []);
+
+    const handleCancelPendingUserActionDraft = useCallback(() => {
+        setPendingUserActionDraft(null);
+        setShowPanel('none');
+    }, []);
+
+    const handleSendPendingUserActionDraft = useCallback(async () => {
+        if (!char || !pendingUserActionDraft || isSendingUserActionDraft) return;
+        const textSegments = pendingUserActionDraft.segments
+            .map(segment => segment.trim())
+            .filter(Boolean);
+        const emoji = pendingUserActionDraft.emoji;
+        if (textSegments.length === 0 && !emoji) return;
+
+        setIsSendingUserActionDraft(true);
+        try {
+            const timestampBase = Date.now();
+            const savedMessages: Message[] = [];
+            let offset = 0;
+
+            for (const segment of textSegments) {
+                const timestamp = timestampBase + offset;
+                const id = await DB.saveMessage({
+                    charId: char.id,
+                    role: 'user',
+                    type: 'text',
+                    content: segment,
+                    timestamp,
+                });
+                savedMessages.push({
+                    id,
+                    charId: char.id,
+                    role: 'user',
+                    type: 'text',
+                    content: segment,
+                    timestamp,
+                });
+                offset += 1;
+            }
+
+            if (emoji) {
+                const timestamp = timestampBase + offset;
+                const metadata = { name: emoji.name, categoryId: emoji.categoryId };
+                const id = await DB.saveMessage({
+                    charId: char.id,
+                    role: 'user',
+                    type: 'emoji',
+                    content: emoji.url,
+                    metadata,
+                    timestamp,
+                });
+                savedMessages.push({
+                    id,
+                    charId: char.id,
+                    role: 'user',
+                    type: 'emoji',
+                    content: emoji.url,
+                    metadata,
+                    timestamp,
+                });
+            }
+
+            const nextMessages = [...messagesRef.current, ...savedMessages];
+            setMessages(nextMessages);
+            messagesRef.current = nextMessages;
+            setPendingUserActionDraft(null);
+            setShowPanel('none');
+            haptic.medium();
+
+            BackendAgentManager.notifyUserReplied(char.id).catch(() => {});
+            void BackendAgentManager.refreshCharacterContext(char.id, char);
+            triggerAI(nextMessages);
+        } catch (error) {
+            console.error('[UserActionSelector] send draft failed:', error);
+            addToast('回复发送失败，请重试', 'error');
+        } finally {
+            setIsSendingUserActionDraft(false);
+        }
+    }, [addToast, char, isSendingUserActionDraft, pendingUserActionDraft, triggerAI]);
+
     // Memoize ChatInputArea callbacks
-    const handleSendCallback = useCallback(() => handleSendText(), [char, input, replyTarget]);
-    const handleCharSelectCallback = useCallback((id: string) => { setActiveCharacterId(id); setShowPanel('none'); }, []);
+    const handleSendCallback = useCallback(() => {
+        if (pendingUserActionDraft) {
+            void handleSendPendingUserActionDraft();
+            return;
+        }
+        handleSendText();
+    }, [char, handleSendPendingUserActionDraft, input, pendingUserActionDraft, replyTarget]);
+    const handleCharSelectCallback = useCallback((id: string) => {
+        closeUserActionSelector();
+        setPendingUserActionDraft(null);
+        setActiveCharacterId(id);
+        setShowPanel('none');
+    }, [closeUserActionSelector]);
 
     // --- Voice Recording → STT → AI Handler ---
     const handleVoiceRecordMessage = useCallback(async (blob: Blob, duration: number) => {
@@ -4271,6 +4583,12 @@ const Chat: React.FC = () => {
                 onSetTranslateLang={(lang: string) => { setTranslateTargetLang(lang); localStorage.setItem('chat_translate_lang', lang); setShowingTargetIds(new Set()); }}
                 xhsEnabled={!!char.xhsEnabled}
                 onToggleXhs={() => updateCharacter(char.id, { xhsEnabled: !char.xhsEnabled })}
+                chatTimeAwarenessEnabled={char.chatTimeAwarenessEnabled !== false}
+                onToggleChatTimeAwareness={() => updateCharacter(char.id, { chatTimeAwarenessEnabled: char.chatTimeAwarenessEnabled === false ? true : false })}
+                chatTimePassageAwarenessEnabled={char.chatTimePassageAwarenessEnabled !== false}
+                onToggleChatTimePassageAwareness={() => updateCharacter(char.id, { chatTimePassageAwarenessEnabled: char.chatTimePassageAwarenessEnabled === false ? true : false })}
+                dateTimeAwarenessEnabled={char.dateTimeAwarenessEnabled !== false}
+                onToggleDateTimeAwareness={() => updateCharacter(char.id, { dateTimeAwarenessEnabled: char.dateTimeAwarenessEnabled === false ? true : false })}
                 showTimestampSetting={isTimestampForced || showTimestampSetting}
                 isTimestampForced={isTimestampForced}
                 onToggleTimestamp={() => {
@@ -4767,6 +5085,7 @@ const Chat: React.FC = () => {
                     const isLastAssistant = m.role === 'assistant' && m.id === lastAssistantId;
                     const statusMode = char.statusBarMode || 'classic';
                     const hasStatusCardMode = statusMode === 'creative' || statusMode === 'custom' || statusMode === 'freeform';
+                    const isUserActionTarget = Boolean(userActionSelectorTarget?.userMessageIds.has(m.id)) && !selectionMode && !isTyping;
                     return (
                         <div
                             key={m.id || i}
@@ -4810,6 +5129,8 @@ const Chat: React.FC = () => {
                                 isAfterglowLoading={isLastAssistant && statusMode === 'afterglow' ? afterglowLoadingIds.has(m.id) : false}
                                 onRequestAfterglow={isLastAssistant && statusMode === 'afterglow' ? handleGenerateAfterglow : undefined}
                                 onOpenStoryPhone={isLastAssistant && statusMode === 'story_phone' && !m.metadata?.storyPhoneConsumed && !selectionMode ? handleOpenStoryPhone : undefined}
+                                onUserAvatarAction={isUserActionTarget ? handleUserAvatarAction : undefined}
+                                isUserAvatarActionLoading={userActionSelectorLoadingId === m.id}
                                 showThinking={THINKING_CHAIN_UI_ENABLED && char.showThinking !== false}
                             />
                         </div>
@@ -4853,6 +5174,81 @@ const Chat: React.FC = () => {
             </div>
 
             <div className="relative z-40">
+                {pendingUserActionDraft && (
+                    <div className="border-t border-white/70 bg-white/[0.82] px-3 py-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur-md">
+                        <div className="mx-auto flex max-w-2xl flex-col gap-2">
+                            <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                    <span className="text-[11px] font-semibold text-slate-500">{pendingUserActionDraft.choice.label}</span>
+                                    <span className="ml-2 text-[10px] text-slate-400">{pendingUserActionDraft.choice.tone}</span>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-1.5">
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelPendingUserActionDraft}
+                                        className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
+                                        aria-label="取消"
+                                    >
+                                        <X className="h-4 w-4" weight="bold" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleSendPendingUserActionDraft}
+                                        disabled={isSendingUserActionDraft || isTyping}
+                                        className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-white shadow-sm transition-transform active:scale-95 disabled:cursor-wait disabled:opacity-50"
+                                        aria-label="发送"
+                                    >
+                                        <PaperPlaneTilt className="h-4 w-4" weight="fill" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex flex-col items-end gap-1.5">
+                                {pendingUserActionDraft.segments.map((segment, index) => (
+                                    <div key={`${pendingUserActionDraft.sourceMessageId}-${index}`} className="flex w-full items-start justify-end gap-2">
+                                        <textarea
+                                            value={segment}
+                                            rows={1}
+                                            onChange={event => updatePendingUserActionSegment(index, event.target.value)}
+                                            placeholder="..."
+                                            className="min-h-[36px] w-full max-w-[82%] resize-none rounded-lg border border-primary/15 bg-primary px-3 py-2 text-right text-[14px] leading-relaxed text-white shadow-sm outline-none transition-colors placeholder:text-white/60 focus:border-primary/40 focus:ring-2 focus:ring-primary/15"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => removePendingUserActionSegment(index)}
+                                            className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                                            aria-label="删除"
+                                        >
+                                            <Trash className="h-3.5 w-3.5" weight="bold" />
+                                        </button>
+                                    </div>
+                                ))}
+                                <button
+                                    type="button"
+                                    onClick={addPendingUserActionSegment}
+                                    className="flex h-8 w-8 items-center justify-center rounded-full border border-primary/15 bg-primary/10 text-primary transition-transform active:scale-95"
+                                    aria-label="新增一条"
+                                >
+                                    <Plus className="h-4 w-4" weight="bold" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPanel(showPanel === 'emojis' ? 'none' : 'emojis')}
+                                    className="flex max-w-[82%] items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm transition-transform active:scale-[0.98]"
+                                    aria-label="更换表情包"
+                                >
+                                    <img
+                                        src={pendingUserActionDraft.emoji.url}
+                                        alt={pendingUserActionDraft.emoji.name}
+                                        className="h-10 w-10 rounded-md object-contain"
+                                    />
+                                    <span className="max-w-[120px] truncate text-[11px] text-slate-500">{pendingUserActionDraft.emoji.name}</span>
+                                    <Smiley className="h-4 w-4 text-slate-400" weight="regular" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {replyTarget && (
                     <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
                         <div className="flex items-center gap-2 truncate"><span className="font-bold text-slate-700">正在回复:</span><span className="truncate max-w-[200px]">{getReplyPreviewText(replyTarget)}</span></div>
@@ -4897,6 +5293,66 @@ const Chat: React.FC = () => {
                     isSpeaking={voiceRecorder.isSpeaking}
                 />
             </div>
+
+            {userActionChoices && (
+                <div
+                    className="fixed inset-0 z-[95] flex items-end bg-slate-950/25 px-2 pb-[calc(var(--safe-bottom)+8px)] backdrop-blur-[2px] sm:items-center sm:justify-center sm:p-4"
+                    onClick={closeUserActionSelector}
+                >
+                    <div
+                        className="w-full max-w-2xl rounded-t-lg border border-white/70 bg-white/[0.92] p-3 shadow-[0_24px_72px_rgba(15,23,42,0.24)] backdrop-blur-xl sm:rounded-lg"
+                        onClick={event => event.stopPropagation()}
+                    >
+                        <div className="mb-2 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={closeUserActionSelector}
+                                className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
+                                aria-label="关闭"
+                            >
+                                <X className="h-4 w-4" weight="bold" />
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            {userActionChoices.map(choice => {
+                                const emoji = resolveUserActionEmoji(choice.emojiName);
+                                return (
+                                    <button
+                                        key={choice.id}
+                                        type="button"
+                                        onClick={() => handleSelectUserActionChoice(choice)}
+                                        className="rounded-lg border border-slate-200 bg-white p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md active:translate-y-0"
+                                    >
+                                        <div className="mb-2 flex items-center justify-between gap-2">
+                                            <div className="min-w-0">
+                                                <div className="truncate text-[13px] font-semibold text-slate-700">{choice.label}</div>
+                                                <div className="text-[10px] text-slate-400">{choice.tone}</div>
+                                            </div>
+                                            {emoji && (
+                                                <img
+                                                    src={emoji.url}
+                                                    alt={emoji.name}
+                                                    className="h-10 w-10 shrink-0 rounded-md object-contain"
+                                                />
+                                            )}
+                                        </div>
+                                        <div className="flex flex-col items-end gap-1">
+                                            {choice.segments.map((segment, index) => (
+                                                <span
+                                                    key={`${choice.id}-${index}`}
+                                                    className="max-w-full rounded-lg bg-primary px-2.5 py-1.5 text-right text-[13px] leading-relaxed text-white shadow-sm"
+                                                >
+                                                    {segment}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {newspaperFeatureEnabled && isYesterdayNewspaperOpen && activeNewspaperRecord?.content && (
                 <YesterdayNewspaperModal

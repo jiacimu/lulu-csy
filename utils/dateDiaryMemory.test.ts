@@ -1,44 +1,16 @@
 import { describe,expect,it } from 'vitest';
-import {
-    buildDateDiaryMemoryPrompt,
-    parseDateDiaryMemoryResponse,
-    renderDateDiaryMemoryTemplate,
-    toDateDiaryMemoryTemplate,
-} from './dateDiaryMemory';
+import { DATE_RECAP_SYSTEM_PROMPT,DEFAULT_DATE_SUMMARY_PROMPT } from './dateSummaryPrompts';
+import { renderDateDiaryMemoryTemplate,toDateDiaryMemoryTemplate } from './dateDiaryMemory';
 
 describe('dateDiaryMemory', () => {
-    it('builds a prompt that requires literal name placeholders', () => {
-        const prompt = buildDateDiaryMemoryPrompt('Sully', '初时雨', '2026-05-24 20:00', '他们分别前沉默了一会。');
-
-        expect(prompt).toContain('提到用户时必须写字面量占位符 {userName}');
-        expect(prompt).toContain('如必须提到角色名字，写字面量占位符 {charName}');
-        expect(prompt).toContain('不要写真实名字“初时雨”');
-        expect(prompt).toContain('不要写真实名字“Sully”');
+    it('uses recap wording instead of long-term memory wording for date summaries', () => {
+        expect(DATE_RECAP_SYSTEM_PROMPT).toContain('交接 recap');
+        expect(DEFAULT_DATE_SUMMARY_PROMPT).toContain('重点放在“离场态”');
+        expect(DEFAULT_DATE_SUMMARY_PROMPT).not.toContain('长期保存');
+        expect(DEFAULT_DATE_SUMMARY_PROMPT).not.toContain('字面量占位符');
     });
 
-    it('parses diary memory JSON and clamps importance', () => {
-        const result = parseDateDiaryMemoryResponse(`\`\`\`json
-[
-  {
-    "title": "分别前的沉默",
-    "content": "我记得 {userName} 快分别时忽然安静下来。那一瞬间我没有立刻说话，因为我怕自己把舍不得说得太明显。",
-    "emotionalJourney": "舍不得、克制",
-    "importance": 99
-  }
-]
-\`\`\``);
-
-        expect(result).toEqual([
-            {
-                title: '分别前的沉默',
-                content: '我记得 {userName} 快分别时忽然安静下来。那一瞬间我没有立刻说话，因为我怕自己把舍不得说得太明显。',
-                emotionalJourney: '舍不得、克制',
-                importance: 10,
-            },
-        ]);
-    });
-
-    it('renders placeholders for embedding or prompt injection', () => {
+    it('renders legacy placeholders for retrieval compatibility', () => {
         expect(renderDateDiaryMemoryTemplate(
             '我记得 {userName} 没有松开手，{charName} 也没有后退。',
             'Sully',

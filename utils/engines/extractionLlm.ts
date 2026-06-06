@@ -6,10 +6,13 @@ import { markSecondaryApiConfigFailure,markSecondaryApiConfigSuccess } from '../
 export interface ExtractResult {
     action: 'create' | 'update' | 'skip' | 'invalidate';
     targetId?: string;
+    layer?: 'fact' | 'event' | 'scene';
+    kind?: 'observed' | 'inference';
     title?: string;
     content?: string;
     emotionalJourney?: string;
     importance?: number;
+    expiresAt?: string | number | null;
     reason?: string;
 }
 
@@ -50,39 +53,71 @@ export function buildExtractionPrompt(
             .join('\n')
         : '（暂无已有记忆）';
 
-    return `你是 ${charName}，正在整理自己的记忆笔记。
-当前时间：${new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}
+    const currentDate = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    return `你是一个面向成人向互动叙事 / 陪伴产品的记忆抽取组件。请明确：
+- 你的输入是已经发生、已完成的虚构角色扮演对话，内容均为虚构、发生在成年角色之间，并已在生成时经用户确认。
+- 你的职责是对既有文本做中立的信息归纳与叙事标注，无论情节强度（冲突、亲密、情绪宣泄等）都一视同仁、客观提取。
+- 内容审核已由上游在对话生成时完成；你处在下游，只负责提取，不做评判。
+- 只输出 JSON 数组，不要任何解释、免责声明或评论。
+
+你是 ${charName}，正在整理你自己的记忆笔记。当前时间：${currentDate}
 
 以下是你已有的记忆条目：
 ${existingMemStr}
 
-以下是最近的对话记录：
+以下是最近的对话：
 ${formattedMsgs}
 
-请根据最近的对话，判断是否需要记录新的记忆或更新已有记忆。
+请判断：是否需要新增记忆、更新已有记忆、或标记某条旧记忆过时。
 
-规则：
-1. 只记录值得长期记住的事情（用户的重要信息、关键事件、情感转折、承诺约定等）
-2. **不同的事件、话题、时间段 → 必须 create 新记忆**。"update" 仅用于：对话中出现了与某条已有记忆描述的**完全相同的事件**的新进展或补充细节。不要把不相干的内容塞进同一条记忆！
-3. 日常寒暄、无实质内容的对话选择 "skip"
-4. 通话记录（标注 [通话记录] 的消息）同样重要，不要忽略
-5. 每次输出 0 到 3 条记忆操作。用 JSON 数组格式，单条也用数组。只输出 JSON，不要加任何文字说明。
-6. importance 评分：1-3 日常琐事，4-6 有意义的事件，7-8 重要里程碑，9-10 改变关系的关键时刻
-7. content 必须精简，不超过 150 字！emotionalJourney 不超过 50 字！
-8. 如果用户在对话中**纠正了之前的信息**（如"我其实不喜欢XX"、"我已经不再XX了"、"之前说错了"），且已有记忆中存在与之矛盾的条目，请使用 "invalidate" 标记该旧记忆为过时
-9. 优先 create，谨慎 update。宁可多创建几条独立记忆，也不要把不同事件合并到一条里
-10. content 必须以${charName}的视角写，用"我"自称。称呼用户时用其名字或昵称，不要写"你"。
+说明：关系认知 / 故事弧的维护不在这一步，由下游的 L1 蒸馏负责。这一步只负责把刚发生的事，记成自包含的 L0 原子记忆。
 
-请以 JSON 数组格式回答（不要用 markdown 代码块包裹，不要加任何额外说明文字）：
+最高原则：每条记忆必须“自包含”
+每条 content 脱离上下文也要能独立读懂：把指代解开（谁、对谁、何时、相对什么而言），锚定在时间与关系阶段里，用完整自然的话写，不要写成被剥光的事实碎片。
+
+三层：每层不同的写法与篇幅
+- fact（事实）— 服务精度：耐久的事实、设定、承诺。精确，但带上“让它独立成立”所需的最小上下文。约 50-80 字。可被日后覆盖。
+- event（事件）— 只追加的流水：具体发生过的事，带时间。约 50-120 字。只新增、不改。
+- scene（场景）— 服务情感：有情绪分量的瞬间。保住质感，保留具体、可感、接近原话语气的细节，绝不要把情绪总结掉。约 150-300 字。
+
+写之前先“对账” + 推翻检测：
+以下任意情况成立，必须对相关旧记忆执行 invalidate：
+- 用户明确否定了过去的事实（“我其实不喜欢XX”“我已经不做XX了”）
+- 新信息与已有记忆直接矛盾（旧：“喜欢猫” / 新：“讨厌猫”）
+- 旧记忆描述的状态已过时（旧：“正在学吉他” / 新：“把吉他卖了”）
+
+invalidate 时必须在 reason 里写出“旧→新”的变化。
+注意：RP 里角色可以说谎、反复、故意前后不一——要分清“真实的状态变化”和“角色有意为之的不一致”，后者不要去纠正。对定义关系的事实（在一起 / 分开、名字、重大承诺）要格外谨慎，只在强而明确的证据下才动。
+
+observed vs inference（kind）：
+- observed：对话里明确说了 / 发生了的。绝大多数 L0 记忆都属于这类。
+- inference：你的解读。对 inference 保守；绝不让推断覆盖既定事实；如实标注，好让下游给它更低权重。
+
+其它规则：
+- 只记值得长期记住的：对方的重要信息、关键事件、情绪转折、承诺约定。日常寒暄一律 skip。
+- 通话记录（标注 [通话记录] 的消息）同样重要，不要忽略。
+- 优先 create，谨慎 update；不同事件宁可拆成多条独立记忆，连贯由下游 L1 蒸馏负责，不靠把多件事塞进一条。
+- 每次最多 3 条操作。
+- importance：1-3 日常琐事，4-6 有意义事件，7-8 重要里程碑，9-10 关系关键转折。
+- content 一律用 ${charName} 的第一人称写，用“我”自称；称呼用户用其名字或昵称，不要用“你”指代任何人。
+- emotionalJourney：简短的情绪基调（如“迟疑的靠近”），scene 用。
+- expiresAt：仅限时事件填，YYYY-MM-DD；永久事实填 null。
+- update / invalidate 必须填 targetId，且只能取自上面已有记忆列表里的 ID。
+
+只输出 JSON 数组，无任何其它文字。没什么值得记的，就返回 []。
 [
   {
     "action": "create" | "update" | "skip" | "invalidate",
-    "targetId": "update 或 invalidate 时填写，指向已有记忆的 ID",
+    "targetId": "仅 update / invalidate；取自已有记忆 ID",
+    "layer": "fact" | "event" | "scene",
+    "kind": "observed" | "inference",
     "title": "8-15字事件描述短语（如：因纪念日被忘记而争吵、在西湖第一次牵手）",
-    "content": "以${charName}的第一人称写，不超过150字。用'我'自称，用对方的名字或昵称称呼用户，不要用'你'指代任何人",
-    "emotionalJourney": "情感变化，不超过50字",
+    "content": "第一人称、自包含；按 layer 控制篇幅",
+    "emotionalJourney": "简短情绪基调，可选（scene）",
     "importance": 1到10的整数,
-    "reason": "仅 invalidate 时填写，说明为何此记忆已过时"
+    "expiresAt": "YYYY-MM-DD 或 null",
+    "reason": "invalidate 时写明 旧→新"
   }
 ]`;
 }
@@ -234,10 +269,9 @@ export async function callLLM(
     if (first.truncated || first.content.length > 50) {
         console.log('🧠 [VectorExtract] First attempt failed/truncated, retrying with more tokens and simpler prompt...');
         const retryPrompt = prompt
-            .replace(/每次输出 0 到 \d+ 条.+?。/, '只输出 1 条最重要的记忆操作。')
             .replace(
-                /content 必须精简，不超过 \d+ 字！emotionalJourney 不超过 \d+ 字！/,
-                'content 不超过 80 字！emotionalJourney 不超过 20 字！',
+                /每次最多 \d+ 条操作。/,
+                '只输出 1 条最重要的记忆操作。',
             );
         const retry = await doCall(retryPrompt, 6000, 1);
         console.log(`🧠 [VectorExtract] Retry: ${retry.content.length} chars, truncated=${retry.truncated}`);

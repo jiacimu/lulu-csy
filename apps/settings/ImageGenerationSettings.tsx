@@ -6,7 +6,6 @@ import type {
     ImageGenerationStyle,
     ImageProviderType,
     NaiImageModel,
-    OpenAICompatibleStyleFamily,
     OpenAIImageBackground,
     OpenAIImageModeration,
     OpenAIImageOutputFormat,
@@ -18,8 +17,6 @@ import type {
 } from '../../types';
 import {
     DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG,
-    GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS,
-    GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     NAI_IMAGE_MODELS,
     NAI_IMAGE_NOISE_SCHEDULE_OPTIONS,
     NAI_IMAGE_SAMPLER_OPTIONS,
@@ -30,7 +27,6 @@ import {
     OPENAI_IMAGE_RESPONSE_FORMATS,
     OPENAI_IMAGE_STYLES,
     clearImageGenerationDraftConfig,
-    getOpenAICompatibleStyleFamily,
     getImageGenerationDraftConfig,
     setImageGenerationDraftConfig,
 } from '../../utils/runtimeConfig';
@@ -39,7 +35,7 @@ import { getImageProviderLabel,testOpenAICompatibleImageConnection,type OpenAICo
 
 const providerOptions: Array<{ id: ImageProviderType; label: string; hint: string }> = [
     { id: 'novelai', label: 'NovelAI', hint: 'Persistent API Token' },
-    { id: 'openai-compatible', label: 'OpenAI 兼容', hint: 'OpenAI / Gemini 图像接口' },
+    { id: 'openai-compatible', label: 'OpenAI 兼容', hint: 'OpenAI 图像兼容接口' },
 ];
 
 const imageStyleOptions: Array<{ id: ImageGenerationStyle; label: string; hint: string }> = [
@@ -63,8 +59,8 @@ const createEmptyStylePresetDraft = (): StylePresetDraft => ({
 const providerScopeLabels: Record<PhotoStylePreset['providerScope'], string> = {
     all: '旧版通用',
     novelai: 'NovelAI',
-    'openai-gpt': 'GPT / OpenAI',
-    'openai-gemini': 'Gemini / Nano Banana',
+    'openai-gpt': 'OpenAI 兼容 / GPT',
+    'openai-gemini': 'OpenAI 兼容 / Gemini',
 };
 
 const optionalParamLabel = (value: string) => value || '不发送';
@@ -122,14 +118,9 @@ const buildCurrentPresetParams = (
         };
     }
 
-    const targetFamily: OpenAICompatibleStyleFamily = scope === 'openai-gemini' ? 'gemini' : 'gpt';
-    const currentFamily = getOpenAICompatibleStyleFamily(config.openaiCompatible);
-    const openai = currentFamily === targetFamily
+    const openai = scope === 'openai-gpt' || scope === 'openai-gemini'
         ? config.openaiCompatible
-        : {
-            ...DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG,
-            ...(targetFamily === 'gemini' ? GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS : {}),
-        };
+        : DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG;
     return {
         model: openai.model || undefined,
         size: openai.size,
@@ -224,7 +215,6 @@ const ImageGenerationSettings: React.FC = () => {
     const [apiPresetName, setApiPresetName] = useState('');
     const [naiPresetDraft, setNaiPresetDraft] = useState<StylePresetDraft>(createEmptyStylePresetDraft);
     const [gptPresetDraft, setGptPresetDraft] = useState<StylePresetDraft>(createEmptyStylePresetDraft);
-    const [geminiPresetDraft, setGeminiPresetDraft] = useState<StylePresetDraft>(createEmptyStylePresetDraft);
     const [fetchedModels, setFetchedModels] = useState<OpenAICompatibleModelOption[]>([]);
     const [isFetchingModels, setIsFetchingModels] = useState(false);
 
@@ -259,21 +249,6 @@ const ImageGenerationSettings: React.FC = () => {
         }
     };
 
-    const applyGeminiCompatibleDefaults = () => {
-        updateLocalConfig(prev => ({
-            ...prev,
-            activeProvider: 'openai-compatible',
-            openaiCompatible: {
-                ...prev.openaiCompatible,
-                ...GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS,
-                apiKey: prev.openaiCompatible.apiKey,
-                user: prev.openaiCompatible.user,
-            },
-        }));
-        setFetchedModels([]);
-        addToast('已套用 Gemini / Nano Banana 参数', 'success');
-    };
-
     const naiStylePresets = useMemo(
         () => photoStylePresets.filter(preset => preset.providerScope === 'novelai'),
         [photoStylePresets],
@@ -281,11 +256,6 @@ const ImageGenerationSettings: React.FC = () => {
 
     const gptStylePresets = useMemo(
         () => photoStylePresets.filter(preset => preset.providerScope === 'openai-gpt'),
-        [photoStylePresets],
-    );
-
-    const geminiStylePresets = useMemo(
-        () => photoStylePresets.filter(preset => preset.providerScope === 'openai-gemini'),
         [photoStylePresets],
     );
 
@@ -329,15 +299,13 @@ const ImageGenerationSettings: React.FC = () => {
     const saveDraftPreset = (scope: PhotoStyleProviderScope, draft: StylePresetDraft, resetDraft: () => void) => {
         const positivePrompt = draft.positivePrompt.trim();
         const isNaiScope = scope === 'novelai';
-        const isGeminiScope = scope === 'openai-gemini';
-        const isGptScope = scope === 'openai-gpt';
         if (!positivePrompt) {
             addToast(isNaiScope ? '请先填写 NAI 正向提示词' : '请先填写自然语言风格描述', 'error');
             return;
         }
         const preset: PhotoStylePreset = {
             id: `style-${scope}-${Date.now()}`,
-            name: draft.name.trim() || (isNaiScope ? '新的 NAI 风格' : isGeminiScope ? '新的 Gemini 风格' : '新的 GPT 风格'),
+            name: draft.name.trim() || (isNaiScope ? '新的 NAI 风格' : '新的 OpenAI 兼容风格'),
             providerScope: scope,
             positivePrompt,
             negativePrompt: draft.negativePrompt.trim(),
@@ -345,7 +313,7 @@ const ImageGenerationSettings: React.FC = () => {
         };
         savePhotoStylePresets([...photoStylePresets, preset]);
         resetDraft();
-        addToast(isNaiScope ? 'NAI 风格预设已保存' : isGeminiScope ? 'Gemini 风格预设已保存' : isGptScope ? 'GPT 风格预设已保存' : '风格预设已保存', 'success');
+        addToast(isNaiScope ? 'NAI 风格预设已保存' : 'OpenAI 兼容风格预设已保存', 'success');
     };
 
     const removePreset = (id: string) => {
@@ -579,20 +547,6 @@ const ImageGenerationSettings: React.FC = () => {
                     </div>
                 ) : (
                     <div className="space-y-4">
-                        <div className="flex flex-col gap-2 rounded-2xl border border-amber-100 bg-amber-50/70 p-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0">
-                                <div className="truncate text-xs font-bold text-amber-800">Gemini / Nano Banana</div>
-                                <div className="mt-0.5 truncate text-[10px] font-mono text-amber-600">{GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL}</div>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={applyGeminiCompatibleDefaults}
-                                className="shrink-0 rounded-xl bg-amber-500 px-3 py-2 text-[10px] font-bold text-white"
-                            >
-                                套用参数
-                            </button>
-                        </div>
-
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">Base URL</label>
                             <input
@@ -623,7 +577,7 @@ const ImageGenerationSettings: React.FC = () => {
                                 <input
                                     value={localConfig.openaiCompatible.model}
                                     onChange={e => updateOpenAICompatible('model', e.target.value)}
-                                    placeholder="gpt-image-2 / gemini-3.1-flash-image-preview"
+                                    placeholder="gpt-image-2"
                                     className="min-w-0 flex-1 bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono"
                                 />
                                 <button
@@ -641,6 +595,12 @@ const ImageGenerationSettings: React.FC = () => {
                                     onChange={e => updateOpenAICompatible('model', e.target.value)}
                                     className="mt-2 w-full bg-slate-50 border border-slate-200/60 rounded-xl px-3 py-2 text-xs font-mono"
                                 >
+                                    {localConfig.openaiCompatible.model.trim()
+                                        && !fetchedModels.some(model => model.id === localConfig.openaiCompatible.model.trim()) && (
+                                        <option value={localConfig.openaiCompatible.model.trim()}>
+                                            当前值 / {localConfig.openaiCompatible.model.trim()}
+                                        </option>
+                                    )}
                                     {fetchedModels.map(model => <option key={model.id} value={model.id}>{model.displayName}</option>)}
                                 </select>
                             )}
@@ -774,10 +734,10 @@ const ImageGenerationSettings: React.FC = () => {
             <section className="w-full max-w-full overflow-hidden bg-white/60 backdrop-blur-sm rounded-3xl p-4 sm:p-5 shadow-sm border border-white/50">
                 <div className="mb-4">
                     <h2 className="text-sm font-semibold text-slate-600 tracking-wider">风格预设库</h2>
-                    <p className="text-[10px] text-slate-400 mt-1">NovelAI 使用 tag 正负向；GPT 和 Gemini 使用自然语言风格描述。</p>
+                    <p className="text-[10px] text-slate-400 mt-1">NovelAI 使用 tag 正负向；OpenAI 兼容使用自然语言风格描述。</p>
                 </div>
 
-                <div className="grid min-w-0 gap-6 lg:grid-cols-3">
+                <div className="grid min-w-0 gap-6 lg:grid-cols-2">
                     <div className="min-w-0 space-y-3">
                         <div>
                             <h3 className="text-xs font-bold text-slate-600">NovelAI Tag 预设</h3>
@@ -824,13 +784,13 @@ const ImageGenerationSettings: React.FC = () => {
 
                     <div className="min-w-0 space-y-3">
                         <div>
-                            <h3 className="text-xs font-bold text-slate-600">GPT / OpenAI 图像风格</h3>
-                            <p className="text-[10px] text-slate-400 mt-1">适合 gpt-image 系列和普通 OpenAI 图像兼容服务。</p>
+                            <h3 className="text-xs font-bold text-slate-600">OpenAI 兼容图像风格</h3>
+                            <p className="text-[10px] text-slate-400 mt-1">适合 OpenAI 图像兼容服务。</p>
                         </div>
 
                         <PhotoStylePresetList
                             presets={gptStylePresets}
-                            emptyText="还没有 GPT 图像风格"
+                            emptyText="还没有 OpenAI 兼容图像风格"
                             positiveLabel="风格"
                             negativeLabel="避免"
                             onExport={exportPreset}
@@ -841,7 +801,7 @@ const ImageGenerationSettings: React.FC = () => {
                             <input
                                 value={gptPresetDraft.name}
                                 onChange={e => setGptPresetDraft(prev => ({ ...prev, name: e.target.value }))}
-                                placeholder="GPT 风格名称（可选）"
+                                placeholder="OpenAI 兼容风格名称（可选）"
                                 className="w-full bg-slate-50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm"
                             />
                             <textarea
@@ -861,51 +821,7 @@ const ImageGenerationSettings: React.FC = () => {
                                 onClick={() => saveDraftPreset('openai-gpt', gptPresetDraft, () => setGptPresetDraft(createEmptyStylePresetDraft()))}
                                 className="w-full py-3 bg-slate-900 text-white rounded-2xl text-sm font-bold active:scale-95 transition-transform"
                             >
-                                保存 GPT 风格
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="min-w-0 space-y-3">
-                        <div>
-                            <h3 className="text-xs font-bold text-slate-600">Gemini / Nano Banana 风格</h3>
-                            <p className="text-[10px] text-slate-400 mt-1">适合 Gemini 图像模型，保存时自动带 Gemini 推荐参数。</p>
-                        </div>
-
-                        <PhotoStylePresetList
-                            presets={geminiStylePresets}
-                            emptyText="还没有 Gemini 风格"
-                            positiveLabel="风格"
-                            negativeLabel="避免"
-                            onExport={exportPreset}
-                            onRemove={removePreset}
-                        />
-
-                        <div className="space-y-3 border-t border-slate-100 pt-4">
-                            <input
-                                value={geminiPresetDraft.name}
-                                onChange={e => setGeminiPresetDraft(prev => ({ ...prev, name: e.target.value }))}
-                                placeholder="Gemini 风格名称（可选）"
-                                className="w-full bg-slate-50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm"
-                            />
-                            <textarea
-                                value={geminiPresetDraft.positivePrompt}
-                                onChange={e => setGeminiPresetDraft(prev => ({ ...prev, positivePrompt: e.target.value }))}
-                                placeholder="自然语言风格描述..."
-                                className="w-full h-28 bg-slate-50 border border-slate-200/60 rounded-2xl p-4 text-xs resize-none"
-                            />
-                            <textarea
-                                value={geminiPresetDraft.negativePrompt}
-                                onChange={e => setGeminiPresetDraft(prev => ({ ...prev, negativePrompt: e.target.value }))}
-                                placeholder="需要避免的画面内容（可选）..."
-                                className="w-full h-24 bg-slate-50 border border-slate-200/60 rounded-2xl p-4 text-xs resize-none"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => saveDraftPreset('openai-gemini', geminiPresetDraft, () => setGeminiPresetDraft(createEmptyStylePresetDraft()))}
-                                className="w-full py-3 bg-amber-500 text-white rounded-2xl text-sm font-bold active:scale-95 transition-transform"
-                            >
-                                保存 Gemini 风格
+                                保存 OpenAI 兼容风格
                             </button>
                         </div>
                     </div>

@@ -269,6 +269,119 @@ export const FeishuSection = React.memo<FeishuProps>(({ enabled, appId, appSecre
     );
 });
 
+interface CanvaMcpProps {
+    enabled: boolean; mcpUrl: string; workspaceLabel: string;
+    set: (field: string, value: any) => void;
+    onTestStatus: (msg: string) => void;
+    onUpdateConfig: (config: any) => void;
+}
+
+export const CanvaMcpSection = React.memo<CanvaMcpProps>(({ enabled, mcpUrl, workspaceLabel, set, onTestStatus, onUpdateConfig }) => {
+    const [connectedMode, setConnectedMode] = useState<'bridge' | 'mcp' | ''>('');
+    const recommendedBridgeUrl = 'http://localhost:18062/api';
+
+    const persistConfig = (nextUrl: string, nextWorkspaceLabel?: string) => {
+        onUpdateConfig({
+            enabled,
+            serverUrl: nextUrl,
+            workspaceLabel: nextWorkspaceLabel || workspaceLabel || undefined,
+        });
+    };
+
+    const testCanvaMcp = async () => {
+        if (!mcpUrl) { onTestStatus('请填写 Canva 服务地址'); return; }
+        onTestStatus('正在连接 Canva...');
+        try {
+            const { CanvaMcpClient } = await import('../../../utils/canvaMcpClient');
+            const result = await CanvaMcpClient.testConnection(mcpUrl);
+            if (result.connected) {
+                const toolCount = result.tools?.length || 0;
+                const modeLabel = result.mode === 'bridge' ? 'Bridge' : '兼容 MCP';
+                setConnectedMode(result.mode || '');
+                if (result.workspaceLabel && !workspaceLabel) set('canvaWorkspaceLabel', result.workspaceLabel);
+                persistConfig(mcpUrl, result.workspaceLabel);
+                onTestStatus(`✅ Canva ${modeLabel} 连接成功! ${toolCount} 个工具可用${result.workspaceLabel ? ` | 工作区: ${result.workspaceLabel}` : ''}`);
+            } else {
+                setConnectedMode('');
+                onTestStatus(`❌ Canva 连接失败: ${result.error}`);
+            }
+        } catch (e: any) {
+            setConnectedMode('');
+            onTestStatus(`Canva 网络错误: ${e.message}`);
+        }
+    };
+
+    const autoDetect = async () => {
+        onTestStatus('正在探测 Canva 服务...');
+        const { CanvaMcpClient } = await import('../../../utils/canvaMcpClient');
+        const candidates = [recommendedBridgeUrl, '/canva-api'];
+        let lastError = '';
+        for (const url of candidates) {
+            try {
+                onTestStatus(`尝试 ${url}...`);
+                const result = await CanvaMcpClient.testConnection(url);
+                if (result.connected) {
+                    set('canvaMcpUrl', url);
+                    setConnectedMode(result.mode || '');
+                    if (result.workspaceLabel && !workspaceLabel) set('canvaWorkspaceLabel', result.workspaceLabel);
+                    onUpdateConfig({
+                        enabled,
+                        serverUrl: url,
+                        workspaceLabel: workspaceLabel || result.workspaceLabel || undefined,
+                    });
+                    onTestStatus(`✅ Canva 自动探测成功: ${url}`);
+                    return;
+                }
+                lastError = result.error || '连接失败';
+            } catch (error: any) {
+                lastError = error?.message || '连接失败';
+            }
+        }
+        onTestStatus(`❌ Canva 自动探测失败。请确认 Canva MCP/Bridge 已启动（推荐地址 ${recommendedBridgeUrl}）。${lastError ? `最后一次错误：${lastError}` : ''}`);
+    };
+
+    return (
+        <div className="bg-cyan-50/50 p-4 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <span className="text-lg">🎨</span>
+                    <span className="text-sm font-bold text-cyan-700">Canva 设计</span>
+                    <span className="text-[9px] bg-fuchsia-100 text-fuchsia-500 px-1.5 py-0.5 rounded-full">MCP</span>
+                    {connectedMode && (
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${connectedMode === 'bridge' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'}`}>
+                            {connectedMode === 'bridge' ? 'Bridge 模式' : '兼容 MCP'}
+                        </span>
+                    )}
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" checked={enabled} onChange={e => { set('canvaMcpEnabled', e.target.checked); set('canvaEnabled', e.target.checked); }} className="sr-only peer" />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
+                </label>
+            </div>
+            <p className="text-[10px] text-cyan-600/70 leading-relaxed">开启后，char 可以在聊天里帮你生成 Canva 设计草稿、搜索已有设计、导出分享图。建议通过本地 Bridge 或远端代理处理 Canva OAuth。</p>
+            {enabled && (
+                <div className="space-y-2">
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Server URL</label>
+                        <input value={mcpUrl} onChange={e => set('canvaMcpUrl', e.target.value)} className="w-full bg-white/80 border border-cyan-200 rounded-xl px-3 py-2 text-[11px] font-mono" placeholder="推荐: http://localhost:18062/api；开发期也可用 /canva-api" {...getGuardedInputProps({ kind: 'url', field: 'canva-mcp-server-url', inputMode: 'text' })} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        <button onClick={testCanvaMcp} className="py-2 bg-cyan-100 text-cyan-700 text-xs font-bold rounded-xl active:scale-95 transition-transform">测试连接</button>
+                        <button onClick={autoDetect} className="py-2 bg-cyan-50 text-cyan-600 text-xs font-bold rounded-xl active:scale-95 transition-transform border border-cyan-200">自动探测</button>
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">工作区备注</label>
+                        <input value={workspaceLabel} onChange={e => set('canvaWorkspaceLabel', e.target.value)} className="w-full bg-white/80 border border-cyan-200 rounded-xl px-3 py-2 text-[11px]" placeholder="例如: 个人 Canva / 品牌团队" />
+                    </div>
+                    <p className="text-[10px] text-cyan-600/70 leading-relaxed">
+                        官方 Canva MCP 的登录和权限按每个用户单独授权；前端只保存服务地址和工作区备注。若在手机访问，请把 localhost 改成电脑局域网 IP，例如 http://192.168.x.x:18062/api。
+                    </p>
+                </div>
+            )}
+        </div>
+    );
+});
+
 interface XhsMcpProps {
     enabled: boolean; mcpUrl: string; nickname: string; userId: string;
     set: (field: string, value: any) => void;

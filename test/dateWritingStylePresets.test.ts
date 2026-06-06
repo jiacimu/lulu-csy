@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     DATE_WRITING_STYLE_PRESETS,
+    buildFullDateSystemPrompt,
     buildDateOutputTuning,
     resolveDateWritingStylePreset,
 } from '../utils/datePrompts';
@@ -67,5 +68,28 @@ describe('date writing style presets', () => {
         expect(tuning).not.toContain('【文风：松弛日常】');
         expect(tuning).not.toContain('【文风：静水深流】');
         expect(tuning).not.toContain('【文风指令：自定义】');
+    });
+
+    it('omits the date time block when character date time awareness is off', () => {
+        const prompt = buildFullDateSystemPrompt({
+            char: {
+                id: 'char-date-time-off',
+                name: 'Sully',
+                avatar: '',
+                description: '',
+                systemPrompt: '',
+                memories: [],
+                dateTimeAwarenessEnabled: false,
+            } as any,
+            userProfile: {
+                name: '糯米',
+                avatar: '',
+                bio: '',
+            },
+        });
+
+        expect(prompt).not.toContain('### 【当前时间】');
+        expect(prompt).not.toContain('现在几点了？读取上方系统提供的【当前时间】');
+        expect(prompt).toContain('该角色已关闭线下时间感知');
     });
 });

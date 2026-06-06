@@ -1,5 +1,4 @@
 import {
-    GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     type APIConfig,
     type ApiPreset,
     type RealtimeConfig,
@@ -9,12 +8,12 @@ import {
     type ImageProviderType,
     type NaiImageModel,
     type NovelAIImageProviderConfig,
+    type OpenAICompatibleStyleFamily,
     type OpenAIImageBackground,
     type OpenAIImageModeration,
     type OpenAIImageOutputFormat,
     type OpenAIImageQuality,
     type OpenAICompatibleImageProviderConfig,
-    type OpenAICompatibleStyleFamily,
     type OpenAIImageResponseFormat,
     type OpenAIImageStyle,
     type PhotoStylePreset,
@@ -24,7 +23,6 @@ import {
     DEFAULT_STT_CONFIG,
     DEFAULT_TTS_CONFIG,
 } from '../types';
-export { GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL } from '../types';
 import {
     type BackendResolutionDebug,
     getBackendResolutionDebug,
@@ -99,6 +97,11 @@ export const DEFAULT_RUNTIME_REALTIME_CONFIG: RealtimeConfig = {
         enabled: false,
         serverUrl: 'http://localhost:18061/api',
     },
+    canvaEnabled: false,
+    canvaMcpConfig: {
+        enabled: false,
+        serverUrl: 'http://localhost:18062/api',
+    },
     cacheMinutes: 30,
 };
 
@@ -120,9 +123,7 @@ export const NAI_IMAGE_MODELS: NaiImageModel[] = [
 
 export const IMAGE_PROVIDER_TYPES: ImageProviderType[] = ['novelai', 'openai-compatible'];
 export const IMAGE_GENERATION_STYLES: ImageGenerationStyle[] = ['guoman', 'cg', 'real'];
-export const OPENAI_COMPATIBLE_STYLE_FAMILIES: OpenAICompatibleStyleFamily[] = ['gpt', 'gemini'];
 export const PHOTO_STYLE_PROVIDER_SCOPES: PhotoStyleProviderScope[] = ['all', 'novelai', 'openai-gpt', 'openai-gemini'];
-export const LEGACY_OPENAI_COMPATIBLE_PHOTO_STYLE_SCOPE = 'openai-compatible';
 type NaiImageOption = { value: string; label: string; aliases?: string[] };
 export const NAI_IMAGE_SAMPLER_OPTIONS: NaiImageOption[] = [
     { value: 'k_euler', label: 'Euler', aliases: ['euler'] },
@@ -152,58 +153,6 @@ export const OPENAI_IMAGE_STYLES: OpenAIImageStyle[] = ['', 'vivid', 'natural'];
 export const OPENAI_IMAGE_BACKGROUNDS: OpenAIImageBackground[] = ['', 'auto', 'transparent', 'opaque'];
 export const OPENAI_IMAGE_OUTPUT_FORMATS: OpenAIImageOutputFormat[] = ['', 'png', 'jpeg', 'webp'];
 export const OPENAI_IMAGE_MODERATIONS: OpenAIImageModeration[] = ['', 'auto', 'low'];
-export const GEMINI_OPENAI_COMPATIBLE_IMAGE_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai';
-const LEGACY_GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL = 'gemini-2.5-flash-image';
-const APP_OWNED_GEMINI_STYLE_MODEL_IDS = new Set([
-    LEGACY_GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
-    GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
-]);
-export const GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS: Partial<OpenAICompatibleImageProviderConfig> = {
-    baseUrl: GEMINI_OPENAI_COMPATIBLE_IMAGE_BASE_URL,
-    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
-    size: '1024x1024',
-    responseFormat: 'b64_json',
-    n: 1,
-    quality: '',
-    style: '',
-    background: '',
-    outputFormat: '',
-    outputCompression: null,
-    moderation: '',
-    stream: false,
-    partialImages: null,
-    extraRequestBody: '',
-    qualityTags: '清晰自然，高质量细节，人物身份稳定，光影真实柔和，画面有生活感',
-    negativePrompt: '低质量，模糊，畸形手，文字，水印，logo，多余人物，脸部融合，比例失衡',
-};
-
-export function getOpenAICompatibleStyleFamily(
-    value: Partial<OpenAICompatibleImageProviderConfig> | Partial<ImageGenerationConfig> | null | undefined,
-): OpenAICompatibleStyleFamily {
-    const raw = (value || {}) as Partial<OpenAICompatibleImageProviderConfig> & Partial<ImageGenerationConfig>;
-    const provider = raw.openaiCompatible || raw;
-    const haystack = [
-        provider.model,
-        provider.baseUrl,
-    ].map(item => String(item || '').toLowerCase()).join(' ');
-    return /gemini|nano[-_\s]?banana|generativelanguage\.googleapis\.com|googleapis\.com\/v1beta\/openai/.test(haystack)
-        ? 'gemini'
-        : 'gpt';
-}
-
-function getOpenAICompatibleStyleFamilyFromPresetHint(value: Partial<PhotoStylePreset> & Record<string, unknown>): OpenAICompatibleStyleFamily {
-    const haystack = [
-        value.id,
-        value.name,
-        value.model,
-        value.extraRequestBody,
-    ].map(item => String(item || '').toLowerCase()).join(' ');
-    return /gemini|nano[-_\s]?banana/.test(haystack) ? 'gemini' : 'gpt';
-}
-
-export function getOpenAIPhotoStyleProviderScope(family: OpenAICompatibleStyleFamily): PhotoStyleProviderScope {
-    return family === 'gemini' ? 'openai-gemini' : 'openai-gpt';
-}
 
 export const DEFAULT_NOVELAI_IMAGE_CONFIG: NovelAIImageProviderConfig = {
     apiUrl: 'https://image.novelai.net',
@@ -240,6 +189,15 @@ export const DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG: OpenAICompatibleImageProvid
     negativePrompt: 'low quality, blurry, distorted hands, watermark, text, logo',
 };
 
+export const GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL = 'gemini-3.1-flash-image-preview';
+export const GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS: Partial<OpenAICompatibleImageProviderConfig> = {
+    model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+    size: '1024x1536',
+    responseFormat: 'b64_json',
+    qualityTags: DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.qualityTags,
+    negativePrompt: DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG.negativePrompt,
+};
+
 export const DEFAULT_IMAGE_GENERATION_CONFIG: ImageGenerationConfig = {
     activeProvider: 'novelai',
     imageStyle: 'guoman',
@@ -257,16 +215,6 @@ export const DEFAULT_PHOTO_STYLE_PRESETS: PhotoStylePreset[] = [
         providerScope: 'openai-gpt',
         positivePrompt: '一张柔和胶片质感的随手拍，暖色室内光，轻微颗粒，构图自然亲密，像刚刚用手机拍下来发给对方。',
         negativePrompt: '过曝，欠曝，强闪光，廉价影楼感，过度修图',
-    },
-    {
-        id: 'gemini-nano-banana-natural-snapshot',
-        name: 'Gemini / Nano Banana 自然随拍',
-        providerScope: 'openai-gemini',
-        positivePrompt: '自然真实的日常随拍感，保持主体身份一致，光线柔和，细节清晰，构图像手机或相机随手记录下来的亲密瞬间，画面干净、有空气感。',
-        negativePrompt: '文字，水印，logo，脸部融合，额外人物，过度磨皮，低质量，模糊，畸形手，比例失衡',
-        size: '1024x1024',
-        responseFormat: 'b64_json',
-        n: 1,
     },
     {
         id: 'clean-anime-snapshot-compatible',
@@ -331,14 +279,24 @@ export const DEFAULT_PHOTO_STYLE_PRESETS: PhotoStylePreset[] = [
         positivePrompt: '双人同框真人感合照，画面中有两位清晰主体，像真实拍摄的人物照片，成熟英俊男性，五官立体，眼睛深邃好看，气质沉稳温柔，高颜值但自然不过分夸张。另一位人物与他自然同框，互动亲密自然，像情侣或暧昧对象的日常合照。整体为三次元真实摄影风格，皮肤质感自然，轻微肤纹，真实光影，生活感，高级氛围感，构图干净，电影感，手机壁纸尺寸',
         negativePrompt: '二次元，国漫风，动漫插画，Q版，卡通，3D建模感，假脸，塑料皮肤，过度磨皮，网红滤镜，单人照，只有一个人，人物融合，脸部融合，重复人物，第三人，肢体畸形，手部异常，裁掉其中一人，模糊脸，低清晰度',
     },
+    {
+        id: 'gemini-nano-banana-natural-snapshot',
+        name: 'Gemini / Nano Banana 自然随拍',
+        providerScope: 'openai-gemini',
+        size: '1024x1536',
+        positivePrompt: '自然生活随拍，真实手机摄影感，构图轻松，光线柔和，人物状态自然，细节清晰，有亲近的日常氛围。',
+        negativePrompt: '过度修图，塑料皮肤，摆拍感，水印，文字，低清晰度，畸形手',
+    },
 ];
+
+const DEFAULT_PHOTO_STYLE_PRESET_BY_ID = new Map(DEFAULT_PHOTO_STYLE_PRESETS.map(preset => [preset.id, preset]));
 
 const RETIRED_DEFAULT_PHOTO_STYLE_PRESET_IDS = new Set([
     'soft-polaroid',
     'clean-anime-snapshot',
 ]);
 const PHOTO_STYLE_PRESETS_MIGRATION_KEY = 'os_photo_style_presets_migration';
-const PHOTO_STYLE_PRESETS_MIGRATION_VERSION = 'gemini-31-image-presets-2026-06-05';
+const PHOTO_STYLE_PRESETS_MIGRATION_VERSION = 'openai-compatible-style-family-2026-06-06';
 
 export const EMBEDDING_ENGINES: Record<
     EmbeddingEngineId,
@@ -449,6 +407,13 @@ function normalizeString(value: unknown): string {
     return typeof value === 'string' ? value.trim() : '';
 }
 
+export function getOpenAICompatibleStyleFamily(
+    config: Pick<OpenAICompatibleImageProviderConfig, 'baseUrl' | 'model'> | null | undefined,
+): OpenAICompatibleStyleFamily {
+    const source = `${String(config?.baseUrl || '')} ${String(config?.model || '')}`.toLowerCase();
+    return /gemini|generativelanguage|googleapis|nano[-_\s]?banana|imagen/.test(source) ? 'gemini' : 'gpt';
+}
+
 function normalizeUrl(value: unknown): string {
     return normalizeString(value).replace(/\/+$/, '');
 }
@@ -497,6 +462,9 @@ function normalizeRealtimeConfig(value: Partial<RealtimeConfig> | null | undefin
     const normalizedXhsServerUrl = legacyUntouchedMcpDefault
         ? 'http://localhost:18061/api'
         : rawXhsServerUrl || DEFAULT_RUNTIME_REALTIME_CONFIG.xhsMcpConfig?.serverUrl || 'http://localhost:18061/api';
+    const normalizedCanvaServerUrl = normalizeString(value?.canvaMcpConfig?.serverUrl)
+        || DEFAULT_RUNTIME_REALTIME_CONFIG.canvaMcpConfig?.serverUrl
+        || 'http://localhost:18062/api';
     const normalizedNewsPlatforms = normalizeStringArray(value?.newsPlatforms);
 
     return {
@@ -521,6 +489,12 @@ function normalizeRealtimeConfig(value: Partial<RealtimeConfig> | null | undefin
             serverUrl: normalizedXhsServerUrl,
             loggedInUserId: normalizeString(value?.xhsMcpConfig?.loggedInUserId) || undefined,
             loggedInNickname: normalizeString(value?.xhsMcpConfig?.loggedInNickname) || undefined,
+        },
+        canvaEnabled: value?.canvaEnabled === true,
+        canvaMcpConfig: {
+            enabled: value?.canvaMcpConfig?.enabled === true,
+            serverUrl: normalizedCanvaServerUrl,
+            workspaceLabel: normalizeString(value?.canvaMcpConfig?.workspaceLabel) || undefined,
         },
         cacheMinutes: typeof value?.cacheMinutes === 'number' && Number.isFinite(value.cacheMinutes)
             ? value.cacheMinutes
@@ -618,6 +592,7 @@ function normalizeSttConfig(value: Partial<SttConfig> | null | undefined): SttCo
         baseUrl: normalizeString(value?.baseUrl) || undefined,
         model: normalizeString(value?.model) || undefined,
         language: normalizeString(value?.language) || undefined,
+        voiceCallManualSend: value?.voiceCallManualSend === true,
     };
 }
 
@@ -675,11 +650,12 @@ export function normalizePhotoStyleProviderScope(
     hint: (Partial<PhotoStylePreset> & Record<string, unknown>) | null | undefined = undefined,
 ): PhotoStyleProviderScope {
     const scope = normalizeString(value).toLowerCase();
-    if (scope === LEGACY_OPENAI_COMPATIBLE_PHOTO_STYLE_SCOPE || scope === 'openai-compatible') {
-        return getOpenAIPhotoStyleProviderScope(getOpenAICompatibleStyleFamilyFromPresetHint(hint || {}));
+    if (scope === 'openai-gpt') return 'openai-gpt';
+    if (scope === 'openai-gemini') return 'openai-gemini';
+    if (scope === 'gemini' || scope === 'nano-banana' || scope === 'nano_banana') return 'openai-gemini';
+    if (scope === 'openai-compatible' || scope === 'openai' || scope === 'gpt') {
+        return getOpenAICompatibleStyleFamily(hint) === 'gemini' ? 'openai-gemini' : 'openai-gpt';
     }
-    if (scope === 'gpt' || scope === 'openai' || scope === 'openai-gpt') return 'openai-gpt';
-    if (scope === 'gemini' || scope === 'nano-banana' || scope === 'nano_banana' || scope === 'openai-gemini') return 'openai-gemini';
     return PHOTO_STYLE_PROVIDER_SCOPES.includes(scope as PhotoStyleProviderScope) ? scope as PhotoStyleProviderScope : fallback;
 }
 
@@ -949,20 +925,19 @@ function normalizePhotoStylePresets(value: unknown): PhotoStylePreset[] {
     return normalized.length > 0 ? normalized : DEFAULT_PHOTO_STYLE_PRESETS;
 }
 
-function migrateBuiltInGeminiPhotoStylePresetModel(preset: PhotoStylePreset): PhotoStylePreset {
-    const builtIn = DEFAULT_PHOTO_STYLE_PRESETS.find(defaultPreset =>
-        defaultPreset.id === preset.id
-        && defaultPreset.providerScope === 'openai-gemini'
-    );
-    if (!builtIn || !preset.model || !APP_OWNED_GEMINI_STYLE_MODEL_IDS.has(preset.model)) return preset;
-    const { model, ...rest } = preset;
-    return rest;
-}
-
 function migratePhotoStylePresetsWithBuiltIns(presets: PhotoStylePreset[]): PhotoStylePreset[] {
     const migrated = presets
         .filter(preset => !RETIRED_DEFAULT_PHOTO_STYLE_PRESET_IDS.has(preset.id))
-        .map(migrateBuiltInGeminiPhotoStylePresetModel);
+        .map(preset => {
+            const builtIn = DEFAULT_PHOTO_STYLE_PRESET_BY_ID.get(preset.id);
+            if (!builtIn) return preset;
+            return {
+                ...preset,
+                providerScope: builtIn.providerScope,
+                model: builtIn.model,
+                size: builtIn.size,
+            };
+        });
     const existingIds = new Set(migrated.map(preset => preset.id));
 
     for (const preset of DEFAULT_PHOTO_STYLE_PRESETS) {

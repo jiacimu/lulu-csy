@@ -154,6 +154,9 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
         releaseGate,
         lastCallHistory,
         sendTextMessage,
+        pendingVoiceTranscript,
+        sendPendingVoiceTranscript,
+        discardPendingVoiceTranscript,
         engineState,
         isUserSpeaking,
         transcript,
@@ -565,6 +568,9 @@ const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                         onToggleMute={toggleMute}
                         onEndCall={endCall}
                         onSendTextMessage={sendTextMessage}
+                        pendingVoiceTranscript={pendingVoiceTranscript}
+                        onSendPendingVoiceTranscript={sendPendingVoiceTranscript}
+                        onDiscardPendingVoiceTranscript={discardPendingVoiceTranscript}
                         transcript={transcript}
                         aiResponse={aiResponse}
                         engineState={engineState}

@@ -6,6 +6,7 @@ import CharacterWeixinBindingCard from './CharacterWeixinBindingCard';
 
 const {
     mockCheckWeixinQrStatus,
+    mockEnsureWeixinSync,
     mockGenerateWeixinQr,
     mockGetWeixinReadiness,
     mockListWeixinBindings,
@@ -13,6 +14,7 @@ const {
     mockSyncPendingAgentMessagesForCharacter,
 } = vi.hoisted(() => ({
     mockCheckWeixinQrStatus: vi.fn(),
+    mockEnsureWeixinSync: vi.fn(),
     mockGenerateWeixinQr: vi.fn(),
     mockGetWeixinReadiness: vi.fn(),
     mockListWeixinBindings: vi.fn(),
@@ -25,6 +27,7 @@ vi.mock('../../utils/backendClient', async () => {
     return {
         ...actual,
         checkWeixinQrStatus: mockCheckWeixinQrStatus,
+        ensureWeixinSync: mockEnsureWeixinSync,
         generateWeixinQr: mockGenerateWeixinQr,
         getWeixinReadiness: mockGetWeixinReadiness,
         listWeixinBindings: mockListWeixinBindings,
@@ -54,6 +57,12 @@ describe('CharacterWeixinBindingCard', () => {
             received: 0,
             saved: 0,
             acked: 0,
+        });
+        mockEnsureWeixinSync.mockResolvedValue({
+            status: 'idle',
+            processed: false,
+            remainingQueued: 0,
+            clientIdBound: true,
         });
     });
 
@@ -92,6 +101,63 @@ describe('CharacterWeixinBindingCard', () => {
         expect(mockListWeixinBindings).toHaveBeenCalledTimes(1);
         expect(mockGetWeixinReadiness).toHaveBeenCalledWith('char-1');
         expect(mockSyncPendingAgentMessagesForCharacter).toHaveBeenCalledWith('char-1');
+    });
+
+    it('manually ensures Weixin jobs before pulling pending agent messages', async () => {
+        mockListWeixinBindings.mockResolvedValue([
+            {
+                id: 1,
+                userId: 'user-1',
+                charId: 'char-1',
+                weixinBotName: null,
+                bridgeSessionId: null,
+                status: 'active',
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+            },
+        ]);
+        mockEnsureWeixinSync.mockResolvedValue({
+            status: 'processed',
+            processed: true,
+            remainingQueued: 0,
+            clientIdBound: true,
+        });
+        mockSyncPendingAgentMessagesForCharacter
+            .mockResolvedValueOnce({
+                received: 0,
+                saved: 0,
+                acked: 0,
+            })
+            .mockResolvedValueOnce({
+                received: 2,
+                saved: 2,
+                acked: 2,
+            });
+
+        render(
+            <CharacterWeixinBindingCard
+                charId="char-1"
+                charName="Sully"
+                addToast={mockAddToast}
+            />,
+        );
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: '立即同步' })).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: '立即同步' }));
+
+        await waitFor(() => {
+            expect(mockEnsureWeixinSync).toHaveBeenCalledWith('char-1');
+        });
+        await waitFor(() => {
+            expect(mockSyncPendingAgentMessagesForCharacter).toHaveBeenCalledTimes(2);
+        });
+
+        expect(mockEnsureWeixinSync).toHaveBeenCalledTimes(1);
+        expect(mockAddToast).toHaveBeenCalledWith('已同步 2 条微信消息到小手机。', 'success');
+        expect(screen.getByText('已同步 2 条微信消息到小手机。')).toBeInTheDocument();
     });
 
     it('automatically repairs an active binding that needs the current client id', async () => {

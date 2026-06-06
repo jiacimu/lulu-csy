@@ -107,7 +107,7 @@ export interface ChatTheme {
     timestampIntervalMs?: number;
 }
 
-export type MessageType = 'text' | 'image' | 'emoji' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'score_card' | 'music_card' | 'mcd_card' | 'html_card' | 'news_card' | 'moments' | 'voice' | 'call_log' | 'soul_reflection';
+export type MessageType = 'text' | 'image' | 'emoji' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'canva_card' | 'score_card' | 'music_card' | 'mcd_card' | 'html_card' | 'news_card' | 'moments' | 'voice' | 'call_log' | 'soul_reflection';
 
 export interface Message {
     id: number;
@@ -170,6 +170,9 @@ export interface VectorMemory {
     modelId?: string;              // Embedding model used (e.g. "BAAI/bge-m3")
     source: 'auto' | 'manual' | 'import' | 'sync' | 'call' | 'distillation' | 'musing'; // How it was created
     sourceMessageIds?: number[];           // IDs of messages that produced/updated this memory
+    layer?: 'fact' | 'event' | 'scene';     // L0 extraction layer
+    kind?: 'observed' | 'inference';        // Whether the content was directly observed or inferred
+    expiresAt?: string | number | null;     // Optional expiry for time-limited facts/events
     cloudSynced?: boolean;                 // Whether this memory has been pushed to cloud successfully
     syncState?: MemorySyncState;           // Local/cloud sync state for cache + offline fallback
     deprecated?: boolean;              // Marked as outdated by LLM (info was corrected/superseded)

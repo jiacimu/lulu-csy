@@ -334,7 +334,8 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
         expect(body.messages[2].content).toContain('## 用户梗要求');
         expect(body.messages[2].content).toContain('请以「Marcus 对 我 的回应」为核心');
         expect(body.messages[2].content).toContain('你就是Marcus本人，不能像任何通用角色');
-        expect(body.messages[2].content).toContain('[2268~2576 字，根据用户梗复杂度自然伸缩]');
+        expect(body.messages[2].content).toContain('[不设固定字数。优先遵守"用户梗要求"里对长短、形式、节奏的明示要求');
+        expect(body.messages[2].content).not.toContain('2268~2576');
         expect(body.messages[2].content).toContain('用户指定梗: 雨夜误会');
         expect(body.messages[2].content).not.toContain('正文 3280~3654 中文字');
         expect(body.messages[2].content).not.toContain('运笔·〈本期作家〉风');

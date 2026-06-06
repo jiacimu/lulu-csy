@@ -22,6 +22,7 @@ import {
     type AfterglowGenerationOptions,
 } from '../../utils/afterglowMotifs';
 import XhsCard from './cards/XhsCard';
+import CanvaCard from './cards/CanvaCard';
 import SocialCard from './cards/SocialCard';
 import SystemNoticeCard from './cards/SystemNoticeCard';
 import PhoneEvidenceCard from './cards/PhoneEvidenceCard';
@@ -573,6 +574,8 @@ interface MessageItemProps {
     isAfterglowLoading?: boolean;
     onRequestAfterglow?: (message: Message, options?: AfterglowGenerationOptions) => Promise<StatusCardData | null>;
     onOpenStoryPhone?: (message: Message) => void;
+    onUserAvatarAction?: (message: Message) => void;
+    isUserAvatarActionLoading?: boolean;
     // Thinking chain visibility
     showThinking?: boolean;
 }
@@ -608,6 +611,8 @@ const MessageItem = React.memo(({
     isAfterglowLoading,
     onRequestAfterglow,
     onOpenStoryPhone,
+    onUserAvatarAction,
+    isUserAvatarActionLoading,
     showThinking,
 }: MessageItemProps) => {
     const isUser = m.role === 'user';
@@ -825,10 +830,15 @@ const MessageItem = React.memo(({
         }
     }, []);
 
-    const renderAvatar = (src: string, isCharAvatar = false) => (
+    const renderAvatar = (src: string, isCharAvatar = false) => {
+        const isUserActionAvatar = !isCharAvatar && isUser && !!onUserAvatarAction;
+        return (
         <div
-            className={`relative w-9 h-9 shrink-0 z-0 ${isCharAvatar && hasAnyVoice ? 'cursor-pointer' : ''}`}
-            onClick={isCharAvatar ? handleAvatarClick : undefined}
+            className={`relative w-9 h-9 shrink-0 z-0 ${(isCharAvatar && hasAnyVoice) || isUserActionAvatar ? 'cursor-pointer' : ''}`}
+            onClick={isCharAvatar ? handleAvatarClick : isUserActionAvatar ? (event) => {
+                event.stopPropagation();
+                if (!selectionMode) onUserAvatarAction?.(m);
+            } : undefined}
         >
             <img
                 src={src}
@@ -909,8 +919,12 @@ const MessageItem = React.memo(({
                     ) : null}
                 </div>
             )}
+            {isUserActionAvatar && isUserAvatarActionLoading && (
+                <span className="absolute -right-1 -top-1 z-20 h-3.5 w-3.5 rounded-full border-2 border-white border-t-[#c47770] bg-white shadow-sm animate-spin" />
+            )}
         </div>
     );
+    };
 
     // --- SYSTEM MESSAGE RENDERING ---
     if (isSystem) {
@@ -1388,6 +1402,13 @@ const MessageItem = React.memo(({
         );
     }
 
+    // --- Canva Card Rendering (Canva 设计卡片) ---
+    if (m.type === 'canva_card' && m.metadata?.canvaDesign) {
+        return commonLayout(
+            <CanvaCard design={m.metadata.canvaDesign} />
+        );
+    }
+
     // --- WeChat Moments Card (朋友圈动态卡片) ---
     if (m.type === 'moments' && m.metadata?.moments) {
         return commonLayout(
@@ -1794,6 +1815,8 @@ const MessageItem = React.memo(({
         prev.isAfterglowLoading === next.isAfterglowLoading &&
         prev.onRequestAfterglow === next.onRequestAfterglow &&
         prev.onOpenStoryPhone === next.onOpenStoryPhone &&
+        prev.onUserAvatarAction === next.onUserAvatarAction &&
+        prev.isUserAvatarActionLoading === next.isUserAvatarActionLoading &&
         prev.showThinking === next.showThinking &&
         prev.msg.metadata?.thinking === next.msg.metadata?.thinking &&
         prev.msg.metadata?.storyPhoneConsumed === next.msg.metadata?.storyPhoneConsumed &&

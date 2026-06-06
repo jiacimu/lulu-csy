@@ -110,7 +110,6 @@ import {
     buildManualPhotoPrompt,
     createPhotoMeta,
     generatePhotoImage,
-    getOpenAIStyleFamilyForConfig,
     isImageGenerationConfigured,
     resolveImageStylePhotoPreset,
 } from '../../utils/photoGeneration';
@@ -1747,7 +1746,6 @@ const LoveShowApp: React.FC = () => {
             const plan = getLoveShowSocialImagePlan(
                 post.image.intent,
                 imageGenerationConfig.imageStyle,
-                getOpenAIStyleFamilyForConfig(imageGenerationConfig),
             );
             const guestId = post.authorGuestId || post.guestRefs?.[0]?.guestId;
             const guestCharacter = guestId

@@ -91,6 +91,12 @@ interface ChatModalsProps {
     showTimestampSetting?: boolean;
     isTimestampForced?: boolean;
     onToggleTimestamp?: () => void;
+    chatTimeAwarenessEnabled?: boolean;
+    onToggleChatTimeAwareness?: () => void;
+    chatTimePassageAwarenessEnabled?: boolean;
+    onToggleChatTimePassageAwareness?: () => void;
+    dateTimeAwarenessEnabled?: boolean;
+    onToggleDateTimeAwareness?: () => void;
     // Voice / TTS
     onReadAloud?: () => void;
     onVoiceToText?: () => void;
@@ -167,6 +173,9 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     translationEnabled, onToggleTranslation, translateSourceLang, translateTargetLang, onSetTranslateSourceLang, onSetTranslateLang,
     xhsEnabled, onToggleXhs,
     showTimestampSetting, isTimestampForced, onToggleTimestamp,
+    chatTimeAwarenessEnabled = true, onToggleChatTimeAwareness,
+    chatTimePassageAwarenessEnabled = true, onToggleChatTimePassageAwareness,
+    dateTimeAwarenessEnabled = true, onToggleDateTimeAwareness,
     onReadAloud, onVoiceToText, onDownloadVoice, autoTts, onToggleAutoTts,
     autoCall, onToggleAutoCall,
     autoShareSong, onToggleAutoShareSong,
@@ -658,6 +667,39 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                 : '开启后，消息间隔超过 3 分钟时显示时间戳分隔符'
                             }
                         </p>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100">
+                        <label className="text-xs font-bold text-slate-400 uppercase mb-3 block">时间感知</label>
+                        <div className="space-y-3">
+                            <div className={`flex justify-between items-start gap-4 ${onToggleChatTimeAwareness ? 'cursor-pointer' : 'opacity-60'}`} onClick={onToggleChatTimeAwareness}>
+                                <div className="min-w-0">
+                                    <div className="text-[13px] font-bold text-slate-600">主聊天当前时间</div>
+                                    <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">控制今日信息、当前日程锚点、特殊日期和日历上下文。</p>
+                                </div>
+                                <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center shrink-0 ${chatTimeAwarenessEnabled ? 'bg-primary' : 'bg-slate-200'}`}>
+                                    <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${chatTimeAwarenessEnabled ? 'translate-x-4' : ''}`}></div>
+                                </div>
+                            </div>
+                            <div className={`flex justify-between items-start gap-4 ${onToggleChatTimePassageAwareness ? 'cursor-pointer' : 'opacity-60'}`} onClick={onToggleChatTimePassageAwareness}>
+                                <div className="min-w-0">
+                                    <div className="text-[13px] font-bold text-slate-600">主聊天时间流逝</div>
+                                    <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">控制聊天空窗、节奏、时段变迁和待跟进事件提醒。</p>
+                                </div>
+                                <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center shrink-0 ${chatTimePassageAwarenessEnabled ? 'bg-primary' : 'bg-slate-200'}`}>
+                                    <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${chatTimePassageAwarenessEnabled ? 'translate-x-4' : ''}`}></div>
+                                </div>
+                            </div>
+                            <div className={`flex justify-between items-start gap-4 ${onToggleDateTimeAwareness ? 'cursor-pointer' : 'opacity-60'}`} onClick={onToggleDateTimeAwareness}>
+                                <div className="min-w-0">
+                                    <div className="text-[13px] font-bold text-slate-600">线下时间感知</div>
+                                    <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">控制线下见面/约会中的当前时间、时段变化和互动间隔。</p>
+                                </div>
+                                <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center shrink-0 ${dateTimeAwarenessEnabled ? 'bg-primary' : 'bg-slate-200'}`}>
+                                    <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${dateTimeAwarenessEnabled ? 'translate-x-4' : ''}`}></div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     {/* Translation Settings */}

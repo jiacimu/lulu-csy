@@ -32,6 +32,11 @@ interface SessionInfo {
     startTimeOfDay: string;    // 开始时的时段（如"下午"）
 }
 
+export interface TemporalContextOptions {
+    includeCurrentTime?: boolean;
+    includeTimePassage?: boolean;
+}
+
 // ─── Constants ──────────────────────────────────────────────
 
 /** 两条消息间隔超过此值（毫秒）视为新会话 */
@@ -111,73 +116,83 @@ export const cleanupExpiredEvents = (charId: string): void => {
 export const buildTemporalContext = (
     messages: Message[],
     currentTimestamp: number,
-    charId: string
+    charId: string,
+    options: TemporalContextOptions = {},
 ): string => {
     if (messages.length < 2) return '';
 
+    const includeCurrentTime = options.includeCurrentTime !== false;
+    const includeTimePassage = options.includeTimePassage !== false;
+    if (!includeCurrentTime && !includeTimePassage) return '';
+
     const now = new Date(currentTimestamp);
-    const timeCtx = RealtimeContextManager.getTimeContext();
     const parts: string[] = [];
 
     parts.push('\n[时间感知]');
 
     // 1. 精确当前时间
-    parts.push(`⏰ 现在 ${timeCtx.timeStr} ${timeCtx.timeOfDay}`);
+    if (includeCurrentTime) {
+        const timeCtx = RealtimeContextManager.getTimeContext();
+        parts.push(`⏰ 现在 ${timeCtx.timeStr} ${timeCtx.timeOfDay}`);
+    }
 
     // 2. 会话信息
-    const session = detectSession(messages, currentTimestamp);
-    if (session) {
-        const durStr = formatDuration(session.durationMinutes);
-        const startTimeStr = new Date(session.startTime).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-        parts.push(`📊 你们从 ${startTimeStr} 开始聊，已经${durStr}了`);
+    if (includeTimePassage) {
+        const session = detectSession(messages, currentTimestamp);
+        if (session) {
+            const durStr = formatDuration(session.durationMinutes);
+            const startTimeStr = new Date(session.startTime).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            parts.push(`📊 你们从 ${startTimeStr} 开始聊，已经${durStr}了`);
 
-        // 时段变迁检测
-        const currentTimeOfDay = getTimeOfDay(now.getHours());
-        if (session.startTimeOfDay !== currentTimeOfDay) {
-            parts.push(`🔄 时段变迁：从${session.startTimeOfDay}聊到了${currentTimeOfDay}`);
+            // 时段变迁检测
+            const currentTimeOfDay = getTimeOfDay(now.getHours());
+            if (session.startTimeOfDay !== currentTimeOfDay) {
+                parts.push(`🔄 时段变迁：从${session.startTimeOfDay}聊到了${currentTimeOfDay}`);
+            }
         }
-    }
 
-    // 3. 对话节奏
-    const rhythm = analyzeRhythm(messages, currentTimestamp);
-    if (rhythm) {
-        const rhythmLabels: Record<ConversationRhythm, string> = {
-            rapid: '你们聊得很热络，用户在快速回复',
-            normal: '你们在悠闲地聊天',
-            slow: '用户回复比较慢，可能在忙别的事',
-            returned: '用户沉默了一会儿后刚回来',
-        };
-        parts.push(`💬 对话节奏：${rhythmLabels[rhythm]}`);
-    }
+        // 3. 对话节奏
+        const rhythm = analyzeRhythm(messages, currentTimestamp);
+        if (rhythm) {
+            const rhythmLabels: Record<ConversationRhythm, string> = {
+                rapid: '你们聊得很热络，用户在快速回复',
+                normal: '你们在悠闲地聊天',
+                slow: '用户回复比较慢，可能在忙别的事',
+                returned: '用户沉默了一会儿后刚回来',
+            };
+            parts.push(`💬 对话节奏：${rhythmLabels[rhythm]}`);
+        }
 
-    // 4. 最后一次消息间隔（与现有 getTimeGapHint 互补但更丰富）
-    const lastGapInfo = getLastGapDescription(messages, currentTimestamp);
-    if (lastGapInfo) {
-        parts.push(lastGapInfo);
-    }
+        // 4. 最后一次消息间隔（与现有 getTimeGapHint 互补但更丰富）
+        const lastGapInfo = getLastGapDescription(messages, currentTimestamp);
+        if (lastGapInfo) {
+            parts.push(lastGapInfo);
+        }
 
-    // 5. 待跟进事件
-    cleanupExpiredEvents(charId);
-    const pendingEvents = getPendingEvents(charId);
-    if (pendingEvents.length > 0) {
-        for (const evt of pendingEvents) {
-            const minutesSinceCreated = Math.round((currentTimestamp - evt.createdAt) / 60000);
-            const minutesUntilDue = Math.round((evt.dueAt - currentTimestamp) / 60000);
+        // 5. 待跟进事件
+        cleanupExpiredEvents(charId);
+        const pendingEvents = getPendingEvents(charId);
+        if (pendingEvents.length > 0) {
+            for (const evt of pendingEvents) {
+                const minutesSinceCreated = Math.round((currentTimestamp - evt.createdAt) / 60000);
+                const minutesUntilDue = Math.round((evt.dueAt - currentTimestamp) / 60000);
 
-            if (minutesUntilDue > 5) {
-                // 还没到时间
-                parts.push(`⏳ ${minutesSinceCreated}分钟前用户提到${evt.event}（预计${evt.estimatedMinutes}分钟，还有约${minutesUntilDue}分钟）`);
-            } else if (minutesUntilDue > -5) {
-                // 差不多到了
-                parts.push(`⏳ ${minutesSinceCreated}分钟前用户说的${evt.event}，现在应该差不多了`);
-            } else {
-                // 已经过了
-                const overdue = Math.abs(minutesUntilDue);
-                parts.push(`⏳ ${minutesSinceCreated}分钟前用户提到的${evt.event}，已经过了预计时间${overdue}分钟了，应该完成了`);
+                if (minutesUntilDue > 5) {
+                    // 还没到时间
+                    parts.push(`⏳ ${minutesSinceCreated}分钟前用户提到${evt.event}（预计${evt.estimatedMinutes}分钟，还有约${minutesUntilDue}分钟）`);
+                } else if (minutesUntilDue > -5) {
+                    // 差不多到了
+                    parts.push(`⏳ ${minutesSinceCreated}分钟前用户说的${evt.event}，现在应该差不多了`);
+                } else {
+                    // 已经过了
+                    const overdue = Math.abs(minutesUntilDue);
+                    parts.push(`⏳ ${minutesSinceCreated}分钟前用户提到的${evt.event}，已经过了预计时间${overdue}分钟了，应该完成了`);
+                }
             }
         }
     }
 
+    if (parts.length <= 1) return '';
     return parts.join('\n');
 };
 

@@ -263,6 +263,10 @@ describe('runtimeConfig', () => {
             provider: 'siliconflow',
             groqApiKey: '',
             siliconflowApiKey: 'silicon-key',
+            baseUrl: undefined,
+            model: undefined,
+            language: undefined,
+            voiceCallManualSend: false,
         });
     });
 
@@ -272,6 +276,7 @@ describe('runtimeConfig', () => {
             siliconflowApiKey: 'silicon-key',
             baseUrl: 'https://api-st.siliconflow.cn/v1',
             language: 'en',
+            voiceCallManualSend: true,
         }));
 
         expect(getSttConfig()).toMatchObject({
@@ -279,6 +284,7 @@ describe('runtimeConfig', () => {
             siliconflowApiKey: 'silicon-key',
             baseUrl: 'https://api-st.siliconflow.cn/v1',
             language: 'en',
+            voiceCallManualSend: true,
         });
     });
 
@@ -320,6 +326,31 @@ describe('runtimeConfig', () => {
             serverUrl: 'http://localhost:18061/api',
             loggedInUserId: undefined,
             loggedInNickname: undefined,
+        });
+    });
+
+    it('defaults canva config to the recommended bridge server', () => {
+        expect(getRealtimeConfig().canvaMcpConfig).toEqual({
+            enabled: false,
+            serverUrl: 'http://localhost:18062/api',
+            workspaceLabel: undefined,
+        });
+    });
+
+    it('normalizes canva MCP config whitespace', () => {
+        localStorage.setItem(REALTIME_CONFIG_KEY, JSON.stringify({
+            canvaEnabled: true,
+            canvaMcpConfig: {
+                enabled: true,
+                serverUrl: '  https://canva-mcp.example.com/mcp  ',
+                workspaceLabel: '  Sully  ',
+            },
+        }));
+
+        expect(getRealtimeConfig().canvaMcpConfig).toEqual({
+            enabled: true,
+            serverUrl: 'https://canva-mcp.example.com/mcp',
+            workspaceLabel: 'Sully',
         });
     });
 

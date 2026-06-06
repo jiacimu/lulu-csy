@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../utils/context', () => ({
     ContextBuilder: {
@@ -50,6 +50,7 @@ vi.mock('../utils/temporalContext', () => ({
 import { ChatPrompts } from '../utils/chatPrompts';
 import type { CharacterProfile, Message, UserProfile } from '../types';
 import { DB } from '../utils/db';
+import { buildTemporalContext } from '../utils/temporalContext';
 
 function character(): CharacterProfile {
     return {
@@ -71,6 +72,12 @@ function user(): UserProfile {
 }
 
 describe('ChatPrompts life anchor injection', () => {
+    beforeEach(() => {
+        vi.mocked(buildTemporalContext).mockClear();
+        vi.mocked(buildTemporalContext).mockImplementation(() => '\n[时间感知]\n现在 20:00 晚上');
+        vi.mocked(DB.getAllAnniversaries).mockResolvedValue([]);
+    });
+
     it('keeps the schedule anchor out of ordinary chat history while preserving temporal context', () => {
         const now = new Date(2026, 3, 29, 20, 0, 0).getTime();
         vi.setSystemTime(now);
@@ -98,6 +105,95 @@ describe('ChatPrompts life anchor injection', () => {
         expect(last).toContain('[时间感知]');
         expect(last).toContain('现在 20:00 晚上');
         vi.useRealTimers();
+    });
+
+    it('omits main-chat temporal context when both character time switches are off', () => {
+        const now = new Date(2026, 3, 29, 20, 0, 0).getTime();
+        const messages: Message[] = [
+            {
+                id: 1,
+                charId: 'char-life-anchor',
+                role: 'assistant',
+                type: 'text',
+                content: '刚才说到哪了',
+                timestamp: now - 2 * 60 * 60_000,
+            },
+            {
+                id: 2,
+                charId: 'char-life-anchor',
+                role: 'user',
+                type: 'text',
+                content: '继续聊',
+                timestamp: now,
+            },
+        ];
+
+        const history = ChatPrompts.buildMessageHistory(
+            messages,
+            20,
+            {
+                ...character(),
+                chatTimeAwarenessEnabled: false,
+                chatTimePassageAwarenessEnabled: false,
+            },
+            user(),
+            [],
+        );
+        const last = history.apiMessages[history.apiMessages.length - 1].content as string;
+
+        expect(last).toContain('继续聊');
+        expect(last).not.toContain('[时间感知]');
+        expect(last).not.toContain('距离上一条消息');
+        expect(buildTemporalContext).not.toHaveBeenCalled();
+    });
+
+    it('can keep current-time context while disabling main-chat passage hints', () => {
+        vi.mocked(buildTemporalContext).mockImplementation((_messages, _now, _charId, options) => (
+            options?.includeCurrentTime && options?.includeTimePassage === false
+                ? '\n[时间感知]\n现在 20:00 晚上'
+                : ''
+        ));
+        const now = new Date(2026, 3, 29, 20, 0, 0).getTime();
+        const messages: Message[] = [
+            {
+                id: 1,
+                charId: 'char-life-anchor',
+                role: 'assistant',
+                type: 'text',
+                content: '刚才说到哪了',
+                timestamp: now - 2 * 60 * 60_000,
+            },
+            {
+                id: 2,
+                charId: 'char-life-anchor',
+                role: 'user',
+                type: 'text',
+                content: '继续聊',
+                timestamp: now,
+            },
+        ];
+
+        const history = ChatPrompts.buildMessageHistory(
+            messages,
+            20,
+            {
+                ...character(),
+                chatTimePassageAwarenessEnabled: false,
+            },
+            user(),
+            [],
+        );
+        const last = history.apiMessages[history.apiMessages.length - 1].content as string;
+
+        expect(last).toContain('[时间感知]');
+        expect(last).toContain('现在 20:00 晚上');
+        expect(last).not.toContain('距离上一条消息');
+        expect(buildTemporalContext).toHaveBeenCalledWith(
+            expect.any(Array),
+            expect.any(Number),
+            'char-life-anchor',
+            { includeCurrentTime: true, includeTimePassage: false },
+        );
     });
 
     it('ignores stale imported history breakpoints when building chat context', () => {
@@ -179,6 +275,26 @@ describe('ChatPrompts life anchor injection', () => {
         expect(systemPrompt).toContain('### 【当前日程锚点】');
         expect(systemPrompt).toContain('旧聊天、旧生活碎片、旧记忆');
         expect(systemPrompt.indexOf('### 【当前日程锚点】')).toBeLessThan(systemPrompt.indexOf('Step 2 — 现实锚定'));
+        vi.useRealTimers();
+    });
+
+    it('omits schedule/time anchors from the main-chat system prompt when current-time awareness is off', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 3, 29, 20, 0, 0));
+
+        const systemPrompt = await ChatPrompts.buildSystemPrompt(
+            { ...character(), chatTimeAwarenessEnabled: false },
+            user(),
+            [],
+            [],
+            [],
+            [],
+        );
+
+        expect(systemPrompt).not.toContain('### 【今日信息】');
+        expect(systemPrompt).not.toContain('### 【当前日程锚点】');
+        expect(systemPrompt).not.toContain('先读取【当前日程锚点】');
+        expect(systemPrompt).toContain('不要额外推断当前真实日程或所在地');
         vi.useRealTimers();
     });
 

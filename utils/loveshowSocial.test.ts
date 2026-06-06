@@ -61,11 +61,6 @@ describe('LoveShow social feed', () => {
             presetId: 'loveshow-couple-real',
             includeUserAppearance: true,
         });
-        expect(getLoveShowSocialImagePlan('date_scene', 'real', 'gemini')).toMatchObject({
-            mode: 'couple',
-            presetId: 'loveshow-gemini-couple-real',
-            includeUserAppearance: true,
-        });
         expect(getLoveShowSocialImagePlan('user_post_image', 'guoman')).toMatchObject({
             mode: 'solo',
             presetId: 'loveshow-solo-guoman',

@@ -124,6 +124,84 @@ interface DistillResult {
 
 const ORPHAN_PREVIEW_LIMIT = 3;
 const GRAPH_PREVIEW_LIMIT = 6;
+const DISTILLATION_MEDIA_OMITTED = '（已设置；图片/媒体数据不注入 L1 prompt）';
+
+function optionalTextForDistillation(value?: string | null): string | null {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    return trimmed || null;
+}
+
+function optionalBooleanForDistillation(value?: boolean): boolean | null {
+    return typeof value === 'boolean' ? value : null;
+}
+
+function optionalNumberForDistillation(value?: number): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function mediaValueForDistillation(value?: string | null): string | null {
+    const trimmed = optionalTextForDistillation(value);
+    if (!trimmed) return null;
+    return trimmed.startsWith('data:') ? DISTILLATION_MEDIA_OMITTED : trimmed;
+}
+
+function buildCharacterProfileContextForDistillation(character?: CharacterProfile | null): string {
+    if (!character) return '';
+
+    const context = {
+        identityCompatibility: {
+            id: character.id,
+            name: character.name,
+            charInstanceId: optionalTextForDistillation(character.charInstanceId),
+            templateCharId: optionalTextForDistillation(character.templateCharId),
+            gender: character.gender || null,
+        },
+        personaCore: {
+            description: optionalTextForDistillation(character.description),
+            systemPrompt: optionalTextForDistillation(character.systemPrompt),
+            worldview: optionalTextForDistillation(character.worldview),
+            softDevotionChatMode: optionalBooleanForDistillation(character.softDevotionChatMode),
+            writerPersona: optionalTextForDistillation(character.writerPersona),
+        },
+        locationCity: {
+            cityOverride: optionalTextForDistillation(character.cityOverride),
+            cityAdcode: optionalTextForDistillation(character.cityAdcode),
+            isFictionalCity: optionalBooleanForDistillation(character.isFictionalCity),
+            cityReferenceReal: optionalTextForDistillation(character.cityReferenceReal),
+        },
+        memorySystem: {
+            memories: (character.memories || []).map(memory => ({
+                id: memory.id,
+                date: memory.date,
+                summary: memory.summary,
+                mood: optionalTextForDistillation(memory.mood),
+            })),
+            refinedMemories: character.refinedMemories || {},
+            activeMemoryMonths: character.activeMemoryMonths || [],
+            impression: character.impression || null,
+        },
+        worldbooks: {
+            mountedWorldbooks: (character.mountedWorldbooks || []).map(book => ({
+                id: book.id,
+                title: book.title,
+                content: book.content,
+                category: optionalTextForDistillation(book.category),
+                position: book.position || null,
+                vectorized: optionalBooleanForDistillation(book.vectorized),
+            })),
+        },
+        chatDisplayAndContext: {
+            bubbleStyle: optionalTextForDistillation(character.bubbleStyle),
+            chatBackground: mediaValueForDistillation(character.chatBackground),
+            contextLimit: optionalNumberForDistillation(character.contextLimit),
+            showThinking: optionalBooleanForDistillation(character.showThinking),
+            hideSystemLogs: optionalBooleanForDistillation(character.hideSystemLogs),
+            hideBeforeMessageId: optionalNumberForDistillation(character.hideBeforeMessageId),
+        },
+    };
+
+    return JSON.stringify(context, null, 2);
+}
 
 function readStringField(source: any, keys: string[], fallback = ''): string {
     for (const key of keys) {
@@ -932,9 +1010,11 @@ const CognitiveNetworkApp: React.FC = () => {
         setDistillResetStats(null);
         try {
             const charName = charNameMap(selectedBackendCharId);
+            const systemPrompt = selectedMemoryChar?.systemPrompt || '';
+            const characterProfileContext = buildCharacterProfileContextForDistillation(selectedMemoryChar);
             const resp = await fetch(`${url}/api/distillation/run`, {
                 method: 'POST', headers: fullHeaders(),
-                body: JSON.stringify({ charId: selectedBackendCharId, charName, userName: userProfile.name }),
+                body: JSON.stringify({ charId: selectedBackendCharId, charName, userName: userProfile.name, systemPrompt, characterProfileContext }),
             });
             if (!resp.ok) {
                 let detail = `HTTP ${resp.status}`;
@@ -956,7 +1036,7 @@ const CognitiveNetworkApp: React.FC = () => {
             }
         } catch (e: any) { addToast(`凝结失败: ${e.message}`, 'error'); }
         finally { setDistilling(false); setShowConfirm(prev => prev === 'distill' ? null : prev); }
-    }, [fullHeaders, addToast, selectedBackendCharId, charNameMap, fetchGraphInsights, fetchStats, userProfile.name]);
+    }, [fullHeaders, addToast, selectedBackendCharId, selectedMemoryChar, charNameMap, fetchGraphInsights, fetchStats, userProfile.name]);
 
     const doDistillRebuild = useCallback(async () => {
         const url = getBackendUrl();
@@ -964,10 +1044,12 @@ const CognitiveNetworkApp: React.FC = () => {
         setDistillRebuilding(true);
         try {
             const charName = charNameMap(selectedBackendCharId);
+            const systemPrompt = selectedMemoryChar?.systemPrompt || '';
+            const characterProfileContext = buildCharacterProfileContextForDistillation(selectedMemoryChar);
             const resp = await fetch(`${url}/api/distillation/reset-and-run`, {
                 method: 'POST',
                 headers: fullHeaders(),
-                body: JSON.stringify({ charId: selectedBackendCharId, charName, userName: userProfile.name }),
+                body: JSON.stringify({ charId: selectedBackendCharId, charName, userName: userProfile.name, systemPrompt, characterProfileContext }),
             });
             if (!resp.ok) {
                 let detail = `HTTP ${resp.status}`;
@@ -997,7 +1079,7 @@ const CognitiveNetworkApp: React.FC = () => {
             setDistillRebuilding(false);
             setShowConfirm(prev => prev === 'distillRebuild' ? null : prev);
         }
-    }, [fullHeaders, addToast, selectedBackendCharId, charNameMap, fetchGraphInsights, fetchStats, userProfile.name]);
+    }, [fullHeaders, addToast, selectedBackendCharId, selectedMemoryChar, charNameMap, fetchGraphInsights, fetchStats, userProfile.name]);
 
     // ─── Sync helpers (used by sync view) ───
     const handleAbortSemantic = useCallback(() => {

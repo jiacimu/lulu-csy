@@ -88,6 +88,9 @@ export function didCharacterContextRelevantFieldsChange(
         | 'description'
         | 'systemPrompt'
         | 'softDevotionChatMode'
+        | 'chatTimeAwarenessEnabled'
+        | 'chatTimePassageAwarenessEnabled'
+        | 'dateTimeAwarenessEnabled'
         | 'worldview'
         | 'mountedWorldbooks'
         | 'refinedMemories'
@@ -100,6 +103,9 @@ export function didCharacterContextRelevantFieldsChange(
         | 'description'
         | 'systemPrompt'
         | 'softDevotionChatMode'
+        | 'chatTimeAwarenessEnabled'
+        | 'chatTimePassageAwarenessEnabled'
+        | 'dateTimeAwarenessEnabled'
         | 'worldview'
         | 'mountedWorldbooks'
         | 'refinedMemories'
@@ -113,6 +119,9 @@ export function didCharacterContextRelevantFieldsChange(
     if ((previous.description || '') !== (next.description || '')) return true;
     if ((previous.systemPrompt || '') !== (next.systemPrompt || '')) return true;
     if ((previous.softDevotionChatMode || false) !== (next.softDevotionChatMode || false)) return true;
+    if ((previous.chatTimeAwarenessEnabled !== false) !== (next.chatTimeAwarenessEnabled !== false)) return true;
+    if ((previous.chatTimePassageAwarenessEnabled !== false) !== (next.chatTimePassageAwarenessEnabled !== false)) return true;
+    if ((previous.dateTimeAwarenessEnabled !== false) !== (next.dateTimeAwarenessEnabled !== false)) return true;
     if ((previous.worldview || '') !== (next.worldview || '')) return true;
 
     const previousWorldbooksDigest = buildMountedWorldbooksDigest(previous.mountedWorldbooks);

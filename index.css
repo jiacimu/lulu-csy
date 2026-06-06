@@ -1530,156 +1530,162 @@
   animation: checkphoneDesktopWiggle 0.24s ease-in-out infinite alternate;
 }
 
-.checkphone-desktop-app.is-music-widget {
-  grid-column: span 2;
-  align-items: stretch;
-  gap: 0;
-}
-
-.checkphone-desktop-music-widget {
-  position: relative;
-  display: flex;
-  height: 78px;
-  min-width: 0;
-  align-items: center;
-  gap: 9px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 22px;
-  background:
-    linear-gradient(145deg, rgba(24, 24, 29, 0.94), rgba(10, 10, 13, 0.96)),
-    #121216;
-  box-shadow: 0 16px 34px -22px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  color: #fff;
-  cursor: pointer;
-  padding: 9px;
-  text-align: left;
-  transition: transform 0.18s, box-shadow 0.18s;
-}
-
-.checkphone-desktop-music-widget:active {
-  transform: scale(0.96);
-  box-shadow: 0 10px 24px -18px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-}
-
-.checkphone-desktop-music-glow {
+.cp-music {
+  --m-soft: color-mix(in srgb, var(--m-ink) 46%, var(--m-surface));
+  --m-line: color-mix(in srgb, var(--m-ink) 12%, var(--m-surface));
   position: absolute;
-  inset: -40% -20%;
-  pointer-events: none;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 20px;
+  grid-template-rows: minmax(0, 1fr) 2px;
+  align-items: center;
+  gap: 0 7px;
+  overflow: hidden;
+  border-radius: var(--m-radius, 18px);
   background:
-    radial-gradient(62% 54% at 24% 30%, rgba(236, 65, 65, 0.46), transparent 68%),
-    radial-gradient(48% 46% at 86% 20%, rgba(245, 198, 118, 0.22), transparent 68%),
-    linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.04));
-  filter: blur(8px);
-  opacity: 0.9;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.18)),
+    color-mix(in srgb, var(--m-surface) calc(var(--m-alpha, 100) * 1%), transparent);
+  box-shadow: 0 10px 24px -20px rgba(36, 34, 31, 0.42), inset 0 0 0 1px var(--m-line), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  color: var(--m-ink);
+  cursor: pointer;
+  padding: 7px 8px 6px;
+  touch-action: none;
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+  user-select: none;
+  -webkit-backdrop-filter: blur(var(--m-blur, 0px));
+  backdrop-filter: blur(var(--m-blur, 0px));
+  -webkit-user-select: none;
 }
 
-.checkphone-desktop-music-cover {
-  position: relative;
-  z-index: 1;
+.cp-music.is-editable {
+  cursor: grab;
+}
+
+.cp-music.is-dragging {
+  cursor: grabbing;
+  transform: scale(1.025);
+  box-shadow: 0 18px 34px -20px rgba(36, 34, 31, 0.5), inset 0 0 0 1px var(--m-line);
+}
+
+.cp-music-cover {
   display: flex;
   width: 42px;
   height: 42px;
   flex: none;
+  grid-column: 1;
+  grid-row: 1;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border-radius: 12px;
-  background: linear-gradient(145deg, #ec4141, #2f1114);
-  box-shadow: 0 8px 16px -10px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  color: rgba(255, 255, 255, 0.88);
+  border-radius: var(--m-cover-radius, 12px);
+  background: linear-gradient(150deg, #f0ece4, #d9d1c5 52%, #8b8580);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.56), 0 7px 14px -13px rgba(36, 34, 31, 0.68);
 }
 
-.checkphone-desktop-music-cover img {
-  display: block;
+.cp-music-cover img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.checkphone-desktop-music-cover svg {
-  width: 21px;
-  height: 21px;
+.cp-music-cover > svg {
+  width: 16px;
+  height: 16px;
+  color: var(--m-accent);
 }
 
-.checkphone-desktop-music-main {
-  position: relative;
-  z-index: 1;
+.cp-music-body {
   display: flex;
   min-width: 0;
-  flex: 1;
+  grid-column: 2;
+  grid-row: 1;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
-.checkphone-desktop-music-kicker {
-  color: rgba(255, 255, 255, 0.48);
+.cp-music-kick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--m-accent) 76%, var(--m-ink));
   font-family: var(--cpd-mono);
-  font-size: 8px;
-  letter-spacing: 0.14em;
+  font-size: 6px;
+  letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
 }
 
-.checkphone-desktop-music-title,
-.checkphone-desktop-music-artist {
-  display: block;
+.cp-music-ln {
+  display: none;
+}
+
+.cp-music-no {
+  flex: none;
+  color: var(--m-accent);
+  letter-spacing: 0.04em;
+}
+
+.cp-music-title {
   min-width: 0;
   overflow: hidden;
+  color: var(--m-ink);
+  font-family: "Cormorant Garamond", "Noto Serif SC", serif;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.08;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.checkphone-desktop-music-title {
-  color: rgba(255, 255, 255, 0.96);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.15;
-}
-
-.checkphone-desktop-music-artist {
-  color: rgba(255, 255, 255, 0.58);
-  font-size: 9px;
-  line-height: 1.1;
-}
-
-.checkphone-desktop-music-progress {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: 3px;
+.cp-music-artist {
+  min-width: 0;
   overflow: hidden;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  margin-top: 4px;
+  color: var(--m-soft);
+  font-size: 8.5px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.checkphone-desktop-music-progress span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #fff, #ec4141);
-}
-
-.checkphone-desktop-music-play {
-  position: relative;
-  z-index: 1;
+.cp-music-play {
+  position: static;
   display: flex;
-  width: 26px;
-  height: 26px;
+  width: 20px;
+  height: 20px;
   flex: none;
+  grid-column: 3;
+  grid-row: 1;
   align-items: center;
   justify-content: center;
+  border: 1px solid var(--m-line);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.18);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  color: #fff;
+  background: rgba(255, 255, 255, 0.52);
+  color: var(--m-accent);
 }
 
-.checkphone-desktop-music-play svg {
-  width: 14px;
-  height: 14px;
+.cp-music-play svg {
+  width: 8px;
+  height: 8px;
   margin-left: 1px;
+}
+
+.cp-music-progress {
+  position: relative;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  height: 2px;
+  align-self: end;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--m-line);
+}
+
+.cp-music-progress span {
+  display: block;
+  height: 100%;
+  background: var(--m-accent);
 }
 
 .checkphone-desktop-chip {
@@ -1959,23 +1965,6 @@
   .checkphone-desktop-chip {
     width: 50px;
     height: 50px;
-  }
-
-  .checkphone-desktop-music-widget {
-    height: 74px;
-    gap: 7px;
-    padding: 8px;
-  }
-
-  .checkphone-desktop-music-cover {
-    width: 38px;
-    height: 38px;
-    border-radius: 11px;
-  }
-
-  .checkphone-desktop-music-play {
-    width: 24px;
-    height: 24px;
   }
 
   .checkphone-desktop-dock {
@@ -3014,6 +3003,101 @@
 .checkphone-settings-install svg {
   width: 16px;
   height: 16px;
+}
+
+.cpmsp {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cpmsp-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.cpmsp-chip {
+  display: flex;
+  min-width: 0;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  background: #fff;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 7px;
+}
+
+.cpmsp-chip.is-on {
+  border-color: color-mix(in srgb, var(--a) 58%, #fff);
+  background: color-mix(in srgb, var(--c) 62%, #fff);
+  color: #0f172a;
+}
+
+.cpmsp-sw {
+  display: block;
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border: 2px solid var(--a);
+  border-radius: 50%;
+  background: var(--c);
+}
+
+.cpmsp-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  border-radius: 10px;
+  background: #fff;
+  padding: 6px 8px;
+}
+
+.cpmsp-row > span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.cpmsp-row input[type="color"] {
+  width: 100%;
+  height: 24px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.cpmsp-row input[type="range"] {
+  width: 100%;
+  accent-color: #0f172a;
+}
+
+.cpmsp-row button,
+.cpmsp-reset {
+  min-height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 0 10px;
+}
+
+.cpmsp-reset {
+  width: 100%;
+  min-height: 34px;
+  background: #0f172a;
+  color: #fff;
 }
 
 .checkphone-settings-icon-list {

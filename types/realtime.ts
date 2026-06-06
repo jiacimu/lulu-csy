@@ -1,4 +1,5 @@
 
+import { CanvaMcpConfig } from './canva';
 import { XhsMcpConfig } from './xhs';
 
 // 实时上下文配置 - 让AI角色感知真实世界
@@ -36,6 +37,10 @@ export interface RealtimeConfig {
     // 小红书配置 (MCP 浏览器自动化)
     xhsEnabled: boolean;
     xhsMcpConfig?: XhsMcpConfig;
+
+    // Canva 设计配置 (MCP / Bridge)
+    canvaEnabled: boolean;
+    canvaMcpConfig?: CanvaMcpConfig;
 
     // 缓存配置
     cacheMinutes: number;

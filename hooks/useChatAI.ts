@@ -34,6 +34,7 @@ import { handleDiaryWrite } from './handlers/handleDiaryWrite';
 import { handleDiaryRead } from './handlers/handleDiaryRead';
 import { handleFeishuDiary } from './handlers/handleFeishuDiary';
 import { handleFeishuDiaryRead } from './handlers/handleFeishuDiaryRead';
+import { handleCanvaActions } from './handlers/handleCanvaActions';
 import { handleXhsActions } from './handlers/handleXhsActions';
 import type { SongCardMetadata } from '../types/music';
 import { searchSongs } from '../utils/musicService';
@@ -967,6 +968,8 @@ export const useChatAI = ({
             aiContent = await handleFeishuDiary(aiContent, handlerContext);
 
             aiContent = await handleFeishuDiaryRead(aiContent, handlerContext);
+
+            aiContent = await handleCanvaActions(aiContent, handlerContext);
 
             aiContent = await handleXhsActions(aiContent, handlerContext);
 

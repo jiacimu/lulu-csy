@@ -74,6 +74,9 @@ interface ActiveCallViewProps {
     onToggleMute: () => void;
     onEndCall: () => void;
     onSendTextMessage: (text: string) => void;
+    pendingVoiceTranscript?: string;
+    onSendPendingVoiceTranscript?: () => void;
+    onDiscardPendingVoiceTranscript?: () => void;
     transcript?: string;
     aiResponse?: string;
     engineState?: EngineState;
@@ -112,6 +115,9 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
     onToggleMute,
     onEndCall,
     onSendTextMessage,
+    pendingVoiceTranscript = '',
+    onSendPendingVoiceTranscript,
+    onDiscardPendingVoiceTranscript,
     isConnecting = false,
     transcript = '',
     aiResponse = '',
@@ -168,6 +174,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
     const degradedScrollRef = useRef<HTMLDivElement>(null);
     const subtitleHistoryRef = useRef<HTMLDivElement>(null);
     const visibleAiResponse = sanitizeVoiceCallAssistantText(displayedAiResponse);
+    const visiblePendingVoiceTranscript = pendingVoiceTranscript.trim();
     useEffect(() => {
         if (ttsDegraded && degradedScrollRef.current) {
             degradedScrollRef.current.scrollTop = degradedScrollRef.current.scrollHeight;
@@ -394,8 +401,28 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
                             </div>
                         )}
 
-                        {/* 用户说的话 — 悬浮字幕 */}
-                        {displayedTranscript ? (
+                        {visiblePendingVoiceTranscript ? (
+                            <div className="vc-voice-draft">
+                                <span className="vc-subtitle-label">待发送</span>
+                                <p className="vc-voice-draft-text">{visiblePendingVoiceTranscript}</p>
+                                <div className="vc-voice-draft-actions">
+                                    <button
+                                        type="button"
+                                        className="vc-voice-draft-btn vc-voice-draft-btn--ghost"
+                                        onClick={onDiscardPendingVoiceTranscript}
+                                    >
+                                        重说
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="vc-voice-draft-btn vc-voice-draft-btn--send"
+                                        onClick={onSendPendingVoiceTranscript}
+                                    >
+                                        发送
+                                    </button>
+                                </div>
+                            </div>
+                        ) : displayedTranscript ? (
                             <div key={`tr-${transcriptKey}`} className="flex flex-col items-center">
                                 <span className="vc-subtitle-label">{transcriptSource === 'text' ? '你发送' : '你'}</span>
                                 <p className="vc-subtitle vc-subtitle--user">{displayedTranscript}</p>

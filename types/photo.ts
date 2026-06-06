@@ -6,7 +6,6 @@ export type ImageProviderType = 'novelai' | 'openai-compatible';
 export type ImageGenerationStyle = 'guoman' | 'cg' | 'real';
 export type OpenAICompatibleStyleFamily = 'gpt' | 'gemini';
 export type PhotoStyleProviderScope = 'all' | 'novelai' | 'openai-gpt' | 'openai-gemini';
-export const GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL = 'gemini-3.1-flash-image-preview';
 export type OpenAIImageResponseFormat = 'auto' | 'b64_json' | 'url';
 export type OpenAIImageQuality = '' | 'auto' | 'low' | 'medium' | 'high' | 'standard' | 'hd';
 export type OpenAIImageStyle = '' | 'vivid' | 'natural';

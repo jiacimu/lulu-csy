@@ -59,6 +59,38 @@ export interface WeixinRepairClientResponse {
     repair?: WeixinClientRepairStatus;
 }
 
+export type WeixinSyncEnsureStatus = 'idle' | 'processing' | 'processed' | 'failed';
+
+export interface WeixinSyncEnsureJob {
+    id?: number | string;
+    status?: string | null;
+    attempts?: number;
+    createdAt?: number;
+    updatedAt?: number;
+    startedAt?: number | null;
+    completedAt?: number | null;
+    lastError?: string | null;
+}
+
+export interface WeixinSyncEnsureResponse {
+    status?: WeixinSyncEnsureStatus;
+    processed?: boolean;
+    remainingQueued?: number;
+    clientIdBound?: boolean;
+    repair?: WeixinClientRepairStatus & {
+        performed?: boolean;
+        repaired?: boolean;
+        imported?: number;
+        importedCount?: number;
+        synced?: number;
+        syncedCount?: number;
+    };
+    job?: WeixinSyncEnsureJob | null;
+    outcome?: string;
+    error?: string;
+    message?: string | null;
+}
+
 function getRequiredBackendUrl(path: string, query?: Record<string, string>): string {
     const url = buildBackendUrl(path, query);
     if (!url || url === path) {
@@ -147,4 +179,12 @@ export async function repairWeixinClientBinding(
 
         throw error;
     }
+}
+
+export async function ensureWeixinSync(charId: string): Promise<WeixinSyncEnsureResponse> {
+    const contentCharId = await resolveCharacterContentId(charId);
+    return requestWeixin<WeixinSyncEnsureResponse>('/api/weixin/sync/ensure', {
+        method: 'POST',
+        body: JSON.stringify({ charId: contentCharId }),
+    });
 }

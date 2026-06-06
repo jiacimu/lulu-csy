@@ -122,6 +122,7 @@ const SttSettings: React.FC = () => {
             : STT_PROVIDER_DEFAULTS.siliconflow.baseUrl,
     );
     const [sttLanguage, setSttLanguage] = useState(sttConfig.language || '');
+    const [voiceCallManualSend, setVoiceCallManualSend] = useState(sttConfig.voiceCallManualSend === true);
     const [isTesting, setIsTesting] = useState(false);
 
     const handleSaveAndTest = async () => {
@@ -132,6 +133,7 @@ const SttSettings: React.FC = () => {
             siliconflowApiKey: sttSiliconKey,
             baseUrl: sttProvider === 'siliconflow' ? siliconBaseUrl : undefined,
             language: sttLanguage || undefined,
+            voiceCallManualSend,
         };
 
         // 1. 先保存
@@ -232,6 +234,23 @@ const SttSettings: React.FC = () => {
                             ✓ 已锁定中文识别，不会再出现韩文幻觉问题。
                         </p>
                     )}
+                </div>
+
+                <div className="rounded-2xl bg-white/45 border border-[#d4e4f7]/60 px-4 py-3">
+                    <label className="flex items-center justify-between gap-4 cursor-pointer">
+                        <span className="min-w-0">
+                            <span className="block text-xs font-bold text-[#6b7f99]">语音通话手动发送</span>
+                            <span className="block text-[10px] text-[#8b9bb1] mt-1 leading-relaxed">
+                                STT 识别后先显示草稿，点发送才调用模型，适合长语音和停顿较多的通话。
+                            </span>
+                        </span>
+                        <input
+                            type="checkbox"
+                            checked={voiceCallManualSend}
+                            onChange={e => setVoiceCallManualSend(e.target.checked)}
+                            className="h-5 w-5 rounded border-[#b9c9df] text-[#7b8db8] focus:ring-[#7b8db8]"
+                        />
+                    </label>
                 </div>
 
                 {/* Groq API Key */}

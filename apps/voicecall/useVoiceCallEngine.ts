@@ -261,6 +261,10 @@ export interface UseVoiceCallEngineReturn {
     engineState: EngineState;
     isUserSpeaking: boolean;
     transcript: string;
+    /** STT 识别后等待用户确认发送的语音草稿 */
+    pendingVoiceTranscript: string;
+    sendPendingVoiceTranscript: () => void;
+    discardPendingVoiceTranscript: () => void;
     aiResponse: string;
     /** TTS 合成失败，已降级为纯文字展示 */
     ttsDegraded: boolean;
@@ -492,6 +496,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
     const [engineState, setEngineState] = useState<EngineState>('idle');
     const [isUserSpeaking, setIsUserSpeaking] = useState(false);
     const [transcript, setTranscript] = useState('');
+    const [pendingVoiceTranscript, setPendingVoiceTranscript] = useState('');
     const [aiResponse, setAiResponse] = useState('');
     const [ttsDegraded, setTtsDegraded] = useState(false);
     const [transcriptSource, setTranscriptSource] = useState<VoiceCallTranscriptSource>('voice');
@@ -586,6 +591,18 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
     const pendingAudioSegmentsRef = useRef<Float32Array[]>([]);
     const sttDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const STT_DEBOUNCE_MS = 250; // VAD 300ms redemption + 250ms 去抖（从 400ms 压缩，加速 TTFV）
+
+    const appendPendingVoiceTranscript = useCallback((text: string) => {
+        const trimmed = text.trim();
+        if (!trimmed) return;
+
+        setPendingVoiceTranscript(prev => {
+            const current = prev.trim();
+            if (!current) return trimmed;
+            const needsSpace = !/[，。！？、,.!?；;：:\s]$/.test(current);
+            return `${current}${needsSpace ? ' ' : ''}${trimmed}`;
+        });
+    }, []);
 
 
     // ─── 核心处理：用户消息 → LLM → 回复通道（TTS 或文字）────────────────
@@ -1183,6 +1200,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
 
         // Fix C: gen 由 processUserMessage 统一管理，此处不再递增
         const gen = generationRef.current;
+        const stateBeforeStt = engineStateRef.current;
 
         try {
             setEngineState('processing');
@@ -1215,6 +1233,17 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             }
 
             console.log(`[Engine] STT result: "${text}"`);
+            const shouldDraft = opts.sttConfig.voiceCallManualSend === true || stateBeforeStt !== 'listening';
+            if (shouldDraft) {
+                setTranscriptSource('voice');
+                setTranscript(text);
+                appendPendingVoiceTranscript(text);
+                setAiResponse('');
+                setEngineState('listening');
+                engineStateRef.current = 'listening';
+                return;
+            }
+
             await processUserMessage(text, 'voice');
         } catch (err: any) {
             if (gen !== generationRef.current) return;
@@ -1224,7 +1253,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
             engineStateRef.current = 'listening';
             optionsRef.current.onAISpeakingChange(false);
         }
-    }, [processUserMessage]);
+    }, [appendPendingVoiceTranscript, processUserMessage]);
 
     // ─── 打断逻辑 ────────────────────────────────────────────────
 
@@ -1359,6 +1388,22 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         processUserMessage(trimmed, 'text');
     }, [stopCurrentTurn, processUserMessage]);
 
+    const sendPendingVoiceTranscript = useCallback(() => {
+        const trimmed = pendingVoiceTranscript.trim();
+        if (!trimmed || !engineActiveRef.current) return;
+        console.log(`[Engine] sendPendingVoiceTranscript: "${trimmed}"`);
+        setPendingVoiceTranscript('');
+        if (engineStateRef.current === 'speaking' || engineStateRef.current === 'processing') {
+            stopCurrentTurn();
+        }
+        processUserMessage(trimmed, 'voice');
+    }, [pendingVoiceTranscript, stopCurrentTurn, processUserMessage]);
+
+    const discardPendingVoiceTranscript = useCallback(() => {
+        setPendingVoiceTranscript('');
+        setTranscript('');
+    }, []);
+
 
     // ─── 启动引擎 ──────────────────────────────────────────────────
 
@@ -1387,6 +1432,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         subtitleIdRef.current = 0;
         setSubtitleHistory([]);
         setAiTranslation('');
+        setPendingVoiceTranscript('');
         setVoiceInputMode(runtimeProfileRef.current.voiceInputMode);
         turnAudioChunksRef.current = [];
         turnAudioBlobsRef.current = new Map();
@@ -1737,6 +1783,7 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         setEngineState('idle');
         engineStateRef.current = 'idle';
         setIsUserSpeaking(false);
+        setPendingVoiceTranscript('');
         setVoiceInputMode(runtimeProfileRef.current.voiceInputMode);
         setVoiceInputFallbackReason('');
         console.log('[Engine] Voice call engine stopped');
@@ -1789,6 +1836,9 @@ export function useVoiceCallEngine(options: UseVoiceCallEngineOptions): UseVoice
         engineState,
         isUserSpeaking,
         transcript,
+        pendingVoiceTranscript,
+        sendPendingVoiceTranscript,
+        discardPendingVoiceTranscript,
         aiResponse,
         ttsDegraded,
         transcriptSource,

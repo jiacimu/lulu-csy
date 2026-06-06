@@ -2,7 +2,7 @@
 import React,{ useState } from 'react';
 import { useOS } from '../../../context/OSContext';
 import Modal from '../../../components/os/Modal';
-import { WeatherSection,NewsSection,HotSearchSection,AiHotSection,NotionSection,FeishuSection,XhsMcpSection } from './sections';
+import { WeatherSection,NewsSection,HotSearchSection,AiHotSection,NotionSection,FeishuSection,CanvaMcpSection,XhsMcpSection } from './sections';
 
 const RealtimeSettings: React.FC = () => {
     const { realtimeConfig, updateRealtimeConfig, addToast } = useOS();
@@ -30,6 +30,10 @@ const RealtimeSettings: React.FC = () => {
         xhsMcpUrl: realtimeConfig.xhsMcpConfig?.serverUrl || '',
         xhsNickname: realtimeConfig.xhsMcpConfig?.loggedInNickname || '',
         xhsUserId: realtimeConfig.xhsMcpConfig?.loggedInUserId || '',
+        canvaEnabled: realtimeConfig.canvaEnabled ?? false,
+        canvaMcpEnabled: realtimeConfig.canvaMcpConfig?.enabled ?? false,
+        canvaMcpUrl: realtimeConfig.canvaMcpConfig?.serverUrl || 'http://localhost:18062/api',
+        canvaWorkspaceLabel: realtimeConfig.canvaMcpConfig?.workspaceLabel || '',
     }));
 
     const [testStatus, setTestStatus] = useState('');
@@ -48,6 +52,8 @@ const RealtimeSettings: React.FC = () => {
             feishuBaseId: rt.feishuBaseId, feishuTableId: rt.feishuTableId,
             xhsEnabled: rt.xhsEnabled,
             xhsMcpConfig: { enabled: rt.xhsMcpEnabled, serverUrl: rt.xhsMcpUrl, loggedInNickname: rt.xhsNickname || undefined, loggedInUserId: rt.xhsUserId || undefined },
+            canvaEnabled: rt.canvaEnabled,
+            canvaMcpConfig: { enabled: rt.canvaMcpEnabled, serverUrl: rt.canvaMcpUrl, workspaceLabel: rt.canvaWorkspaceLabel || undefined },
         });
         addToast('实时感知配置已保存', 'success');
         setShowModal(false);
@@ -102,6 +108,11 @@ const RealtimeSettings: React.FC = () => {
                         <div className={`text-xs font-bold ${rt.xhsEnabled ? 'text-red-700' : ''}`}>小红书</div>
                     </div>
 
+                    <div className={`p-3 rounded-2xl transition-all border ${rt.canvaEnabled ? 'bg-gradient-to-br from-cyan-50 to-fuchsia-50 border-cyan-100 shadow-sm' : 'bg-slate-50/50 border-transparent text-slate-400 opacity-60'}`}>
+                        <div className="text-2xl mb-1.5">{rt.canvaEnabled ? '🎨' : '🖼️'}</div>
+                        <div className={`text-xs font-bold ${rt.canvaEnabled ? 'text-cyan-700' : ''}`}>Canva</div>
+                    </div>
+
                     <div className={`p-3 rounded-2xl transition-all border ${rt.aihotEnabled ? 'bg-gradient-to-br from-violet-50 to-purple-50 border-violet-100 shadow-sm' : 'bg-slate-50/50 border-transparent text-slate-400 opacity-60'}`}>
                         <div className="text-2xl mb-1.5">{rt.aihotEnabled ? '💡' : '📋'}</div>
                         <div className={`text-xs font-bold ${rt.aihotEnabled ? 'text-violet-700' : ''}`}>AI 动态</div>
@@ -119,6 +130,8 @@ const RealtimeSettings: React.FC = () => {
                     <AiHotSection enabled={rt.aihotEnabled} set={set} />
                     <NotionSection enabled={rt.notionEnabled} apiKey={rt.notionApiKey} dbId={rt.notionDbId} notesDbId={rt.notionNotesDbId} set={set} onTestStatus={setTestStatus} />
                     <FeishuSection enabled={rt.feishuEnabled} appId={rt.feishuAppId} appSecret={rt.feishuAppSecret} baseId={rt.feishuBaseId} tableId={rt.feishuTableId} set={set} onTestStatus={setTestStatus} />
+                    <CanvaMcpSection enabled={rt.canvaMcpEnabled} mcpUrl={rt.canvaMcpUrl} workspaceLabel={rt.canvaWorkspaceLabel} set={set} onTestStatus={setTestStatus}
+                        onUpdateConfig={(cfg) => updateRealtimeConfig({ canvaMcpConfig: cfg })} />
                     <XhsMcpSection enabled={rt.xhsMcpEnabled} mcpUrl={rt.xhsMcpUrl} nickname={rt.xhsNickname} userId={rt.xhsUserId} set={set} onTestStatus={setTestStatus}
                         onUpdateConfig={(cfg) => updateRealtimeConfig({ xhsMcpConfig: cfg })} />
                     {testStatus && (

@@ -12,15 +12,8 @@ import DateSettings from '../components/date/DateSettings';
 import { buildDatePreamble,buildTheaterScene,buildDateTail,buildDateTimeBlock } from '../utils/datePrompts';
 import { pronoun } from '../utils/genderWords';
 import { extractThinking, extractInnerWhispers, type InnerWhisper } from '../utils/thinkingExtractor';
-import { DEFAULT_DATE_SUMMARY_PROMPT,buildSummaryPrompt,formatDateMessagesForBridge,formatMessagesForSummary } from '../utils/dateSummaryPrompts';
-import {
-    buildDateDiaryMemoryPrompt,
-    parseDateDiaryMemoryResponse,
-    renderDateDiaryMemoryTemplate,
-    toDateDiaryMemoryTemplate,
-    type DateDiaryMemoryDraft,
-} from '../utils/dateDiaryMemory';
-import { getSecondaryApiConfig } from '../utils/runtimeConfig';
+import { DATE_RECAP_SYSTEM_PROMPT,DEFAULT_DATE_SUMMARY_PROMPT,buildSummaryPrompt,formatDateMessagesForBridge,formatMessagesForSummary } from '../utils/dateSummaryPrompts';
+import { getEmbeddingConfig,getSecondaryApiConfig } from '../utils/runtimeConfig';
 import { renderMarkdown } from '../utils/markdownLite';
 import { stripTranslationTags } from '../utils/chatParser';
 import { trackedApiRequest } from '../utils/apiRequestLedger';
@@ -42,12 +35,6 @@ type SummaryDraft = {
     fromPendingAuto?: boolean;
     /** Set only during exit flow — after saving, also create bridge + finishExit */
     bridgeOnSave?: boolean;
-    injectToVectorMemory?: boolean;
-};
-type DateDiaryMemoryPreviewEntry = DateDiaryMemoryDraft & { id: string };
-type DateDiaryMemoryPreviewState = {
-    summaryDraft: SummaryDraft;
-    entries: DateDiaryMemoryPreviewEntry[];
 };
 
 const isDateSummaryMessage = (m: Message) => m.metadata?.source === 'date' && m.metadata?.isSummary === true;
@@ -155,14 +142,16 @@ export const buildDateSessionSystemPrompt = ({
 }): string => {
     let systemPrompt = buildDatePreamble(char.name, userProfile.name);
     systemPrompt += ContextBuilder.buildCoreContext(char, userProfile);
-    systemPrompt += buildDateTimeBlock();
+    if (char.dateTimeAwarenessEnabled !== false) {
+        systemPrompt += buildDateTimeBlock();
+    }
     systemPrompt += buildDateSummaryMemoryPrompt(allMsgs);
     const REQUIRED_EMOTIONS = ['normal', 'happy', 'angry', 'sad', 'shy'];
     const dateEmotions = [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])];
     const userPov = char.datePerspective || 'second';
     const charPov = char.dateCharPerspective || 'third';
     systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov, undefined, char.dateOutputWordCount, char.dateWritingStyle, char.gender ?? 'male');
-    systemPrompt += buildDateTail(char.name, userProfile.name, userPov, charPov, char.gender ?? 'male');
+    systemPrompt += buildDateTail(char.name, userProfile.name, userPov, charPov, char.gender ?? 'male', char.dateTimeAwarenessEnabled !== false);
     return systemPrompt;
 };
 
@@ -204,19 +193,6 @@ const fetchDateChatCompletion = (
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
         body: JSON.stringify(body),
     }));
-};
-
-const createDiaryMemoryPreviewEntry = (draft?: Partial<DateDiaryMemoryDraft>): DateDiaryMemoryPreviewEntry => ({
-    id: `date-diary-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    title: draft?.title || '未命名片段',
-    content: draft?.content || '',
-    emotionalJourney: draft?.emotionalJourney || '',
-    importance: Math.min(10, Math.max(1, Math.round(draft?.importance || 5))),
-});
-
-const parseDiaryMemoryImportance = (value: string): number => {
-    const parsed = parseInt(value || '5', 10);
-    return Number.isFinite(parsed) ? Math.min(10, Math.max(1, parsed)) : 5;
 };
 
 export const buildHistorySessions = (msgs: Message[]): DateHistorySession[] => {
@@ -315,9 +291,7 @@ const DateApp: React.FC = () => {
     const [isSummaryGenerating, setIsSummaryGenerating] = useState(false);
     const [activeSummaryDraft, setActiveSummaryDraft] = useState<SummaryDraft | null>(null);
     const [pendingAutoSummary, setPendingAutoSummary] = useState<SummaryDraft | null>(null);
-    const [diaryMemoryPreview, setDiaryMemoryPreview] = useState<DateDiaryMemoryPreviewState | null>(null);
-    const [isDiaryMemoryGenerating, setIsDiaryMemoryGenerating] = useState(false);
-    const [isDiaryMemorySaving, setIsDiaryMemorySaving] = useState(false);
+    const [isDateMemoryExtracting, setIsDateMemoryExtracting] = useState(false);
     const [showSummarySettings, setShowSummarySettings] = useState(false);
     const [summaryPromptDraft, setSummaryPromptDraft] = useState('');
     const summaryGeneratingRef = useRef(false);
@@ -492,7 +466,7 @@ const DateApp: React.FC = () => {
             const response = await fetchDateChatCompletion(selectedApi, {
                     model: selectedApi.model,
                     messages: [
-                        { role: 'system', content: '你负责把线下见面记录整理成可供角色之后自然记住的总结。只输出总结正文。' },
+                        { role: 'system', content: DATE_RECAP_SYSTEM_PROMPT },
                         { role: 'user', content: prompt }
                     ],
                     temperature: 0.45,
@@ -583,23 +557,29 @@ const DateApp: React.FC = () => {
 
             if (!exitPromptContent.trim()) { addToast('没有可总结的内容', 'info'); return null; }
 
-            const fullPrompt = `你正在为 ${char.name} 和 ${userProfile.name} 的一次线下见面写最终总结。
-请把下面所有内容（包括已总结的片段和新增原始记录）合并成一份完整的、连贯的总结。
+            const fullPrompt = `你正在为 ${char.name} 和 ${userProfile.name} 的一次线下见面写最终交接 recap。
+请把下面所有内容（包括之前的阶段 recap 和新增原始记录）合并成一份完整、连贯、能带回线上对话的交接 recap。
 
 当前时间: ${buildTimeLabel()}
 
 ${exitPromptContent}
 【输出要求】
 - 使用 Markdown。
-- 写成 ${char.name} 之后能自然记住的事实与情绪脉络。
+- 以 ${char.name} 的口径写——这是 ${char.name} 刚刚亲历、带回线上的事，不是旁观总结。
 - 保留关键事件、关系变化、未说出口的情绪、值得之后线上承接的小细节。
+- 重点放在“离场态”：这次见面结束时两人是什么心情、停在哪一步、有没有没说完 / 没收尾的话。
 - 不要生成新的剧情，不要改写已经发生的事实。
-- 把之前的总结片段和新内容融合成一份流畅的整体，不要简单拼接。`;
+- 把之前的阶段 recap 和新内容融合成一份流畅的整体，不要简单拼接。
+
+结构：
+## 事件脉络
+## 情绪变化
+## 关系信号`;
 
             const response = await fetchDateChatCompletion(selectedApi, {
                     model: selectedApi.model,
                     messages: [
-                        { role: 'system', content: '你负责把线下见面的所有记录整理成一份完整的最终总结。只输出总结正文。' },
+                        { role: 'system', content: DATE_RECAP_SYSTEM_PROMPT },
                         { role: 'user', content: fullPrompt },
                     ],
                     temperature: 0.45,
@@ -647,227 +627,81 @@ ${exitPromptContent}
         return savedSummaryId;
     };
 
-    const finishSummarySave = async (draft: SummaryDraft, diaryMemoryCount = 0) => {
-        const memorySuffix = diaryMemoryCount > 0 ? `，已刻入 ${diaryMemoryCount} 条日记记忆` : '';
+    const extractDateL0Memories = async (coveredMsgIds?: number[]): Promise<number> => {
+        if (!char || !char.vectorMemoryEnabled) return 0;
+
+        const secondaryConfig = getSecondaryApiConfig();
+        const selectedApi = hasCompleteApiConfig(secondaryConfig) ? secondaryConfig : apiConfig;
+        if (!hasCompleteApiConfig(selectedApi)) {
+            addToast('L0 记忆提取已跳过：请先配置主 API 或副 API', 'info');
+            return 0;
+        }
+
+        const embeddingApiKey = getEmbeddingConfig().apiKey;
+        if (!embeddingApiKey) {
+            addToast('L0 记忆提取已跳过：未配置 Embedding API Key', 'info');
+            return 0;
+        }
+
+        setIsDateMemoryExtracting(true);
+        try {
+            const allMsgs = await DB.getMessagesByCharId(char.id);
+            const sessionMessages = getCurrentSessionMessages(allMsgs);
+            const coveredSet = new Set((coveredMsgIds || []).filter((id): id is number => typeof id === 'number'));
+            const sourceMessages = coveredSet.size > 0
+                ? sessionMessages.filter(message => coveredSet.has(message.id))
+                : sessionMessages;
+            if (sourceMessages.length === 0) return 0;
+
+            const { VectorMemoryExtractor } = await import('../utils/vectorMemoryExtractor');
+            return await VectorMemoryExtractor.extractFromMessages(
+                char.id,
+                char.name,
+                sourceMessages,
+                selectedApi,
+                embeddingApiKey,
+                hasCompleteApiConfig(secondaryConfig) ? secondaryConfig : undefined,
+                { reason: '线下见面L0记忆提取', retryReason: '线下见面L0记忆提取重试', userInitiated: true },
+            );
+        } catch (e: any) {
+            console.error('[DateApp] Date L0 extraction failed', e);
+            addToast(`L0 记忆提取失败: ${e.message || e}`, 'error');
+            return 0;
+        } finally {
+            setIsDateMemoryExtracting(false);
+        }
+    };
+
+    const finishSummarySave = async (draft: SummaryDraft, l0MemoryCount = 0) => {
+        const memorySuffix = l0MemoryCount > 0 ? `，已提取 ${l0MemoryCount} 条 L0 记忆` : '';
         // If this save was triggered from exit flow, create bridge then exit
         if (draft.bridgeOnSave && draft.exitState) {
             const bridged = await createBridgeFromSummary();
-            addToast(bridged ? `总结已同步到主聊天${memorySuffix}` : `总结已保存${memorySuffix}`, 'success');
+            addToast(bridged ? `交接 recap 已同步到主聊天${memorySuffix}` : `交接 recap 已保存${memorySuffix}`, 'success');
             finishExitSession(draft.exitState);
         } else {
-            addToast(`总结已保存${memorySuffix}`, 'success');
+            addToast(`交接 recap 已保存${memorySuffix}`, 'success');
             if (draft.exitState) finishExitSession(draft.exitState);
         }
     };
 
-    const prepareDiaryMemoryPreview = async (draft: SummaryDraft) => {
-        if (!char || isDiaryMemoryGenerating) return;
-        const secondaryConfig = getSecondaryApiConfig();
-        const selectedApi = hasCompleteApiConfig(secondaryConfig) ? secondaryConfig : apiConfig;
-        if (!hasCompleteApiConfig(selectedApi)) {
-            addToast('请先配置主 API 或副 API 来生成日记记忆', 'error');
-            return;
-        }
-
-        setIsDiaryMemoryGenerating(true);
-        try {
-            const prompt = buildDateDiaryMemoryPrompt(char.name, userProfile.name, buildTimeLabel(), draft.content);
-            const response = await fetchDateChatCompletion(selectedApi, {
-                    model: selectedApi.model,
-                    messages: [
-                        { role: 'system', content: '你负责把线下见面总结拆成角色第一人称的长期日记记忆。只输出 JSON 数组。' },
-                        { role: 'user', content: prompt },
-                    ],
-                    temperature: 0.5,
-                    max_tokens: 3500,
-                },
-                '见面日记记忆预览',
-                char.id,
-                undefined,
-                true,
-            );
-
-            if (!response.ok) throw new Error(`Diary Memory API Error: ${response.status}`);
-            const data = await safeResponseJson(response);
-            const extracted = extractThinking(data.choices?.[0]?.message?.content || '');
-            const entries = parseDateDiaryMemoryResponse(extracted.content);
-            if (entries.length === 0) throw new Error('日记记忆内容为空或无法解析');
-
-            setDiaryMemoryPreview({
-                summaryDraft: draft,
-                entries: entries.map(entry => createDiaryMemoryPreviewEntry(entry)),
-            });
-            setActiveSummaryDraft(null);
-        } catch (e: any) {
-            console.error('[DateApp] Generate diary memory preview failed', e);
-            addToast(`日记记忆生成失败: ${e.message || e}`, 'error');
-        } finally {
-            setIsDiaryMemoryGenerating(false);
-        }
-    };
-
-    const saveDateDiaryVectorMemories = async (
-        entries: DateDiaryMemoryPreviewEntry[],
-        draft: SummaryDraft,
-    ): Promise<number> => {
-        if (!char) return 0;
-        const validEntries = entries
-            .map(entry => ({
-                ...entry,
-                title: entry.title.trim(),
-                content: entry.content.trim(),
-                emotionalJourney: entry.emotionalJourney?.trim() || undefined,
-                importance: Number.isFinite(entry.importance)
-                    ? Math.min(10, Math.max(1, Math.round(entry.importance)))
-                    : 5,
-            }))
-            .filter(entry => entry.title && entry.content);
-        if (validEntries.length === 0) return 0;
-
-        const { getEmbeddingConfig, hasCloudSyncTarget } = await import('../utils/runtimeConfig');
-        const { EmbeddingService } = await import('../utils/embeddingService');
-        const { markVectorMemoryAsPendingSync, markVectorMemoryAsLocalOnly, markVectorMemoryAsSynced } = await import('../utils/vectorMemorySyncState');
-        const { pushMemories } = await import('../utils/backendClient');
-
-        const embedConfig = getEmbeddingConfig();
-        const embedKey = embedConfig.apiKey;
-        if (!embedKey) throw new Error('未配置 Embedding API Key');
-
-        const textsToEmbed = validEntries.map(entry => {
-            const renderedContent = renderDateDiaryMemoryTemplate(entry.content, char.name, userProfile.name);
-            const renderedEmotion = entry.emotionalJourney
-                ? renderDateDiaryMemoryTemplate(entry.emotionalJourney, char.name, userProfile.name)
-                : '';
-            return `${entry.title}: ${renderedContent}${renderedEmotion ? `\n当时的感受: ${renderedEmotion}` : ''}`;
-        });
-        const vectors = await EmbeddingService.embedBatch(textsToEmbed, 'VECTOR_MEMORY', embedKey);
-        if (vectors.length !== validEntries.length) throw new Error('Embedding 返回数量不一致');
-
-        const sourceMessageIds = Array.isArray(draft.coveredMsgIds)
-            ? draft.coveredMsgIds.filter((id): id is number => typeof id === 'number')
-            : [];
-        const createdAt = Date.now();
-        const memories = validEntries.map((entry, index) => ({
-            id: `vmem-date-${createdAt}-${index}-${Math.random().toString(36).slice(2, 8)}`,
-            charId: char.id,
-            title: entry.title,
-            content: entry.content,
-            emotionalJourney: entry.emotionalJourney,
-            vector: vectors[index],
-            modelId: embedConfig.model,
-            source: 'manual' as const,
-            importance: entry.importance,
-            createdAt: createdAt + index,
-            mentionCount: 0,
-            lastMentioned: 0,
-            sourceMessageIds,
-        }));
-
-        const isCloud = hasCloudSyncTarget();
-        const finalMemories = memories.map(memory => (
-            isCloud ? markVectorMemoryAsPendingSync(memory) : markVectorMemoryAsLocalOnly(memory)
-        ));
-        await Promise.all(finalMemories.map(memory => DB.saveVectorMemory(memory)));
-
-        if (isCloud) {
-            pushMemories(char.id, finalMemories).then(success => {
-                if (!success) return;
-                finalMemories.forEach(memory => {
-                    DB.saveVectorMemory(markVectorMemoryAsSynced(memory)).catch(() => {});
-                });
-            }).catch(() => {});
-        }
-
-        return finalMemories.length;
-    };
-
     const saveSummaryDraft = async (draft: SummaryDraft) => {
         if (!char) return;
-        if (draft.injectToVectorMemory) {
-            await prepareDiaryMemoryPreview(draft);
+        const content = draft.content.trim();
+        if (!content) {
+            addToast('recap 内容不能为空', 'error');
             return;
         }
 
-        const savedSummaryId = await saveSummaryRecord(draft);
+        const normalizedDraft = { ...draft, content };
+        const savedSummaryId = await saveSummaryRecord(normalizedDraft);
         if (savedSummaryId) {
+            const l0MemoryCount = normalizedDraft.bridgeOnSave
+                ? await extractDateL0Memories(normalizedDraft.coveredMsgIds)
+                : 0;
             setActiveSummaryDraft(null);
-            await finishSummarySave(draft);
+            await finishSummarySave(normalizedDraft, l0MemoryCount);
         }
-    };
-
-    const saveDiaryMemoryPreview = async () => {
-        if (!diaryMemoryPreview || !char || isDiaryMemorySaving) return;
-        const validEntries = diaryMemoryPreview.entries.filter(entry => entry.title.trim() && entry.content.trim());
-        if (validEntries.length === 0) {
-            addToast('至少保留一条日记记忆，或选择跳过记忆保存', 'info');
-            return;
-        }
-
-        setIsDiaryMemorySaving(true);
-        try {
-            const summaryDraft = { ...diaryMemoryPreview.summaryDraft, injectToVectorMemory: false };
-            const diaryMemoryCount = await saveDateDiaryVectorMemories(validEntries, summaryDraft);
-            const savedSummaryId = await saveSummaryRecord(summaryDraft);
-            if (savedSummaryId) {
-                setDiaryMemoryPreview(null);
-                setActiveSummaryDraft(null);
-                await finishSummarySave(summaryDraft, diaryMemoryCount);
-            }
-        } catch (e: any) {
-            console.error('[DateApp] Save diary memory preview failed', e);
-            addToast(`日记记忆写入失败: ${e.message || e}`, 'error');
-        } finally {
-            setIsDiaryMemorySaving(false);
-        }
-    };
-
-    const skipDiaryMemoryPreview = async () => {
-        if (!diaryMemoryPreview || isDiaryMemorySaving) return;
-        setIsDiaryMemorySaving(true);
-        try {
-            const summaryDraft = { ...diaryMemoryPreview.summaryDraft, injectToVectorMemory: false };
-            const savedSummaryId = await saveSummaryRecord(summaryDraft);
-            if (savedSummaryId) {
-                setDiaryMemoryPreview(null);
-                setActiveSummaryDraft(null);
-                await finishSummarySave(summaryDraft);
-            }
-        } catch (e: any) {
-            console.error('[DateApp] Save summary without diary memory failed', e);
-            addToast(`总结保存失败: ${e.message || e}`, 'error');
-        } finally {
-            setIsDiaryMemorySaving(false);
-        }
-    };
-
-    const returnToSummaryFromDiaryPreview = () => {
-        if (!diaryMemoryPreview || isDiaryMemorySaving) return;
-        setActiveSummaryDraft(diaryMemoryPreview.summaryDraft);
-        setDiaryMemoryPreview(null);
-    };
-
-    const updateDiaryMemoryPreviewEntry = (
-        id: string,
-        updates: Partial<Omit<DateDiaryMemoryPreviewEntry, 'id'>>,
-    ) => {
-        setDiaryMemoryPreview(current => current ? {
-            ...current,
-            entries: current.entries.map(entry => entry.id === id ? { ...entry, ...updates } : entry),
-        } : current);
-    };
-
-    const removeDiaryMemoryPreviewEntry = (id: string) => {
-        setDiaryMemoryPreview(current => current ? {
-            ...current,
-            entries: current.entries.filter(entry => entry.id !== id),
-        } : current);
-    };
-
-    const addDiaryMemoryPreviewEntry = () => {
-        setDiaryMemoryPreview(current => current ? {
-            ...current,
-            entries: [...current.entries, createDiaryMemoryPreviewEntry()],
-        } : current);
     };
 
     const closeSummaryModal = () => {
@@ -1035,13 +869,11 @@ ${exitPromptContent}
 
     const renderSummaryModal = () => {
         if (!activeSummaryDraft) return null;
-        const saveLabel = activeSummaryDraft.injectToVectorMemory
-            ? '生成日记预览'
-            : activeSummaryDraft.bridgeOnSave ? '保存并同步' : activeSummaryDraft.exitState ? '保存并退出' : '保存';
+        const saveLabel = activeSummaryDraft.bridgeOnSave ? '保存并同步' : activeSummaryDraft.exitState ? '保存并退出' : '保存';
         return (
             <Modal
                 isOpen={!!activeSummaryDraft}
-                title="场次总结预览"
+                title="交接 recap 预览"
                 onClose={closeSummaryModal}
                 footer={
                     <>
@@ -1053,11 +885,11 @@ ${exitPromptContent}
                         </button>
                         <button onClick={discardSummaryDraft} className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-500 font-bold">丢弃</button>
                         <button
-                            disabled={!activeSummaryDraft.content.trim() || isDiaryMemoryGenerating}
+                            disabled={!activeSummaryDraft.content.trim() || isDateMemoryExtracting}
                             onClick={() => saveSummaryDraft(activeSummaryDraft)}
                             className="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-2xl disabled:opacity-50"
                         >
-                            {isDiaryMemoryGenerating ? '生成日记...' : saveLabel}
+                            {isDateMemoryExtracting ? '提取记忆...' : saveLabel}
                         </button>
                     </>
                 }
@@ -1065,7 +897,7 @@ ${exitPromptContent}
                 <div className="flex flex-col gap-4">
                     <div>
                         <div className="mb-2 flex items-center justify-between text-[11px] font-bold text-slate-400">
-                            <span>总结正文</span>
+                            <span>recap 正文</span>
                             <span>{activeSummaryDraft.content.trim().length} 字</span>
                         </div>
                         <textarea
@@ -1083,123 +915,6 @@ ${exitPromptContent}
                             </div>
                         </div>
                     )}
-                    {activeSummaryDraft.summaryType === 'manual' && activeSummaryDraft.bridgeOnSave && (
-                        <label className="flex items-center gap-2 mt-4 cursor-pointer p-3 bg-slate-50 rounded-xl border border-slate-200 transition-colors hover:bg-slate-100">
-                            <input 
-                                type="checkbox" 
-                                className="w-4 h-4 text-emerald-500 rounded border-slate-300 focus:ring-emerald-500" 
-                                checked={activeSummaryDraft.injectToVectorMemory || false} 
-                                onChange={e => setActiveSummaryDraft({ ...activeSummaryDraft, injectToVectorMemory: e.target.checked })} 
-                            />
-                            <span className="text-sm font-medium text-slate-700">提取角色日记碎片，确认后刻入永久向量记忆库</span>
-                        </label>
-                    )}
-                </div>
-            </Modal>
-        );
-    };
-
-    const renderDiaryMemoryPreviewModal = () => {
-        if (!diaryMemoryPreview) return null;
-        if (!char) return null;
-        const validCount = diaryMemoryPreview.entries.filter(entry => entry.title.trim() && entry.content.trim()).length;
-        return (
-            <Modal
-                isOpen={!!diaryMemoryPreview}
-                title="日记记忆预览"
-                onClose={returnToSummaryFromDiaryPreview}
-                footer={
-                    <>
-                        <button
-                            disabled={isDiaryMemorySaving}
-                            onClick={returnToSummaryFromDiaryPreview}
-                            className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-500 font-bold disabled:opacity-50"
-                        >
-                            返回总结
-                        </button>
-                        <button
-                            disabled={isDiaryMemorySaving}
-                            onClick={skipDiaryMemoryPreview}
-                            className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-600 font-bold disabled:opacity-50"
-                        >
-                            跳过记忆
-                        </button>
-                        <button
-                            disabled={isDiaryMemorySaving || validCount === 0}
-                            onClick={saveDiaryMemoryPreview}
-                            className="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-2xl disabled:opacity-50"
-                        >
-                            {isDiaryMemorySaving ? '写入中...' : `写入 ${validCount} 条`}
-                        </button>
-                    </>
-                }
-            >
-                <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs leading-relaxed text-slate-400">这些碎片会单独向量化。预览里显示当前名字，写入时会保留可替换的名字锚点。</p>
-                        <button
-                            type="button"
-                            disabled={isDiaryMemorySaving}
-                            onClick={addDiaryMemoryPreviewEntry}
-                            className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-bold text-slate-500 active:scale-95 disabled:opacity-50"
-                        >
-                            新增
-                        </button>
-                    </div>
-                    <div className="max-h-[58vh] space-y-3 overflow-y-auto pr-1">
-                        {diaryMemoryPreview.entries.length === 0 ? (
-                            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-400">
-                                暂无日记碎片，可以新增一条，或跳过记忆保存。
-                            </div>
-                        ) : diaryMemoryPreview.entries.map((entry, index) => (
-                            <div key={entry.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                                <div className="mb-2 flex items-center justify-between gap-2">
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">碎片 {index + 1}</span>
-                                    <button
-                                        type="button"
-                                        disabled={isDiaryMemorySaving}
-                                        onClick={() => removeDiaryMemoryPreviewEntry(entry.id)}
-                                        className="rounded-full bg-white px-2 py-1 text-[11px] font-bold text-red-400 disabled:opacity-50"
-                                    >
-                                        删除
-                                    </button>
-                                </div>
-                                <div className="grid grid-cols-[1fr_72px] gap-2">
-                                    <input
-                                        value={entry.title}
-                                        disabled={isDiaryMemorySaving}
-                                        onChange={e => updateDiaryMemoryPreviewEntry(entry.id, { title: e.target.value })}
-                                        placeholder="标题"
-                                        className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60"
-                                    />
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        max={10}
-                                        value={entry.importance}
-                                        disabled={isDiaryMemorySaving}
-                                        onChange={e => updateDiaryMemoryPreviewEntry(entry.id, { importance: parseDiaryMemoryImportance(e.target.value) })}
-                                        className="rounded-xl border border-slate-200 bg-white px-2 py-2 text-center text-xs font-bold text-slate-700 outline-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60"
-                                    />
-                                </div>
-                                <textarea
-                                    value={renderDateDiaryMemoryTemplate(entry.content, char.name, userProfile.name)}
-                                    disabled={isDiaryMemorySaving}
-                                    onChange={e => updateDiaryMemoryPreviewEntry(entry.id, { content: toDateDiaryMemoryTemplate(e.target.value, char.name, userProfile.name) })}
-                                    rows={5}
-                                    placeholder={`我记得 ${userProfile.name} ...`}
-                                    className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white p-3 text-sm leading-relaxed text-slate-700 outline-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60"
-                                />
-                                <input
-                                    value={entry.emotionalJourney ? renderDateDiaryMemoryTemplate(entry.emotionalJourney, char.name, userProfile.name) : ''}
-                                    disabled={isDiaryMemorySaving}
-                                    onChange={e => updateDiaryMemoryPreviewEntry(entry.id, { emotionalJourney: toDateDiaryMemoryTemplate(e.target.value, char.name, userProfile.name) })}
-                                    placeholder="当时的感受，例如：舍不得、克制、心动"
-                                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 outline-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60"
-                                />
-                            </div>
-                        ))}
-                    </div>
                 </div>
             </Modal>
         );
@@ -1344,7 +1059,8 @@ ${exitPromptContent}
                 contextLimit: limit,
             });
             const lastMsg = requestContext[requestContext.length - 1]?.sourceMessage;
-            const gapHint = getTimeGapHint(lastMsg?.timestamp);
+            const dateTimeAwarenessEnabled = c.dateTimeAwarenessEnabled !== false;
+            const gapHint = dateTimeAwarenessEnabled ? getTimeGapHint(lastMsg?.timestamp) : '';
 
             const recentMsgs = requestContext.map(item => {
                 return `${item.role}: ${item.content}`;
@@ -1357,12 +1073,19 @@ ${exitPromptContent}
             peekSystemPrompt += ContextBuilder.buildCoreContext(c, userProfile, false);
 
             // Force separator to signal new scene
-            const contextSeparator = gapHint ? `\n\n--- [TIME SKIP: ${gapHint}] ---\n\n` : `\n\n--- [NEW SCENE START] ---\n\n`;
+            const contextSeparator = dateTimeAwarenessEnabled && gapHint ? `\n\n--- [TIME SKIP: ${gapHint}] ---\n\n` : `\n\n--- [NEW SCENE START] ---\n\n`;
+            const timeAwarenessInstruction = dateTimeAwarenessEnabled
+                ? `当前时间: ${timeStr}\n时间上下文: ${gapHint || '无明显间隔'}`
+                : '时间感知: 已关闭。不要根据现实时间、时段或距离上次互动多久来安排开场状态。';
+            const timeContinuityInstruction = dateTimeAwarenessEnabled
+                ? `1. **上下文连贯性**: 参考 [最近记录]，但**必须**注意 [TIME SKIP]。如果是很久没见，不要接着上一次的话题聊，而是开启新场景。
+2. **状态一致性**: ${gapHint.includes('很久') ? '因为很久没见，可能在发呆、忙碌或者有点落寞。' : '根据之前的聊天状态决定。'}`
+                : `1. **上下文连贯性**: 参考 [最近记录]，但不要主动演绎现实时间、时段或久别感。
+2. **状态一致性**: 根据之前的聊天状态决定。`;
 
             const peekInstructions = `
 ### 场景：感知 (Sense Presence)
-当前时间: ${timeStr}
-时间上下文: ${gapHint}
+${timeAwarenessInstruction}
 
 ### 任务
 你现在并不在和${userProfile.name}直接对话。${userProfile.name}正在悄悄靠近你所在的地点。
@@ -1370,8 +1093,7 @@ ${exitPromptContent}
 描述：${c.name} 此时此刻正在做什么？周围环境是怎样的？状态如何？
 
 ### 逻辑检查
-1. **上下文连贯性**: 参考 [最近记录]，但**必须**注意 [TIME SKIP]。如果是很久没见，不要接着上一次的话题聊，而是开启新场景。
-2. **状态一致性**: ${gapHint.includes('很久') ? '因为很久没见，可能在发呆、忙碌或者有点落寞。' : '根据之前的聊天状态决定。'}
+${timeContinuityInstruction}
 3. **描写风格**: 电影感，沉浸式，细节丰富。不要输出任何前缀，直接输出描写内容。`;
 
             const response = await fetchDateChatCompletion(apiConfig, {
@@ -1428,8 +1150,10 @@ ${exitPromptContent}
         });
         const temporalHistory = requestContext.map(item => item.sourceMessage);
         const previousContextMsg = temporalHistory[temporalHistory.length - 2];
-        const temporalContext = buildTemporalContext(temporalHistory, Date.now(), char.id)
-            || getTimeGapHint(previousContextMsg?.timestamp);
+        const temporalContext = char.dateTimeAwarenessEnabled !== false
+            ? buildTemporalContext(temporalHistory, Date.now(), char.id)
+                || getTimeGapHint(previousContextMsg?.timestamp)
+            : '';
         const userPromptText = appendDateTemporalContext(text, temporalContext);
 
         // Construct History for AI
@@ -1482,7 +1206,9 @@ ${exitPromptContent}
         // Refresh local state
         const freshMsgs = await DB.getMessagesByCharId(char.id);
         setDateMessages(freshMsgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp));
-        maybeExtractDateTemporalEvent(char.id, text, secondaryApiConfig);
+        if (char.dateTimeAwarenessEnabled !== false) {
+            maybeExtractDateTemporalEvent(char.id, text, secondaryApiConfig);
+        }
         void maybeTriggerAutoSummary(freshMsgs);
 
         return { content, whispers: whisperResult.whispers };
@@ -1513,8 +1239,10 @@ ${exitPromptContent}
         });
         const temporalHistory = requestContext.map(item => item.sourceMessage);
         const previousContextMsg = temporalHistory[temporalHistory.length - 2];
-        const temporalContext = buildTemporalContext(temporalHistory, Date.now(), char.id)
-            || getTimeGapHint(previousContextMsg?.timestamp);
+        const temporalContext = char.dateTimeAwarenessEnabled !== false
+            ? buildTemporalContext(temporalHistory, Date.now(), char.id)
+                || getTimeGapHint(previousContextMsg?.timestamp)
+            : '';
         const userPromptText = appendDateTemporalContext(lastUserMsg.content, temporalContext);
         const historyMsgs = requestContext.filter(item => item.sourceMessage.id !== lastUserMsg.id).map(item => ({
             role: item.role,
@@ -1832,7 +1560,6 @@ ${exitPromptContent}
                     <textarea value={editContent} onChange={e => setEditContent(e.target.value)} className="w-full h-32 bg-slate-100 rounded-2xl p-4 resize-none focus:ring-1 focus:ring-primary/20 transition-all text-sm leading-relaxed" />
                 </Modal>
                 {renderSummaryModal()}
-                {renderDiaryMemoryPreviewModal()}
                 {renderSummarySettingsModal()}
             </>
         );

@@ -2,6 +2,7 @@ import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import Modal from '../os/Modal';
 import {
     checkWeixinQrStatus,
+    ensureWeixinSync,
     generateWeixinQr,
     getWeixinReadiness,
     listWeixinBindings,
@@ -22,8 +23,11 @@ interface CharacterWeixinBindingCardProps {
 
 type BindingLoadState = 'loading' | 'ready' | 'error';
 type RepairState = 'idle' | 'checking' | 'repairing' | 'repaired' | 'conflict' | 'error';
+type ManualSyncState = 'idle' | 'ensuring' | 'processing' | 'pulling' | 'done' | 'error';
 
 const DEFAULT_REPAIR_LOOKBACK_DAYS = 7;
+const WEIXIN_MANUAL_SYNC_MAX_ROUNDS = 12;
+const WEIXIN_MANUAL_SYNC_RETRY_DELAY_MS = 2000;
 const WEIXIN_REPAIR_SUCCESS_MESSAGE = '已把最近微信记录同步到这台小手机';
 const WEIXIN_REPAIR_CONFLICT_MESSAGE = '这条微信绑定已属于另一台设备，重新扫码可切换到当前设备';
 
@@ -207,6 +211,54 @@ function getRepairStateClassName(repairState: RepairState): string {
     return 'bg-emerald-50/70 border-emerald-100 text-emerald-700';
 }
 
+function waitForManualSyncRetry(): Promise<void> {
+    return new Promise(resolve => window.setTimeout(resolve, WEIXIN_MANUAL_SYNC_RETRY_DELAY_MS));
+}
+
+function getManualSyncButtonLabel(manualSyncState: ManualSyncState): string {
+    switch (manualSyncState) {
+        case 'ensuring':
+            return '同步中';
+        case 'processing':
+            return '处理中';
+        case 'pulling':
+            return '拉取中';
+        case 'done':
+        case 'error':
+            return '重新检查同步';
+        case 'idle':
+        default:
+            return '立即同步';
+    }
+}
+
+function getManualSyncStateText(manualSyncState: ManualSyncState, message: string): string {
+    if (message) return message;
+
+    switch (manualSyncState) {
+        case 'ensuring':
+            return '正在检查微信消息队列。';
+        case 'processing':
+            return '微信消息正在处理，2 秒后自动再检查。';
+        case 'pulling':
+            return '正在拉取同步消息。';
+        default:
+            return '';
+    }
+}
+
+function getManualSyncStateClassName(manualSyncState: ManualSyncState): string {
+    if (manualSyncState === 'error') {
+        return 'bg-rose-50/80 border-rose-100 text-rose-600';
+    }
+
+    if (manualSyncState === 'processing') {
+        return 'bg-sky-50/80 border-sky-100 text-sky-700';
+    }
+
+    return 'bg-emerald-50/70 border-emerald-100 text-emerald-700';
+}
+
 const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = memo(({
     charId,
     charName,
@@ -216,6 +268,8 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
     const [loadState, setLoadState] = useState<BindingLoadState>('loading');
     const [loadError, setLoadError] = useState('');
     const [repairState, setRepairState] = useState<RepairState>('idle');
+    const [manualSyncState, setManualSyncState] = useState<ManualSyncState>('idle');
+    const [manualSyncMessage, setManualSyncMessage] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [qrPayload, setQrPayload] = useState<WeixinQrResponse | null>(null);
     const [qrStatus, setQrStatus] = useState<WeixinQrStatus | 'idle' | 'generating' | 'error'>('idle');
@@ -223,6 +277,7 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
     const [qrImageIndex, setQrImageIndex] = useState(0);
     const [qrImageLoadError, setQrImageLoadError] = useState(false);
     const pollTimerRef = useRef<number | null>(null);
+    const manualSyncRunIdRef = useRef(0);
 
     const clearPollTimer = useCallback(() => {
         if (pollTimerRef.current !== null) {
@@ -351,6 +406,81 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
         }
     }, [addToast, charId, charName, clearPollTimer]);
 
+    const runManualSync = useCallback(async () => {
+        if (binding?.status !== 'active') {
+            return;
+        }
+
+        const runId = manualSyncRunIdRef.current + 1;
+        manualSyncRunIdRef.current = runId;
+        setManualSyncState('ensuring');
+        setManualSyncMessage('');
+
+        let totalSaved = 0;
+        let totalReceived = 0;
+
+        const isCurrentRun = () => manualSyncRunIdRef.current === runId;
+
+        try {
+            for (let round = 0; round < WEIXIN_MANUAL_SYNC_MAX_ROUNDS; round += 1) {
+                if (!isCurrentRun()) return;
+
+                const ensureResult = await ensureWeixinSync(charId);
+                if (!isCurrentRun()) return;
+
+                const remainingQueued = Math.max(0, Number(ensureResult.remainingQueued) || 0);
+
+                if (ensureResult.status === 'failed') {
+                    throw new Error(ensureResult.message || ensureResult.error || '微信同步处理失败');
+                }
+
+                if (ensureResult.status === 'processing') {
+                    setManualSyncState('processing');
+                    setManualSyncMessage('微信消息正在处理，2 秒后自动再检查。');
+                    await waitForManualSyncRetry();
+                    continue;
+                }
+
+                setManualSyncState('pulling');
+                setManualSyncMessage('正在拉取同步消息。');
+                const syncResult = await syncPendingAgentMessagesForCharacter(charId);
+                if (!isCurrentRun()) return;
+
+                totalReceived += syncResult.received;
+                totalSaved += syncResult.saved;
+
+                if (remainingQueued > 0) {
+                    setManualSyncState('ensuring');
+                    setManualSyncMessage(`还有 ${remainingQueued} 条微信消息在队列里，继续拉取。`);
+                    continue;
+                }
+
+                const doneMessage = totalSaved > 0
+                    ? `已同步 ${totalSaved} 条微信消息到小手机。`
+                    : totalReceived > 0
+                        ? '微信同步已检查，消息已在小手机里。'
+                        : '微信同步已检查，暂时没有新消息。';
+                setManualSyncState('done');
+                setManualSyncMessage(doneMessage);
+                addToast(doneMessage, totalSaved > 0 ? 'success' : 'info');
+                return;
+            }
+
+            if (!isCurrentRun()) return;
+            const pendingMessage = '微信消息还在处理，稍后可再点一次重新检查同步。';
+            setManualSyncState('processing');
+            setManualSyncMessage(pendingMessage);
+            addToast(pendingMessage, 'info');
+        } catch (error) {
+            if (!isCurrentRun()) return;
+            const message = error instanceof Error ? error.message : '微信同步检查失败';
+            const errorMessage = `微信同步检查失败：${message}`;
+            setManualSyncState('error');
+            setManualSyncMessage(errorMessage);
+            addToast(errorMessage, 'error');
+        }
+    }, [addToast, binding?.status, charId]);
+
     const handlePrimaryAction = useCallback(() => {
         if (loadState === 'error') {
             void refreshBinding();
@@ -368,11 +498,15 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
     useEffect(() => {
         setIsModalOpen(false);
         setRepairState('idle');
+        setManualSyncState('idle');
+        setManualSyncMessage('');
+        manualSyncRunIdRef.current += 1;
         resetQrState();
         void refreshBinding();
     }, [charId, refreshBinding, resetQrState]);
 
     useEffect(() => () => {
+        manualSyncRunIdRef.current += 1;
         clearPollTimer();
     }, [clearPollTimer]);
 
@@ -432,6 +566,13 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
         : qrStatusText;
     const repairStateText = getRepairStateText(repairState);
     const repairStateClassName = getRepairStateClassName(repairState);
+    const manualSyncStateText = getManualSyncStateText(manualSyncState, manualSyncMessage);
+    const manualSyncStateClassName = getManualSyncStateClassName(manualSyncState);
+    const manualSyncButtonLabel = getManualSyncButtonLabel(manualSyncState);
+    const isManualSyncRunning = manualSyncState === 'ensuring'
+        || manualSyncState === 'processing'
+        || manualSyncState === 'pulling';
+    const isActiveBinding = binding?.status === 'active';
 
     return (
         <>
@@ -453,18 +594,38 @@ const CharacterWeixinBindingCard: React.FC<CharacterWeixinBindingCardProps> = me
                             {summary.subtitle}
                         </div>
                     </div>
-                    <button
-                        type="button"
-                        onClick={handlePrimaryAction}
-                        disabled={loadState === 'loading'}
-                        className="shrink-0 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-3 py-2 rounded-full hover:bg-emerald-100 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {summary.buttonLabel}
-                    </button>
+                    <div className="shrink-0 flex flex-col items-end gap-2">
+                        {isActiveBinding && (
+                            <button
+                                type="button"
+                                onClick={() => void runManualSync()}
+                                disabled={isManualSyncRunning}
+                                className="text-[11px] font-bold text-sky-600 bg-sky-50 px-3 py-2 rounded-full hover:bg-sky-100 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {manualSyncButtonLabel}
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={handlePrimaryAction}
+                            disabled={loadState === 'loading'}
+                            className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-3 py-2 rounded-full hover:bg-emerald-100 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {summary.buttonLabel}
+                        </button>
+                    </div>
                 </div>
                 <div className="mt-3 text-[10px] text-slate-400 leading-relaxed">
                     扫码成功后，真实微信消息会通过 staging 的 bridge 接到这个角色身上。
                 </div>
+                {manualSyncStateText && (
+                    <div
+                        className={`mt-3 rounded-2xl border px-3 py-2 text-[10px] leading-relaxed ${manualSyncStateClassName}`}
+                        aria-live="polite"
+                    >
+                        {manualSyncStateText}
+                    </div>
+                )}
                 {repairStateText && (
                     <div
                         className={`mt-3 rounded-2xl border px-3 py-2 text-[10px] leading-relaxed ${repairStateClassName}`}

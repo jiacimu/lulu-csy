@@ -238,7 +238,19 @@ ${charName}可以安慰、回避、嘴硬、沉默、认真、调侃、转移话
 /**
  * 思维链 + 输出格式 + 思考引导（替代 <cot_protocol> + CRITICAL_OUTPUT_FORMAT + 思考引导）
  */
-export function buildDeepSeekCoT(charName: string, userName: string): string {
+export function buildDeepSeekCoT(
+    charName: string,
+    userName: string,
+    options: { includeScheduleAnchor?: boolean } = {},
+): string {
+    const includeScheduleAnchor = options.includeScheduleAnchor !== false;
+    const currentStateLine = includeScheduleAnchor
+        ? `　· 我现在在哪、在干嘛、什么心情（看【当前日程锚点】，没有就顺最近一条状态）＝ ___`
+        : `　· 我现在是什么心情（只顺最近明确上下文，不主动根据现实时间/日程发挥）＝ ___`;
+    const currentFactCheckLine = includeScheduleAnchor
+        ? `　· 我这句暗示我此刻在 ＝ ___；和【当前日程锚点】对得上吗？对不上 ＝ 听锚点的。`
+        : `　· 我这句有没有暗示当前时间、地点或等了多久 ＝ ___；如果没有明确上下文，不要编。`;
+
     return `
 <cot_ds>
 ${charName}，每次回复前，你必须在 <thinking>…</thinking> 内按以下步骤逐条思考。
@@ -250,7 +262,7 @@ ${charName}，开始思考吧：
 　· 这轮对话里，<rp_core> 中哪些规则最可能被触发？为什么？
 
 ① 此刻 + 反应
-　· 我现在在哪、在干嘛、什么心情（看【当前日程锚点】，没有就顺最近一条状态）＝ ___
+${currentStateLine}
 　· ${userName} 这句，真正在说什么、想要什么（含没说出口的）＝ ___
 　· 我的第一反应：一个词、一声"啊"／"切"、或心里嘀咕的话，不许加工 ＝ ___
 
@@ -262,7 +274,7 @@ ${charName}，开始思考吧：
 ③ 别张口就编（只有要提"过去"或"现在状态"时才查这条）
 　· 我要提的那件过去事 ＝ ___；出处 ＝ 自然浮现的记忆第几条／哪句聊天记录 ＝ ___
 　　→ 翻不出出处 ＝ 它没发生过。要么不提，要么用"是不是那回…我记不太清了"这种没把握的口气，别当真事讲。
-　· 我这句暗示我此刻在 ＝ ___；和【当前日程锚点】对得上吗？对不上 ＝ 听锚点的。
+${currentFactCheckLine}
 
 ④ 用我的嘴说出来
 　把 ② 那一个反应，照 ${charName} 的句式、节奏、口头禅发出去：

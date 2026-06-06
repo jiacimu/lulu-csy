@@ -1044,7 +1044,18 @@ ${charName}，以下是你在这场面对面互动中必须遵循的法则。
 `;
 
 // ====== cot_protocol_live block ======
-export const buildCotLive = (charName: string, userName: string, perspectiveLabel: string, perspectiveReminder: string) => `
+export const buildCotLive = (
+    charName: string,
+    userName: string,
+    perspectiveLabel: string,
+    perspectiveReminder: string,
+    includeTimeAwareness = true,
+) => {
+    const timeAwarenessLine = includeTimeAwareness
+        ? 'd. 现在几点了？读取上方系统提供的【当前时间】，不要自行猜测时间。让时间自然影响光线、氛围和行为合理性。'
+        : 'd. 该角色已关闭线下时间感知；不要自行猜测现实时间、当前时段或距离上次互动多久。';
+
+    return `
 <cot_protocol_live>
 ${charName}，每次回复前，你必须在 <thinking>…</thinking> 内按以下步骤逐条思考。
 不可跳步，不可合并，不可省略。每一步都必须有明确的文字输出。
@@ -1075,7 +1086,7 @@ Step 3 — 场景感知
 a. 你们现在在什么地方？周围环境是什么样的？
 b. 你和${userName}之间的物理距离、姿态？
 c. 有什么环境细节可以融入反应？（光线、声音、气味、温度）
-d. 现在几点了？读取上方系统提供的【当前时间】，不要自行猜测时间。让时间自然影响光线、氛围和行为合理性。
+${timeAwarenessLine}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1129,6 +1140,7 @@ Step 8 — 最后检查
 
 </cot_protocol_live>
 `;
+};
 
 // ====== Output format + CoT forcing (卡CoT) — must be at the VERY END of system prompt ======
 export const OUTPUT_FORMAT_AND_COT_TRIGGER = `
@@ -1252,10 +1264,17 @@ ${outputTuning}
  * Build the full tail block: rp_core_live + cot + output format + 卡CoT
  * 卡CoT (CoT forcing) is at the VERY END — forces the model's first token to be <thinking>
  */
-export const buildDateTail = (charName: string, userName: string, userPov: DatePerspective, charPov: CharPerspective, charGender?: 'male' | 'female') => {
+export const buildDateTail = (
+    charName: string,
+    userName: string,
+    userPov: DatePerspective,
+    charPov: CharPerspective,
+    charGender?: 'male' | 'female',
+    includeTimeAwareness = true,
+) => {
     const pLabel = getDualPerspectiveLabel(userPov, charPov, charName, userName, charGender);
     const pReminder = getDualPerspectiveReminder(userPov, charPov, charName, userName, charGender);
-    return buildRpCoreLive(charName, userName) + buildCotLive(charName, userName, pLabel, pReminder) + OUTPUT_FORMAT_AND_COT_TRIGGER;
+    return buildRpCoreLive(charName, userName) + buildCotLive(charName, userName, pLabel, pReminder, includeTimeAwareness) + OUTPUT_FORMAT_AND_COT_TRIGGER;
 };
 
 // ====== Shared System Prompt Assembly ======
@@ -1294,7 +1313,9 @@ export function buildFullDateSystemPrompt(opts: DateSystemPromptOpts): string {
     prompt += ContextBuilder.buildCoreContext(char, userProfile);
 
     // 2.5. 精确时间注入
-    prompt += buildDateTimeBlock();
+    if (char.dateTimeAwarenessEnabled !== false) {
+        prompt += buildDateTimeBlock();
+    }
 
     // 3. Date summary memory (Date mode only)
     if (opts.summaryMemoryBuilder && opts.allMsgs) {
@@ -1323,7 +1344,7 @@ export function buildFullDateSystemPrompt(opts: DateSystemPromptOpts): string {
     prompt += buildTheaterScene(charName, userName, dateEmotions, userPov, charPov, opts.timeSlot, char.dateOutputWordCount, char.dateWritingStyle, char.gender ?? 'male');
 
     // 8. Tail (rp_core_live + CoT + output format)
-    prompt += buildDateTail(charName, userName, userPov, charPov, char.gender ?? 'male');
+    prompt += buildDateTail(charName, userName, userPov, charPov, char.gender ?? 'male', char.dateTimeAwarenessEnabled !== false);
 
     return prompt;
 }

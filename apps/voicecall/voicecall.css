@@ -424,6 +424,74 @@
     white-space: pre-wrap;
 }
 
+.vc-voice-draft {
+    width: min(88%, 360px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    border-radius: 16px;
+    background: rgba(160, 210, 190, 0.12);
+    border: 1px solid rgba(190, 235, 215, 0.18);
+    backdrop-filter: blur(18px) saturate(115%);
+    -webkit-backdrop-filter: blur(18px) saturate(115%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+    animation: vc-subtitle-in 0.3s ease-out forwards;
+}
+
+.vc-voice-draft-text {
+    width: 100%;
+    max-height: 96px;
+    margin: 0;
+    overflow-y: auto;
+    color: rgba(236, 255, 246, 0.88);
+    font-size: 14px;
+    line-height: 1.6;
+    text-align: center;
+    word-break: break-word;
+    white-space: pre-wrap;
+    scrollbar-width: none;
+}
+
+.vc-voice-draft-text::-webkit-scrollbar {
+    display: none;
+}
+
+.vc-voice-draft-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.vc-voice-draft-btn {
+    min-width: 76px;
+    min-height: 34px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    font-size: 13px;
+    line-height: 1;
+    transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.vc-voice-draft-btn:active {
+    transform: scale(0.94);
+}
+
+.vc-voice-draft-btn--ghost {
+    color: rgba(240, 237, 233, 0.64);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.vc-voice-draft-btn--send {
+    color: #25342d;
+    background: rgba(218, 244, 226, 0.88);
+    border-color: rgba(230, 255, 238, 0.52);
+}
+
 /* ─── 药丸 Dock 控制栏 ─── */
 .vc-dock {
     display: flex;

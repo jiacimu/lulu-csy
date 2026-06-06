@@ -231,6 +231,19 @@ function formatXhsCard(message: ContextMessage, options: FormatMessageContextOpt
     return `[${sender}分享了小红书笔记]\n标题: ${note.title || '无标题'}\n作者: ${note.author || '未知'}\n赞: ${note.likes || 0}\n简介: ${note.desc || '无'}${suffix}`;
 }
 
+function formatCanvaCard(message: ContextMessage): string {
+    const design = message.metadata?.canvaDesign || {};
+    const sender = message.role === 'user' ? '用户' : '你';
+    const statusLabel: Record<string, string> = {
+        created: '创建了 Canva 设计草稿',
+        searched: '分享了 Canva 搜索结果',
+        exported: '导出了 Canva 设计',
+        candidate: '分享了 Canva 候选设计',
+    };
+    const action = statusLabel[design.status] || '分享了 Canva 设计';
+    return `[${sender}${action}]\n标题: ${design.title || '未命名设计'}${design.designType ? `\n类型: ${design.designType}` : ''}${design.format ? `\n格式: ${design.format}` : ''}${design.url || design.exportUrl ? `\n链接: ${design.exportUrl || design.url}` : ''}`;
+}
+
 function formatForwardedMessageContent(forwarded: any): string {
     const type = String(forwarded?.type || 'text');
     if (type === 'image') return '[图片]';
@@ -407,6 +420,8 @@ function formatMessageBody(message: ContextMessage, options: FormatMessageContex
             return formatSocialCard(message, options);
         case 'xhs_card':
             return formatXhsCard(message, options);
+        case 'canva_card':
+            return formatCanvaCard(message);
         case 'chat_forward':
             return formatChatForward(message);
         case 'moments':

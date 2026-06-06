@@ -1,24 +1,48 @@
 import React,{ useState,useEffect } from 'react';
 
 const UPDATE_VERSION_KEY = 'sullyos_update_seen_version';
-export const CURRENT_VERSION = 'v2.11.0';
+export const CURRENT_VERSION = 'v2.12.0';
 
 const UPDATE_LOGS = [
     {
-        title: '1. 查手机上线',
-        desc: '聊天页面现在可以查看 char 的小手机了。\n\n查到的内容可以塞进当前剧情里，让他亲自解释——\n或者说，亲自狡辩。\n\n聊天记录、页面内容、心声卡片等也都做了相关性升级，会更贴近当前聊天。'
+        title: '1. 记忆系统静默升级',
+        desc: '记忆系统做了一轮神秘后台升级，体感上回复速度会更快，更省token，召回效果有所提升。'
     },
     {
-        title: '2. ElevenLabs 语音接口',
-        desc: '新增 ElevenLabs 语音接口，目前主要用于通话模式。\n\n相比 minimax，ElevenLabs 会更适合外国 char、人机恋、偏真实感或影视感的声线。\n\n也新增了让 char 自己给自己捏声线的小设计，用不用都可以，当作参考也很可爱。\n\n试听效果可以参考吱的小红书视频。'
+        title: '2. 生图',
+        desc: '聊天里补上了更完整的生图链路：手动生图、剧情模式整理、角色主动发照片和相册落档都可以一起工作。\n\n它会尽量读懂当前剧情，不再只是把一句话硬塞给生图接口。'
     },
     {
-        title: '3. Soft Devotion Chat',
-        desc: '新增 soft devotion chat。\n\n开启后，char 的共情、安抚、低压陪伴能力会更明显。\n\n适合想要被好好哄一哄的时候使用，实测吵架使用风味更佳。'
+        title: '3. 主题曲',
+        desc: '聊天窗口新增主题曲生成入口，可以把当前关系、剧情和角色气质整理成一首歌的草稿。\n\n生成后会有确认弹窗和封面预览，适合给一段关系留一张能播放的纪念票根。'
     },
     {
-        title: '4. 昨日来信 / 回望·周章 / 回望·月章',
-        desc: '新增回顾类小报功能。\n\n它会把过去一天、一周、一个月的聊天整理成娱乐小报一样的形式，支持高清原图导出。\n\n开关在聊天设置里。'
+        title: '4. 生图预设',
+        desc: '生图设置加入预设管理和风格预设库。\n\n常用模型、接口、画风、负面词、Vibe 参考可以更稳定地复用，不用每次重新填一遍。'
+    },
+    {
+        title: '5. 线下文风',
+        desc: '线下见面新增文风选择和自定义文风。\n\n目前内置：相对忘言、乍见之欢、不着一字、五感氤氲、光影成景、浮世苍凉、机锋暗涌、繁花缱绻、冷处偏佳、工笔水乡、静水深流、机锋暗许、咫尺天涯、危光微醺、谑而不虐、蜜里调油。'
+    },
+    {
+        title: '6. 查手机桌面自定义',
+        desc: '查手机的桌面外观开放更多自定义：壁纸、图标、播放器，桌面内容和自定义 App 都能更贴近char本人。\n\n现在它更像一台真的被使用过的小手机。'
+    },
+    {
+        title: '7. 番外篇',
+        desc: '新增番外篇模式。\n\n每轮回复后可以自动生成一篇藏在星星入口里的同人本番外，也可以手动加梗，让剧情在正文之外悄悄多长出一页。'
+    },
+    {
+        title: '8. 线上聊天回复器',
+        desc: '四个选项，支持自由编辑添加删减后发送，免收打字之苦'
+    },
+    {
+        title: '9. 线上 / 线下时间感知开关',
+        desc: '聊天设置里新增线上、线下时间感知相关开关，线上时间流逝感知开关。\n\n大家按需手动开启'
+    },
+    {
+        title: '10. 语音通话 STT 优化',
+        desc: '语音通话的 STT 链路做了优化。识别失败、识别为空、配置缺失时会有更清楚的降级处理。\n\n纯文字模式，和手动发送模式按需选择'
     }
 ];
 
@@ -62,7 +86,7 @@ const UpdatePopup: React.FC<UpdatePopupProps> = ({ canShow }) => {
                     <div className="flex items-center justify-center gap-2 mb-1">
                         <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">发现新版本 {CURRENT_VERSION}</h2>
                     </div>
-                    <p className="text-[12px] text-slate-400 mt-1 font-medium">5.25 更新 · Csy 手抓糯米机</p>
+                    <p className="text-[12px] text-slate-400 mt-1 font-medium">6.6 更新 · Csy 手抓糯米机</p>
                 </div>
 
                 {/* Content */}

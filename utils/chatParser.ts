@@ -555,7 +555,7 @@ export const ChatParser = {
             // ── Strip markdown headers ──
             .replace(/^#{1,6}\s+/gm, '')
             // ── Strip residual action/system tags ──
-            .replace(/\[\[(?:ACTION|NEWS_CARD|RECALL|SEARCH|DIARY|READ_DIARY|FS_DIARY|FS_READ_DIARY|DIARY_START|DIARY_END|FS_DIARY_START|FS_DIARY_END|CALL|WEIBO_SEARCH|XHS_SEARCH|XHS_BROWSE|XHS_POST|XHS_SHARE|XHS_COMMENT|XHS_LIKE|XHS_FAV|XHS_DETAIL|XHS_REPLY|XHS_MY_PROFILE|READ_NOTE)[:\s][\s\S]*?\]\]/g, '')
+            .replace(/\[\[(?:ACTION|NEWS_CARD|RECALL|SEARCH|DIARY|READ_DIARY|FS_DIARY|FS_READ_DIARY|DIARY_START|DIARY_END|FS_DIARY_START|FS_DIARY_END|CALL|WEIBO_SEARCH|CANVA_CREATE|CANVA_SEARCH|CANVA_EXPORT|XHS_SEARCH|XHS_BROWSE|XHS_POST|XHS_SHARE|XHS_COMMENT|XHS_LIKE|XHS_FAV|XHS_DETAIL|XHS_REPLY|XHS_MY_PROFILE|READ_NOTE)[:\s][\s\S]*?\]\]/g, '')
             .replace(/\[\[(?:ACTION|CALL)[:\s]\w*\]\]/g, '')
             .replace(/\[schedule_message[^\]]*\]/g, '')
             .replace(/\[\[(?:QU[OA]TE|引用)[：:][\s\S]*?\]\]/g, '')

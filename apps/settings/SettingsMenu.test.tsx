@@ -72,6 +72,11 @@ describe('SettingsMenu', () => {
                 feishuBaseId: '',
                 feishuTableId: '',
                 xhsEnabled: false,
+                canvaEnabled: false,
+                canvaMcpConfig: {
+                    enabled: false,
+                    serverUrl: 'http://localhost:18062/api',
+                },
                 cacheMinutes: 30,
             },
             tts: {

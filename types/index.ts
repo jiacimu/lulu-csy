@@ -7,6 +7,7 @@ export * from './character';
 export * from './room';
 export * from './social';
 export * from './bank';
+export * from './canva';
 export * from './xhs';
 export * from './realtime';
 export * from './backup';

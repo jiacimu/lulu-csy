@@ -30,6 +30,10 @@ export interface SearchResult {
     url: string;
 }
 
+export interface RealtimeContextBuildOptions {
+    includeTime?: boolean;
+}
+
 export interface RealtimeConfig {
     // 天气配置
     weatherEnabled: boolean;
@@ -65,6 +69,10 @@ export interface RealtimeConfig {
     xhsEnabled?: boolean;
     xhsMcpConfig?: { enabled: boolean; serverUrl: string };
 
+    // Canva 设计配置 (Bridge / MCP)
+    canvaEnabled?: boolean;
+    canvaMcpConfig?: { enabled: boolean; serverUrl: string; workspaceLabel?: string };
+
     // 缓存配置
     cacheMinutes: number;   // 缓存时长（分钟）
 }
@@ -85,6 +93,8 @@ export const defaultRealtimeConfig: RealtimeConfig = {
     notionDatabaseId: '',
     xhsEnabled: false,
     xhsMcpConfig: { enabled: false, serverUrl: 'http://localhost:18061/api' },
+    canvaEnabled: false,
+    canvaMcpConfig: { enabled: false, serverUrl: 'http://localhost:18062/api' },
     cacheMinutes: 30
 };
 
@@ -533,22 +543,25 @@ export const RealtimeContextManager = {
     /**
      * 构建完整的实时上下文（注入到系统提示词）
      */
-    buildFullContext: async (config: RealtimeConfig): Promise<string> => {
+    buildFullContext: async (config: RealtimeConfig, options: RealtimeContextBuildOptions = {}): Promise<string> => {
         const parts: string[] = [];
+        const includeTime = options.includeTime !== false;
 
         // 开头强调：这是真实世界的信息
         parts.push(`### 【真实世界感知系统】`);
         parts.push(`⚠️ 重要：以下信息来自真实世界，不是虚构的。你现在真的能"看到"外面的世界。`);
         parts.push('');
 
-        // 1. 时间信息（总是包含）
-        const time = RealtimeContextManager.getTimeContext();
-        parts.push(`📅 当前真实时间: ${time.dateStr} ${time.dayOfWeek} ${time.timeOfDay} ${time.timeStr}`);
+        // 1. 时间信息
+        if (includeTime) {
+            const time = RealtimeContextManager.getTimeContext();
+            parts.push(`📅 当前真实时间: ${time.dateStr} ${time.dayOfWeek} ${time.timeOfDay} ${time.timeStr}`);
 
-        // 2. 特殊日期
-        const specialDates = RealtimeContextManager.checkSpecialDates();
-        if (specialDates.length > 0) {
-            parts.push(`🎉 今日特殊: ${specialDates.join('、')}`);
+            // 2. 特殊日期
+            const specialDates = RealtimeContextManager.checkSpecialDates();
+            if (specialDates.length > 0) {
+                parts.push(`🎉 今日特殊: ${specialDates.join('、')}`);
+            }
         }
 
         // 3. 天气信息

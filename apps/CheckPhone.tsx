@@ -18,7 +18,6 @@ import {
     ChatTeardrop,
     GearSix,
     MusicNote,
-    Play,
     Phone,
     Plus,
     ShoppingBagOpen,
@@ -28,6 +27,7 @@ import {
 // === [Deprecated] 高德地图 POI 搜索已因额度耗尽停用，外卖商家改由大模型生成 ===
 // import { searchNearbyRestaurants } from '../utils/mapService';
 import MeituanTakeoutCard from '../components/chat/cards/phone/MeituanTakeoutCard';
+import DesktopMusicWidget, { DEFAULT_MUSIC_CONFIG, MusicSkinPicker, useMusicConfig } from './DesktopMusicWidget';
 
 // 朋友圈封面背景图池 —— 每次进入随机选一张
 const MOMENTS_BG_POOL = [
@@ -989,6 +989,7 @@ const CheckPhone: React.FC = () => {
     const [newAppColor, setNewAppColor] = useState('#3b82f6');
     const [newAppPrompt, setNewAppPrompt] = useState('');
     const [desktopNow, setDesktopNow] = useState(() => new Date());
+    const [musicConfig, setMusicConfig] = useMusicConfig();
     const [desktopGalleryPhotos, setDesktopGalleryPhotos] = useState<DesktopPhotoCard[]>([]);
     const [activeDesktopPhotoId, setActiveDesktopPhotoId] = useState<string | null>(null);
     const [desktopPage, setDesktopPage] = useState(0);
@@ -1573,6 +1574,16 @@ const CheckPhone: React.FC = () => {
             setIsDesktopEditing(true);
             desktopEditTimerRef.current = null;
         }, 520);
+    };
+
+    const handleDesktopSurfacePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (event.target !== event.currentTarget) return;
+        startDesktopEditPress();
+    };
+
+    const handleDesktopSurfacePointerUp = () => {
+        cancelDesktopEditPress();
+        desktopLongPressTriggeredRef.current = false;
     };
 
     const handleDesktopAppClick = (action: () => void) => {
@@ -3447,58 +3458,6 @@ Format:
 
     const DesktopAppIcon = ({ app }: { app: DesktopAppEntry }) => {
         const IconComponent = app.icon;
-        if (app.id === NETEASE_MUSIC_RECORD_TYPE) {
-            const musicRecords = getRecentRecordsByType(NETEASE_MUSIC_RECORD_TYPE);
-            const nowPlaying = musicRecords[0] || null;
-            const artist = nowPlaying ? getNeteaseRecordArtist(nowPlaying) : (targetChar?.name ? `${targetChar.name} 的听歌档案` : '等待翻找');
-            const progress = getNeteaseRecordProgress(nowPlaying);
-            const coverSrc = nowPlaying?.albumCover || app.customIcon || targetChar?.avatar;
-            const traceCount = typeof app.badge === 'number' ? app.badge : musicRecords.length;
-
-            return (
-                <div className={`checkphone-desktop-app is-music-widget ${isDesktopEditing ? 'is-editing' : ''}`}>
-                    <button
-                        type="button"
-                        className="checkphone-desktop-music-widget"
-                        onClick={() => handleDesktopAppClick(app.onClick)}
-                        onPointerDown={startDesktopEditPress}
-                        onPointerUp={cancelDesktopEditPress}
-                        onPointerCancel={cancelDesktopEditPress}
-                        onPointerMove={cancelDesktopEditPress}
-                        onContextMenu={(event) => {
-                            event.preventDefault();
-                            setIsDesktopEditing(true);
-                        }}
-                        aria-label={app.label}
-                    >
-                        <span className="checkphone-desktop-music-glow"></span>
-                        <span className="checkphone-desktop-music-cover">
-                            {coverSrc ? (
-                                <img src={coverSrc} alt="" />
-                            ) : (
-                                <MusicNote weight="fill" />
-                            )}
-                        </span>
-                        <span className="checkphone-desktop-music-main">
-                            <span className="checkphone-desktop-music-kicker">
-                                {traceCount > 0 ? `${traceCount} tracks` : 'idle'}
-                            </span>
-                            <span className="checkphone-desktop-music-title">
-                                {nowPlaying?.title || app.label}
-                            </span>
-                            <span className="checkphone-desktop-music-artist">{artist}</span>
-                            <span className="checkphone-desktop-music-progress" aria-hidden="true">
-                                <span style={{ width: `${progress}%` }}></span>
-                            </span>
-                        </span>
-                        <span className="checkphone-desktop-music-play">
-                            <Play weight="fill" />
-                        </span>
-                    </button>
-                </div>
-            );
-        }
-
         return (
             <div className={`checkphone-desktop-app ${isDesktopEditing ? 'is-editing' : ''}`}>
                 <button
@@ -3593,7 +3552,7 @@ Format:
             setActiveAppId(appMap[appId] || appId);
         };
         const desktopApps: DesktopAppEntry[] = [
-            ...CHECKPHONE_DESKTOP_PAGE_APPS.map(app => {
+            ...CHECKPHONE_DESKTOP_PAGE_APPS.filter(app => app.id !== NETEASE_MUSIC_RECORD_TYPE).map(app => {
                 const recordCount = app.recordType ? getRecentRecordsByType(app.recordType).length : 0;
                 return {
                     id: app.id,
@@ -3616,6 +3575,14 @@ Format:
             })),
         ];
         const appPages = chunkDesktopApps(desktopApps, CHECKPHONE_DESKTOP_APP_PAGE_SIZE);
+        const musicRecords = getRecentRecordsByType(NETEASE_MUSIC_RECORD_TYPE);
+        const nowPlaying = musicRecords[0] || null;
+        const musicArtist = nowPlaying
+            ? getNeteaseRecordArtist(nowPlaying)
+            : targetChar?.name
+                ? `${targetChar.name} 的听歌档案`
+                : '等待翻找';
+        const musicCoverSrc = nowPlaying?.albumCover || desktopIconOverrides[NETEASE_MUSIC_RECORD_TYPE] || targetChar?.avatar;
         const desktopStyle = desktopAppearance.wallpaper
             ? { '--cpd-wallpaper': `url(${desktopAppearance.wallpaper})` } as React.CSSProperties
             : undefined;
@@ -3625,7 +3592,30 @@ Format:
                 className={`checkphone-desktop-ui absolute inset-0 z-0 ${desktopAppearance.wallpaper ? 'has-wallpaper' : ''}`}
                 style={desktopStyle}
             >
-                <div className="checkphone-desktop-content">
+                <div
+                    className="checkphone-desktop-content"
+                    onPointerDown={handleDesktopSurfacePointerDown}
+                    onPointerUp={handleDesktopSurfacePointerUp}
+                    onPointerCancel={handleDesktopSurfacePointerUp}
+                    onPointerMove={handleDesktopSurfacePointerUp}
+                    onContextMenu={(event) => {
+                        if (event.target !== event.currentTarget) return;
+                        event.preventDefault();
+                        setIsDesktopEditing(true);
+                    }}
+                >
+                    <DesktopMusicWidget
+                        config={musicConfig}
+                        title={nowPlaying?.title || '网易云音乐'}
+                        artist={musicArtist}
+                        progress={getNeteaseRecordProgress(nowPlaying)}
+                        trackCount={musicRecords.length}
+                        coverSrc={musicCoverSrc}
+                        draggable={isDesktopEditing}
+                        onOpen={() => openCoreApp(NETEASE_MUSIC_RECORD_TYPE)}
+                        onPositionChange={(pos) => setMusicConfig(current => ({ ...current, pos }))}
+                    />
+
                     <div className="checkphone-desktop-statusbar">
                         <span>{clockLabel}</span>
                         <div className="checkphone-desktop-status-right">
@@ -3710,7 +3700,17 @@ Format:
                         ))}
                     </div>
 
-                    <div className="checkphone-desktop-spacer"></div>
+                    <div
+                        className="checkphone-desktop-spacer"
+                        onPointerDown={startDesktopEditPress}
+                        onPointerUp={handleDesktopSurfacePointerUp}
+                        onPointerCancel={handleDesktopSurfacePointerUp}
+                        onPointerMove={handleDesktopSurfacePointerUp}
+                        onContextMenu={(event) => {
+                            event.preventDefault();
+                            setIsDesktopEditing(true);
+                        }}
+                    ></div>
 
                     <nav className="checkphone-desktop-dock" aria-label="常用 App">
                         {CHECKPHONE_DESKTOP_DOCK_APPS.map(app => {
@@ -4079,6 +4079,20 @@ Format:
                                 恢复默认
                             </button>
                         </div>
+                    </section>
+
+                    <section className="checkphone-settings-section">
+                        <div className="checkphone-settings-section-head">
+                            <div>
+                                <h4>网易云浮窗</h4>
+                                <span>拖动位置与皮肤会自动保存</span>
+                            </div>
+                        </div>
+                        <MusicSkinPicker
+                            config={musicConfig}
+                            onChange={setMusicConfig}
+                            onReset={() => setMusicConfig(DEFAULT_MUSIC_CONFIG)}
+                        />
                     </section>
 
                     <section className="checkphone-settings-section">

@@ -25,6 +25,8 @@ export interface SttConfig {
     model?: string;
     /** 语言偏好，不填则自动检测（推荐中英混合场景留空） */
     language?: string;
+    /** 语音通话中 STT 结果是否需要用户手动确认后再发送给模型 */
+    voiceCallManualSend?: boolean;
 }
 
 // ─── 识别结果 ────────────────────────────────────────────────────────
@@ -71,6 +73,7 @@ export const DEFAULT_STT_CONFIG: SttConfig = {
     provider: 'groq',
     groqApiKey: '',
     siliconflowApiKey: '',
+    voiceCallManualSend: false,
 };
 
 // ─── 工具函数 ────────────────────────────────────────────────────────

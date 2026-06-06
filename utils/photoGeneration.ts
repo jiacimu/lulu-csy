@@ -28,7 +28,6 @@ import {
     DEFAULT_PHOTO_STYLE_PRESETS,
     NAI_IMAGE_MODELS,
     getOpenAICompatibleStyleFamily,
-    getOpenAIPhotoStyleProviderScope,
     markSecondaryApiConfigFailure,
     markSecondaryApiConfigSuccess,
     normalizePhotoStyleProviderScope,
@@ -629,9 +628,8 @@ function getPhotoStyleProviderScopeForRuntime(
     providerType: ImageProviderType,
     openAIStyleFamily: OpenAICompatibleStyleFamily = 'gpt',
 ): PhotoStyleProviderScope {
-    return providerType === 'openai-compatible'
-        ? getOpenAIPhotoStyleProviderScope(openAIStyleFamily)
-        : 'novelai';
+    if (providerType === 'novelai') return 'novelai';
+    return openAIStyleFamily === 'gemini' ? 'openai-gemini' : 'openai-gpt';
 }
 
 export function isPhotoStyleCompatible(
@@ -640,7 +638,8 @@ export function isPhotoStyleCompatible(
     openAIStyleFamily: OpenAICompatibleStyleFamily = 'gpt',
 ): boolean {
     if (style.id === NO_PHOTO_STYLE_PRESET_ID) return true;
-    return style.providerScope === getPhotoStyleProviderScopeForRuntime(providerType, openAIStyleFamily);
+    const styleScope = normalizePhotoStyleProviderScope(style.providerScope, 'novelai', style as Partial<PhotoStylePreset> & Record<string, unknown>);
+    return styleScope === getPhotoStyleProviderScopeForRuntime(providerType, openAIStyleFamily);
 }
 
 export function getCompatiblePhotoStylePresets(
@@ -650,7 +649,14 @@ export function getCompatiblePhotoStylePresets(
 ): PhotoStylePreset[] {
     const available = presets.length > 0 ? presets : DEFAULT_PHOTO_STYLE_PRESETS;
     const compatible = available.filter(style => isPhotoStyleCompatible(style, providerType, openAIStyleFamily));
-    return compatible.length > 0 ? compatible : available.filter(style => style.providerScope === 'all');
+    if (compatible.length > 0) return compatible;
+    const shared = available.filter(style => style.providerScope === 'all');
+    if (shared.length > 0) return shared;
+    return available.filter(style => (
+        providerType === 'openai-compatible'
+            ? style.providerScope === 'openai-gpt' || style.providerScope === 'openai-gemini'
+            : style.providerScope === 'novelai'
+    ));
 }
 
 export function resolvePhotoStylePreset(
@@ -662,11 +668,10 @@ export function resolvePhotoStylePreset(
 ): PhotoStylePreset {
     if (isNoPhotoStylePresetId(requestedId)) return NO_PHOTO_STYLE_PRESET;
     if (!requestedId && isNoPhotoStylePresetId(char?.defaultPhotoStylePresetId)) return NO_PHOTO_STYLE_PRESET;
-    const openAIStyleFamily = options.openAIStyleFamily || 'gpt';
-    const compatible = getCompatiblePhotoStylePresets(presets, providerType, openAIStyleFamily);
+    const compatible = getCompatiblePhotoStylePresets(presets, providerType, options.openAIStyleFamily);
     const available = compatible.length > 0
         ? compatible
-        : DEFAULT_PHOTO_STYLE_PRESETS.filter(style => isPhotoStyleCompatible(style, providerType, openAIStyleFamily));
+        : DEFAULT_PHOTO_STYLE_PRESETS.filter(style => isPhotoStyleCompatible(style, providerType, options.openAIStyleFamily));
     if (available.length === 0) return NO_PHOTO_STYLE_PRESET;
     const fallbackPool = available;
     const requestedStyleId = String(requestedId || '').trim();
@@ -693,9 +698,9 @@ export function resolveImageStylePhotoPreset(
     char: CharacterProfile | undefined,
     config: ImageGenerationConfig,
     includeUserAppearance: boolean,
-    options: { allowUnboundRequested?: boolean } = {},
+    options: { allowUnboundRequested?: boolean; openAIStyleFamily?: OpenAICompatibleStyleFamily } = {},
 ): PhotoStylePreset {
-    const openAIStyleFamily = getOpenAIStyleFamilyForConfig(config);
+    const openAIStyleFamily = options.openAIStyleFamily || getOpenAIStyleFamilyForConfig(config);
     if (config.activeProvider !== 'openai-compatible' || requestedId) {
         return resolvePhotoStylePreset(requestedId, presets, char, config.activeProvider, {
             ...options,
@@ -1071,11 +1076,6 @@ function logPhotoResponse(label: string, response: Response, text: string, conte
 function normalizeOpenAICompatibleModelId(value: unknown): string {
     const raw = String(value || '').trim();
     if (!raw) return '';
-    const knownImageModelMatches = raw.match(/\b(?:gemini-[a-z0-9][a-z0-9.-]*image[a-z0-9.-]*|gpt-image-[a-z0-9][a-z0-9.-]*)\b/ig);
-    const knownImageModel = knownImageModelMatches && knownImageModelMatches.length > 0
-        ? knownImageModelMatches[knownImageModelMatches.length - 1].trim()
-        : '';
-    if (knownImageModel) return knownImageModel;
     const displayDelimiterParts = raw.split(/\s+\/\s+/).map(part => part.trim()).filter(Boolean);
     if (displayDelimiterParts.length > 1) {
         return displayDelimiterParts[displayDelimiterParts.length - 1];
@@ -1097,15 +1097,36 @@ function normalizeOpenAICompatibleModelOption(item: any): OpenAICompatibleModelO
     const rawName = item && typeof item === 'object'
         ? (item.name ?? item.display_name ?? item.displayName ?? item.label ?? '')
         : '';
-    const sourceId = String(rawId || rawName || '').trim();
-    const id = normalizeOpenAICompatibleModelId(sourceId);
+    const explicitId = String(rawId || '').trim();
+    const displayOnlyId = String(rawName || '').trim();
+    const id = explicitId || normalizeOpenAICompatibleModelId(displayOnlyId);
     if (!id) return null;
-    const name = String(rawName || sourceId).trim();
+    const name = String(rawName || explicitId || id).trim();
     return {
         id,
         name,
         displayName: name && name !== id ? `${name} / ${id}` : id,
     };
+}
+
+function dedupeOpenAICompatibleModelOptions(options: OpenAICompatibleModelOption[]): OpenAICompatibleModelOption[] {
+    const seen = new Set<string>();
+    const deduped: OpenAICompatibleModelOption[] = [];
+    for (const option of options) {
+        if (!option.id || seen.has(option.id)) continue;
+        seen.add(option.id);
+        deduped.push(option);
+    }
+    return deduped;
+}
+
+function extractOpenAICompatibleModelItems(payload: any): any[] {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.data)) return payload.data;
+    if (Array.isArray(payload?.models)) return payload.models;
+    if (Array.isArray(payload?.result?.data)) return payload.result.data;
+    if (Array.isArray(payload?.result?.models)) return payload.result.models;
+    return [];
 }
 
 function base64ToBlob(base64: string, mimeType = 'image/png'): Blob {
@@ -1531,10 +1552,63 @@ function readOpenAICompatibleErrorMessage(payload: any, fallbackText: string): s
     return message.replace(/\s+/g, ' ').slice(0, 180);
 }
 
+function isOpenAICompatibleAuthError(status: number, detail: string): boolean {
+    if (status === 401 || status === 403) return true;
+    return /(?:api\s*key|apikey|authorization|bearer|unauthori[sz]ed|forbidden|token|鉴权|认证|密钥)/i.test(detail);
+}
+
+function buildOpenAICompatibleAuthError(label: string, status: number, detail: string): string {
+    const original = detail ? ` 原始信息：${detail}` : '';
+    return `${label}鉴权失败 (${status})：服务端提示 API Key 无效或未收到，请检查当前生图服务的 API Key。${original}`;
+}
+
 function buildOpenAICompatiblePayloadPreview(payload: any, responseText: string): string {
     const raw = typeof payload === 'string' ? payload : responseText;
     const preview = String(raw || '').trim().replace(/\s+/g, ' ').slice(0, 800);
     return preview ? `，预览：${preview}` : '';
+}
+
+function buildOpenAICompatibleImageRequestPreview(body: Record<string, unknown>): Record<string, unknown> {
+    const preview: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(body)) {
+        if (/key|token|authorization|secret/i.test(key)) {
+            preview[key] = '[REDACTED]';
+            continue;
+        }
+        if (key === 'prompt' && typeof value === 'string') {
+            preview.prompt = value.length > 1200 ? `${value.slice(0, 1200)}...` : value;
+            preview.promptLength = value.length;
+            continue;
+        }
+        preview[key] = value;
+    }
+    return preview;
+}
+
+type OpenAICompatibleImageDebugDetailsArgs = {
+    requestUrl: string;
+    authAttempt: string;
+    requestBody: Record<string, unknown>;
+    response: Response;
+    responseText: string;
+    contentType: string;
+    payload?: any;
+};
+
+function buildOpenAICompatibleImageDebugDetails(args: OpenAICompatibleImageDebugDetailsArgs): string {
+    const payloadShape = args.payload === undefined ? '' : `\n返回结构：${summarizePayloadShape(args.payload)}`;
+    return [
+        '',
+        '--- OpenAI 兼容生图调试信息 ---',
+        `请求 URL：${args.requestUrl}`,
+        `鉴权方式：${args.authAttempt}`,
+        `HTTP 状态：${args.response.status}`,
+        `Content-Type：${args.contentType || 'unknown'}`,
+        `请求体：${JSON.stringify(buildOpenAICompatibleImageRequestPreview(args.requestBody), null, 2)}`,
+        `响应原文预览：${responsePreview(args.responseText, 1200) || '空'}`,
+        payloadShape,
+        '--- 调试信息结束 ---',
+    ].filter(Boolean).join('\n');
 }
 
 async function extractedImageToGeneratedPhoto(image: ExtractedImage): Promise<GeneratedPhotoImage> {
@@ -1587,8 +1661,9 @@ function buildOpenAICompatibleImageRequestBody(
     provider: OpenAICompatibleImageProviderConfig,
     meta: PhotoMeta,
 ): Record<string, unknown> {
+    const model = normalizeOpenAICompatibleModelId(meta.model || provider.model);
     const body: Record<string, unknown> = {
-        model: normalizeOpenAICompatibleModelId(meta.model || provider.model),
+        model,
         prompt: meta.finalPrompt || meta.positivePrompt,
     };
     const size = String(meta.size || provider.size || '').trim();
@@ -1647,6 +1722,7 @@ async function generateOpenAICompatibleImage(
         userInitiated: meta.source === 'manual',
         url: requestUrl,
     }, async () => {
+        const authAttempt = 'Authorization Bearer';
         const response = await fetch(requestUrl, {
             method: 'POST',
             headers: {
@@ -1665,21 +1741,55 @@ async function generateOpenAICompatibleImage(
                 status: response.status,
                 contentType: contentType || 'unknown',
             });
-            throw buildHtmlResponseError('OpenAI 兼容生图', response, responseText, contentType);
+            const htmlError = buildHtmlResponseError('OpenAI 兼容生图', response, responseText, contentType);
+            throw new Error(`${htmlError.message}${buildOpenAICompatibleImageDebugDetails({
+                requestUrl,
+                authAttempt,
+                requestBody,
+                response,
+                responseText,
+                contentType,
+            })}`);
         }
         if (!responseText.trim()) {
-            throw new Error('OpenAI 兼容接口返回空响应，请检查 endpoint、model、key、CORS 或代理日志。');
+            throw new Error(`OpenAI 兼容接口返回空响应，请检查 endpoint、model、key、CORS 或代理日志。${buildOpenAICompatibleImageDebugDetails({
+                requestUrl,
+                authAttempt,
+                requestBody,
+                response,
+                responseText,
+                contentType,
+            })}`);
         }
         const payload = parseOpenAICompatibleResponsePayload(responseText);
         const image = extractGeneratedImage(payload);
         if (!response.ok && !image) {
             const detail = readOpenAICompatibleErrorMessage(payload, responseText);
+            if (isOpenAICompatibleAuthError(response.status, detail)) {
+                throw new Error(`${buildOpenAICompatibleAuthError('OpenAI 兼容生图', response.status, detail)}${buildOpenAICompatibleImageDebugDetails({
+                    requestUrl,
+                    authAttempt,
+                    requestBody,
+                    response,
+                    responseText,
+                    contentType,
+                    payload,
+                })}`);
+            }
             const textOnlyHint = detail && !extractImageFromText(detail) && !looksLikeBase64ImagePayload(detail)
                 ? `：接口返回了文字说明，未返回图片。${detail}`
                 : detail
                     ? `: ${detail}`
                     : '';
-            throw new Error(`OpenAI 兼容生图失败 (${response.status})${textOnlyHint}`);
+            throw new Error(`OpenAI 兼容生图失败 (${response.status})${textOnlyHint}${buildOpenAICompatibleImageDebugDetails({
+                requestUrl,
+                authAttempt,
+                requestBody,
+                response,
+                responseText,
+                contentType,
+                payload,
+            })}`);
         }
         if (!response.ok) {
             console.warn('[OpenAICompatibleImage] non-OK response contained a usable image payload:', response.status);
@@ -1689,6 +1799,7 @@ async function generateOpenAICompatibleImage(
                 requestUrl,
                 kind: image.kind,
                 status: response.status,
+                authAttempt,
             });
             return extractedImageToGeneratedPhoto(image);
         }
@@ -1698,7 +1809,15 @@ async function generateOpenAICompatibleImage(
             payloadShape: summarizePayloadShape(payload),
             responseTextPreview: responsePreview(responseText, 500),
         });
-        throw new Error(`OpenAI 兼容接口没有返回可识别的图片（返回结构：${summarizePayloadShape(payload)}${buildOpenAICompatiblePayloadPreview(payload, responseText)}）`);
+        throw new Error(`OpenAI 兼容接口没有返回可识别的图片（返回结构：${summarizePayloadShape(payload)}${buildOpenAICompatiblePayloadPreview(payload, responseText)}）${buildOpenAICompatibleImageDebugDetails({
+            requestUrl,
+            authAttempt,
+            requestBody,
+            response,
+            responseText,
+            contentType,
+            payload,
+        })}`);
     });
 }
 
@@ -1766,7 +1885,7 @@ export async function runPhotoDirector(args: {
 }): Promise<PhotoDirectorResult | null> {
     const { apiConfig, char, userProfile, aiReply, thinking, hint, stylePresets, recentPhotoMetas, providerType, contextOptions } = args;
     const baseUrl = apiConfig.baseUrl.replace(/\/+$/, '');
-    const compatibleStyles = getCompatiblePhotoStylePresets(stylePresets, providerType, args.openAIStyleFamily || 'gpt');
+    const compatibleStyles = getCompatiblePhotoStylePresets(stylePresets, providerType, args.openAIStyleFamily);
     const styleLines = compatibleStyles.map(preset => `- ${preset.id}: ${preset.name}`).join('\n') || '- no-style: 不使用风格预设';
     const recentLines = recentPhotoMetas.slice(-8).map((meta, index) => {
         const director = meta.directorResult;
@@ -1978,7 +2097,7 @@ export async function runManualPhotoDirector(args: {
         contextOptions,
     } = args;
     const baseUrl = apiConfig.baseUrl.replace(/\/+$/, '');
-    const compatibleStyles = getCompatiblePhotoStylePresets(stylePresets, providerType, openAIStyleFamily || 'gpt');
+    const compatibleStyles = getCompatiblePhotoStylePresets(stylePresets, providerType, openAIStyleFamily);
     const styleLines = compatibleStyles.map(preset => `- ${preset.id}: ${preset.name}`).join('\n') || '- no-style: 不使用风格预设';
     const recentLines = recentPhotoMetas.slice(-8).map((meta, index) => {
         const director = meta.directorResult;
@@ -2253,21 +2372,28 @@ export async function testOpenAICompatibleImageConnection(config: OpenAICompatib
             'Authorization': `Bearer ${config.apiKey.trim()}`,
         },
     });
-    if (response.status === 401 || response.status === 403) {
-        return { ok: false, status: response.status, message: '鉴权失败，请检查 API Key', models: [], modelOptions: [] };
-    }
     if (!response.ok) {
         const text = await response.text().catch(() => '');
         if (looksLikeHtmlResponse(text, responseContentType(response))) {
             throw buildHtmlResponseError('OpenAI 兼容模型列表', response, text);
         }
+        const detail = readOpenAICompatibleErrorMessage(parseOpenAICompatibleResponsePayload(text), text);
+        if (isOpenAICompatibleAuthError(response.status, detail)) {
+            return {
+                ok: false,
+                status: response.status,
+                message: buildOpenAICompatibleAuthError('OpenAI 兼容模型列表', response.status, detail),
+                models: [],
+                modelOptions: [],
+            };
+        }
         return { ok: false, status: response.status, message: `连接失败：${response.status}${text ? `：${responsePreview(text, 120)}` : ''}`, models: [], modelOptions: [] };
     }
 
     const { payload } = await readJsonResponsePayload('OpenAI 兼容模型列表', response);
-    const modelOptions: OpenAICompatibleModelOption[] = Array.isArray(payload?.data)
-        ? payload.data.map(normalizeOpenAICompatibleModelOption).filter((item: OpenAICompatibleModelOption | null): item is OpenAICompatibleModelOption => Boolean(item))
-        : [];
+    const modelOptions = dedupeOpenAICompatibleModelOptions(extractOpenAICompatibleModelItems(payload)
+        .map(normalizeOpenAICompatibleModelOption)
+        .filter((item: OpenAICompatibleModelOption | null): item is OpenAICompatibleModelOption => Boolean(item)));
     const models = modelOptions.map(item => item.id);
     return {
         ok: true,
