@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import NianNianApp from './NianNianApp';
 import { useOS } from '../../context/OSContext';
@@ -154,7 +154,9 @@ describe('NianNianApp', () => {
             const systemPrompt = body.messages?.[0]?.content || '';
             const content = systemPrompt.includes('你是「天意」')
                 ? `<<<SCENE>>>
-并蒂莲灯轻轻晃了一下,你们被人潮挤到同一处灯影里。
+（旁白：并蒂莲灯轻轻晃了一下,你们被人潮挤到同一处灯影里。
+
+灯影落在水面上,把旧缘照得很轻。）
 <<<OPTIONS>>>
 A | 问他是否也来猜灯谜 | TA 借灯谜试探旧缘
 B | 先把玉扣纹样记在心里 | TA 察觉玩家留心
@@ -222,6 +224,8 @@ npc: 无
 
         expect(saved.rawBuffer.some(item => item.role === 'user' && item.content.includes('【选项】先弯腰拾起'))).toBe(true);
         expect(saved.rawBuffer.some(item => item.role === 'assistant' && item.content.includes('多谢姑娘'))).toBe(true);
+        expect(saved.historyBuffer?.some(item => item.role === 'user' && item.content.includes('【选项】先弯腰拾起'))).toBe(true);
+        expect(saved.historyBuffer?.some(item => item.role === 'assistant' && item.content.includes('多谢姑娘'))).toBe(true);
         expect(savedUser?.playerSegments).toEqual([
             { kind: 'player', anchor: '选项', text: '先弯腰拾起落在脚边的那件失物,递还过去。' },
         ]);
@@ -233,6 +237,40 @@ npc: 无
         });
         expect(saved.rawBuffer.some(item => item.role === 'director' && item.content.includes('并蒂莲灯'))).toBe(true);
         expect(saved.status.ta.好感).toBe(10);
+        expect(saved.currentStep.sceneText).toBe('并蒂莲灯轻轻晃了一下,你们被人潮挤到同一处灯影里。\n\n灯影落在水面上,把旧缘照得很轻。');
+        expect(saved.currentStep.sceneText).not.toContain('旁白');
         expect(saved.currentStep.options[0].label).toBe('问他是否也来猜灯谜');
+
+        fireEvent.click(screen.getByText('先弯腰拾起落在脚边的那件失物,递还过去。'));
+        await screen.findByText('他接过那枚旧玉扣,指尖停在半空。');
+        fireEvent.click(screen.getByRole('button', { name: '上一页' }));
+        await screen.findByText('先弯腰拾起落在脚边的那件失物,递还过去。');
+        expect(screen.queryByText('他接过那枚旧玉扣,指尖停在半空。')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+        await screen.findByText('他接过那枚旧玉扣,指尖停在半空。');
+        fireEvent.click(screen.getByText('他接过那枚旧玉扣,指尖停在半空。'));
+        await screen.findByText('“多谢姑娘。”');
+        fireEvent.click(screen.getByText('“多谢姑娘。”'));
+        await screen.findByText('并蒂莲灯轻轻晃了一下,你们被人潮挤到同一处灯影里。');
+        expect(screen.queryByText('灯影落在水面上,把旧缘照得很轻。')).not.toBeInTheDocument();
+        expect(screen.queryByText('问他是否也来猜灯谜')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+        await screen.findByText('灯影落在水面上,把旧缘照得很轻。');
+        expect(screen.queryByText('问他是否也来猜灯谜')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+        await screen.findByText('问他是否也来猜灯谜');
+
+        fireEvent.click(screen.getByRole('button', { name: '展开天机之书' }));
+        const fateBook = await screen.findByLabelText('天机之书');
+        expect(within(fateBook).queryByText('情境')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: '打开回想录' }));
+        const historyPanel = await screen.findByLabelText('回想录');
+        expect(within(historyPanel).getByText('序章')).toBeInTheDocument();
+        expect(within(historyPanel).getAllByText('第 1 回').length).toBeGreaterThan(0);
+        expect(within(historyPanel).getByText('测试用户')).toBeInTheDocument();
+
+        fireEvent.click(within(historyPanel).getByRole('button', { name: /回放第 1 回念念.*多谢姑娘/ }));
+        expect(screen.getAllByText('“多谢姑娘。”').length).toBeGreaterThan(1);
     });
 });

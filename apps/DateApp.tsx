@@ -3,13 +3,13 @@ import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { useVirtualTime } from '../context/VirtualTimeContext';
 import { DB } from '../utils/db';
-import { CharacterProfile,Message,DateState,UserProfile,DateTokenUsage } from '../types';
+import { CharacterProfile,Message,DateState,UserProfile,DateTokenUsage,DateRequestDebugSnapshot } from '../types';
 import { ContextBuilder } from '../utils/context';
 import { safeResponseJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
 import DateSession,{ DateExitSyncMode } from '../components/date/DateSession';
 import DateSettings from '../components/date/DateSettings';
-import { buildDatePreamble,buildTheaterScene,buildDateTail,buildDateTimeBlock } from '../utils/datePrompts';
+import { buildDatePreamble,buildIdentityIntro,buildTheaterScene,buildDateTail,buildDateTimeBlock } from '../utils/datePrompts';
 import { pronoun } from '../utils/genderWords';
 import { extractThinking, extractInnerWhispers, type InnerWhisper } from '../utils/thinkingExtractor';
 import { DATE_RECAP_SYSTEM_PROMPT,DEFAULT_DATE_SUMMARY_PROMPT,buildSummaryPrompt,formatDateMessagesForBridge,formatMessagesForSummary } from '../utils/dateSummaryPrompts';
@@ -19,7 +19,8 @@ import { stripTranslationTags } from '../utils/chatParser';
 import { trackedApiRequest } from '../utils/apiRequestLedger';
 import { buildTemporalContext } from '../utils/temporalContext';
 import { EventExtractor } from '../utils/eventExtractor';
-import { buildDateRequestContextMessages } from '../utils/dateContext';
+import { buildDateRequestContextMessages, type DateRequestContextMessage } from '../utils/dateContext';
+import { buildDateHistoryContextBlock, injectDateHistoryAfterPreference } from '../utils/datePromptHistory';
 
 type SummaryType = 'auto' | 'manual';
 type DateOpeningMode = 'sense' | 'coming_over' | 'chance' | 'rendezvous' | 'custom';
@@ -237,13 +238,17 @@ export const buildDateSessionSystemPrompt = ({
     char,
     userProfile,
     allMsgs,
+    historyContextBlock,
 }: {
     char: CharacterProfile;
     userProfile: UserProfile;
     allMsgs: Message[];
+    historyContextBlock?: string;
 }): string => {
     let systemPrompt = buildDatePreamble(char.name, userProfile.name);
     systemPrompt += ContextBuilder.buildCoreContext(char, userProfile);
+    systemPrompt = injectDateHistoryAfterPreference(systemPrompt, historyContextBlock || '');
+    systemPrompt += buildIdentityIntro(char.name, userProfile.name);
     if (char.dateTimeAwarenessEnabled !== false) {
         systemPrompt += buildDateTimeBlock();
     }
@@ -261,6 +266,19 @@ export const appendDateTemporalContext = (content: string, temporalContext?: str
     const normalized = temporalContext?.trim();
     return normalized ? `${content}\n\n${normalized}` : content;
 };
+
+const buildDateRequestHistoryBlock = (
+    requestContext: DateRequestContextMessage[],
+    charName: string,
+    userName: string,
+    excludeMessageId?: number,
+): string => buildDateHistoryContextBlock(
+    requestContext
+        .filter(item => item.sourceMessage.id !== excludeMessageId)
+        .map(item => ({ role: item.role, content: item.content })),
+    charName,
+    userName,
+);
 
 export const maybeExtractDateTemporalEvent = (
     charId: string,
@@ -373,6 +391,7 @@ const DateApp: React.FC = () => {
     const [peekThinking, setPeekThinking] = useState<string>('');
     const [peekLoading, setPeekLoading] = useState(false);
     const [lastDateTokenUsage, setLastDateTokenUsage] = useState<DateTokenUsage | null>(null);
+    const [dateRequestDebugSnapshots, setDateRequestDebugSnapshots] = useState<DateRequestDebugSnapshot[]>([]);
     const [dateOpeningMode, setDateOpeningMode] = useState<DateOpeningMode>('sense');
     const [dateOpeningKeywords, setDateOpeningKeywords] = useState('');
     const [peekOpeningMode, setPeekOpeningMode] = useState<DateOpeningMode>('sense');
@@ -394,6 +413,19 @@ const DateApp: React.FC = () => {
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [editTargetMsg, setEditTargetMsg] = useState<Message | null>(null);
     const [editContent, setEditContent] = useState('');
+
+    const recordDateRequestDebugSnapshot = (snapshot: Omit<DateRequestDebugSnapshot, 'id' | 'updatedAt'>) => {
+        const updatedAt = Date.now();
+        setDateRequestDebugSnapshots(prev => [{
+            ...snapshot,
+            id: `${updatedAt}_${snapshot.source}_${prev.length}`,
+            updatedAt,
+            messages: snapshot.messages.map(message => ({
+                role: message.role,
+                content: message.content || '',
+            })),
+        }, ...prev].slice(0, 12));
+    };
     const [isSummaryGenerating, setIsSummaryGenerating] = useState(false);
     const [activeSummaryDraft, setActiveSummaryDraft] = useState<SummaryDraft | null>(null);
     const [pendingAutoSummary, setPendingAutoSummary] = useState<SummaryDraft | null>(null);
@@ -568,15 +600,25 @@ const DateApp: React.FC = () => {
 
             const promptSnapshot = char.dateSummaryPrompt?.trim() || DEFAULT_DATE_SUMMARY_PROMPT;
             const prompt = buildSummaryPrompt(char.name, userProfile.name, buildTimeLabel(), targetMessages, promptSnapshot);
+            const requestMessages = [
+                { role: 'system', content: DATE_RECAP_SYSTEM_PROMPT },
+                { role: 'user', content: prompt },
+            ];
+            const requestBody = {
+                model: selectedApi.model,
+                messages: requestMessages,
+                temperature: 0.45,
+            };
+            recordDateRequestDebugSnapshot({
+                source: summaryType === 'auto' ? 'auto-summary' : 'manual-summary',
+                label: summaryType === 'auto' ? '见面自动摘要更新' : '见面手动摘要生成',
+                model: selectedApi.model,
+                temperature: 0.45,
+                messages: requestMessages,
+            });
 
-            const response = await fetchDateChatCompletion(selectedApi, {
-                    model: selectedApi.model,
-                    messages: [
-                        { role: 'system', content: DATE_RECAP_SYSTEM_PROMPT },
-                        { role: 'user', content: prompt }
-                    ],
-                    temperature: 0.45,
-                },
+            const response = await fetchDateChatCompletion(selectedApi,
+                requestBody,
                 summaryType === 'auto' ? '见面自动摘要更新' : '见面手动摘要生成',
                 char.id,
                 undefined,
@@ -681,15 +723,25 @@ ${exitPromptContent}
 ## 事件脉络
 ## 情绪变化
 ## 关系信号`;
+            const requestMessages = [
+                { role: 'system', content: DATE_RECAP_SYSTEM_PROMPT },
+                { role: 'user', content: fullPrompt },
+            ];
+            const requestBody = {
+                model: selectedApi.model,
+                messages: requestMessages,
+                temperature: 0.45,
+            };
+            recordDateRequestDebugSnapshot({
+                source: 'exit-summary',
+                label: '见面退出最终摘要',
+                model: selectedApi.model,
+                temperature: 0.45,
+                messages: requestMessages,
+            });
 
-            const response = await fetchDateChatCompletion(selectedApi, {
-                    model: selectedApi.model,
-                    messages: [
-                        { role: 'system', content: DATE_RECAP_SYSTEM_PROMPT },
-                        { role: 'user', content: fullPrompt },
-                    ],
-                    temperature: 0.45,
-                },
+            const response = await fetchDateChatCompletion(selectedApi,
+                requestBody,
                 '见面退出最终摘要',
                 char.id,
                 undefined,
@@ -1185,15 +1237,16 @@ ${exitPromptContent}
             const dateTimeAwarenessEnabled = c.dateTimeAwarenessEnabled !== false;
             const gapHint = dateTimeAwarenessEnabled ? getTimeGapHint(lastMsg?.timestamp) : '';
 
-            const recentMsgs = requestContext.map(item => {
-                return `${item.role}: ${item.content}`;
-            }).join('\n');
-
             const timeStr = `${virtualTime.day} ${formatTime()}`;
 
-            // Build system prompt: dreamweaver + identity intro + core context
+            // Build system prompt: dreamweaver + core context + identity intro
             let peekSystemPrompt = buildDatePreamble(c.name, userProfile.name);
             peekSystemPrompt += ContextBuilder.buildCoreContext(c, userProfile, false);
+            peekSystemPrompt = injectDateHistoryAfterPreference(
+                peekSystemPrompt,
+                buildDateRequestHistoryBlock(requestContext, c.name, userProfile.name),
+            );
+            peekSystemPrompt += buildIdentityIntro(c.name, userProfile.name);
 
             // Force separator to signal new scene
             const contextSeparator = dateTimeAwarenessEnabled && gapHint ? `\n\n--- [TIME SKIP: ${gapHint}] ---\n\n` : `\n\n--- [NEW SCENE START] ---\n\n`;
@@ -1201,9 +1254,9 @@ ${exitPromptContent}
                 ? `当前时间: ${timeStr}\n时间上下文: ${gapHint || '无明显间隔'}`
                 : '时间感知: 已关闭。不要根据现实时间、时段或距离上次互动多久来安排开场状态。';
             const timeContinuityInstruction = dateTimeAwarenessEnabled
-                ? `1. **上下文连贯性**: 参考 [最近记录]，但**必须**注意 [TIME SKIP]。如果是很久没见，不要接着上一次的话题聊，而是开启新场景。
+                ? `1. **上下文连贯性**: 参考【最近对话上下文】，但**必须**注意 [TIME SKIP]。如果是很久没见，不要接着上一次的话题聊，而是开启新场景。
 2. **状态一致性**: ${gapHint.includes('很久') ? '因为很久没见，可能在发呆、忙碌或者有点落寞。' : '根据之前的聊天状态决定。'}`
-                : `1. **上下文连贯性**: 参考 [最近记录]，但不要主动演绎现实时间、时段或久别感。
+                : `1. **上下文连贯性**: 参考【最近对话上下文】，但不要主动演绎现实时间、时段或久别感。
 2. **状态一致性**: 根据之前的聊天状态决定。`;
 
             const peekInstructions = buildDateOpeningInstructions({
@@ -1214,15 +1267,25 @@ ${exitPromptContent}
                 timeContinuityInstruction,
                 userKeywords: normalizedKeywords,
             });
+            const requestMessages = [
+                { role: 'system', content: peekSystemPrompt },
+                { role: 'user', content: `${contextSeparator}${peekInstructions}\n\n(Start sensing...)` },
+            ];
+            const requestBody = {
+                model: apiConfig.model,
+                messages: requestMessages,
+                temperature: 0.85,
+            };
+            recordDateRequestDebugSnapshot({
+                source: 'peek',
+                label: '见面入场前状态感知',
+                model: apiConfig.model,
+                temperature: 0.85,
+                messages: requestMessages,
+            });
 
-            const response = await fetchDateChatCompletion(apiConfig, {
-                    model: apiConfig.model,
-                    messages: [
-                        { role: "system", content: peekSystemPrompt },
-                        { role: "user", content: `[最近记录 (Previous Context)]:${recentMsgs}${contextSeparator}${peekInstructions}\n\n(Start sensing...)` }
-                    ],
-                    temperature: 0.85
-                },
+            const response = await fetchDateChatCompletion(apiConfig,
+                requestBody,
                 '见面入场前状态感知',
                 c.id,
                 undefined,
@@ -1276,34 +1339,37 @@ ${exitPromptContent}
             : '';
         const userPromptText = appendDateTemporalContext(text, temporalContext);
 
-        // Construct History for AI
-        // We exclude the very last message (UserMsg we just sent) from history array
-        // because we'll pass it as the explicit user prompt "content".
-        // BUT, we must ensure the Opening (Assistant) is included in history.
-        const historyMsgs = requestContext.filter(item => item.sourceMessage.id !== userMessageId).map(item => ({
-            role: item.role,
-            content: item.content,
-        }));
-
-        const systemPrompt = buildDateSessionSystemPrompt({ char, userProfile, allMsgs });
-
-        const response = await fetchDateChatCompletion(apiConfig, {
-                model: apiConfig.model,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    ...historyMsgs,
-                    { role: 'user', content: `${userPromptText}\n\n(System Note: 严格遵守沉浸剧场格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签。叙述人称严格遵守当前视角设定。${directorHint ? `\n<director_note>${directorHint}</director_note>` : ''}${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。规则：
+        const historyContextBlock = buildDateRequestHistoryBlock(requestContext, char.name, userProfile.name, userMessageId);
+        const systemPrompt = buildDateSessionSystemPrompt({ char, userProfile, allMsgs, historyContextBlock });
+        const finalUserPrompt = `${userPromptText}\n\n(System Note: 严格遵守沉浸剧场格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签。叙述人称严格遵守当前视角设定。${directorHint ? `\n<director_note>${directorHint}</director_note>` : ''}${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。规则：
 • 每一行仍然必须以 [emotion] 开头，<翻译> 标签只能出现在 [emotion] 后面，不能放在行首。
 • 只有${char.name}的「台词/说的话」用${dateTranslateSourceLang}写，并写成 [emotion]<翻译><原文>${dateTranslateSourceLang}台词</原文><译文>${dateTranslateTargetLang}译文</译文></翻译>。
 • 叙述、动作描写、心理活动、环境描写 → 保持中文不变，不用 <翻译> 标签。
 • <原文> 和 <译文> 内不要再写 [emotion] 标签。
 示例：
 [happy]<翻译><原文>「おはよう！今日はいい天気だね」</原文><译文>「早上好！今天天气真好呢」</译文></翻译>
-[shy] ${pronoun(char.gender ?? 'male')}的脸颊微微泛红，视线移向了窗外。]` : ''})` }
-                ],
-                temperature: char.dateTemperature ?? 0.85,
-                max_tokens: DATE_CHAT_MAX_TOKENS,
-            },
+[shy] ${pronoun(char.gender ?? 'male')}的脸颊微微泛红，视线移向了窗外。]` : ''})`;
+        const requestMessages = [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: finalUserPrompt },
+        ];
+        const requestBody = {
+            model: apiConfig.model,
+            messages: requestMessages,
+            temperature: char.dateTemperature ?? 0.85,
+            max_tokens: DATE_CHAT_MAX_TOKENS,
+        };
+        recordDateRequestDebugSnapshot({
+            source: 'send',
+            label: directorHint ? '见面导演提示回复' : '见面聊天回复',
+            model: apiConfig.model,
+            temperature: char.dateTemperature ?? 0.85,
+            maxTokens: DATE_CHAT_MAX_TOKENS,
+            messages: requestMessages,
+        });
+
+        const response = await fetchDateChatCompletion(apiConfig,
+            requestBody,
             directorHint ? '见面导演提示回复' : '见面聊天回复',
             char.id,
             userMessageId,
@@ -1364,23 +1430,30 @@ ${exitPromptContent}
                 || getTimeGapHint(previousContextMsg?.timestamp)
             : '';
         const userPromptText = appendDateTemporalContext(lastUserMsg.content, temporalContext);
-        const historyMsgs = requestContext.filter(item => item.sourceMessage.id !== lastUserMsg.id).map(item => ({
-            role: item.role,
-            content: item.content,
-        }));
+        const historyContextBlock = buildDateRequestHistoryBlock(requestContext, char.name, userProfile.name, lastUserMsg.id);
+        const systemPrompt = buildDateSessionSystemPrompt({ char, userProfile, allMsgs, historyContextBlock });
+        const rerollUserPrompt = `${userPromptText}\n\n(System Note: Reroll. 用不同的角度重写。严格遵守沉浸剧场格式、当前叙述人称。${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。每一行仍必须以 [emotion] 开头。只有${char.name}的台词用${dateTranslateSourceLang}写成 [emotion]<翻译><原文>...</原文><译文>...</译文></翻译>；叙述/动作/心理描写保持中文不变，不用 <翻译>。]` : ''})`;
+        const requestMessages = [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: rerollUserPrompt },
+        ];
+        const requestBody = {
+            model: apiConfig.model,
+            messages: requestMessages,
+            temperature: Math.min((char.dateTemperature ?? 0.85) + 0.05, 2.0),
+            max_tokens: DATE_CHAT_MAX_TOKENS,
+        };
+        recordDateRequestDebugSnapshot({
+            source: 'reroll',
+            label: '见面回复重掷',
+            model: apiConfig.model,
+            temperature: Math.min((char.dateTemperature ?? 0.85) + 0.05, 2.0),
+            maxTokens: DATE_CHAT_MAX_TOKENS,
+            messages: requestMessages,
+        });
 
-        const systemPrompt = buildDateSessionSystemPrompt({ char, userProfile, allMsgs });
-
-        const response = await fetchDateChatCompletion(apiConfig, {
-                model: apiConfig.model,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    ...historyMsgs,
-                    { role: 'user', content: `${userPromptText}\n\n(System Note: Reroll. 用不同的角度重写。严格遵守沉浸剧场格式、当前叙述人称。${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。每一行仍必须以 [emotion] 开头。只有${char.name}的台词用${dateTranslateSourceLang}写成 [emotion]<翻译><原文>...</原文><译文>...</译文></翻译>；叙述/动作/心理描写保持中文不变，不用 <翻译>。]` : ''})` }
-                ],
-                temperature: Math.min((char.dateTemperature ?? 0.85) + 0.05, 2.0),
-                max_tokens: DATE_CHAT_MAX_TOKENS,
-            },
+        const response = await fetchDateChatCompletion(apiConfig,
+            requestBody,
             '见面回复重掷',
             char.id,
             lastUserMsg.id,
@@ -1678,6 +1751,7 @@ ${exitPromptContent}
                     canAutoSummary={canAutoSummary}
                     summaryDisabledReason={summaryDisabledReason}
                     lastTokenUsage={lastDateTokenUsage}
+                    requestDebugSnapshots={dateRequestDebugSnapshots}
                     onRequestSummary={requestManualSummary}
                     onReviewPendingSummary={() => pendingAutoSummary && setActiveSummaryDraft({ ...pendingAutoSummary, fromPendingAuto: true })}
                     onDiscardPendingSummary={discardPendingAutoSummary}

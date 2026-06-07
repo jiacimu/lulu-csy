@@ -1,6 +1,6 @@
 import React,{ memo,useEffect,useMemo,useRef,useState } from 'react';
 import { motion,useMotionValue,PanInfo } from 'framer-motion';
-import { GearSix,NotePencil,X,WarningCircle,ArrowCounterClockwise } from '@phosphor-icons/react';
+import { GearSix,NotePencil,X,WarningCircle,ArrowCounterClockwise,ClipboardText } from '@phosphor-icons/react';
 import { CharacterProfile,DateTokenUsage } from '../../types';
 import { DATE_DEFAULT_WORD_COUNT } from '../../utils/datePrompts';
 import WritingStyleSheet, { getStyleDisplayLabel } from './WritingStyleSheet';
@@ -31,6 +31,8 @@ interface SummaryFloatingBallProps {
     translateSourceLang?: string;
     translateTargetLang?: string;
     lastTokenUsage?: DateTokenUsage | null;
+    requestDebugCount?: number;
+    onOpenRequestDebug?: () => void;
     onToggleTranslation?: (enabled: boolean) => void;
     onSetTranslateSourceLang?: (lang: string) => void;
     onSetTranslateTargetLang?: (lang: string) => void;
@@ -165,6 +167,8 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
     fontScale, onChangeFontScale,
     translationEnabled, translateSourceLang, translateTargetLang,
     lastTokenUsage,
+    requestDebugCount = 0,
+    onOpenRequestDebug,
     onToggleTranslation, onSetTranslateSourceLang, onSetTranslateTargetLang,
 }) => {
     const storageKey = `date_summary_ball_pos_${char.id}`;
@@ -352,6 +356,21 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
                                     {lastTokenUsage ? '接口未返回 usage 时显示 --' : '发送后显示最近一轮'}
                                 </div>
                             )}
+                            <button
+                                type="button"
+                                disabled={!requestDebugCount}
+                                onClick={onOpenRequestDebug}
+                                className="transition-all active:scale-[0.97] disabled:opacity-35"
+                                style={{
+                                    width: '100%', marginTop: 7, border: 'none', borderRadius: 10,
+                                    background: C.base, boxShadow: raisedSm, cursor: requestDebugCount ? 'pointer' : 'default',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                                    padding: '5px 0', fontSize: 10, fontWeight: 600, color: C.accent,
+                                }}
+                            >
+                                <ClipboardText size={12} color={C.accent} />
+                                查看输入{requestDebugCount ? ` ${requestDebugCount}` : ''}
+                            </button>
                         </div>
 
                         {/* ── Section 1: 总结 ── */}

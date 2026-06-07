@@ -43,6 +43,24 @@ export interface DateTokenUsage {
     updatedAt: number;
 }
 
+export type DateRequestDebugSource = 'peek' | 'send' | 'reroll' | 'auto-summary' | 'manual-summary' | 'exit-summary';
+
+export interface DateRequestDebugMessage {
+    role: string;
+    content: string;
+}
+
+export interface DateRequestDebugSnapshot {
+    id: string;
+    source: DateRequestDebugSource;
+    label: string;
+    updatedAt: number;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    messages: DateRequestDebugMessage[];
+}
+
 export interface SpecialMomentRecord {
     content: string;
     timestamp: number;

@@ -247,6 +247,7 @@ export function createNianNianSession(input: {
         milestones: [],
         segments: [],
         rawBuffer: [],
+        historyBuffer: [],
         pendingCompressionBuffer: [],
         pendingCompressionTurnStart: 1,
         director: {
@@ -638,9 +639,23 @@ function parseNianNianDirectorMeta(raw: string): Omit<NianNianParsedDirectorOutp
     };
 }
 
+function normalizeNianNianSceneText(raw: string): string {
+    let text = (raw || '').trim();
+    const wrappedNarrator = text.match(/^[（(]\s*旁白\s*[:：]\s*([\s\S]*)$/);
+    if (wrappedNarrator) {
+        text = wrappedNarrator[1].trim();
+        if (text.endsWith('）') || text.endsWith(')')) {
+            text = text.slice(0, -1).trim();
+        }
+        return text;
+    }
+
+    return text.replace(/^旁白\s*[:：]\s*/, '').trim();
+}
+
 export function parseNianNianDirectorOutput(raw: string): NianNianParsedDirectorOutput | null {
     const sections = parseDelimitedSections(raw, ['SCENE', 'OPTIONS', 'DIRECTOR']);
-    const sceneText = (sections.SCENE || '').trim();
+    const sceneText = normalizeNianNianSceneText(sections.SCENE || '');
     const options = parseNianNianDirectorOptions(sections.OPTIONS || '');
     const director = parseNianNianDirectorMeta(sections.DIRECTOR || '');
 
@@ -756,9 +771,13 @@ export function appendNianNianRawMessage(
 ): NianNianSession {
     const shouldKeepForCompression = message.role !== 'system';
     const pendingCompressionBuffer = session.pendingCompressionBuffer || [];
+    const historyBuffer = session.historyBuffer || [];
     return {
         ...session,
         rawBuffer: [...session.rawBuffer, message].slice(-NIANNIAN_RAW_BUFFER_LIMIT),
+        historyBuffer: shouldKeepForCompression
+            ? [...historyBuffer, message]
+            : historyBuffer,
         pendingCompressionBuffer: shouldKeepForCompression
             ? [...pendingCompressionBuffer, message]
             : pendingCompressionBuffer,

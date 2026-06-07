@@ -11,7 +11,7 @@ import { ContextBuilder } from '../../utils/context';
 import { safeResponseJson } from '../../utils/safeApi';
 import { extractThinking, extractInnerWhispers, type InnerWhisper } from '../../utils/thinkingExtractor';
 import { getEmbeddingConfig, getSecondaryApiConfig } from '../../utils/runtimeConfig';
-import { buildDatePreamble, buildTheaterScene, buildDateTail, buildDateTimeBlock } from '../../utils/datePrompts';
+import { buildDatePreamble, buildIdentityIntro, buildTheaterScene, buildDateTail, buildDateTimeBlock } from '../../utils/datePrompts';
 import { hasCompleteApiConfig } from '../../utils/apiValidation';
 import { DEFAULT_DATE_SUMMARY_PROMPT, buildSummaryPrompt } from '../../utils/dateSummaryPrompts';
 import { renderMarkdown } from '../../utils/markdownLite';
@@ -612,6 +612,7 @@ const TheaterApp: React.FC = () => {
                 const continuityContext = buildTheaterMainlineContinuityContext(allMsgs, char.name, userProfile.name);
                 let systemPrompt = buildDatePreamble(char.name, userProfile.name);
                 systemPrompt += ContextBuilder.buildCoreContext(char, userProfile);
+                systemPrompt += buildIdentityIntro(char.name, userProfile.name);
                 systemPrompt += continuityContext;
 
                 if (transitionEvent) {
@@ -733,6 +734,7 @@ const TheaterApp: React.FC = () => {
             // Build system prompt (reuse date mode prompts)
             let systemPrompt = buildDatePreamble(char.name, userProfile.name);
             systemPrompt += ContextBuilder.buildCoreContext(char, userProfile);
+            systemPrompt += buildIdentityIntro(char.name, userProfile.name);
             systemPrompt += continuityContext;
             systemPrompt += `\n\n${scenePrompt}`;
 
@@ -947,6 +949,7 @@ const TheaterApp: React.FC = () => {
         try {
             let systemPrompt = buildDatePreamble(char.name, userProfile.name);
             systemPrompt += ContextBuilder.buildCoreContext(char, userProfile);
+            systemPrompt += buildIdentityIntro(char.name, userProfile.name);
             systemPrompt += mainlineContinuityContext;
             systemPrompt += buildTheaterSummaryMemoryPrompt(
                 getTimelineRawMessagesForSummaryLookup(allMsgs, char.id, currentTimelineId),
@@ -1645,6 +1648,7 @@ ${exitPromptContent}
         if (!char) return '';
         let systemPrompt = buildDatePreamble(char.name, userProfile.name);
         systemPrompt += ContextBuilder.buildCoreContext(char, userProfile, true);
+        systemPrompt += buildIdentityIntro(char.name, userProfile.name);
         systemPrompt += buildDateTimeBlock();
         const vectorMemory = await retrieveEndingVectorMemory(contextMessages);
         if (vectorMemory?.trim()) {

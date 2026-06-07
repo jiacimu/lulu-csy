@@ -139,9 +139,16 @@ export function isStatusEcosystemMessage(message: ContextMessage): boolean {
         || (typeof metadata.statusBarMode === 'string' && metadata.source !== 'soul_reflection');
 }
 
+function isDateContextBridgeMessage(message: ContextMessage): boolean {
+    const source = String(message.metadata?.source || '');
+    return (source === 'date' || source === 'theater')
+        && message.metadata?.isDateContextBridge === true;
+}
+
 export function shouldIncludeMessageInContext(message: ContextMessage): boolean {
     if (!message) return false;
     if (isStatusEcosystemMessage(message)) return false;
+    if (isDateContextBridgeMessage(message)) return true;
     if (
         message.metadata?.hiddenFromUser
         && message.type !== 'soul_reflection'
@@ -374,6 +381,17 @@ function formatMessageBody(message: ContextMessage, options: FormatMessageContex
     const type = String(message.type || 'text');
     const maxContentChars = options.maxContentChars ?? (options.surface === 'chat' ? undefined : DEFAULT_CONTENT_LIMIT);
     const replyPrefix = formatReplyPrefix(message);
+
+    if (isDateContextBridgeMessage(message)) {
+        const source = String(message.metadata?.source || '');
+        const sourceLabel = source === 'theater' ? '约会剧场' : '线下见面';
+        const typeLabel = message.metadata?.bridgeType === 'raw' ? '原始记录' : '总结';
+        const content = clipText(message.content || '', maxContentChars);
+        if (options.surface === 'chat') {
+            return `[${sourceLabel}${typeLabel}已同步到主聊天时间线]\n${content}\n[这是一段已经发生过的共同经历，不是新的用户输入。现在已经回到线上聊天，请只把它当作自然记得的背景，不要复述记录说明，不要继续使用见面模式的 [emotion] 格式。]`;
+        }
+        return `[${sourceLabel}${typeLabel}]\n${content}`;
+    }
 
     switch (type) {
         case 'text':

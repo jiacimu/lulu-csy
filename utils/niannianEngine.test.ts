@@ -225,6 +225,7 @@ bad line`);
 
         expect(session.rawBuffer).toHaveLength(5);
         expect(session.pendingCompressionBuffer).toHaveLength(8);
+        expect(session.historyBuffer).toHaveLength(8);
 
         const compressed = applyNianNianCompressionOutput(session, `<<<SEGMENT>>>
 八条回应已被压缩。
@@ -232,6 +233,8 @@ bad line`);
 
         expect(compressed.session.pendingCompressionBuffer).toHaveLength(0);
         expect(compressed.session.pendingCompressionTurnStart).toBe(session.director.turn + 1);
+        expect(compressed.session.historyBuffer).toHaveLength(8);
+        expect(compressed.session.historyBuffer?.[0].content).toBe('第 1 条回应');
     });
 
     it('stores assistant camera markers as beats while raw content remains clean', () => {
@@ -284,7 +287,7 @@ ta.心情: 微窘
             now: 1700000000000,
         });
         const raw = `<<<SCENE>>>
-今日天阴,你才从书肆出来,豆大的雨点便砸了下来。
+（旁白：今日天阴,你才从书肆出来,豆大的雨点便砸了下来。）
 <<<OPTIONS>>>
 A | 先开口打破这局促 | 玩家主动,TA 可顺势多说两句
 B | 不说话,只借雨声悄悄打量他 |
@@ -303,8 +306,10 @@ ending_ready: false
         });
 
         expect(parsed?.options[0].directorHint).toContain('玩家主动');
+        expect(parsed?.sceneText).toBe('今日天阴,你才从书肆出来,豆大的雨点便砸了下来。');
         expect(applied.parsed?.eventUsed).toBe('檐下避雨');
         expect(applied.session.currentStep.sceneText).toContain('豆大的雨点');
+        expect(applied.session.currentStep.sceneText).not.toContain('旁白');
         expect(applied.session.currentStep.options[0].label).toBe('先开口打破这局促');
         expect(applied.session.currentStep.options[0].directorHint).toContain('顺势');
         expect(applied.session.director.stage).toBe('拉扯');

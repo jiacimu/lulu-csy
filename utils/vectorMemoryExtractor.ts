@@ -339,7 +339,7 @@ export const VectorMemoryExtractor = {
             const allMems = await DB.getAllVectorMemories(charId);
             const vectorCache = new Map<string, number[]>(allMems.map(m => [m.id, m.vector]));
             const emojis = await DB.getEmojis().catch(() => []);
-            const WINDOW_SIZE = 50;
+            const WINDOW_SIZE = 30;
             const OVERLAP = 10;
             const STRIDE = WINDOW_SIZE - OVERLAP;
             const affectedMemIds = new Set<string>();

@@ -1,5 +1,5 @@
 import React,{ useState,useEffect,useRef } from 'react';
-import { CharacterProfile,Message,DateState,DialogueItem,UserProfile,DateTokenUsage } from '../../types';
+import { CharacterProfile,Message,DateState,DialogueItem,UserProfile,DateTokenUsage,DateRequestDebugSnapshot } from '../../types';
 import { type InnerWhisper } from '../../utils/thinkingExtractor';
 import { extractTranslationPairs } from '../../utils/chatParser';
 import Modal from '../../components/os/Modal';
@@ -143,6 +143,7 @@ interface DateSessionProps {
     canAutoSummary: boolean;
     summaryDisabledReason?: string;
     lastTokenUsage?: DateTokenUsage | null;
+    requestDebugSnapshots?: DateRequestDebugSnapshot[];
     onRequestSummary: () => void;
     onReviewPendingSummary: () => void;
     onDiscardPendingSummary: () => void;
@@ -188,6 +189,7 @@ const DateSession: React.FC<DateSessionProps> = ({
     canAutoSummary,
     summaryDisabledReason,
     lastTokenUsage,
+    requestDebugSnapshots = [],
     onRequestSummary,
     onReviewPendingSummary,
     onDiscardPendingSummary,
@@ -231,6 +233,8 @@ const DateSession: React.FC<DateSessionProps> = ({
     const [showInputBox, setShowInputBox] = useState(false);
     const [isTyping, setIsTyping] = useState(false); // Waiting for API
     const [showExitModal, setShowExitModal] = useState(false);
+    const [showRequestDebug, setShowRequestDebug] = useState(false);
+    const [selectedRequestDebugId, setSelectedRequestDebugId] = useState<string | null>(null);
     
     // Inner Whispers State (内心低语)
     const [activeWhispers, setActiveWhispers] = useState<InnerWhisper[]>([]);
@@ -248,6 +252,16 @@ const DateSession: React.FC<DateSessionProps> = ({
     const novelScrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const isResumedRef = useRef(false);
+    const selectedRequestDebug = requestDebugSnapshots.find(item => item.id === selectedRequestDebugId) || requestDebugSnapshots[0] || null;
+    const requestDebugText = React.useMemo(() => {
+        if (!selectedRequestDebug) return '';
+        return selectedRequestDebug.messages.map((message, index) => (
+            `#${index + 1} ${message.role.toUpperCase()} (${message.content.length.toLocaleString('zh-CN')} 字符)\n${message.content}`
+        )).join('\n\n' + '-'.repeat(64) + '\n\n');
+    }, [selectedRequestDebug]);
+    const requestDebugCharCount = selectedRequestDebug
+        ? selectedRequestDebug.messages.reduce((sum, message) => sum + message.content.length, 0)
+        : 0;
 
     useEffect(() => {
         return () => {
@@ -273,11 +287,15 @@ const DateSession: React.FC<DateSessionProps> = ({
                 setShowExitModal(false);
                 return true;
             }
+            if (showRequestDebug) {
+                setShowRequestDebug(false);
+                return true;
+            }
             setShowExitModal(true);
             return true;
         });
         return unregister;
-    }, [showSettings, showExitModal, registerBackHandler]);
+    }, [showSettings, showExitModal, showRequestDebug, registerBackHandler]);
 
     // Filter messages for Novel Mode: Show only current session
     // Logic: Find the LAST message with `isOpening: true`. Show all messages from there onwards.
@@ -652,6 +670,8 @@ const DateSession: React.FC<DateSessionProps> = ({
                 canAutoSummary={canAutoSummary}
                 disabledReason={summaryDisabledReason}
                 lastTokenUsage={lastTokenUsage}
+                requestDebugCount={requestDebugSnapshots.length}
+                onOpenRequestDebug={() => setShowRequestDebug(true)}
                 onRequestManualSummary={onRequestSummary}
                 onReviewPendingSummary={onReviewPendingSummary}
                 onDiscardPendingSummary={onDiscardPendingSummary}
@@ -819,6 +839,54 @@ const DateSession: React.FC<DateSessionProps> = ({
                     <DateSettings char={char} onBack={() => setShowSettings(false)} />
                 </div>
             )}
+
+            <Modal isOpen={showRequestDebug} title="最近请求输入" onClose={() => setShowRequestDebug(false)}>
+                <div className="space-y-3 text-slate-600">
+                    {requestDebugSnapshots.length === 0 || !selectedRequestDebug ? (
+                        <div className="py-6 text-center text-sm text-slate-400">还没有记录到见面请求。</div>
+                    ) : (
+                        <>
+                            <div className="flex gap-2 overflow-x-auto pb-1">
+                                {requestDebugSnapshots.map((snapshot, index) => {
+                                    const active = selectedRequestDebug.id === snapshot.id;
+                                    return (
+                                        <button
+                                            key={snapshot.id}
+                                            type="button"
+                                            onClick={() => setSelectedRequestDebugId(snapshot.id)}
+                                            className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-bold transition-colors ${active ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'}`}
+                                        >
+                                            {index === 0 ? '最新' : `#${index + 1}`} · {snapshot.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <div className="rounded-2xl bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-500">
+                                <div>时间：{new Date(selectedRequestDebug.updatedAt).toLocaleString()}</div>
+                                <div>模型：{selectedRequestDebug.model || '--'}</div>
+                                <div>消息：{selectedRequestDebug.messages.length} 条，合计 {requestDebugCharCount.toLocaleString('zh-CN')} 字符</div>
+                                <div>参数：temperature {selectedRequestDebug.temperature ?? '--'}{selectedRequestDebug.maxTokens ? `，max_tokens ${selectedRequestDebug.maxTokens.toLocaleString('zh-CN')}` : ''}</div>
+                            </div>
+                            <textarea
+                                readOnly
+                                value={requestDebugText}
+                                className="h-[52vh] w-full resize-none rounded-2xl bg-slate-950 p-3 font-mono text-[11px] leading-relaxed text-slate-100 outline-none"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    navigator.clipboard.writeText(requestDebugText)
+                                        .then(() => addToast('已复制请求输入', 'success'))
+                                        .catch(() => addToast('复制失败', 'error'));
+                                }}
+                                className="w-full rounded-2xl bg-slate-900 py-3 text-sm font-bold text-white"
+                            >
+                                复制当前输入
+                            </button>
+                        </>
+                    )}
+                </div>
+            </Modal>
 
             {/* Exit Modal */}
             <Modal isOpen={showExitModal} title="离开见面?" onClose={() => setShowExitModal(false)} footer={

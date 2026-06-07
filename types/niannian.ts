@@ -168,6 +168,8 @@ export interface NianNianSession {
     milestones: string[];
     segments: NianNianFrozenSegment[];
     rawBuffer: NianNianRawMessage[];
+    // UI-only full original backlog. Prompting and compression still use rawBuffer/pendingCompressionBuffer.
+    historyBuffer?: NianNianRawMessage[];
     pendingCompressionBuffer?: NianNianRawMessage[];
     pendingCompressionTurnStart?: number;
     director: NianNianDirectorState;

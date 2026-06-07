@@ -66,6 +66,40 @@ describe('message context formatter', () => {
         expect(text).toBe('[🎤用户语音] 这条文字被朗读后仍要进上下文。');
     });
 
+    it('keeps date context bridges as timeline messages and drops raw date messages', () => {
+        const { apiMessages } = ChatPrompts.buildMessageHistory([
+            msg({
+                id: 1,
+                role: 'user',
+                content: '线下原文',
+                metadata: { source: 'date' },
+            }),
+            msg({
+                id: 2,
+                role: 'system',
+                content: '他们在雨里一起回家。',
+                metadata: {
+                    source: 'date',
+                    hiddenFromUser: true,
+                    isDateContextBridge: true,
+                    bridgeType: 'summary',
+                },
+            }),
+            msg({
+                id: 3,
+                role: 'user',
+                content: '回到线上了',
+            }),
+        ], 10, character, user, []);
+
+        expect(apiMessages).toHaveLength(2);
+        expect(apiMessages[0]?.role).toBe('system');
+        expect(apiMessages[0]?.content).toContain('[线下见面总结已同步到主聊天时间线]');
+        expect(apiMessages[0]?.content).toContain('他们在雨里一起回家。');
+        expect(apiMessages[0]?.content).not.toContain('线下原文');
+        expect(apiMessages[1]?.content).toContain('回到线上了');
+    });
+
     it('formats rich chat messages instead of dropping them', () => {
         const messages = [
             msg({ type: 'image', content: 'https://example.com/a.png' }),

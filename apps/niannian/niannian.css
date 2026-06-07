@@ -35,6 +35,11 @@
 .nn-scene,
 .nn-choice-review-hotspot,
 .nn-status-orb,
+.nn-history-toggle,
+.nn-history-row,
+.nn-history-close,
+.nn-history-current,
+.nn-dialogue-nav,
 .nn-options button,
 .nn-beat-toggle button,
 .nn-beat-remove,
@@ -306,12 +311,13 @@
 }
 
 .nn-dialogue-card {
+    position: relative;
     display: grid;
     align-content: start;
     gap: 10px;
     width: 100%;
     min-height: 138px;
-    padding: 14px 16px 16px;
+    padding: 14px 16px 32px;
     border: 1px solid rgba(255, 255, 255, 0.72);
     border-radius: 18px 18px 10px 10px;
     color: #3d302e;
@@ -419,6 +425,38 @@
     animation: nn-continue-pulse 1.2s ease-in-out infinite;
 }
 
+.nn-dialogue-pager {
+    position: absolute;
+    left: 50%;
+    bottom: 8px;
+    display: inline-grid;
+    grid-template-columns: 28px minmax(34px, auto) 28px;
+    align-items: center;
+    gap: 6px;
+    transform: translateX(-50%);
+    color: rgba(96, 71, 67, 0.54);
+    font-size: 10px;
+    font-weight: 850;
+    line-height: 1;
+}
+
+.nn-dialogue-nav {
+    display: inline-grid;
+    width: 28px;
+    height: 24px;
+    place-items: center;
+    border-radius: 999px;
+    color: rgba(89, 62, 56, 0.72);
+    background: rgba(255, 247, 236, 0.72);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.nn-dialogue-nav:disabled {
+    cursor: default;
+    color: rgba(89, 62, 56, 0.24);
+    background: rgba(132, 107, 92, 0.06);
+}
+
 .nn-status-orb {
     position: absolute;
     top: max(92px, calc(env(safe-area-inset-top) + 84px));
@@ -458,6 +496,215 @@
 .nn-status-orb.is-expanded strong {
     font-size: 10px;
     letter-spacing: 0;
+}
+
+.nn-history-toggle {
+    position: absolute;
+    top: max(94px, calc(env(safe-area-inset-top) + 86px));
+    left: 12px;
+    z-index: 20;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 88px;
+    height: 42px;
+    padding: 0 10px;
+    border-radius: 999px;
+    color: #5d433b;
+    background: rgba(255, 250, 241, 0.76);
+    box-shadow: 0 12px 30px rgba(111, 86, 75, 0.17), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(18px);
+}
+
+.nn-history-toggle span {
+    font-size: 12px;
+    font-weight: 950;
+    letter-spacing: 0;
+}
+
+.nn-history-toggle strong {
+    display: inline-grid;
+    min-width: 20px;
+    height: 20px;
+    place-items: center;
+    padding: 0 5px;
+    border-radius: 999px;
+    color: #6b3a28;
+    background: rgba(241, 203, 142, 0.76);
+    font-size: 11px;
+    line-height: 1;
+}
+
+.nn-history-toggle.is-open {
+    color: #6b3a28;
+    background: rgba(255, 241, 214, 0.9);
+}
+
+.nn-history-panel {
+    position: absolute;
+    top: max(150px, calc(env(safe-area-inset-top) + 142px));
+    left: 10px;
+    z-index: 24;
+    display: grid;
+    gap: 10px;
+    width: min(372px, calc(100% - 20px));
+    max-height: min(62vh, 520px);
+    overflow: hidden;
+    padding: 12px;
+    border: 1px solid rgba(129, 86, 61, 0.24);
+    border-radius: 16px;
+    color: #453431;
+    background: rgba(255, 250, 241, 0.88);
+    box-shadow: 0 22px 54px rgba(82, 57, 45, 0.23), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(24px);
+}
+
+.nn-history-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.nn-history-head div {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.nn-history-head span {
+    color: #5f3d2d;
+    font-family: "KaiTi", "STKaiti", "Songti SC", serif;
+    font-size: 19px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+}
+
+.nn-history-head strong {
+    overflow: hidden;
+    color: rgba(80, 54, 45, 0.56);
+    font-size: 11px;
+    font-weight: 850;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nn-history-close {
+    display: grid;
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    border-radius: 999px;
+    color: rgba(84, 58, 50, 0.55);
+    background: rgba(115, 78, 59, 0.08);
+    font-size: 20px;
+    line-height: 1;
+}
+
+.nn-history-list {
+    display: grid;
+    gap: 7px;
+    max-height: min(46vh, 374px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+    scrollbar-width: thin;
+}
+
+.nn-history-row {
+    appearance: none;
+    -webkit-appearance: none;
+    display: flex;
+    align-items: start;
+    gap: 8px;
+    width: 100%;
+    height: max-content;
+    min-height: 64px;
+    padding: 8px 9px;
+    border: 1px solid rgba(124, 86, 64, 0.14);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.58);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+    text-align: left;
+}
+
+.nn-history-row.is-user {
+    background: rgba(237, 246, 255, 0.62);
+}
+
+.nn-history-row.is-character {
+    background: rgba(255, 241, 239, 0.66);
+}
+
+.nn-history-row.is-active {
+    border-color: rgba(169, 91, 76, 0.42);
+    background: rgba(255, 236, 208, 0.84);
+    box-shadow: 0 10px 22px rgba(124, 86, 64, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.74);
+}
+
+.nn-history-turn {
+    align-self: start;
+    display: inline-grid;
+    flex: 0 0 54px;
+    width: 54px;
+    min-height: 24px;
+    place-items: center;
+    padding: 0 6px;
+    border-radius: 999px;
+    color: rgba(91, 62, 50, 0.64);
+    background: rgba(121, 88, 70, 0.08);
+    font-size: 10px;
+    font-weight: 950;
+    white-space: nowrap;
+}
+
+.nn-history-copy {
+    display: grid;
+    flex: 1 1 auto;
+    gap: 4px;
+    min-width: 0;
+}
+
+.nn-history-copy strong {
+    overflow: hidden;
+    color: rgba(68, 45, 39, 0.68);
+    font-size: 11px;
+    font-weight: 950;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nn-history-copy em {
+    display: block;
+    color: #3c302d;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 690;
+    line-height: 1.45;
+}
+
+.nn-history-current {
+    min-height: 36px;
+    border-radius: 12px;
+    color: #5d372f;
+    background: linear-gradient(180deg, #ffe7b9 0%, #f1c786 100%);
+    font-size: 12px;
+    font-weight: 950;
+}
+
+.nn-history-current:disabled {
+    cursor: default;
+    color: rgba(91, 68, 64, 0.42);
+    background: rgba(245, 232, 214, 0.7);
+}
+
+.nn-history-empty {
+    padding: 20px 8px;
+    color: rgba(91, 68, 64, 0.46);
+    font-size: 12px;
+    font-weight: 850;
+    text-align: center;
 }
 
 .nn-fate-book {
@@ -1053,7 +1300,7 @@
 
     .nn-dialogue-card {
         min-height: 132px;
-        padding: 14px 14px 18px;
+        padding: 14px 14px 30px;
         border-radius: 16px 16px 10px 10px;
     }
 
@@ -1097,10 +1344,46 @@
         line-height: 1.66;
     }
 
+    .nn-dialogue-pager {
+        bottom: 7px;
+        grid-template-columns: 26px minmax(32px, auto) 26px;
+    }
+
+    .nn-dialogue-nav {
+        width: 26px;
+        height: 23px;
+    }
+
     .nn-fate-book {
         top: max(148px, calc(env(safe-area-inset-top) + 140px));
         width: calc(100% - 20px);
         max-height: min(68vh, 466px);
+    }
+
+    .nn-history-toggle {
+        top: max(92px, calc(env(safe-area-inset-top) + 84px));
+        height: 40px;
+        min-width: 82px;
+    }
+
+    .nn-history-panel {
+        top: max(144px, calc(env(safe-area-inset-top) + 136px));
+        max-height: min(60vh, 452px);
+        padding: 10px;
+    }
+
+    .nn-history-list {
+        max-height: min(43vh, 328px);
+    }
+
+    .nn-history-row {
+        min-height: 62px;
+        padding: 8px;
+    }
+
+    .nn-history-turn {
+        flex-basis: 50px;
+        width: 50px;
     }
 
     .nn-fate-pages {

@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
     ArrowCounterClockwise,
     BookOpenText,
+    CaretLeft,
+    CaretRight,
     PaperPlaneTilt,
     Sparkle,
     X,
@@ -93,6 +95,14 @@ interface PlaybackUnit {
     text: string;
 }
 
+interface HistoryEntry {
+    key: string;
+    turnLabel: string;
+    speakerLabel: string;
+    unit: PlaybackUnit;
+    preview: string;
+}
+
 interface PendingTurnReplay {
     selectedOption?: NianNianChoiceOption | null;
     content: string;
@@ -107,6 +117,8 @@ interface TurnErrorState {
     retry: PendingTurnReplay;
     createdAt: number;
 }
+
+const DIALOGUE_PARAGRAPH_MAX_LENGTH = 190;
 
 const createInputBeat = (kind: NianNianInputBeat['kind']): NianNianInputBeat & { id: string } => ({
     id: createNianNianId('nn_beat'),
@@ -177,14 +189,61 @@ function getDisplayKind(item: DisplayItem): DialogueKind {
     return item.type === '话' ? 'character' : 'narrator';
 }
 
-function buildPlaybackUnit(item: DisplayItem, key: string): PlaybackUnit | null {
-    const text = item.text.trim();
-    if (!text) return null;
-    return {
-        key,
-        kind: getDisplayKind(item),
+function splitLongDialogueParagraph(paragraph: string): string[] {
+    const text = paragraph.trim();
+    if (!text) return [];
+    if (text.length <= DIALOGUE_PARAGRAPH_MAX_LENGTH) return [text];
+
+    const sentences = text.match(/[^。！？!?；;…]+[。！？!?；;…]+[”’」』）】]?|[^。！？!?；;…]+$/g) || [text];
+    const chunks: string[] = [];
+    let current = '';
+
+    for (const rawSentence of sentences) {
+        const sentence = rawSentence.trim();
+        if (!sentence) continue;
+
+        if (current && current.length + sentence.length > DIALOGUE_PARAGRAPH_MAX_LENGTH) {
+            chunks.push(current);
+            current = sentence;
+            continue;
+        }
+
+        current = current ? `${current}${sentence}` : sentence;
+    }
+
+    if (current) chunks.push(current);
+
+    return chunks.flatMap(chunk => {
+        if (chunk.length <= DIALOGUE_PARAGRAPH_MAX_LENGTH * 1.35) return [chunk];
+        const hardChunks: string[] = [];
+        for (let index = 0; index < chunk.length; index += DIALOGUE_PARAGRAPH_MAX_LENGTH) {
+            hardChunks.push(chunk.slice(index, index + DIALOGUE_PARAGRAPH_MAX_LENGTH).trim());
+        }
+        return hardChunks.filter(Boolean);
+    });
+}
+
+function splitNaturalDialogueParagraphs(text: string): string[] {
+    const normalized = text.replace(/\r\n?/g, '\n').trim();
+    if (!normalized) return [];
+
+    return normalized
+        .split(/\n{2,}/)
+        .map(paragraph => paragraph.replace(/\n+/g, '\n').trim())
+        .filter(Boolean)
+        .flatMap(splitLongDialogueParagraph);
+}
+
+function buildPlaybackUnitsFromItem(item: DisplayItem, key: string): PlaybackUnit[] {
+    const paragraphs = splitNaturalDialogueParagraphs(item.text);
+    if (paragraphs.length === 0) return [];
+    const kind = getDisplayKind(item);
+
+    return paragraphs.map((text, index) => ({
+        key: `${key}:p${index + 1}`,
+        kind,
         text,
-    };
+    }));
 }
 
 function buildNarratorItem(text: string): DisplayItem {
@@ -196,12 +255,21 @@ function buildNarratorItem(text: string): DisplayItem {
     };
 }
 
+function normalizeHistoryPreview(text: string): string {
+    return text.replace(/\s+/g, ' ').trim();
+}
+
+function getHistorySpeakerLabel(kind: DialogueKind, session: NianNianSession, narratorLabel = '旁白'): string {
+    if (kind === 'user') return session.userName || '你';
+    if (kind === 'character') return session.charName || 'TA';
+    return narratorLabel;
+}
+
 function buildPlaybackUnits(session: NianNianSession): PlaybackUnit[] {
     const units: PlaybackUnit[] = [];
     const pushDisplayItems = (baseKey: string, items: DisplayItem[]) => {
         items.forEach((item, index) => {
-            const unit = buildPlaybackUnit(item, `${baseKey}:${index}`);
-            if (unit) units.push(unit);
+            units.push(...buildPlaybackUnitsFromItem(item, `${baseKey}:${index}`));
         });
     };
 
@@ -246,6 +314,95 @@ function buildPlaybackUnits(session: NianNianSession): PlaybackUnit[] {
         kind: 'narrator',
         text: '',
     }];
+}
+
+function buildHistoryEntries(session: NianNianSession): HistoryEntry[] {
+    const entries: HistoryEntry[] = [];
+    const historyMessages = session.historyBuffer || [];
+    const sourceKind = historyMessages.length > 0
+        ? 'history'
+        : session.pendingCompressionBuffer?.length
+            ? 'pending'
+            : 'raw';
+    const sourceMessages = sourceKind === 'history'
+        ? historyMessages
+        : sourceKind === 'pending'
+            ? session.pendingCompressionBuffer || []
+            : session.rawBuffer;
+    const pushDisplayItems = (
+        baseKey: string,
+        turnLabel: string,
+        items: DisplayItem[],
+        narratorLabel = '旁白',
+    ) => {
+        items.forEach((item, index) => {
+            const units = buildPlaybackUnitsFromItem(item, `${baseKey}:${index}`);
+            entries.push(...units.map(unit => ({
+                key: unit.key,
+                turnLabel,
+                speakerLabel: getHistorySpeakerLabel(unit.kind, session, narratorLabel),
+                unit,
+                preview: normalizeHistoryPreview(unit.text),
+            })));
+        });
+    };
+
+    const openingText = sourceMessages.length > 0
+        ? session.world.openingStep?.sceneText || session.world.opening
+        : session.currentStep.sceneText || session.world.opening;
+    if (openingText?.trim()) {
+        pushDisplayItems('nn_history_opening', '序章', [buildNarratorItem(openingText)]);
+    }
+
+    if (sourceKind !== 'history') {
+        for (const segment of session.segments) {
+            const turnRange = segment.turnRange.join('-');
+            pushDisplayItems(`nn_history_segment_${segment.idx}`, `旧卷 ${segment.idx + 1}`, [
+                buildNarratorItem(`回合 ${turnRange}\n${segment.summary}`),
+            ], '旧卷');
+        }
+    }
+
+    const sourceTurnCount = sourceMessages.filter(item => item.role === 'user').length;
+    let turnNumber = sourceKind === 'history'
+        ? 0
+        : sourceKind === 'pending'
+            ? (session.pendingCompressionTurnStart || 1) - 1
+            : Math.max(0, session.director.turn - sourceTurnCount);
+    for (const item of sourceMessages) {
+        if (item.role === 'system') continue;
+
+        if (item.role === 'user') {
+            turnNumber += 1;
+            const playerSegments = getMessagePlayerSegments(item);
+            pushDisplayItems(item.id, `第 ${turnNumber} 回`, playerSegments);
+            continue;
+        }
+
+        const turnLabel = turnNumber > 0 ? `第 ${turnNumber} 回` : '序章';
+        if (item.role === 'assistant') {
+            const beats = item.assistantBeats?.length ? item.assistantBeats : parseBeats(item.content);
+            pushDisplayItems(item.id, turnLabel, beats.map((beat): DisplayItem => ({
+                kind: 'beat',
+                type: beat.type,
+                anchor: beat.anchor,
+                text: beat.text,
+            })));
+            continue;
+        }
+
+        if (item.role === 'director') {
+            pushDisplayItems(item.id, turnLabel, [buildNarratorItem(item.content)], '天意');
+        }
+    }
+
+    const currentSceneText = session.currentStep.sceneText?.trim();
+    const lastEntry = entries[entries.length - 1];
+    if (currentSceneText && lastEntry?.unit.text.trim() !== currentSceneText) {
+        pushDisplayItems(session.currentStep.id, '当前', [buildNarratorItem(currentSceneText)]);
+    }
+
+    return entries;
 }
 
 function getSceneBg(session: NianNianSession | null): NianNianSceneVisual {
@@ -387,6 +544,8 @@ const NianNianApp: React.FC = () => {
     const [worldPackage, setWorldPackage] = useState<NianNianWorldBible | null>(null);
     const [statusExpanded, setStatusExpanded] = useState(false);
     const [activeFatePageKey, setActiveFatePageKey] = useState<string | null>(null);
+    const [historyOpen, setHistoryOpen] = useState(false);
+    const [activeHistoryEntryKey, setActiveHistoryEntryKey] = useState<string | null>(null);
     const [playbackIndex, setPlaybackIndex] = useState(0);
     const [phase, setPhase] = useState<TurnPhase>('dialogue');
     const [choiceReviewOpen, setChoiceReviewOpen] = useState(false);
@@ -465,29 +624,44 @@ const NianNianApp: React.FC = () => {
         () => session ? buildPlaybackUnits(session) : [],
         [session],
     );
+    const historyEntries = useMemo(
+        () => session ? buildHistoryEntries(session) : [],
+        [session],
+    );
     const playbackSignature = playbackUnits.map(unit => unit.key).join('|');
+    const activeHistoryEntry = activeHistoryEntryKey
+        ? historyEntries.find(entry => entry.key === activeHistoryEntryKey) || null
+        : null;
 
     useEffect(() => {
         setPlaybackIndex(0);
         setPhase('dialogue');
         setChoiceReviewOpen(false);
+        setActiveHistoryEntryKey(null);
     }, [playbackSignature]);
 
     const lastDialogueIndex = Math.max(0, playbackUnits.length - 1);
     const currentUnit = playbackUnits[Math.min(playbackIndex, lastDialogueIndex)];
+    const visibleUnit = activeHistoryEntry?.unit || currentUnit;
+    const isHistoryPreviewing = Boolean(activeHistoryEntry);
     const showDecisionControls = Boolean(session && phase === 'choice' && !choiceReviewOpen && !isSubmittingTurn && !turnError);
-    const canAdvanceDialogue = Boolean(session && phase === 'dialogue' && !isSubmittingTurn);
-    const frameKind = currentUnit?.kind || 'narrator';
+    const canAdvanceDialogue = Boolean(session && phase === 'dialogue' && !isSubmittingTurn && !isHistoryPreviewing);
+    const canGoPreviousDialogue = Boolean(session && phase === 'dialogue' && !isSubmittingTurn && !isHistoryPreviewing && playbackIndex > 0);
+    const showDialoguePager = Boolean(session && phase === 'dialogue' && !isHistoryPreviewing && playbackUnits.length > 1);
+    const dialoguePageLabel = playbackUnits.length > 1
+        ? `${Math.min(playbackIndex + 1, playbackUnits.length)}/${playbackUnits.length}`
+        : '';
+    const frameKind = visibleUnit?.kind || 'narrator';
     const dialogueFrame: DialogueFrame | null = session ? {
-        key: currentUnit?.key || 'empty',
+        key: visibleUnit?.key || 'empty',
         kind: frameKind,
         side: frameKind === 'user' ? 'right' : frameKind === 'character' ? 'left' : 'none',
         speakerName: frameKind === 'user' ? userName : frameKind === 'character' ? session.charName : '旁白',
         speakerColor: frameKind === 'user' ? '#5f82b5' : frameKind === 'character' ? '#b56e76' : '#8f7b70',
         avatarUrl: frameKind === 'user' ? userProfile?.avatar : sessionCharacter?.avatar,
-        text: currentUnit?.text || '',
+        text: visibleUnit?.text || '',
     } : null;
-    const showDialogueCard = Boolean(dialogueFrame && !isSubmittingTurn && !turnError && (phase === 'dialogue' || choiceReviewOpen));
+    const showDialogueCard = Boolean(dialogueFrame && !isSubmittingTurn && !turnError && (isHistoryPreviewing || phase === 'dialogue' || choiceReviewOpen));
     const showLoadingCard = Boolean(session && isSubmittingTurn);
     const showErrorCard = Boolean(session && turnError && !isSubmittingTurn);
     const sceneBg = getSceneBg(session);
@@ -502,7 +676,6 @@ const NianNianApp: React.FC = () => {
                 { label: '时辰', value: formatFateValue(session.status.scene.时辰) },
                 { label: '地点', value: formatFateValue(session.status.scene.地点) },
                 { label: '场景', value: sceneBg.label },
-                { label: '情境', value: formatFateValue(session.status.scene.情境) },
             ],
         },
         {
@@ -571,6 +744,8 @@ const NianNianApp: React.FC = () => {
         });
         setStatusExpanded(false);
         setActiveFatePageKey(null);
+        setHistoryOpen(false);
+        setActiveHistoryEntryKey(null);
         setPhase('dialogue');
         setChoiceReviewOpen(false);
         setTurnError(null);
@@ -581,6 +756,8 @@ const NianNianApp: React.FC = () => {
     const handleSelectSession = (nextSession: NianNianSession) => {
         setStatusExpanded(false);
         setActiveFatePageKey(null);
+        setHistoryOpen(false);
+        setActiveHistoryEntryKey(null);
         setPhase('dialogue');
         setChoiceReviewOpen(false);
         setTurnError(null);
@@ -611,6 +788,10 @@ const NianNianApp: React.FC = () => {
 
     const handleAdvanceDialogue = () => {
         if (!session) return;
+        if (activeHistoryEntryKey) {
+            setActiveHistoryEntryKey(null);
+            return;
+        }
         if (phase === 'choice') {
             if (choiceReviewOpen) setChoiceReviewOpen(false);
             return;
@@ -618,10 +799,6 @@ const NianNianApp: React.FC = () => {
         if (playbackIndex < lastDialogueIndex) {
             const nextIndex = Math.min(playbackIndex + 1, lastDialogueIndex);
             setPlaybackIndex(nextIndex);
-            if (nextIndex >= lastDialogueIndex) {
-                setPhase('choice');
-                setChoiceReviewOpen(false);
-            }
             return;
         }
 
@@ -629,10 +806,23 @@ const NianNianApp: React.FC = () => {
         setChoiceReviewOpen(false);
     };
 
+    const handlePreviousDialogue = () => {
+        if (!canGoPreviousDialogue) return;
+        setPlaybackIndex(index => Math.max(0, index - 1));
+        setChoiceReviewOpen(false);
+    };
+
     const handleDialogueWheel = (event: React.WheelEvent<HTMLElement>) => {
-        if (!canAdvanceDialogue || Math.abs(event.deltaY) < 24) return;
-        event.preventDefault();
-        handleAdvanceDialogue();
+        if (Math.abs(event.deltaY) < 24) return;
+        if (event.deltaY < 0 && canGoPreviousDialogue) {
+            event.preventDefault();
+            handlePreviousDialogue();
+            return;
+        }
+        if (event.deltaY > 0 && canAdvanceDialogue) {
+            event.preventDefault();
+            handleAdvanceDialogue();
+        }
     };
 
     const handleSubmitTurn = async (
@@ -662,6 +852,8 @@ const NianNianApp: React.FC = () => {
         setIsSubmittingTurn(true);
         setPhase('dialogue');
         setPlaybackIndex(0);
+        setHistoryOpen(false);
+        setActiveHistoryEntryKey(null);
         setChoiceReviewOpen(false);
         const characterContext = buildNianNianCharacterContext(sessionCharacter);
         const turnPlan = buildNianNianTurnPlan(session, content, optionForTurn, characterContext);
@@ -809,6 +1001,8 @@ const NianNianApp: React.FC = () => {
         setSession(null);
         setStatusExpanded(false);
         setActiveFatePageKey(null);
+        setHistoryOpen(false);
+        setActiveHistoryEntryKey(null);
         setPhase('dialogue');
         setChoiceReviewOpen(false);
         setTurnError(null);
@@ -817,7 +1011,35 @@ const NianNianApp: React.FC = () => {
 
     const handleToggleFateBook = () => {
         setActiveFatePageKey(null);
+        setHistoryOpen(false);
+        setActiveHistoryEntryKey(null);
         setStatusExpanded(expanded => !expanded);
+    };
+
+    const handleToggleHistory = () => {
+        const nextOpen = !historyOpen;
+        setHistoryOpen(nextOpen);
+        setStatusExpanded(false);
+        setActiveFatePageKey(null);
+        if (!nextOpen) {
+            setActiveHistoryEntryKey(null);
+            if (phase === 'choice') setChoiceReviewOpen(false);
+            return;
+        }
+        if (phase === 'choice') setChoiceReviewOpen(true);
+    };
+
+    const handleSelectHistoryEntry = (entry: HistoryEntry) => {
+        setHistoryOpen(true);
+        setStatusExpanded(false);
+        setActiveFatePageKey(null);
+        setActiveHistoryEntryKey(entry.key);
+        if (phase === 'choice') setChoiceReviewOpen(true);
+    };
+
+    const handleReturnToCurrent = () => {
+        setActiveHistoryEntryKey(null);
+        if (phase === 'choice') setChoiceReviewOpen(false);
     };
 
     if (isLoadingSessions) {
@@ -933,6 +1155,18 @@ const NianNianApp: React.FC = () => {
                         <span className="nn-scene-label">{sceneBg.label}</span>
                     </button>
 
+                    <button
+                        type="button"
+                        className={`nn-history-toggle ${historyOpen ? 'is-open' : ''}`}
+                        onClick={handleToggleHistory}
+                        aria-label={historyOpen ? '收起回想录' : '打开回想录'}
+                        aria-pressed={historyOpen}
+                    >
+                        <BookOpenText size={16} weight="duotone" />
+                        <span>回想</span>
+                        <strong>{historyEntries.length}</strong>
+                    </button>
+
                     {phase === 'choice' && !choiceReviewOpen && (
                         <button
                             type="button"
@@ -940,6 +1174,52 @@ const NianNianApp: React.FC = () => {
                             onClick={() => setChoiceReviewOpen(true)}
                             aria-label="回看对白"
                         />
+                    )}
+
+                    {historyOpen && (
+                        <aside className="nn-history-panel" aria-label="回想录">
+                            <header className="nn-history-head">
+                                <div>
+                                    <span>回想录</span>
+                                    <strong>{session.charName} · {session.director.stage}</strong>
+                                </div>
+                                <button
+                                    type="button"
+                                    className="nn-history-close"
+                                    onClick={handleToggleHistory}
+                                    aria-label="收起回想录"
+                                >
+                                    ×
+                                </button>
+                            </header>
+                            <div className="nn-history-list">
+                                {historyEntries.length > 0 ? historyEntries.map(entry => (
+                                    <button
+                                        key={entry.key}
+                                        type="button"
+                                        className={`nn-history-row is-${entry.unit.kind}${entry.key === activeHistoryEntryKey ? ' is-active' : ''}`}
+                                        onClick={() => handleSelectHistoryEntry(entry)}
+                                        aria-label={`回放${entry.turnLabel}${entry.speakerLabel}: ${entry.preview}`}
+                                    >
+                                        <span className="nn-history-turn">{entry.turnLabel}</span>
+                                        <span className="nn-history-copy">
+                                            <strong>{entry.speakerLabel}</strong>
+                                            <em>{entry.preview}</em>
+                                        </span>
+                                    </button>
+                                )) : (
+                                    <div className="nn-history-empty">暂无回想</div>
+                                )}
+                            </div>
+                            <button
+                                type="button"
+                                className="nn-history-current"
+                                onClick={handleReturnToCurrent}
+                                disabled={!activeHistoryEntryKey}
+                            >
+                                回到当前
+                            </button>
+                        </aside>
                     )}
 
                     <section
@@ -1004,7 +1284,10 @@ const NianNianApp: React.FC = () => {
                                 role="button"
                                 tabIndex={0}
                                 onKeyDown={event => {
-                                    if (event.key === 'Enter' || event.key === ' ') {
+                                    if (event.key === 'ArrowLeft') {
+                                        event.preventDefault();
+                                        handlePreviousDialogue();
+                                    } else if (event.key === 'ArrowRight' || event.key === 'Enter' || event.key === ' ') {
                                         event.preventDefault();
                                         handleAdvanceDialogue();
                                     }
@@ -1027,7 +1310,38 @@ const NianNianApp: React.FC = () => {
                                 <div className="nn-dialogue-copy">
                                     <p>{dialogueFrame.text}</p>
                                 </div>
-                                {canAdvanceDialogue && <span className="nn-continue" aria-hidden="true">▾</span>}
+                                {showDialoguePager && (
+                                    <div className="nn-dialogue-pager" aria-label="对白翻页">
+                                        <button
+                                            type="button"
+                                            className="nn-dialogue-nav is-prev"
+                                            onClick={event => {
+                                                event.stopPropagation();
+                                                handlePreviousDialogue();
+                                            }}
+                                            disabled={!canGoPreviousDialogue}
+                                            aria-label="上一页"
+                                            title="上一页"
+                                        >
+                                            <CaretLeft size={15} weight="bold" />
+                                        </button>
+                                        <span>{dialoguePageLabel}</span>
+                                        <button
+                                            type="button"
+                                            className="nn-dialogue-nav is-next"
+                                            onClick={event => {
+                                                event.stopPropagation();
+                                                handleAdvanceDialogue();
+                                            }}
+                                            disabled={!canAdvanceDialogue}
+                                            aria-label="下一页"
+                                            title="下一页"
+                                        >
+                                            <CaretRight size={15} weight="bold" />
+                                        </button>
+                                    </div>
+                                )}
+                                {canAdvanceDialogue && !showDialoguePager && <span className="nn-continue" aria-hidden="true">▾</span>}
                             </div>
                         )}
 

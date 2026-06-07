@@ -1163,9 +1163,9 @@ export const OUTPUT_FORMAT_AND_COT_TRIGGER = `
 
 // ====== Composite builders for DateApp ======
 
-/** Build the full system prompt preamble (dreamweaver + identity) */
-export const buildDatePreamble = (charName: string, userName: string) =>
-    DREAMWEAVER + '\n\n' + buildIdentityIntro(charName, userName);
+/** Build the full system prompt preamble (dreamweaver only). */
+export const buildDatePreamble = (_charName: string, _userName: string) =>
+    DREAMWEAVER + '\n\n';
 
 // ====== Inner Whispers (内心低语) prompt instruction ======
 const buildInnerWhisperInstruction = (userName: string, charGender?: 'male' | 'female') => {
@@ -1306,11 +1306,12 @@ export function buildFullDateSystemPrompt(opts: DateSystemPromptOpts): string {
     const charName = char.name;
     const userName = userProfile.name;
 
-    // 1. Dreamweaver + Identity
+    // 1. Dreamweaver
     let prompt = buildDatePreamble(charName, userName);
 
     // 2. Core Context (character profile, user profile, memories, worldbooks...)
     prompt += ContextBuilder.buildCoreContext(char, userProfile);
+    prompt += buildIdentityIntro(charName, userName);
 
     // 2.5. 精确时间注入
     if (char.dateTimeAwarenessEnabled !== false) {
