@@ -61,8 +61,10 @@ export function buildDateRequestContextMessages(input: {
         contextLimit,
     );
 
+    const currentSessionMessages = (input.currentSessionMessages || [])
+        .filter(shouldIncludeMessageInContext);
     const currentSessionContext = selectRecentDateContextMessages(
-        input.currentSessionMessages || [],
+        currentSessionMessages,
         contextLimit,
     );
 

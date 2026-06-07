@@ -112,6 +112,13 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
         id: 'char-1',
         name: 'Marcus',
         systemPrompt: '冷静、敏感，讲话克制。',
+        memories: [
+            { date: '2026-04-14', mood: 'rec', summary: '他记得阿眠那天认真说过不要敷衍。' },
+        ],
+        refinedMemories: {
+            '2026-04': '核心记忆：阿眠不怕谈难题，但很怕被轻描淡写带过。',
+        },
+        activeMemoryMonths: ['2026-04'],
         moodState: undefined,
     } as any;
 
@@ -197,19 +204,22 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
             apiConfig,
             undefined,
             {
+                userProfile: { name: '阿眠', bio: '长期关系里的对话对象。' } as any,
                 mirrorMessages: [
                     { role: 'system', content: 'FULL SYSTEM PROMPT WITH WORLDBOOKS' },
                     { role: 'user', content: 'full db context line' },
                 ],
-                contextLimit: 1000000,
+                contextLimit: 1,
                 historyMsgCount: 2,
                 model: 'main-chat-model',
             },
         );
 
         const body = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body));
-        const taskPrompt = body.messages[2].content;
+        const taskPrompt = body.messages[0].content;
         expect(body.max_tokens).toBe(65536);
+        expect(body.messages).toHaveLength(2);
+        expect(JSON.stringify(body.messages)).not.toContain('FULL SYSTEM PROMPT WITH WORLDBOOKS');
         expect(taskPrompt).toContain('番外篇');
         expect(taskPrompt).toContain('本期形态:');
         expect(taskPrompt).toContain('## ✒ 作家笔触');
@@ -224,12 +234,20 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
             taskPrompt.includes('if 前提:'),
             taskPrompt.includes('本轮梗:'),
         ].filter(Boolean).length).toBeLessThanOrEqual(1);
-        expect(taskPrompt).toContain('Marcus × 我');
+        expect(taskPrompt).toContain('Marcus × 阿眠');
         expect(taskPrompt).not.toContain('__AFTERGLOW_CHAR_NAME__');
         expect(taskPrompt).not.toContain('__AFTERGLOW_USER_NAME__');
         expect(taskPrompt).toContain('《标题》');
         expect(taskPrompt).toContain('题记');
         expect(taskPrompt).not.toContain('{{roll:');
+        expect(body.messages[1].content).toContain('### 你的身份 (Character)');
+        expect(body.messages[1].content).toContain('- 名字: 阿眠');
+        expect(body.messages[1].content).toContain('**你的记忆 · 脉络**');
+        expect(body.messages[1].content).toContain('核心记忆：阿眠不怕谈难题');
+        expect(body.messages[1].content).toContain('当前激活的详细回忆');
+        expect(body.messages[1].content).toContain('他记得阿眠那天认真说过不要敷衍。');
+        expect(body.messages[1].content).toContain('Marcus: 记得，我会提前看材料。');
+        expect(body.messages[1].content).not.toContain('阿眠: 你明天还记得那个会吗？');
         expect(result?.cardType).toBe('freeform');
         expect(result?.body).toBe('他把杯子往窗边推了一点，像是给沉默也留了个座位。');
         expect(result?.meta?.html).toContain('番外篇');
@@ -267,7 +285,7 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
         );
 
         const body = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body));
-        const taskPrompt = body.messages[2].content;
+        const taskPrompt = body.messages[0].content;
 
         expect(taskPrompt).toContain('本期笔触：张爱玲—冷艳世故、苍凉俯视、以物象作反讽');
         expect(taskPrompt).not.toContain('曹雪芹—');
@@ -300,7 +318,7 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
         );
 
         const body = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body));
-        const taskPrompt = body.messages[2].content;
+        const taskPrompt = body.messages[0].content;
 
         expect(taskPrompt).toContain('本期笔触：王尔德—机锋悖论、唯美毒舌〔译〕');
         expect(taskPrompt).not.toContain('张爱玲—冷艳世故、苍凉俯视、以物象作反讽');
@@ -331,16 +349,101 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
         );
 
         const body = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body));
-        expect(body.messages[2].content).toContain('## 用户梗要求');
-        expect(body.messages[2].content).toContain('请以「Marcus 对 我 的回应」为核心');
-        expect(body.messages[2].content).toContain('你就是Marcus本人，不能像任何通用角色');
-        expect(body.messages[2].content).toContain('[不设固定字数。优先遵守"用户梗要求"里对长短、形式、节奏的明示要求');
-        expect(body.messages[2].content).not.toContain('2268~2576');
-        expect(body.messages[2].content).toContain('用户指定梗: 雨夜误会');
-        expect(body.messages[2].content).not.toContain('正文 3280~3654 中文字');
-        expect(body.messages[2].content).not.toContain('运笔·〈本期作家〉风');
-        expect(body.messages[2].content).not.toContain('roll:FORM');
-        expect(body.messages[2].content).not.toContain('{{roll:');
+        expect(body.messages).toHaveLength(2);
+        expect(body.messages[0].content).toContain('## 用户梗要求');
+        expect(body.messages[0].content).toContain('请以「Marcus 对 我 的回应」为核心');
+        expect(body.messages[0].content).toContain('你就是Marcus本人，不能像任何通用角色');
+        expect(body.messages[0].content).toContain('[不设固定字数。优先遵守"用户梗要求"里对长短、形式、节奏的明示要求');
+        expect(body.messages[0].content).not.toContain('2268~2576');
+        expect(body.messages[0].content).toContain('用户指定梗: 雨夜误会');
+        expect(body.messages[0].content).not.toContain('正文 3280~3654 中文字');
+        expect(body.messages[0].content).not.toContain('运笔·〈本期作家〉风');
+        expect(body.messages[0].content).not.toContain('roll:FORM');
+        expect(body.messages[0].content).not.toContain('{{roll:');
+    });
+
+    it('uses full clean core context for heart-talk and strips thinking from the visible afterglow body', async () => {
+        const longSystemPrompt = `冷静、敏感，讲话克制。${'完整人设'.repeat(180)}`;
+        const longWorldview = `雨城、旧档案馆、两个人长期共享的秘密。${'完整世界观'.repeat(120)}`;
+        const heartTalkCharacter = {
+            ...baseCharacter,
+            systemPrompt: longSystemPrompt,
+            worldview: longWorldview,
+            mountedWorldbooks: [
+                {
+                    id: 'wb-1',
+                    title: '完整世界书条目',
+                    content: '这条世界书必须完整进入谈心模式，不从主聊天镜像继承。',
+                    category: '关系设定',
+                    position: 'after_worldview',
+                },
+            ],
+            impression: {
+                personality_core: {
+                    summary: '他觉得阿眠敏感但有韧劲。',
+                    interaction_style: '先试探，再认真回应。',
+                    observed_traits: ['敏感', '有边界'],
+                },
+                value_map: {
+                    likes: ['被认真听见'],
+                    dislikes: ['被敷衍'],
+                },
+                emotion_schema: {
+                    triggers: { negative: ['忽冷忽热'] },
+                    comfort_zone: '安静但明确的解释。',
+                },
+                observed_changes: ['最近更愿意直接说不安。'],
+            },
+        } as any;
+        mockFetchContent('<THINKING data-test="1">内部拆解和首句草稿。</THINKING>\n[[SEND_EMOJI: 亲亲]]\n[22:15] Marcus: 2026年4月14日夜里，他把椅子往后挪开半寸。');
+
+        const result = await MindSnapshotExtractor.generateAfterglowCard(
+            heartTalkCharacter,
+            '我会提前看材料。',
+            currentMsgs as any,
+            apiConfig,
+            undefined,
+            {
+                userProfile: { name: '阿眠', bio: '长期关系里的对话对象。' } as any,
+                mirrorMessages: [
+                    { role: 'system', content: 'FULL SYSTEM PROMPT WITH [[SEND_EMOJI: 污染表情]] AND TIMESTAMP RULES' },
+                    { role: 'user', content: 'full db context line' },
+                ],
+                mirrorThinking: '主聊天 thinking 污染',
+                contextLimit: 1000000,
+                historyMsgCount: 2,
+                model: 'main-chat-model',
+                allowMirrorLookup: true,
+            },
+            {
+                mode: 'heartTalk',
+                userMotif: '我想认真聊聊这段关系里让我不安的地方。',
+            },
+        );
+
+        const body = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body));
+        const serializedMessages = JSON.stringify(body.messages);
+        expect(body.messages).toHaveLength(2);
+        expect(body.messages[0].content).toContain('## 你是谁 · 这场谈话');
+        expect(body.messages[0].content).toContain('至少 3000 字');
+        expect(body.messages[0].content).toContain('先输出 <thinking>');
+        expect(body.messages[1].content).toContain('## 阿眠想跟你聊');
+        expect(body.messages[1].content).toContain('我想认真聊聊这段关系里让我不安的地方。');
+        expect(body.messages[1].content).toContain(longSystemPrompt);
+        expect(body.messages[1].content).toContain(longWorldview);
+        expect(body.messages[1].content).toContain('完整世界书条目');
+        expect(body.messages[1].content).toContain('这条世界书必须完整进入谈心模式');
+        expect(body.messages[1].content).toContain('核心评价: 他觉得阿眠敏感但有韧劲。');
+        expect(body.messages[1].content).toContain('- 名字: 阿眠');
+        expect(serializedMessages).not.toContain('FULL SYSTEM PROMPT WITH');
+        expect(serializedMessages).not.toContain('主聊天 thinking 污染');
+        expect(result?.body).toBe('2026年4月14日夜里，他把椅子往后挪开半寸。');
+        expect(result?.body).not.toContain('内部拆解');
+        expect(result?.body).not.toContain('SEND_EMOJI');
+        expect(result?.body).not.toContain('[22:15]');
+        expect(result?.body).not.toContain('Marcus:');
+        expect(String(result?.meta?.html)).not.toContain('内部拆解');
+        expect(String(result?.meta?.html)).not.toContain('THINKING');
     });
 
     it('includes previous assistant thinking in the pre-reply state sensing prompt', async () => {

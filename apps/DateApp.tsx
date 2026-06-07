@@ -22,7 +22,16 @@ import { EventExtractor } from '../utils/eventExtractor';
 import { buildDateRequestContextMessages } from '../utils/dateContext';
 
 type SummaryType = 'auto' | 'manual';
+type DateOpeningMode = 'sense' | 'coming_over' | 'chance' | 'rendezvous' | 'custom';
 const DATE_SUMMARY_CONTEXT_KEEP_COUNT = 5;
+const DATE_CHAT_MAX_TOKENS = 65536;
+const DATE_OPENING_MODE_OPTIONS: Array<{ key: DateOpeningMode; label: string }> = [
+    { key: 'sense', label: '靠近' },
+    { key: 'coming_over', label: '造访' },
+    { key: 'chance', label: '偶遇' },
+    { key: 'rendezvous', label: '赴约' },
+    { key: 'custom', label: '自定义' },
+];
 export type DateHistorySession = { date: string, msgs: Message[], rawMsgs: Message[], startMsgId: number, summaries: Message[], bridges: Message[] };
 type SummaryDraft = {
     content: string;
@@ -60,6 +69,99 @@ const getBridgeTypeLabel = (m: Message) => {
 const getDateHistoryDisplayText = (content: string) => (
     stripTranslationTags(content || '').replace(/\[.*?\]/g, '').trim()
 );
+
+const buildDateOpeningInstructions = ({
+    mode,
+    char,
+    userProfile,
+    timeAwarenessInstruction,
+    timeContinuityInstruction,
+    userKeywords,
+}: {
+    mode: DateOpeningMode;
+    char: CharacterProfile;
+    userProfile: UserProfile;
+    timeAwarenessInstruction: string;
+    timeContinuityInstruction: string;
+    userKeywords: string;
+}) => {
+    switch (mode) {
+        case 'coming_over':
+            return `
+### 场景：造访 (Coming Over)
+${timeAwarenessInstruction}
+
+### 任务
+你现在并不在和${userProfile.name}直接对话。此刻是你主动前往${userProfile.name}所在的地点。
+请用**第三人称**描写一段话。
+描述：${char.name} 正怎样赶往那里（在路上 / 即将抵达 / 站在门外）？沿途的环境是怎样的？${char.name} 此时是什么心情、什么状态？
+
+### 逻辑检查
+${timeContinuityInstruction}
+3. **视角约束**: 只描写${char.name}和环境，写到即将与${userProfile.name}照面为止，不要替${userProfile.name}描写其反应、动作或内心。
+4. **描写风格**: 电影感，沉浸式，细节丰富。不要输出任何前缀，直接输出描写内容。`;
+        case 'custom':
+            return `
+### 场景：自定义 (Custom Scene)
+${timeAwarenessInstruction}
+
+### 任务
+你现在并不在和${userProfile.name}直接对话。请围绕以下关键词，描写${userProfile.name}与你即将照面前的那一刻场景：
+【关键词】${userKeywords}
+请用**第三人称**描写一段话。
+描述：在这些关键词设定的情境里，${char.name} 此时此刻正在做什么？周围环境如何？${char.name} 的状态如何？
+
+### 逻辑检查
+${timeContinuityInstruction}
+3. **关键词处理**: 把上述关键词自然地织进场景与${char.name}的状态里，不要生硬罗列或逐条解释；若某个关键词与已有设定冲突，以连贯性为准。
+4. **视角约束**: 只描写${char.name}和环境，不要替${userProfile.name}描写其反应或内心。
+5. **描写风格**: 电影感，沉浸式，细节丰富。不要输出任何前缀，直接输出描写内容。`;
+        case 'chance':
+            return `
+### 场景：偶遇 (Chance Encounter)
+${timeAwarenessInstruction}
+
+### 任务
+你现在并不在和${userProfile.name}直接对话。此刻你和${userProfile.name}恰好身处同一个地方——你不是来找ta的，也还不知道ta就在附近，你在这里只是为了你自己的事。
+请用**第三人称**描写一段话。
+描述：${char.name} 此刻在这个地方做什么、为什么会在这里？周围环境是怎样的？${char.name} 的状态如何？（写到你们可能即将注意到彼此的那一刻为止）
+
+### 逻辑检查
+${timeContinuityInstruction}
+3. **偶遇前提**: ${char.name}是为自己的事而来，对${userProfile.name}的出现毫不知情，不要让${char.name}表现得像在等谁、找谁或预感到什么。
+4. **视角约束**: 只描写${char.name}和环境，不要替${userProfile.name}描写其反应或内心。
+5. **描写风格**: 电影感，沉浸式，细节丰富。不要输出任何前缀，直接输出描写内容。`;
+        case 'rendezvous':
+            return `
+### 场景：赴约 (Rendezvous)
+${timeAwarenessInstruction}
+
+### 任务
+你现在并不在和${userProfile.name}直接对话。你和${userProfile.name}事先约好了见面，此刻你正在约定的地点等ta——或刚到，或快到约定的时间——你清楚ta就要来了。
+请用**第三人称**描写一段话。
+描述：${char.name} 在约定的地点是什么模样、正用什么方式打发等待？周围环境如何？想到马上要见到${userProfile.name}，${char.name} 是什么心情、什么状态？
+
+### 逻辑检查
+${timeContinuityInstruction}
+3. **赴约前提**: 这是事先约好的见面，${char.name}是带着期待在等${userProfile.name}的，把这份等待与心绪写出来；但${userProfile.name}此刻尚未现身。
+4. **视角约束**: 只描写${char.name}和环境，写到${userProfile.name}即将出现为止，不要替${userProfile.name}描写其反应、动作或内心。
+5. **描写风格**: 电影感，沉浸式，细节丰富。不要输出任何前缀，直接输出描写内容。`;
+        case 'sense':
+        default:
+            return `
+### 场景：感知 (Sense Presence)
+${timeAwarenessInstruction}
+
+### 任务
+你现在并不在和${userProfile.name}直接对话。${userProfile.name}正在悄悄靠近你所在的地点。
+请用**第三人称**描写一段话。
+描述：${char.name} 此时此刻正在做什么？周围环境是怎样的？状态如何？
+
+### 逻辑检查
+${timeContinuityInstruction}
+3. **描写风格**: 电影感，沉浸式，细节丰富。不要输出任何前缀，直接输出描写内容。`;
+    }
+};
 
 const getCurrentSessionMessages = (msgs: Message[]) => {
     const dateMsgs = msgs.filter(isDateRawDialogueMessage).sort((a, b) => a.timestamp - b.timestamp);
@@ -271,6 +373,10 @@ const DateApp: React.FC = () => {
     const [peekThinking, setPeekThinking] = useState<string>('');
     const [peekLoading, setPeekLoading] = useState(false);
     const [lastDateTokenUsage, setLastDateTokenUsage] = useState<DateTokenUsage | null>(null);
+    const [dateOpeningMode, setDateOpeningMode] = useState<DateOpeningMode>('sense');
+    const [dateOpeningKeywords, setDateOpeningKeywords] = useState('');
+    const [peekOpeningMode, setPeekOpeningMode] = useState<DateOpeningMode>('sense');
+    const [peekOpeningKeywords, setPeekOpeningKeywords] = useState('');
 
     // History State
     const [historySessions, setHistorySessions] = useState<DateHistorySession[]>([]);
@@ -1000,7 +1106,7 @@ ${exitPromptContent}
         addToast('已恢复上次进度', 'success');
     };
 
-    const handleStartNewSession = () => {
+    const handleStartNewSession = async () => {
         if (!pendingSessionCharId) return;
         const c = characters.find(ch => ch.id === pendingSessionCharId);
         if (!c) {
@@ -1009,8 +1115,8 @@ ${exitPromptContent}
         }
         updateCharacter(c.id, { savedDateState: undefined });
         setForceFreshSession(true);
-        startPeek(c);
-        setPendingSessionCharId(null);
+        const started = await startPeek(c);
+        if (started) setPendingSessionCharId(null);
     };
 
     // --- 关键修复: 进入 Session 时立即归档开场白 ---
@@ -1027,7 +1133,13 @@ ${exitPromptContent}
                     role: 'assistant',
                     type: 'text',
                     content: peekStatus,
-                    metadata: { source: 'date', isOpening: true, thinking: peekThinking || undefined }
+                    metadata: {
+                        source: 'date',
+                        isOpening: true,
+                        thinking: peekThinking || undefined,
+                        openingMode: peekOpeningMode,
+                        openingKeywords: peekOpeningKeywords || undefined,
+                    }
                 });
                 setHasSavedOpening(true);
             } catch (e) {
@@ -1041,7 +1153,16 @@ ${exitPromptContent}
     };
 
     // --- Peek (Generation) Logic ---
-    const startPeek = async (c: CharacterProfile) => {
+    const startPeek = async (
+        c: CharacterProfile,
+        openingMode: DateOpeningMode = dateOpeningMode,
+        customKeywords: string = dateOpeningKeywords,
+    ): Promise<boolean> => {
+        const normalizedKeywords = customKeywords.trim();
+        if (openingMode === 'custom' && !normalizedKeywords) {
+            addToast('先写自定义开场关键词', 'info');
+            return false;
+        }
         setActiveCharacterId(c.id);
         setForceFreshSession(true);
         setMode('peek');
@@ -1049,6 +1170,8 @@ ${exitPromptContent}
         setPeekStatus('');
         setHasSavedOpening(false);
         setLastDateTokenUsage(null);
+        setPeekOpeningMode(openingMode);
+        setPeekOpeningKeywords(normalizedKeywords);
 
         try {
             const allMsgs = await DB.getMessagesByCharId(c.id);
@@ -1083,18 +1206,14 @@ ${exitPromptContent}
                 : `1. **上下文连贯性**: 参考 [最近记录]，但不要主动演绎现实时间、时段或久别感。
 2. **状态一致性**: 根据之前的聊天状态决定。`;
 
-            const peekInstructions = `
-### 场景：感知 (Sense Presence)
-${timeAwarenessInstruction}
-
-### 任务
-你现在并不在和${userProfile.name}直接对话。${userProfile.name}正在悄悄靠近你所在的地点。
-请用**第三人称**描写一段话。
-描述：${c.name} 此时此刻正在做什么？周围环境是怎样的？状态如何？
-
-### 逻辑检查
-${timeContinuityInstruction}
-3. **描写风格**: 电影感，沉浸式，细节丰富。不要输出任何前缀，直接输出描写内容。`;
+            const peekInstructions = buildDateOpeningInstructions({
+                mode: openingMode,
+                char: c,
+                userProfile,
+                timeAwarenessInstruction,
+                timeContinuityInstruction,
+                userKeywords: normalizedKeywords,
+            });
 
             const response = await fetchDateChatCompletion(apiConfig, {
                     model: apiConfig.model,
@@ -1123,6 +1242,7 @@ ${timeContinuityInstruction}
         } finally {
             setPeekLoading(false);
         }
+        return true;
     };
 
     // --- Session API Logic ---
@@ -1182,7 +1302,7 @@ ${timeContinuityInstruction}
 [shy] ${pronoun(char.gender ?? 'male')}的脸颊微微泛红，视线移向了窗外。]` : ''})` }
                 ],
                 temperature: char.dateTemperature ?? 0.85,
-                max_tokens: 8192,
+                max_tokens: DATE_CHAT_MAX_TOKENS,
             },
             directorHint ? '见面导演提示回复' : '见面聊天回复',
             char.id,
@@ -1259,7 +1379,7 @@ ${timeContinuityInstruction}
                     { role: 'user', content: `${userPromptText}\n\n(System Note: Reroll. 用不同的角度重写。严格遵守沉浸剧场格式、当前叙述人称。${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。每一行仍必须以 [emotion] 开头。只有${char.name}的台词用${dateTranslateSourceLang}写成 [emotion]<翻译><原文>...</原文><译文>...</译文></翻译>；叙述/动作/心理描写保持中文不变，不用 <翻译>。]` : ''})` }
                 ],
                 temperature: Math.min((char.dateTemperature ?? 0.85) + 0.05, 2.0),
-                max_tokens: 8192,
+                max_tokens: DATE_CHAT_MAX_TOKENS,
             },
             '见面回复重掷',
             char.id,
@@ -1359,20 +1479,52 @@ ${timeContinuityInstruction}
                     <span className="font-bold text-slate-700">选择见面对象</span>
                     <div className="w-8"></div>
                 </div>
-                <div className="p-4 grid grid-cols-2 gap-4 overflow-y-auto">
-                    {characters.map(c => (
-                        <div key={c.id} onClick={() => handleCharClick(c)} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 active:scale-95 transition-transform flex flex-col items-center gap-3 relative group">
-                            <button
-                                onClick={(e) => { e.stopPropagation(); openHistory(c); }}
-                                className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors z-20 active:scale-90"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" /></svg>
-                            </button>
-                            <img src={c.avatar} className="w-16 h-16 rounded-full object-cover" />
-                            <span className="font-bold text-slate-700">{c.name}</span>
-                            {c.savedDateState && <div className="absolute top-2 left-2 w-2 h-2 bg-green-500 rounded-full animate-pulse" title="有存档"></div>}
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    <section className="rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                            <span className="text-xs font-bold text-slate-500">开场</span>
+                            <span className="text-[10px] text-slate-400">点击角色后生成</span>
                         </div>
-                    ))}
+                        <div className="flex flex-wrap gap-2">
+                            {DATE_OPENING_MODE_OPTIONS.map(option => {
+                                const isActive = dateOpeningMode === option.key;
+                                return (
+                                    <button
+                                        key={option.key}
+                                        type="button"
+                                        onClick={() => setDateOpeningMode(option.key)}
+                                        className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${isActive ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                    >
+                                        {option.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        {dateOpeningMode === 'custom' && (
+                            <textarea
+                                value={dateOpeningKeywords}
+                                onChange={e => setDateOpeningKeywords(e.target.value)}
+                                rows={2}
+                                placeholder="写关键词或场景要求，比如：雨夜便利店门口、刚吵完架、他手里拿着伞"
+                                className="mt-3 w-full resize-none rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs leading-relaxed text-slate-700 outline-none transition-all focus:border-slate-300 focus:bg-white"
+                            />
+                        )}
+                    </section>
+                    <div className="grid grid-cols-2 gap-4">
+                        {characters.map(c => (
+                            <div key={c.id} onClick={() => handleCharClick(c)} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 active:scale-95 transition-transform flex flex-col items-center gap-3 relative group">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); openHistory(c); }}
+                                    className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors z-20 active:scale-90"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" /></svg>
+                                </button>
+                                <img src={c.avatar} className="w-16 h-16 rounded-full object-cover" />
+                                <span className="font-bold text-slate-700">{c.name}</span>
+                                {c.savedDateState && <div className="absolute top-2 left-2 w-2 h-2 bg-green-500 rounded-full animate-pulse" title="有存档"></div>}
+                            </div>
+                        ))}
+                    </div>
                 </div>
                 <Modal isOpen={!!pendingSessionCharId} title="发现进度" onClose={() => setPendingSessionCharId(null)} footer={<div className="flex gap-3 w-full"><button onClick={handleStartNewSession} className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-600 font-bold">新的见面</button><button onClick={handleResumeSession} className="flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200">继续上次</button></div>}>
                     <div className="text-center text-slate-500 text-sm py-4">检测到 {pendingChar?.name} 有未结束的见面。<br /><span className="text-xs text-slate-400 mt-2 block">(存档时间: {pendingChar?.savedDateState?.timestamp ? new Date(pendingChar.savedDateState.timestamp).toLocaleString() : 'Unknown'})</span></div>
@@ -1491,8 +1643,8 @@ ${timeContinuityInstruction}
                         <div className="shrink-0 flex flex-col items-center gap-6">
                             <div className="w-full flex gap-3">
                                 {/* 修改这里：调用 handleEnterSession 确保开场白被保存 */}
-                                <button onClick={handleEnterSession} className="flex-1 h-14 bg-white text-black rounded-full font-bold tracking-[0.1em] text-sm shadow-[0_0_20px_rgba(255,255,255,0.1)] active:scale-95 transition-transform hover:bg-neutral-200">走过去 (Approach)</button>
-                                <button onClick={() => startPeek(char)} className="w-14 h-14 bg-neutral-800 text-white rounded-full flex items-center justify-center border border-neutral-700 shadow-lg active:scale-90 transition-transform"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /></svg></button>
+                                <button onClick={handleEnterSession} className="flex-1 h-14 bg-white text-black rounded-full font-bold tracking-[0.1em] text-sm shadow-[0_0_20px_rgba(255,255,255,0.1)] active:scale-95 transition-transform hover:bg-neutral-200">开始见面</button>
+                                <button onClick={() => startPeek(char, peekOpeningMode, peekOpeningKeywords)} className="w-14 h-14 bg-neutral-800 text-white rounded-full flex items-center justify-center border border-neutral-700 shadow-lg active:scale-90 transition-transform"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /></svg></button>
                             </div>
                             <div className="flex flex-col items-center gap-3 text-[10px] text-neutral-600 font-medium tracking-wider"><button onClick={() => { setPreviousMode('peek'); setMode('settings'); }} className="hover:text-neutral-400 transition-colors">布置场景 / 设定立绘</button><button onClick={handleBack} className="hover:text-neutral-400 transition-colors">悄悄离开</button></div>
                         </div>

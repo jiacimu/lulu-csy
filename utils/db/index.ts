@@ -70,6 +70,7 @@ export const DB = {
 
     // Assets
     getAllAssets: contentStore.getAllAssets,
+    getStartupAssets: contentStore.getStartupAssets,
     getAsset: contentStore.getAsset,
     saveAsset: contentStore.saveAsset,
     getAssetRaw: contentStore.getAssetRaw,

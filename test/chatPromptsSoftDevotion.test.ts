@@ -110,3 +110,46 @@ describe('ChatPrompts soft devotion mode', () => {
         expect(systemPrompt).toContain('以 <equality> 和 <soft_devotion_chat_mode> 共同为基准');
     });
 });
+
+describe('ChatPrompts RP core rules', () => {
+    it('injects serious topic and agency rules in the default RP core', async () => {
+        const systemPrompt = await ChatPrompts.buildSystemPrompt(
+            character(false),
+            user(),
+            [],
+            [],
+            [],
+            [],
+        );
+
+        expect(systemPrompt).toContain('<serious_topic_engagement>');
+        expect(systemPrompt).toContain('<agency_boundary>');
+        expect(systemPrompt).toContain('当糯米抛出严肃、沉重或抽象的话题时');
+        expect(systemPrompt).toContain('Sully，你不是三流言情小说里的套路主角。');
+        expect(systemPrompt).not.toContain('<location_settings>');
+        expect(systemPrompt).not.toContain('{{user}}');
+        expect(systemPrompt).not.toContain('${char.name}');
+    });
+
+    it('injects serious topic and agency rules in DeepSeek RP core', async () => {
+        const systemPrompt = await ChatPrompts.buildSystemPrompt(
+            character(false),
+            user(),
+            [],
+            [],
+            [],
+            [],
+            undefined,
+            { useDeepSeekMode: true } as any,
+        );
+
+        expect(systemPrompt).toContain('<rp_core_ds>');
+        expect(systemPrompt).toContain('<serious_topic_engagement>');
+        expect(systemPrompt).toContain('<agency_boundary>');
+        expect(systemPrompt).toContain('当糯米抛出严肃、沉重或抽象的话题时');
+        expect(systemPrompt).toContain('Sully，你不是三流言情小说里的套路主角。');
+        expect(systemPrompt).not.toContain('<location_settings>');
+        expect(systemPrompt).not.toContain('{{user}}');
+        expect(systemPrompt).not.toContain('${char.name}');
+    });
+});

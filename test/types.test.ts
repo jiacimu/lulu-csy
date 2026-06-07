@@ -20,6 +20,7 @@ vi.mock('@capacitor/local-notifications', () => ({
 
 let typesModule: typeof import('../types');
 let chatParserModule: typeof import('../utils/chatParser');
+let realtimeServiceModule: typeof import('../utils/services/realtimeService');
 
 // Test the types barrel export — ensures all type modules resolve correctly
 describe('Types barrel export', () => {
@@ -36,6 +37,25 @@ describe('Types barrel export', () => {
     it('should export all key interfaces as importable symbols', () => {
         // These are type-only exports, but the module should resolve without error
         expect(typesModule).toBeDefined();
+    });
+});
+
+describe('Hot news card IDs', () => {
+    beforeAll(async () => {
+        realtimeServiceModule = await import('../utils/services/realtimeService');
+    }, 20000);
+
+    it('generates stable IDs without platform or rank collisions', () => {
+        const { buildHotNewsCardId } = realtimeServiceModule;
+        const a = buildHotNewsCardId('B站', '2026-06-06#3', 2, '公测定档 7月！');
+        const b = buildHotNewsCardId('bilibili', '2026-06-06#3', 2, '公测定档 7月！');
+        const differentPlatform = buildHotNewsCardId('微博', '2026-06-06#3', 2, '公测定档 7月！');
+        const differentRank = buildHotNewsCardId('B站', '2026-06-06#3', 3, '公测定档 7月！');
+
+        expect(a).toBe(b);
+        expect(a).toContain('bilibili:2026-06-06#3:2:');
+        expect(differentPlatform).not.toBe(a);
+        expect(differentRank).not.toBe(a);
     });
 });
 
@@ -141,6 +161,84 @@ describe('ChatParser', () => {
                 title: '测试热点标题',
                 url: 'https://example.com/news',
                 desc: '测试简介',
+            }),
+        }));
+    });
+
+    it('turns degraded natural hot topic shares into news card messages', async () => {
+        const { ChatParser } = chatParserModule;
+        const dbModule = await import('../utils/db');
+        const saveMessage = dbModule.DB.saveMessage as any;
+        const getLatestHotNewsSnapshot = dbModule.DB.getLatestHotNewsSnapshot as any;
+
+        getLatestHotNewsSnapshot.mockResolvedValue({
+            id: '2026-06-07#1',
+            fetchedAt: 1780800000000,
+            items: [
+                { title: '高考', source: '微博', platform: 'weibo', rank: 1, url: 'https://weibo.com/hot/demo', desc: '高考热点' },
+            ],
+        });
+        saveMessage.mockClear();
+
+        const cleaned = await ChatParser.parseAndExecuteActions(
+            '【你分享了一个热点：「高考」\n（来源：微博）】',
+            'char-1',
+            '糯米',
+            vi.fn(),
+        );
+
+        expect(cleaned).toBe('');
+        expect(saveMessage).toHaveBeenCalledWith(expect.objectContaining({
+            charId: 'char-1',
+            role: 'assistant',
+            type: 'news_card',
+            metadata: expect.objectContaining({
+                source: '微博',
+                title: '高考',
+                url: 'https://weibo.com/hot/demo',
+                desc: '高考热点',
+                platform: 'weibo',
+                rank: 1,
+            }),
+        }));
+    });
+
+    it('turns NEWS_CARD_ID tags into linked news card messages', async () => {
+        const { ChatParser } = chatParserModule;
+        const dbModule = await import('../utils/db');
+        const saveMessage = dbModule.DB.saveMessage as any;
+        const getLatestHotNewsSnapshot = dbModule.DB.getLatestHotNewsSnapshot as any;
+        const cardId = 'bilibili:2026-06-06#3:1:b站新番开播';
+
+        getLatestHotNewsSnapshot.mockResolvedValue({
+            id: '2026-06-06#3',
+            fetchedAt: 1780740000000,
+            items: [
+                { id: cardId, cardId, title: 'B站新番开播', source: 'B站', platform: 'bilibili', rank: 1, url: 'https://bilibili.com/video/demo', desc: '追番提醒' },
+            ],
+        });
+        saveMessage.mockClear();
+
+        const cleaned = await ChatParser.parseAndExecuteActions(
+            `刚刷到这个。[[NEWS_CARD_ID: ${cardId}]]\n要不要一起看？`,
+            'char-1',
+            '糯米',
+            vi.fn(),
+        );
+
+        expect(cleaned).toBe('刚刷到这个。\n要不要一起看？');
+        expect(saveMessage).toHaveBeenCalledWith(expect.objectContaining({
+            charId: 'char-1',
+            role: 'assistant',
+            type: 'news_card',
+            metadata: expect.objectContaining({
+                source: 'B站',
+                title: 'B站新番开播',
+                url: 'https://bilibili.com/video/demo',
+                desc: '追番提醒',
+                platform: 'bilibili',
+                rank: 1,
+                cardId,
             }),
         }));
     });

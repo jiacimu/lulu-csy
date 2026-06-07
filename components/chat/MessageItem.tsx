@@ -3,7 +3,7 @@
 
 import React,{ useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState } from 'react';
 import ReactDOM from 'react-dom';
-import { ArrowsOutSimple, DownloadSimple, DeviceMobileCamera, Sparkle, X } from '@phosphor-icons/react';
+import { ArrowSquareOut, ArrowsOutSimple, DownloadSimple, DeviceMobileCamera, Fire, PlayCircle, Sparkle, X } from '@phosphor-icons/react';
 import { Message,ChatTheme } from '../../types';
 import { StatusCardData } from '../../types/statusCard';
 import { haptic } from '../../utils/haptics';
@@ -19,6 +19,7 @@ import {
     saveAfterglowCustomMotifsFromText,
     sanitizeAfterglowMotif,
     type AfterglowCustomMotif,
+    type AfterglowGenerationMode,
     type AfterglowGenerationOptions,
 } from '../../utils/afterglowMotifs';
 import XhsCard from './cards/XhsCard';
@@ -625,6 +626,7 @@ const MessageItem = React.memo(({
     const [showAfterglow, setShowAfterglow] = useState(false);
     const [localAfterglowCard, setLocalAfterglowCard] = useState<StatusCardData | null>(null);
     const [showAfterglowComposer, setShowAfterglowComposer] = useState(false);
+    const [afterglowComposerMode, setAfterglowComposerMode] = useState<AfterglowGenerationMode>('fanfic');
     const [afterglowMotifDraft, setAfterglowMotifDraft] = useState('');
     const [saveMotifToPool, setSaveMotifToPool] = useState(false);
     const [customAfterglowMotifs, setCustomAfterglowMotifs] = useState<AfterglowCustomMotif[]>([]);
@@ -727,6 +729,7 @@ const MessageItem = React.memo(({
     const showClassicInnerVoiceToggle = !statusCardData && trimmedInnerVoice.length > CLASSIC_INNER_VOICE_PREVIEW_THRESHOLD;
     const hasAfterglowMotifDraft = sanitizeAfterglowMotif(afterglowMotifDraft).length > 0;
     const hasMotifsToAdd = parseAfterglowMotifInput(afterglowMotifDraft).length > 0;
+    const isAfterglowHeartTalkMode = afterglowComposerMode === 'heartTalk';
 
     const handleAvatarClick = () => {
         if (!hasAnyVoice || selectionMode) return;
@@ -782,7 +785,15 @@ const MessageItem = React.memo(({
     const handleGenerateWithMotif = () => {
         const userMotif = sanitizeAfterglowMotif(afterglowMotifDraft);
         if (!userMotif) {
-            handleGenerateRandomAfterglow();
+            if (!isAfterglowHeartTalkMode) handleGenerateRandomAfterglow();
+            return;
+        }
+
+        if (isAfterglowHeartTalkMode) {
+            requestAfterglow({
+                mode: 'heartTalk',
+                userMotif,
+            });
             return;
         }
 
@@ -1285,6 +1296,26 @@ const MessageItem = React.memo(({
                                 </div>
 
                                 <div className="space-y-3 px-4 py-4">
+                                    <div className="grid grid-cols-2 rounded-xl border border-[#e3d1bb] bg-white/65 p-1">
+                                        <button
+                                            type="button"
+                                            className={`min-h-8 rounded-lg px-2 text-[12px] font-bold transition ${!isAfterglowHeartTalkMode ? 'bg-[#2d2118] text-[#ffe4bb] shadow-sm' : 'text-[#81552f] hover:bg-[#fff4e4]'}`}
+                                            onClick={() => setAfterglowComposerMode('fanfic')}
+                                        >
+                                            写番外
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`min-h-8 rounded-lg px-2 text-[12px] font-bold transition ${isAfterglowHeartTalkMode ? 'bg-[#2d2118] text-[#ffe4bb] shadow-sm' : 'text-[#81552f] hover:bg-[#fff4e4]'}`}
+                                            onClick={() => {
+                                                setAfterglowComposerMode('heartTalk');
+                                                setSaveMotifToPool(false);
+                                            }}
+                                        >
+                                            谈心
+                                        </button>
+                                    </div>
+
                                     <textarea
                                         data-testid="afterglow-motif-input"
                                         value={afterglowMotifDraft}
@@ -1292,20 +1323,22 @@ const MessageItem = React.memo(({
                                         rows={4}
                                         maxLength={600}
                                         className="w-full resize-none rounded-xl border border-[#e3d1bb] bg-white/80 p-3 text-[13px] leading-6 text-[#4b3324] outline-none transition focus:border-[#b77b45] focus:ring-2 focus:ring-[#f0d2ad]"
-                                        placeholder="例如：雨夜误会、他听见你梦话、一封没寄出的信"
+                                        placeholder={isAfterglowHeartTalkMode ? '把想跟 ta 聊的话写在这里' : '例如：雨夜误会、他听见你梦话、一封没寄出的信'}
                                     />
 
-                                    <label className="flex items-center gap-2 text-[12px] font-medium text-[#7c5a3d]">
-                                        <input
-                                            type="checkbox"
-                                            className="h-4 w-4 accent-[#9b5f2f]"
-                                            checked={saveMotifToPool}
-                                            onChange={(event) => setSaveMotifToPool(event.target.checked)}
-                                        />
-                                        同时存入随机池
-                                    </label>
+                                    {!isAfterglowHeartTalkMode && (
+                                        <label className="flex items-center gap-2 text-[12px] font-medium text-[#7c5a3d]">
+                                            <input
+                                                type="checkbox"
+                                                className="h-4 w-4 accent-[#9b5f2f]"
+                                                checked={saveMotifToPool}
+                                                onChange={(event) => setSaveMotifToPool(event.target.checked)}
+                                            />
+                                            同时存入随机池
+                                        </label>
+                                    )}
 
-                                    <div className={`grid gap-2 ${visibleAfterglowCard ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                                    <div className={`grid gap-2 ${isAfterglowHeartTalkMode ? (visibleAfterglowCard ? 'grid-cols-2' : 'grid-cols-1') : (visibleAfterglowCard ? 'grid-cols-2' : 'grid-cols-3')}`}>
                                         {visibleAfterglowCard && (
                                             <button
                                                 type="button"
@@ -1318,60 +1351,66 @@ const MessageItem = React.memo(({
                                                 打开已有
                                             </button>
                                         )}
-                                        <button
-                                            type="button"
-                                            className="flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-[#dbc4a9] bg-white px-2 text-[12px] font-bold text-[#81552f] transition hover:bg-[#fff4e4] disabled:cursor-wait disabled:opacity-60"
-                                            disabled={isAfterglowLoading}
-                                            onClick={handleGenerateRandomAfterglow}
-                                        >
-                                            <Sparkle className="h-3.5 w-3.5" weight="bold" />
-                                            随机生成
-                                        </button>
+                                        {!isAfterglowHeartTalkMode && (
+                                            <button
+                                                type="button"
+                                                className="flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-[#dbc4a9] bg-white px-2 text-[12px] font-bold text-[#81552f] transition hover:bg-[#fff4e4] disabled:cursor-wait disabled:opacity-60"
+                                                disabled={isAfterglowLoading}
+                                                onClick={handleGenerateRandomAfterglow}
+                                            >
+                                                <Sparkle className="h-3.5 w-3.5" weight="bold" />
+                                                随机生成
+                                            </button>
+                                        )}
                                         <button
                                             type="button"
                                             className="min-h-10 rounded-xl bg-[#2d2118] px-2 text-[12px] font-bold text-[#ffe4bb] transition hover:bg-[#3b2b1f] disabled:cursor-not-allowed disabled:opacity-45"
                                             disabled={isAfterglowLoading || !hasAfterglowMotifDraft}
                                             onClick={handleGenerateWithMotif}
                                         >
-                                            按这个梗生成
+                                            {isAfterglowHeartTalkMode ? '开始谈心' : '按这个梗生成'}
                                         </button>
-                                        <button
-                                            type="button"
-                                            className="min-h-10 rounded-xl border border-dashed border-[#c79f75] bg-[#fff7ea] px-2 text-[12px] font-bold text-[#8f5b2e] transition hover:bg-[#ffedcf] disabled:cursor-not-allowed disabled:opacity-45"
-                                            disabled={!hasMotifsToAdd}
-                                            onClick={handleAddMotifsToPool}
-                                        >
-                                            加入随机池
-                                        </button>
-                                    </div>
-
-                                    <div className="rounded-xl border border-[#eadcc8] bg-white/55 p-3">
-                                        <div className="mb-2 flex items-center justify-between text-[11px] font-bold tracking-[0.12em] text-[#9c7148]">
-                                            <span>随机池</span>
-                                            <span>{customAfterglowMotifs.length}</span>
-                                        </div>
-                                        {customAfterglowMotifs.length > 0 ? (
-                                            <div className="max-h-36 space-y-1.5 overflow-y-auto pr-1">
-                                                {customAfterglowMotifs.map(motif => (
-                                                    <div key={motif.id} className="flex items-start gap-2 rounded-lg bg-[#fffaf2] px-2 py-1.5 text-[12px] text-[#5a3a24]">
-                                                        <span className="min-w-0 flex-1 break-words leading-5">{motif.text}</span>
-                                                        <button
-                                                            type="button"
-                                                            className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#a58062] hover:bg-[#eadcc8] hover:text-[#6a3f1f]"
-                                                            aria-label={`删除梗：${motif.text}`}
-                                                            onClick={() => handleDeleteCustomMotif(motif.id)}
-                                                        >
-                                                            <X className="h-3 w-3" />
-                                                        </button>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <div className="rounded-lg border border-dashed border-[#e4cfb7] px-3 py-4 text-center text-[12px] text-[#b08b67]">
-                                                暂无自定义梗
-                                            </div>
+                                        {!isAfterglowHeartTalkMode && (
+                                            <button
+                                                type="button"
+                                                className="min-h-10 rounded-xl border border-dashed border-[#c79f75] bg-[#fff7ea] px-2 text-[12px] font-bold text-[#8f5b2e] transition hover:bg-[#ffedcf] disabled:cursor-not-allowed disabled:opacity-45"
+                                                disabled={!hasMotifsToAdd}
+                                                onClick={handleAddMotifsToPool}
+                                            >
+                                                加入随机池
+                                            </button>
                                         )}
                                     </div>
+
+                                    {!isAfterglowHeartTalkMode && (
+                                        <div className="rounded-xl border border-[#eadcc8] bg-white/55 p-3">
+                                            <div className="mb-2 flex items-center justify-between text-[11px] font-bold tracking-[0.12em] text-[#9c7148]">
+                                                <span>随机池</span>
+                                                <span>{customAfterglowMotifs.length}</span>
+                                            </div>
+                                            {customAfterglowMotifs.length > 0 ? (
+                                                <div className="max-h-36 space-y-1.5 overflow-y-auto pr-1">
+                                                    {customAfterglowMotifs.map(motif => (
+                                                        <div key={motif.id} className="flex items-start gap-2 rounded-lg bg-[#fffaf2] px-2 py-1.5 text-[12px] text-[#5a3a24]">
+                                                            <span className="min-w-0 flex-1 break-words leading-5">{motif.text}</span>
+                                                            <button
+                                                                type="button"
+                                                                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#a58062] hover:bg-[#eadcc8] hover:text-[#6a3f1f]"
+                                                                aria-label={`删除梗：${motif.text}`}
+                                                                onClick={() => handleDeleteCustomMotif(motif.id)}
+                                                            >
+                                                                <X className="h-3 w-3" />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="rounded-lg border border-dashed border-[#e4cfb7] px-3 py-4 text-center text-[12px] text-[#b08b67]">
+                                                    暂无自定义梗
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>,
@@ -1602,49 +1641,315 @@ const MessageItem = React.memo(({
         const source: string = md.source || '热点';
         const url: string | undefined = md.url;
         const desc: string | undefined = md.desc && md.desc !== title ? md.desc : undefined;
+        const rawPlatform = String(md.platform || '').toLowerCase();
+        const platform = rawPlatform
+            || (source.includes('B站') || source.toLowerCase().includes('bilibili') ? 'bilibili' : '')
+            || (source.includes('微博') ? 'weibo' : '')
+            || (source.includes('知乎') ? 'zhihu' : '')
+            || (source.includes('百度') ? 'baidu' : '')
+            || (source.includes('抖音') ? 'douyin' : '');
+        const rank = Number(md.rank);
+        const rankLabel = Number.isFinite(rank) && rank > 0 ? `#${Math.trunc(rank)}` : '热点';
         const dateStr = new Date(m.timestamp).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' });
-        return commonLayout(
-            <div
-                className="w-60 cursor-pointer active:scale-[0.98] transition-transform"
-                onClick={() => { if (url) window.open(url, '_blank', 'noopener,noreferrer'); }}
-                style={{ fontFamily: "'Noto Serif','Songti SC','Georgia',serif" }}
-            >
+        const openNews = () => { if (url) window.open(url, '_blank', 'noopener,noreferrer'); };
+
+        if (platform === 'bilibili') {
+            return commonLayout(
                 <div
-                    className="rounded-lg overflow-hidden border border-stone-400/70 shadow-[0_3px_12px_rgba(60,50,30,0.18)]"
-                    style={{ background: 'linear-gradient(170deg,#faf6ec 0%,#f3ecdb 100%)' }}
+                    className={`w-64 overflow-hidden rounded-lg border border-[#fb2d86]/40 bg-white shadow-[0_4px_14px_rgba(251,45,134,0.18)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
+                    onClick={openNews}
                 >
-                    <div className="px-3 pt-2 pb-1.5 border-b-2 border-double border-stone-500/60">
-                        <div className="flex items-center justify-between text-stone-500">
-                            <span className="text-[8.5px] tracking-[0.3em] uppercase font-bold">SullyOS Daily</span>
-                            <span className="text-[8.5px] tracking-wide">{dateStr} · 号外</span>
+                    <div className="flex items-center justify-between bg-[#fff0f6] px-3 py-2">
+                        <div className="flex items-center gap-2 text-[#d91672]">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#fb2d86] text-white">
+                                <PlayCircle className="h-5 w-5" weight="fill" />
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-black tracking-[0.16em]">Csy-OS</p>
+                                <p className="text-[9px] font-bold text-[#d91672]/70">BILIBILI 视频热榜</p>
+                            </div>
                         </div>
+                        <span className="rounded bg-white/80 px-1.5 py-0.5 text-[10px] font-black text-[#fb2d86]">{rankLabel}</span>
                     </div>
-                    <div className="px-3 pt-2.5">
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-white bg-red-700 px-1.5 py-[1px] tracking-wide shadow-sm">
-                            <span className="text-[8px]">|</span>{source}
-                        </span>
-                    </div>
-                    <div className="px-3 pt-1.5 pb-2">
+                    <div className="px-3 py-2.5">
                         <p
-                            className="text-[15px] leading-[1.35] font-black text-stone-900"
+                            className="text-[15px] font-black leading-snug text-slate-950"
                             style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                         >
                             {title}
                         </p>
                         {desc && (
                             <p
-                                className="text-[11px] leading-snug text-stone-600 mt-1"
+                                className="mt-1 text-[11px] leading-snug text-slate-500"
                                 style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                             >
                                 {desc}
                             </p>
                         )}
                     </div>
-                    <div className="px-3 py-1.5 flex items-center justify-between border-t border-stone-400/50">
-                        <span className="text-[9px] text-stone-500 italic">{charName || 'Ta'} 转给你看</span>
+                    <div className="flex items-center justify-between border-t border-[#fb2d86]/20 px-3 py-2">
+                        <span className="text-[9px] font-bold text-slate-400">{charName || 'Ta'} 转给你看</span>
+                        {url ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-[#d91672]">
+                                打开视频
+                                <ArrowSquareOut className="h-3 w-3" weight="bold" />
+                            </span>
+                        ) : (
+                            <span className="text-[9px] text-slate-300">热点速读</span>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        if (platform === 'weibo') {
+            return commonLayout(
+                <div
+                    className={`w-64 overflow-hidden rounded-lg border border-[#ff8200]/35 bg-white shadow-[0_4px_14px_rgba(255,130,0,0.16)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
+                    onClick={openNews}
+                >
+                    <div className="flex items-center justify-between bg-[#ff8200] px-3 py-2 text-white">
+                        <div className="flex items-center gap-2">
+                            <Fire className="h-4 w-4" weight="fill" />
+                            <span className="text-[10px] font-black tracking-[0.18em]">Csy-OS</span>
+                            <span className="text-[10px] font-bold text-white/80">微博热搜</span>
+                        </div>
+                        <span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-black text-[#ff8200]">{rankLabel}</span>
+                    </div>
+                    <div className="px-3 py-2.5">
+                        <p
+                            className="text-[16px] font-black leading-snug text-stone-950"
+                            style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                        >
+                            {title}
+                        </p>
+                        {desc && (
+                            <p
+                                className="mt-1 text-[11px] leading-snug text-stone-600"
+                                style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                            >
+                                {desc}
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex items-center justify-between border-t border-[#ff8200]/20 px-3 py-2">
+                        <span className="text-[9px] font-bold text-[#ff8200]/70">{dateStr} · {source}</span>
+                        {url ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-[#ff8200]">
+                                看热搜
+                                <ArrowSquareOut className="h-3 w-3" weight="bold" />
+                            </span>
+                        ) : (
+                            <span className="text-[9px] text-[#ff8200]/45">热点速读</span>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        if (platform === 'zhihu') {
+            return commonLayout(
+                <div
+                    className={`w-64 overflow-hidden rounded-lg border border-[#1772f6]/35 bg-white shadow-[0_4px_14px_rgba(23,114,246,0.16)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
+                    onClick={openNews}
+                >
+                    <div className="bg-[#1772f6] px-3 py-2 text-white">
+                        <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black tracking-[0.2em]">Csy-OS</span>
+                            <span className="text-[9px] font-bold text-white/75">{dateStr} · 号外</span>
+                        </div>
+                        <div className="mt-2 h-[2px] bg-gradient-to-r from-white via-[#8bbcff] to-white/40" />
+                    </div>
+                    <div className="px-3 pt-2.5">
+                        <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1 rounded bg-[#1772f6] px-2 py-1 text-[10px] font-black text-white shadow-sm">
+                                知乎热榜
+                            </span>
+                            <span className="text-[10px] font-black text-[#1772f6]">{rankLabel}</span>
+                        </div>
+                    </div>
+                    <div className="px-3 pb-2 pt-2">
+                        <p
+                            className="text-[16px] font-black leading-snug text-slate-950"
+                            style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                        >
+                            {title}
+                        </p>
+                        {desc && (
+                            <p
+                                className="mt-1 text-[11px] leading-snug text-slate-500"
+                                style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                            >
+                                {desc}
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex items-center justify-between border-t border-[#1772f6]/15 px-3 py-2">
+                        <span className="text-[9px] font-bold text-slate-400">{charName || 'Ta'} 转给你看</span>
+                        {url ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-[#1772f6]">
+                                打开知乎
+                                <ArrowSquareOut className="h-3 w-3" weight="bold" />
+                            </span>
+                        ) : (
+                            <span className="text-[9px] text-slate-300">热点速读</span>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        if (platform === 'baidu') {
+            return commonLayout(
+                <div
+                    className={`w-64 overflow-hidden rounded-lg border border-[#2932e1]/35 bg-white shadow-[0_4px_14px_rgba(41,50,225,0.16)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
+                    onClick={openNews}
+                >
+                    <div className="px-3 py-2">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <span className="relative flex h-7 w-7 items-center justify-center rounded bg-[#2932e1] text-[14px] font-black text-white shadow-sm">
+                                    百
+                                    <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[#de0f17] ring-2 ring-white" />
+                                </span>
+                                <span className="text-[10px] font-black tracking-[0.2em] text-[#2932e1]">Csy-OS</span>
+                            </div>
+                            <span className="text-[9px] font-bold text-slate-400">{dateStr} · 号外</span>
+                        </div>
+                        <div className="mt-2 h-[2px] bg-gradient-to-r from-[#2932e1] via-[#3385ff] to-[#de0f17]" />
+                    </div>
+                    <div className="px-3 pt-2">
+                        <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1 rounded bg-[#2932e1] px-2 py-1 text-[10px] font-black text-white shadow-sm">
+                                百度热榜
+                            </span>
+                            <span className="text-[10px] font-black text-[#de0f17]">{rankLabel}</span>
+                        </div>
+                    </div>
+                    <div className="px-3 pb-2 pt-2">
+                        <p
+                            className="text-[16px] font-black leading-snug text-slate-950"
+                            style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                        >
+                            {title}
+                        </p>
+                        {desc && (
+                            <p
+                                className="mt-1 text-[11px] leading-snug text-slate-500"
+                                style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                            >
+                                {desc}
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex items-center justify-between border-t border-[#2932e1]/15 px-3 py-2">
+                        <span className="text-[9px] font-bold text-slate-400">{charName || 'Ta'} 转给你看</span>
+                        {url ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-[#2932e1]">
+                                打开百度
+                                <ArrowSquareOut className="h-3 w-3 text-[#de0f17]" weight="bold" />
+                            </span>
+                        ) : (
+                            <span className="text-[9px] text-slate-300">热点速读</span>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        if (platform === 'douyin') {
+            return commonLayout(
+                <div
+                    className={`w-64 overflow-hidden rounded-lg border border-black bg-white shadow-[0_5px_16px_rgba(254,44,85,0.18),-2px_2px_0_rgba(37,244,238,0.75)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
+                    onClick={openNews}
+                >
+                    <div className="bg-[#0f0f0f] px-3 py-2 text-white">
+                        <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black tracking-[0.22em]">Csy-OS</span>
+                            <span className="text-[9px] font-bold text-white/70">{dateStr} · 号外</span>
+                        </div>
+                        <div className="mt-2 h-[2px] bg-gradient-to-r from-[#25f4ee] via-white to-[#fe2c55]" />
+                    </div>
+                    <div className="px-3 pt-2.5">
+                        <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1 rounded bg-[#0f0f0f] px-2 py-1 text-[10px] font-black text-white shadow-[2px_0_0_#fe2c55,-2px_0_0_#25f4ee]">
+                                <PlayCircle className="h-3 w-3 text-[#25f4ee]" weight="fill" />
+                                抖音热榜
+                            </span>
+                            <span className="text-[10px] font-black text-[#fe2c55]">{rankLabel}</span>
+                        </div>
+                    </div>
+                    <div className="px-3 pb-2 pt-2">
+                        <p
+                            className="text-[16px] font-black leading-snug text-[#0f0f0f]"
+                            style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                        >
+                            {title}
+                        </p>
+                        {desc && (
+                            <p
+                                className="mt-1 text-[11px] leading-snug text-slate-500"
+                                style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                            >
+                                {desc}
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex items-center justify-between border-t border-black/10 px-3 py-2">
+                        <span className="text-[9px] font-bold text-slate-400">{charName || 'Ta'} 刷到的热点</span>
+                        {url ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-[#fe2c55]">
+                                打开抖音
+                                <ArrowSquareOut className="h-3 w-3 text-[#25f4ee]" weight="bold" />
+                            </span>
+                        ) : (
+                            <span className="text-[9px] text-slate-300">热点速读</span>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        return commonLayout(
+            <div
+                className={`w-64 active:scale-[0.98] transition-transform ${url ? 'cursor-pointer' : ''}`}
+                onClick={openNews}
+            >
+                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.10)]">
+                    <div className="px-3 py-2">
+                        <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black tracking-[0.22em] text-slate-950">Csy-OS</span>
+                            <span className="text-[9px] font-bold text-slate-400">{dateStr} · MAG</span>
+                        </div>
+                        <div className="mt-2 h-[2px] bg-gradient-to-r from-slate-950 via-slate-300 to-transparent" />
+                    </div>
+                    <div className="px-3 pt-1">
+                        <span className="inline-flex items-center gap-1 rounded bg-slate-950 px-2 py-1 text-[10px] font-black tracking-wide text-white shadow-sm">
+                            {source}
+                        </span>
+                        <span className="ml-1.5 text-[10px] font-black text-slate-400">{rankLabel}</span>
+                    </div>
+                    <div className="px-3 pb-2 pt-2">
+                        <p
+                            className="text-[16px] font-black leading-snug text-slate-950"
+                            style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                        >
+                            {title}
+                        </p>
+                        {desc && (
+                            <p
+                                className="mt-1 text-[11px] leading-snug text-slate-500"
+                                style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                            >
+                                {desc}
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex items-center justify-between border-t border-slate-200 px-3 py-2">
+                        <span className="text-[9px] font-bold text-slate-400">{charName || 'Ta'} 转给你看</span>
                         {url
-                            ? <span className="text-[10px] text-red-700 font-bold tracking-wide">查看原文</span>
-                            : <span className="text-[9px] text-stone-400">热点速读</span>}
+                            ? <span className="inline-flex items-center gap-1 text-[10px] font-black text-slate-950">查看原文<ArrowSquareOut className="h-3 w-3" weight="bold" /></span>
+                            : <span className="text-[9px] text-slate-300">热点速读</span>}
                     </div>
                 </div>
             </div>
@@ -1820,7 +2125,13 @@ const MessageItem = React.memo(({
         prev.showThinking === next.showThinking &&
         prev.msg.metadata?.thinking === next.msg.metadata?.thinking &&
         prev.msg.metadata?.storyPhoneConsumed === next.msg.metadata?.storyPhoneConsumed &&
-        prev.msg.metadata?.source === next.msg.metadata?.source;
+        prev.msg.metadata?.source === next.msg.metadata?.source &&
+        prev.msg.metadata?.platform === next.msg.metadata?.platform &&
+        prev.msg.metadata?.rank === next.msg.metadata?.rank &&
+        prev.msg.metadata?.cardId === next.msg.metadata?.cardId &&
+        prev.msg.metadata?.url === next.msg.metadata?.url &&
+        prev.msg.metadata?.title === next.msg.metadata?.title &&
+        prev.msg.metadata?.desc === next.msg.metadata?.desc;
 });
 
 export default MessageItem;

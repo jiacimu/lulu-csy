@@ -9,7 +9,10 @@ export interface AfterglowCustomMotif {
     createdAt: number;
 }
 
+export type AfterglowGenerationMode = 'fanfic' | 'heartTalk';
+
 export interface AfterglowGenerationOptions {
+    mode?: AfterglowGenerationMode;
     userMotif?: string;
     customMotifs?: string[];
 }

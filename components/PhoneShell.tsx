@@ -44,7 +44,7 @@ const XhsStockApp = React.lazy(() => import('../apps/XhsStockApp'));
 const XhsFreeRoamApp = React.lazy(() => import('../apps/XhsFreeRoamApp'));
 const BrowserApp = React.lazy(() => import('../apps/BrowserApp'));
 const VoiceCallApp = React.lazy(() => import('../apps/VoiceCallApp'));
-const HotSearchApp = React.lazy(() => import('../apps/HotSearchApp'));
+const HotNewsApp = React.lazy(() => import('../apps/HotNewsApp'));
 const ZhaixinglouApp = React.lazy(() => import('../apps/zhaixinglou/ZhaixinglouApp'));
 const CsyManualApp = React.lazy(() => import('../apps/CsyManualApp'));
 const CognitiveNetworkApp = React.lazy(() => import('../apps/CognitiveNetworkApp'));
@@ -386,7 +386,7 @@ function renderActiveApp(activeApp: AppID) {
     case AppID.Worldbook: return <WorldbookApp />;
     case AppID.Novel: return <NovelApp />;
     case AppID.Bank: return <BankApp />;
-    case AppID.HotSearch: return <HotSearchApp />;
+    case AppID.HotSearch: return <HotNewsApp />;
     case AppID.XhsStock: return <XhsStockApp />;
     case AppID.XhsFreeRoam: return <XhsFreeRoamApp />;
     case AppID.Browser: return <BrowserApp />;

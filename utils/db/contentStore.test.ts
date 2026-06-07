@@ -43,3 +43,32 @@ describe('contentStore emoji initialization', () => {
         expect(emojis.some(emoji => presetNames.has(emoji.name))).toBe(false);
     });
 });
+
+describe('contentStore startup assets', () => {
+    beforeEach(() => {
+        resetIndexedDb();
+    });
+
+    it('loads only boot-critical assets and leaves generated image originals for on-demand reads', async () => {
+        await DB.saveAsset('wallpaper', 'wallpaper-data');
+        await DB.saveAsset('icon_chat', 'icon-data');
+        await DB.saveAsset('widget_clock', 'widget-data');
+        await DB.saveAsset('deco_rose', 'deco-data');
+        await DB.saveAsset('appearance_preset_soft', 'preset-data');
+        await DB.saveAsset('generated-image-original:photo-1', 'data:image/png;base64,large-original');
+        await DB.saveAsset('spark_user_bg', 'social-bg-data');
+
+        const startupAssets = await DB.getStartupAssets();
+        const ids = startupAssets.map(asset => asset.id).sort();
+
+        expect(ids).toEqual([
+            'appearance_preset_soft',
+            'deco_rose',
+            'icon_chat',
+            'wallpaper',
+            'widget_clock',
+        ]);
+        expect(startupAssets.some(asset => asset.data.includes('large-original'))).toBe(false);
+        expect(await DB.getAsset('generated-image-original:photo-1')).toBe('data:image/png;base64,large-original');
+    });
+});

@@ -2,6 +2,7 @@
 import { DB } from './db';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { stripCoTResidual } from './thinkingExtractor';
+import { enrichHotNewsItemIdentity } from './services/realtimeService';
 import type { SongShareCard } from '../types/music';
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -160,6 +161,33 @@ function normalizeDegradedActionTags(text: string): string {
         .replace(
             new RegExp(String.raw`[【\[]\s*${SPEAKER_PREFIX_RE}(?:退还|退還|返还|返還|拒收|拒绝|拒絕)(?:了)?(?:你|用户|用戶)?(?:的)?\s*(?:转账|轉帳|转帐|轉账)\s*[】\]]`, 'g'),
             '[[ACTION:RETURN_TRANSFER]]',
+        );
+}
+
+function normalizeDegradedNewsCardTags(text: string): string {
+    const toNewsCardTag = (_match: string, sourceOrTitle: string, maybeTitle?: string) => {
+        const hasSource = typeof maybeTitle === 'string';
+        const source = hasSource ? stripOuterTagJunk(sourceOrTitle).replace(/\s+/g, '') : '';
+        const title = stripOuterTagJunk(hasSource ? maybeTitle : sourceOrTitle)
+            .replace(/\s+/g, ' ')
+            .replace(/^(?:热点|标题)\s*[：:]\s*/i, '')
+            .trim();
+        if (!title) return _match;
+        return `[[NEWS_CARD: ${source ? `${source}|` : ''}${title}]]`;
+    };
+
+    return text
+        .replace(
+            /[【\[]\s*(?:你|我|用户|用戶|User)?\s*分享了?\s*(?:一个|一個|一条|一條)?\s*热点\s*[：:]\s*(?:[「《“"]\s*)?([\s\S]{1,220}?)(?:\s*[」》”"])\s*(?:[（(]\s*来源\s*[：:]\s*([^）)\]】\r\n]{1,40})\s*[）)])?\s*[】\]]/g,
+            (_match, title: string, source: string | undefined) => toNewsCardTag(_match, source || '', title),
+        )
+        .replace(
+            /[【\[]\s*(?:你|我|用户|用戶|User)?\s*分享了?\s*(?:一个|一個|一条|一條)?\s*热点\s*[：:]\s*([^\n\r（(】\]]{1,180}?)(?:[（(]\s*来源\s*[：:]\s*([^）)\]】\r\n]{1,40})\s*[）)])?\s*[】\]]/g,
+            (_match, title: string, source: string | undefined) => toNewsCardTag(_match, source || '', title),
+        )
+        .replace(
+            /[【\[]\s*热点分享\s*[：:]\s*([^|｜\n\r】\]]{1,40})\s*[|｜]\s*([^】\]]{1,220}?)\s*[】\]]/g,
+            toNewsCardTag,
         );
 }
 
@@ -374,7 +402,44 @@ export const ChatParser = {
             content = content.replace(returnTransferMatch[0], '').trim();
         }
 
-        // NEWS_CARD — char 主动把某条热点当作新闻卡片分享
+        // NEWS_CARD_ID — char 主动把某条热点当作新闻卡片分享
+        //   [[NEWS_CARD_ID: cardId]] 优先使用稳定 ID；旧格式 NEWS_CARD 继续兼容
+        const newsCardIdMatch = content.match(/\[\[NEWS_CARD_ID\s*[:：]\s*([^\]]*?)\s*\]\]/i);
+        if (newsCardIdMatch) {
+            const rawCardId = (newsCardIdMatch[1] || '').trim();
+            if (rawCardId) {
+                try {
+                    const snapshot = await DB.getLatestHotNewsSnapshot();
+                    const items = (snapshot?.items || []).map((item: any, index: number) =>
+                        enrichHotNewsItemIdentity(item, snapshot?.id || 'latest', index + 1, snapshot?.fetchedAt)
+                    );
+                    const hit = items.find(item => item.cardId === rawCardId || item.id === rawCardId);
+                    if (hit?.title) {
+                        const source = hit.source || '';
+                        const desc = hit.desc && hit.desc !== hit.title ? hit.desc : undefined;
+                        await DB.saveMessage({
+                            charId,
+                            role: 'assistant',
+                            type: 'news_card',
+                            content: `[你分享了一个热点：「${hit.title}」${source ? `（来源：${source}）` : ''}${desc ? `——${desc}` : ''}]`,
+                            metadata: {
+                                source,
+                                title: hit.title,
+                                url: hit.url,
+                                desc,
+                                platform: hit.platform,
+                                rank: hit.rank,
+                                cardId: hit.cardId || hit.id || rawCardId,
+                            },
+                        });
+                        addToast(`${charName} 分享了一条热点`, 'info');
+                    }
+                } catch { /* 没有快照时无法解析稳定 ID，直接移除标签 */ }
+            }
+            content = content.replace(/\[\[NEWS_CARD_ID\s*[:：][^\]]*\]\]/gi, '').trim();
+        }
+
+        // NEWS_CARD — 兼容旧格式
         //   [[NEWS_CARD: 来源|标题]]，来源可省略为 [[NEWS_CARD: 标题]]
         const newsCardMatch = content.match(/\[\[NEWS_CARD\s*[:：]\s*([^\]]*?)\s*\]\]/i);
         if (newsCardMatch) {
@@ -390,13 +455,22 @@ export const ChatParser = {
 
                 let url: string | undefined;
                 let desc: string | undefined;
+                let platform: string | undefined;
+                let rank: number | undefined;
+                let cardId: string | undefined;
                 try {
                     const snapshot = await DB.getLatestHotNewsSnapshot();
-                    const hit = snapshot?.items?.find(item => item.title === title)
-                        || snapshot?.items?.find(item => !!title && (item.title.includes(title) || title.includes(item.title)));
+                    const items = (snapshot?.items || []).map((item: any, index: number) =>
+                        enrichHotNewsItemIdentity(item, snapshot?.id || 'latest', index + 1, snapshot?.fetchedAt)
+                    );
+                    const hit = items.find(item => item.title === title)
+                        || items.find(item => !!title && (item.title.includes(title) || title.includes(item.title)));
                     if (hit) {
                         url = hit.url;
                         desc = hit.desc;
+                        platform = hit.platform;
+                        rank = hit.rank;
+                        cardId = hit.cardId || hit.id;
                         if (!source && hit.source) source = hit.source;
                     }
                 } catch { /* 没有快照时仍然可以生成无链接卡片 */ }
@@ -407,7 +481,7 @@ export const ChatParser = {
                         role: 'assistant',
                         type: 'news_card',
                         content: `[你分享了一个热点：「${title}」${source ? `（来源：${source}）` : ''}${desc ? `——${desc}` : ''}]`,
-                        metadata: { source, title, url, desc },
+                        metadata: { source, title, url, desc, platform, rank, cardId },
                     });
                     addToast(`${charName} 分享了一条热点`, 'info');
                 }
@@ -527,6 +601,7 @@ export const ChatParser = {
             .replace(/[【\[](?:用户|你|我|User)\s*发送了[\s\S]*?[】\]]/g, '');
 
         result = normalizeDegradedActionTags(result);
+        result = normalizeDegradedNewsCardTags(result);
         result = normalizeSongShareTags(result);
         // Strip any CoT protocol residual that leaked through (e.g. from Gemini native thinking)
         result = stripCoTResidual(result);
@@ -555,7 +630,7 @@ export const ChatParser = {
             // ── Strip markdown headers ──
             .replace(/^#{1,6}\s+/gm, '')
             // ── Strip residual action/system tags ──
-            .replace(/\[\[(?:ACTION|NEWS_CARD|RECALL|SEARCH|DIARY|READ_DIARY|FS_DIARY|FS_READ_DIARY|DIARY_START|DIARY_END|FS_DIARY_START|FS_DIARY_END|CALL|WEIBO_SEARCH|CANVA_CREATE|CANVA_SEARCH|CANVA_EXPORT|XHS_SEARCH|XHS_BROWSE|XHS_POST|XHS_SHARE|XHS_COMMENT|XHS_LIKE|XHS_FAV|XHS_DETAIL|XHS_REPLY|XHS_MY_PROFILE|READ_NOTE)[:\s][\s\S]*?\]\]/g, '')
+            .replace(/\[\[(?:ACTION|NEWS_CARD_ID|NEWS_CARD|RECALL|SEARCH|DIARY|READ_DIARY|FS_DIARY|FS_READ_DIARY|DIARY_START|DIARY_END|FS_DIARY_START|FS_DIARY_END|CALL|WEIBO_SEARCH|CANVA_CREATE|CANVA_SEARCH|CANVA_EXPORT|XHS_SEARCH|XHS_BROWSE|XHS_POST|XHS_SHARE|XHS_COMMENT|XHS_LIKE|XHS_FAV|XHS_DETAIL|XHS_REPLY|XHS_MY_PROFILE|READ_NOTE)[:\s][\s\S]*?\]\]/g, '')
             .replace(/\[\[(?:ACTION|CALL)[:\s]\w*\]\]/g, '')
             .replace(/\[schedule_message[^\]]*\]/g, '')
             .replace(/\[\[(?:QU[OA]TE|引用)[：:][\s\S]*?\]\]/g, '')

@@ -6,6 +6,25 @@ import {
   SULLY_CATEGORY_ID,SULLY_PRESET_EMOJIS
 } from './core';
 
+const STARTUP_ASSET_EXACT_KEYS = new Set([
+    'wallpaper',
+    'launcherWidgetImage',
+    'custom_font_data',
+    'input_effect_asset',
+]);
+
+const STARTUP_ASSET_PREFIXES = [
+    'icon_',
+    'widget_',
+    'deco_',
+    'appearance_preset_',
+];
+
+function isStartupAssetKey(value: unknown): value is string {
+    if (typeof value !== 'string' || !value) return false;
+    return STARTUP_ASSET_EXACT_KEYS.has(value) || STARTUP_ASSET_PREFIXES.some(prefix => value.startsWith(prefix));
+}
+
 // --- Themes ---
 export const getThemes = async (): Promise<ChatTheme[]> => {
     const db = await openDB();
@@ -25,6 +44,64 @@ export const getAllAssets = async (): Promise<{ id: string, data: string }[]> =>
         const request = db.transaction(STORE_ASSETS, 'readonly').objectStore(STORE_ASSETS).getAll();
         request.onsuccess = () => resolve(request.result || []);
         request.onerror = () => reject(request.error);
+    });
+};
+export const getStartupAssets = async (): Promise<{ id: string, data: string }[]> => {
+    const db = await openDB();
+    if (!db.objectStoreNames.contains(STORE_ASSETS)) return [];
+
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(STORE_ASSETS, 'readonly');
+        const store = transaction.objectStore(STORE_ASSETS);
+        const keyRequest = store.getAllKeys();
+        const results: { id: string, data: string }[] = [];
+        let pendingReads = 0;
+        let settled = false;
+
+        const settle = (value: { id: string, data: string }[]) => {
+            if (settled) return;
+            settled = true;
+            resolve(value);
+        };
+
+        const fail = (error: unknown) => {
+            if (settled) return;
+            settled = true;
+            reject(error);
+        };
+
+        const maybeSettle = () => {
+            if (pendingReads === 0) {
+                settle(results);
+            }
+        };
+
+        keyRequest.onsuccess = () => {
+            const ids = (keyRequest.result || [])
+                .map(key => String(key))
+                .filter(isStartupAssetKey);
+
+            pendingReads = ids.length;
+            if (pendingReads === 0) {
+                settle([]);
+                return;
+            }
+
+            ids.forEach(id => {
+                const request = store.get(id);
+                request.onsuccess = () => {
+                    const record = request.result;
+                    if (record && typeof record.id === 'string' && typeof record.data === 'string') {
+                        results.push({ id: record.id, data: record.data });
+                    }
+                    pendingReads -= 1;
+                    maybeSettle();
+                };
+                request.onerror = () => fail(request.error);
+            });
+        };
+        keyRequest.onerror = () => fail(keyRequest.error);
+        transaction.onerror = () => fail(transaction.error);
     });
 };
 export const getAsset = async (id: string): Promise<string | null> => {

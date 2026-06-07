@@ -1,6 +1,10 @@
 export {
     RealtimeContextManager,
     defaultRealtimeConfig,
+    buildHotNewsCardId,
+    enrichHotNewsItemIdentity,
+    normalizeHotNewsPlatform,
+    normalizeHotNewsTitleForId,
     type RealtimeConfig,
     type WeatherData,
     type NewsItem,

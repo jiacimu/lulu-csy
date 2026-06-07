@@ -85,12 +85,12 @@ const RealtimeSettings: React.FC = () => {
                     
                     <div className={`p-3 rounded-2xl transition-all border ${rt.newsEnabled ? 'bg-gradient-to-br from-blue-50 to-sky-50 border-blue-100 shadow-sm' : 'bg-slate-50/50 border-transparent text-slate-400 opacity-60'}`}>
                         <div className="text-2xl mb-1.5">{rt.newsEnabled ? '📰' : '📄'}</div>
-                        <div className={`text-xs font-bold ${rt.newsEnabled ? 'text-blue-700' : ''}`}>新闻早报</div>
+                        <div className={`text-xs font-bold ${rt.newsEnabled ? 'text-blue-700' : ''}`}>外部热点</div>
                     </div>
                     
                     <div className={`p-3 rounded-2xl transition-all border ${rt.hotSearchEnabled ? 'bg-gradient-to-br from-rose-50 to-red-50 border-rose-100 shadow-sm' : 'bg-slate-50/50 border-transparent text-slate-400 opacity-60'}`}>
                         <div className="text-2xl mb-1.5">{rt.hotSearchEnabled ? '🔥' : '🧊'}</div>
-                        <div className={`text-xs font-bold ${rt.hotSearchEnabled ? 'text-rose-700' : ''}`}>微博热搜</div>
+                        <div className={`text-xs font-bold ${rt.hotSearchEnabled ? 'text-rose-700' : ''}`}>微博精筛</div>
                     </div>
                     
                     <div className={`p-3 rounded-2xl transition-all border ${rt.notionEnabled ? 'bg-gradient-to-br from-orange-50 to-amber-50 border-orange-100 shadow-sm' : 'bg-slate-50/50 border-transparent text-slate-400 opacity-60'}`}>

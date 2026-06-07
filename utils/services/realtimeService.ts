@@ -18,10 +18,15 @@ export interface WeatherData {
 }
 
 export interface NewsItem {
+    id?: string;
+    cardId?: string;
     title: string;
     source?: string;
+    platform?: string;
+    rank?: number;
     url?: string;
     desc?: string;
+    fetchedAt?: number;
 }
 
 export interface SearchResult {
@@ -104,6 +109,106 @@ let newsCache: { data: NewsItem[]; timestamp: number } = { data: [], timestamp: 
 let hotSearchCache: { data: any[]; timestamp: number } = { data: [], timestamp: 0 };
 let aihotCache: { data: any[]; timestamp: number } = { data: [], timestamp: 0 };
 
+const HOT_NEWS_DIRECT_BASE = 'https://orz.ai/api/v1/dailynews/';
+const HOT_NEWS_PLATFORM_ALIASES: Record<string, string> = {
+    sspai: 'shaoshupai',
+    tskr: '36kr',
+    ftpojie: '52pojie',
+    vtex: 'v2ex',
+};
+const HOT_NEWS_LABEL_ALIASES: Record<string, string> = {
+    微博: 'weibo',
+    知乎: 'zhihu',
+    百度: 'baidu',
+    抖音: 'douyin',
+    b站: 'bilibili',
+    B站: 'bilibili',
+    哔哩哔哩: 'bilibili',
+    少数派: 'shaoshupai',
+    '36氪': '36kr',
+    吾爱破解: '52pojie',
+    豆瓣: 'douban',
+    虎扑: 'hupu',
+    贴吧: 'tieba',
+    掘金: 'juejin',
+    今日头条: 'jinritoutiao',
+    腾讯网: 'tenxunwang',
+};
+
+export function normalizeHotNewsPlatform(platform: string): string {
+    const raw = String(platform || '').trim();
+    const key = raw.toLowerCase();
+    if (HOT_NEWS_LABEL_ALIASES[raw]) return HOT_NEWS_LABEL_ALIASES[raw];
+    if (HOT_NEWS_LABEL_ALIASES[key]) return HOT_NEWS_LABEL_ALIASES[key];
+    return HOT_NEWS_PLATFORM_ALIASES[key] || key;
+}
+
+export function normalizeHotNewsTitleForId(title: string): string {
+    const normalized = String(title || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^\w\u4e00-\u9fa5-]+/g, '')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 48);
+    return normalized || 'untitled';
+}
+
+export function buildHotNewsCardId(platform: string, slotId: string, rank: number, title: string): string {
+    const safePlatform = (normalizeHotNewsPlatform(platform) || 'hot')
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '') || 'hot';
+    const safeSlot = String(slotId || 'slot')
+        .trim()
+        .replace(/[^a-zA-Z0-9#_-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '') || 'slot';
+    const safeRank = Number.isFinite(rank) && rank > 0 ? Math.trunc(rank) : 0;
+    return `${safePlatform}:${safeSlot}:${safeRank}:${normalizeHotNewsTitleForId(title)}`;
+}
+
+export function enrichHotNewsItemIdentity(item: NewsItem, slotId: string, fallbackRank: number, fallbackFetchedAt?: number): NewsItem {
+    const rank = Number.isFinite(item.rank) && Number(item.rank) > 0
+        ? Math.trunc(Number(item.rank))
+        : Math.max(1, Math.trunc(fallbackRank || 1));
+    const platform = normalizeHotNewsPlatform(item.platform || item.source || 'hot') || 'hot';
+    const cardId = item.cardId || item.id || buildHotNewsCardId(platform, slotId, rank, item.title);
+    return {
+        ...item,
+        id: item.id || cardId,
+        cardId,
+        platform,
+        rank,
+        fetchedAt: item.fetchedAt || fallbackFetchedAt,
+    };
+}
+
+async function fetchHotNewsPayload(platform: string): Promise<any> {
+    const query = `platform=${encodeURIComponent(normalizeHotNewsPlatform(platform))}`;
+    const candidates = [
+        `/hot-news?${query}`,
+        `${HOT_NEWS_DIRECT_BASE}?${query}`,
+    ];
+    let lastError: unknown;
+
+    for (const url of candidates) {
+        try {
+            const res = await fetch(url, { headers: { Accept: 'application/json' } });
+            if (!res.ok) {
+                lastError = new Error(`HTTP ${res.status}`);
+                continue;
+            }
+            return await safeResponseJson(res);
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError || 'hot news fetch failed'));
+}
+
 export const RealtimeContextManager = {
 
     /**
@@ -153,9 +258,9 @@ export const RealtimeContextManager = {
     },
 
     HOTNEWS_PLATFORM_LABELS: {
-        baidu: '百度', sspai: '少数派', weibo: '微博', zhihu: '知乎', tskr: '36氪',
-        ftpojie: '吾爱破解', bilibili: 'B站', douban: '豆瓣', hupu: '虎扑', tieba: '贴吧',
-        juejin: '掘金', douyin: '抖音', vtex: 'V2EX', jinritoutiao: '今日头条',
+        baidu: '百度', sspai: '少数派', shaoshupai: '少数派', weibo: '微博', zhihu: '知乎', tskr: '36氪', '36kr': '36氪',
+        ftpojie: '吾爱破解', '52pojie': '吾爱破解', bilibili: 'B站', douban: '豆瓣', hupu: '虎扑', tieba: '贴吧',
+        juejin: '掘金', douyin: '抖音', vtex: 'V2EX', v2ex: 'V2EX', jinritoutiao: '今日头条',
         stackoverflow: 'Stack Overflow', github: 'GitHub', hackernews: 'Hacker News',
         sina_finance: '新浪财经', eastmoney: '东方财富', xueqiu: '雪球', cls: '财联社',
         tenxunwang: '腾讯网',
@@ -167,36 +272,40 @@ export const RealtimeContextManager = {
         const list = (platforms && platforms.length > 0)
             ? platforms
             : RealtimeContextManager.DEFAULT_HOTNEWS_PLATFORMS;
+        const slotId = RealtimeContextManager.getHotNewsSlot().id;
+        const fetchedAt = Date.now();
 
         const perPlatformResults = await Promise.all(list.map(async (platform): Promise<NewsItem[]> => {
-            const label = RealtimeContextManager.HOTNEWS_PLATFORM_LABELS[platform] || platform;
+            const platformKey = normalizeHotNewsPlatform(platform);
+            const label = RealtimeContextManager.HOTNEWS_PLATFORM_LABELS[platformKey] || RealtimeContextManager.HOTNEWS_PLATFORM_LABELS[platform] || platform;
             try {
-                const res = await fetch(`https://orz.ai/api/v1/dailynews/?platform=${encodeURIComponent(platform)}`, {
-                    headers: { Accept: 'application/json' },
-                });
-                if (!res.ok) {
-                    console.warn(`[hot_news] ${label}(${platform}) HTTP ${res.status}`);
-                    return [];
-                }
-                const data = await safeResponseJson(res);
+                const data = await fetchHotNewsPayload(platform);
                 const items: any[] = Array.isArray(data?.data) ? data.data : [];
                 const picked = items
                     .filter(item => item && item.title)
                     .slice(0, perPlatform)
-                    .map(item => {
+                    .map((item, index) => {
+                        const title = String(item.title);
                         const desc = typeof item.desc === 'string' ? item.desc.replace(/\s+/g, ' ').trim() : '';
+                        const rank = index + 1;
+                        const cardId = buildHotNewsCardId(platformKey, slotId, rank, title);
                         return {
-                            title: String(item.title),
+                            id: cardId,
+                            cardId,
+                            title,
                             source: label,
+                            platform: platformKey,
+                            rank,
                             url: typeof item.url === 'string' ? item.url : undefined,
                             desc: desc || undefined,
+                            fetchedAt,
                         };
                     });
                 const withDesc = picked.filter(item => item.desc).length;
-                console.log(`[hot_news] ${label}(${platform}) fetched ${picked.length}/${items.length}, desc=${withDesc}`);
+                console.log(`[hot_news] ${label}(${platformKey}) fetched ${picked.length}/${items.length}, desc=${withDesc}`);
                 return picked;
             } catch (e: any) {
-                console.warn(`[hot_news] ${label}(${platform}) failed:`, e?.message || e);
+                console.warn(`[hot_news] ${label}(${platformKey}) failed:`, e?.message || e);
                 return [];
             }
         }));
@@ -241,7 +350,7 @@ export const RealtimeContextManager = {
             if (snapshot?.items?.length && samePlatforms(snapshot.platforms, platforms)) {
                 const mins = Math.round((Date.now() - snapshot.fetchedAt) / 60000);
                 console.log(`%c[hot_news] reuse ${label} snapshot (${snapshot.items.length} items, ${mins} min old)`, 'color:#16a34a');
-                return snapshot.items;
+                return snapshot.items.map((item, index) => enrichHotNewsItemIdentity(item, snapshot.id, index + 1, snapshot.fetchedAt));
             }
         } catch { /* cache miss is fine */ }
 
@@ -262,7 +371,7 @@ export const RealtimeContextManager = {
                 const latest = await DB.getLatestHotNewsSnapshot();
                 if (latest?.items?.length) {
                     console.warn(`[hot_news] fetch failed, reusing latest snapshot ${latest.date} ${latest.slotLabel}`);
-                    return latest.items;
+                    return latest.items.map((item, index) => enrichHotNewsItemIdentity(item, latest.id, index + 1, latest.fetchedAt));
                 }
             } catch { /* ignore */ }
             return [];
@@ -593,20 +702,21 @@ export const RealtimeContextManager = {
                 newsLines.push(`但如果对方正在认真说一件事 / 带着情绪，就别硬插热点，安静当背景知识就好。）`);
                 picks.forEach((item) => {
                     const source = item.source ? `（${item.source}）` : '';
-                    let line = `- ${item.title}${source}`;
+                    const cardId = item.cardId || item.id || '';
+                    let line = cardId ? `- [cardId: ${cardId}] ${item.title}${source}` : `- ${item.title}${source}`;
                     if (item.desc && item.desc !== item.title) {
                         line += `：${item.desc}`;
                     }
                     newsLines.push(line);
                 });
                 newsLines.push('');
-                newsLines.push(`若你想主动把其中某条当作"新闻卡片"分享给对方，可单独输出一行：[[NEWS_CARD: 来源|标题]]（标题照抄上面的）。它会以卡片形式呈现，然后你再就此展开聊。别滥用，自然就好。`);
+                newsLines.push(`若你想主动把其中某条当作"新闻卡片"分享给对方，只输出一行：[[NEWS_CARD_ID: cardId]]（照抄上方 cardId，不要自己编链接）。它会以可跳转卡片形式呈现，然后你再自然展开聊。别滥用。`);
 
                 try {
                     const block = newsLines.join('\n');
                     console.groupCollapsed(`%c[hot_news] prompt injection: ${picks.length} items · ${block.length} chars`, 'color:#7c3aed;font-weight:bold');
                     if (typeof console.table === 'function') {
-                        console.table(picks.map((item, i) => ({ '#': i + 1, source: item.source || '', title: item.title, desc: item.desc || '' })));
+                        console.table(picks.map((item, i) => ({ '#': i + 1, cardId: item.cardId || item.id || '', source: item.source || '', title: item.title, desc: item.desc || '' })));
                     }
                     console.log(block);
                     console.groupEnd();

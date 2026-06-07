@@ -73,4 +73,39 @@ describe('date request context', () => {
 
         expect(context[0]?.content).toBe(longContent);
     });
+
+    it('excludes current Date session raw messages hidden by summary compression', () => {
+        const currentOpening = msg({
+            id: 10,
+            role: 'assistant',
+            content: '当前见面开场',
+            metadata: { source: 'date', isOpening: true },
+        });
+        const compressedRaw = msg({
+            id: 11,
+            role: 'assistant',
+            content: '已经被总结压缩的旧原文',
+            metadata: {
+                source: 'date',
+                hiddenFromUser: true,
+                dateSummaryAutoHidden: true,
+                hiddenBySummaryMsgId: 99,
+            },
+        });
+        const currentUser = msg({
+            id: 12,
+            role: 'user',
+            content: '压缩之后的新消息',
+            metadata: { source: 'date' },
+        });
+
+        const context = buildDateRequestContextMessages({
+            allMessages: [currentOpening, compressedRaw, currentUser],
+            currentSessionMessages: [currentOpening, compressedRaw, currentUser],
+            contextLimit: 500,
+        });
+
+        expect(context.map(item => item.sourceMessage.id)).toEqual([10, 12]);
+        expect(context.map(item => item.content)).not.toContain('已经被总结压缩的旧原文');
+    });
 });

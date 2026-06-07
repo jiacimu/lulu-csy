@@ -77,6 +77,123 @@ function buildInfoPlugin(info: BuildInfo): Plugin {
   };
 }
 
+const HOT_NEWS_DEV_API = 'https://orz.ai/api/v1/dailynews/';
+const HOT_NEWS_DEV_ALIASES: Record<string, string> = {
+  sspai: 'shaoshupai',
+  tskr: '36kr',
+  ftpojie: '52pojie',
+  vtex: 'v2ex',
+};
+const HOT_NEWS_DEV_CODELIFE_IDS: Record<string, string> = {
+  weibo: 'KqndgxeLl9',
+  zhihu: 'mproPpoq6O',
+  baidu: 'Jb0vmloB1G',
+  bilibili: '74KvxwokxM',
+  douyin: 'DpQvNABoNE',
+};
+
+function normalizeHotNewsFallbackItems(items: any[]): { title: string; url?: string; desc?: string }[] {
+  return items
+    .map((item) => {
+      const title = String(item?.title || item?.name || '').trim();
+      const url = typeof item?.url === 'string' ? item.url
+        : typeof item?.link === 'string' ? item.link
+          : typeof item?.mobilUrl === 'string' ? item.mobilUrl
+            : undefined;
+      const desc = String(item?.desc || item?.hotValue || item?.hot || '').replace(/\s+/g, ' ').trim();
+      return title ? { title, url, desc: desc || undefined } : null;
+    })
+    .filter(Boolean) as { title: string; url?: string; desc?: string }[];
+}
+
+async function fetchHotNewsFallbackPayload(platform: string): Promise<unknown | null> {
+  const id = HOT_NEWS_DEV_CODELIFE_IDS[platform];
+  if (!id) return null;
+
+  const fallbackUrl = new URL('https://api.codelife.cc/api/top/list');
+  fallbackUrl.searchParams.set('lang', 'cn');
+  fallbackUrl.searchParams.set('id', id);
+
+  const fallback = await fetch(fallbackUrl.toString(), {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'SullyOS-HotNews/1.0',
+    },
+  });
+  if (!fallback.ok) return null;
+
+  const payload = await fallback.json() as any;
+  const items = normalizeHotNewsFallbackItems(Array.isArray(payload?.data) ? payload.data : []);
+  if (items.length === 0) return null;
+  return { status: '200', data: items, msg: 'success', fallback: 'codelife' };
+}
+
+async function fetchHotNewsDevPayload(platform: string): Promise<{ payload: unknown; status: number }> {
+  const upstreamUrl = new URL(HOT_NEWS_DEV_API);
+  upstreamUrl.searchParams.set('platform', platform);
+
+  try {
+    const upstream = await fetch(upstreamUrl.toString(), {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'SullyOS-HotNews/1.0',
+      },
+    });
+    const payload = await upstream.json() as any;
+    const hasItems = Array.isArray(payload?.data) && payload.data.length > 0;
+    if (hasItems) return { payload, status: upstream.status };
+
+    const fallbackPayload = await fetchHotNewsFallbackPayload(platform);
+    if (fallbackPayload) return { payload: fallbackPayload, status: 200 };
+    return { payload, status: upstream.status };
+  } catch (error) {
+    const fallbackPayload = await fetchHotNewsFallbackPayload(platform);
+    if (fallbackPayload) return { payload: fallbackPayload, status: 200 };
+    const detail = error instanceof Error ? error.message : String(error);
+    return { payload: { error: 'hot_news_proxy_error', detail }, status: 502 };
+  }
+}
+
+function hotNewsDevProxyPlugin(): Plugin {
+  return {
+    name: 'sully-hot-news-dev-proxy',
+    configureServer(server) {
+      server.middlewares.use('/hot-news', async (req: any, res: any) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+
+        if (req.method === 'OPTIONS') {
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
+
+        if (req.method !== 'GET') {
+          res.statusCode = 405;
+          res.end(JSON.stringify({ error: 'method_not_allowed' }));
+          return;
+        }
+
+        const url = new URL(req.url || '/', 'http://localhost/hot-news');
+        const rawPlatform = String(url.searchParams.get('platform') || '').trim().toLowerCase();
+        const platform = HOT_NEWS_DEV_ALIASES[rawPlatform] || rawPlatform;
+        if (!platform) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: 'invalid_platform' }));
+          return;
+        }
+
+        const { payload, status } = await fetchHotNewsDevPayload(platform);
+        res.statusCode = status;
+        res.setHeader('Cache-Control', 'public, max-age=300');
+        res.end(JSON.stringify(payload));
+      });
+    },
+  };
+}
+
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const buildInfo = createBuildInfo();
@@ -86,7 +203,7 @@ export default defineConfig(({ mode, command }) => {
   }
 
   return {
-    plugins: [react() as any, buildInfoPlugin(buildInfo)],
+    plugins: [react() as any, buildInfoPlugin(buildInfo), hotNewsDevProxyPlugin()],
     optimizeDeps: {
       exclude: ['onnxruntime-web'],
     },

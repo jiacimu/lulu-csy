@@ -2,10 +2,16 @@
 import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { GameSession,GameTheme,CharacterProfile,GameLog } from '../types';
+import { GameSession,GameTheme,CharacterProfile,GameLog,GameSettings,GameSummaryChunk } from '../types';
 import { ContextBuilder } from '../utils/context';
 import { extractContent,extractJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
+import TrpgControlBall from '../components/game/TrpgControlBall';
+import {
+    buildTrpgWritingStylePrompt,
+    normalizeTrpgSettings,
+    TRPG_MAX_OUTPUT_TOKENS
+} from '../utils/trpgSettings';
 
 // --- Themes Configuration (Enhanced) ---
 const GAME_THEMES: Record<GameTheme, { bg: string, text: string, accent: string, font: string, border: string, cardBg: string, gradient: string, optionNormal: string, optionChaotic: string, optionEvil: string }> = {
@@ -57,6 +63,129 @@ const GAME_THEMES: Record<GameTheme, { bg: string, text: string, accent: string,
         optionChaotic: 'bg-yellow-50 border-yellow-200 text-yellow-700',
         optionEvil: 'bg-red-50 border-red-200 text-red-700'
     }
+};
+
+const SUMMARY_INTERVAL_ROUNDS = 20;
+const SUMMARY_BUFFER_ROUNDS = 5;
+
+type GameLogRoundItem = {
+    log: GameLog;
+    index: number;
+    round: number;
+};
+
+type GameTimelineItem =
+    | { type: 'summary'; summary: GameSummaryChunk; index: number }
+    | { type: 'log'; log: GameLog; index: number; round: number };
+
+const isRoundStarter = (log: GameLog) => log.role === 'player' || log.role === 'system';
+
+const getLogRoundItems = (logs: GameLog[]): GameLogRoundItem[] => {
+    let round = 0;
+    return logs.map((log, index) => {
+        if (isRoundStarter(log)) round += 1;
+        return { log, index, round };
+    });
+};
+
+const getGameRoundCount = (logs: GameLog[]) => logs.reduce((count, log) => count + (isRoundStarter(log) ? 1 : 0), 0);
+
+const getSortedSummaries = (game: Pick<GameSession, 'summaries'>) =>
+    [...(game.summaries || [])].sort((a, b) => a.startRound - b.startRound);
+
+const getValidSummaries = (game: Pick<GameSession, 'summaries' | 'logs'>) => {
+    const roundCount = getGameRoundCount(game.logs);
+    return getSortedSummaries(game).filter(summary => summary.endRound <= roundCount);
+};
+
+const getSummarizedUntil = (summaries: GameSummaryChunk[]) =>
+    summaries.reduce((max, summary) => Math.max(max, summary.endRound), 0);
+
+const pruneSummariesForLogs = (summaries: GameSummaryChunk[] | undefined, logs: GameLog[]) => {
+    const roundCount = getGameRoundCount(logs);
+    return (summaries || []).filter(summary => summary.endRound <= roundCount);
+};
+
+const getNextSummaryRange = (game: GameSession) => {
+    const roundCount = getGameRoundCount(game.logs);
+    const summaries = getValidSummaries(game);
+    const summarizedUntil = getSummarizedUntil(summaries);
+    const dueThrough = Math.floor(Math.max(0, roundCount - SUMMARY_BUFFER_ROUNDS) / SUMMARY_INTERVAL_ROUNDS) * SUMMARY_INTERVAL_ROUNDS;
+
+    if (dueThrough <= summarizedUntil) return null;
+
+    return {
+        startRound: summarizedUntil + 1,
+        endRound: Math.min(summarizedUntil + SUMMARY_INTERVAL_ROUNDS, dueThrough)
+    };
+};
+
+const getLogsForSummaryRange = (logs: GameLog[], startRound: number, endRound: number) =>
+    getLogRoundItems(logs).filter(item => (
+        (item.round === 0 && startRound === 1) ||
+        (item.round >= startRound && item.round <= endRound)
+    ));
+
+const formatGameLogForPrompt = (item: GameLogRoundItem) => {
+    const { log, round } = item;
+    const speaker = log.role === 'gm'
+        ? 'GM'
+        : log.role === 'system'
+            ? 'System'
+            : (log.speakerName || 'Player');
+    const roundLabel = round > 0 ? `第${round}轮` : '序章';
+    const dice = log.diceRoll ? ` [D20=${log.diceRoll.result}/${log.diceRoll.max}]` : '';
+    return `[${roundLabel} | ${speaker}${dice}]: ${log.content}`;
+};
+
+const formatSummaryForPrompt = (summary: GameSummaryChunk, index: number) =>
+    `总结${index + 1}（第${summary.startRound}-${summary.endRound}轮）:\n${summary.content}`;
+
+const buildCompressedLogContext = (game: GameSession) => {
+    const summaries = getValidSummaries(game);
+    const summarizedUntil = getSummarizedUntil(summaries);
+    const rawItems = getLogRoundItems(game.logs).filter(item => {
+        if (summarizedUntil <= 0) return true;
+        if (item.round === 0) return false;
+        return item.round > summarizedUntil;
+    });
+
+    const summaryText = summaries.map(formatSummaryForPrompt).join('\n\n');
+    const rawText = rawItems.map(formatGameLogForPrompt).join('\n');
+
+    if (!summaryText) return rawText || '暂无记录';
+
+    return `【已压缩剧情总结】\n${summaryText}\n\n【近期原始记录（第${summarizedUntil + 1}轮起，保留${SUMMARY_BUFFER_ROUNDS}轮缓冲）】\n${rawText || '暂无近期原始记录'}`;
+};
+
+const buildFinalArchiveContext = (game: GameSession) => {
+    const summaries = getValidSummaries(game);
+    const summarizedUntil = getSummarizedUntil(summaries);
+    const rawItems = getLogRoundItems(game.logs).filter(item => {
+        if (summarizedUntil <= 0) return true;
+        if (item.round === 0) return false;
+        return item.round > summarizedUntil;
+    });
+
+    const summaryText = summaries.map(formatSummaryForPrompt).join('\n\n') || '暂无分段总结';
+    const rawText = rawItems.map(formatGameLogForPrompt).join('\n') || '暂无剩余原始记录';
+
+    return `【分段总结】\n${summaryText}\n\n【剩余未总结原始记录】\n${rawText}`;
+};
+
+const getDisplayTimeline = (game: GameSession): GameTimelineItem[] => {
+    const summaries = getValidSummaries(game);
+    const summarizedUntil = getSummarizedUntil(summaries);
+    const summaryItems: GameTimelineItem[] = summaries.map((summary, index) => ({ type: 'summary', summary, index }));
+    const logItems: GameTimelineItem[] = getLogRoundItems(game.logs)
+        .filter(item => {
+            if (summarizedUntil <= 0) return true;
+            if (item.round === 0) return false;
+            return item.round > summarizedUntil;
+        })
+        .map(item => ({ type: 'log', ...item }));
+
+    return [...summaryItems, ...logItems];
 };
 
 // --- Markdown Renderer Component ---
@@ -178,7 +307,7 @@ const GameApp: React.FC = () => {
                 }
             }, 100);
         }
-    }, [activeGame?.logs, view, isTyping]);
+    }, [activeGame?.logs, activeGame?.summaries, view, isTyping]);
 
     const loadGames = async () => {
         const list = await DB.getAllGames();
@@ -186,14 +315,18 @@ const GameApp: React.FC = () => {
     };
 
     // --- Helper: Robust API Call ---
-    const fetchGameAPI = async (prompt: string, maxTokens: number = 8000) => {
+    const fetchGameAPI = async (
+        prompt: string,
+        maxTokens: number = TRPG_MAX_OUTPUT_TOKENS,
+        temperature: number = normalizeTrpgSettings(activeGame?.settings).temperature
+    ) => {
         const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
             body: JSON.stringify({
                 model: apiConfig.model,
                 messages: [{ role: "user", content: prompt }],
-                temperature: 0.9, 
+                temperature,
                 max_tokens: maxTokens,
                 stream: false
             })
@@ -311,6 +444,7 @@ ${recentLog}
         try {
             const tempId = `game-${Date.now()}`;
             const players = characters.filter(c => selectedPlayers.has(c.id));
+            const defaultGameSettings = normalizeTrpgSettings();
             
             // Build Context with Sync
             const playerContext = await buildSyncContext(players);
@@ -345,7 +479,7 @@ ${playerContext}
   ]
 }`;
 
-            const data = await fetchGameAPI(prompt);
+            const data = await fetchGameAPI(prompt, TRPG_MAX_OUTPUT_TOKENS, defaultGameSettings.temperature);
             const rawContent = extractContent(data);
             if (!rawContent) throw new Error('AI 返回了空响应');
 
@@ -395,6 +529,8 @@ ${playerContext}
                 worldSetting: newWorld,
                 playerCharIds: Array.from(selectedPlayers),
                 logs: initialLogs,
+                summaries: [],
+                settings: defaultGameSettings,
                 status: {
                     location: res?.startLocation || 'Unknown',
                     health: 100,
@@ -436,6 +572,95 @@ ${playerContext}
         }
     };
 
+    const updateActiveGameSettings = async (patch: Partial<GameSettings>) => {
+        if (!activeGame) return;
+
+        const nextSettings: GameSettings = {
+            ...activeGame.settings,
+            ...patch
+        };
+        const updated: GameSession = {
+            ...activeGame,
+            settings: nextSettings,
+            lastPlayedAt: Date.now()
+        };
+
+        setActiveGame(updated);
+        setGames(prev => prev.map(game => game.id === updated.id ? updated : game));
+        await DB.saveGame(updated);
+    };
+
+    const summarizeGameChunk = async (game: GameSession, startRound: number, endRound: number): Promise<GameSummaryChunk> => {
+        const chunkLogs = getLogsForSummaryRange(game.logs, startRound, endRound);
+        if (chunkLogs.length === 0) throw new Error('没有可总结的原始记录');
+
+        const priorSummaries = getValidSummaries(game);
+        const priorSummaryText = priorSummaries.length > 0
+            ? priorSummaries.map(formatSummaryForPrompt).join('\n\n')
+            : '无';
+        const chunkText = chunkLogs.map(formatGameLogForPrompt).join('\n');
+
+        const prompt = `### TRPG 自动压缩总结
+你正在为一场长期 TRPG 冒险压缩上下文。请只总结本次给出的第 ${startRound}-${endRound} 轮原始记录，用于后续继续跑团。
+
+### 之前已经存在的总结（只用于衔接，不要重复大段复述）
+${priorSummaryText}
+
+### 本次需要压缩的原始记录
+${chunkText}
+
+### 输出要求
+- 用中文输出一段结构清晰的总结。
+- 保留关键剧情事实、地点变化、重要选择、战斗/谜题结果、获得或失去的物品、HP/SAN/GOLD 的明显变化。
+- 保留角色之间的关系变化、吐槽、承诺、冲突和未解决伏笔。
+- 不要输出寒暄、标题或 Markdown 代码块。
+- 不要虚构原文没有发生的结果。`;
+
+        const data = await fetchGameAPI(prompt, TRPG_MAX_OUTPUT_TOKENS, 0.45);
+        const content = (extractContent(data) || '').trim();
+        if (!content) throw new Error('自动总结返回了空内容');
+
+        return {
+            id: `summary-${Date.now()}-${startRound}-${endRound}`,
+            startRound,
+            endRound,
+            content,
+            createdAt: Date.now()
+        };
+    };
+
+    const maybeAutoSummarizeGame = async (game: GameSession): Promise<GameSession> => {
+        let nextGame: GameSession = {
+            ...game,
+            summaries: pruneSummariesForLogs(game.summaries, game.logs)
+        };
+        let didSummarize = false;
+
+        while (true) {
+            const range = getNextSummaryRange(nextGame);
+            if (!range) break;
+
+            try {
+                addToast(`正在自动整理第 ${range.startRound}-${range.endRound} 轮记录...`, 'info');
+                const summary = await summarizeGameChunk(nextGame, range.startRound, range.endRound);
+                nextGame = {
+                    ...nextGame,
+                    summaries: [...getValidSummaries(nextGame), summary],
+                    lastPlayedAt: Date.now()
+                };
+                await DB.saveGame(nextGame);
+                didSummarize = true;
+            } catch (e: any) {
+                console.error('[GameApp] Auto summary failed', e);
+                addToast(`自动压缩失败，暂时保留原文: ${e.message || e}`, 'error');
+                break;
+            }
+        }
+
+        if (didSummarize) addToast('TRPG 记录已自动压缩', 'success');
+        return nextGame;
+    };
+
     // --- Gameplay Logic ---
     const rollDice = () => {
         if (isRolling || isTyping) return;
@@ -458,11 +683,12 @@ ${playerContext}
         requestAnimationFrame(animate);
     };
 
-    const handleAction = async (actionText: string, isReroll: boolean = false) => {
-        if (!activeGame || !apiConfig.apiKey) return;
-        
-        let contextLogs = activeGame.logs;
-        let updatedGame = activeGame;
+    const handleAction = async (actionText: string, isReroll: boolean = false, gameOverride?: GameSession) => {
+        const sourceGame = gameOverride || activeGame;
+        if (!sourceGame || !apiConfig.apiKey) return;
+
+        let contextLogs = sourceGame.logs;
+        let updatedGame = sourceGame;
 
         if (!isReroll) {
             // Standard Action: Append user log
@@ -474,43 +700,54 @@ ${playerContext}
                 timestamp: Date.now(),
                 diceRoll: diceResult ? { result: diceResult, max: 20 } : undefined
             };
-            
-            const updatedLogs = [...activeGame.logs, userLog];
-            updatedGame = { ...activeGame, logs: updatedLogs, lastPlayedAt: Date.now(), suggestedActions: [] }; // Clear options while thinking
+
+            const updatedLogs = [...sourceGame.logs, userLog];
+            updatedGame = { ...sourceGame, logs: updatedLogs, lastPlayedAt: Date.now(), suggestedActions: [] }; // Clear options while thinking
             setActiveGame(updatedGame);
             await DB.saveGame(updatedGame);
             contextLogs = updatedLogs;
         }
-        
+
         setUserInput('');
         setDiceResult(null);
         setIsTyping(true);
         setLastTokenUsage(null);
+
+        const pendingSummaryRange = getNextSummaryRange(updatedGame);
+        if (pendingSummaryRange) {
+            updatedGame = await maybeAutoSummarizeGame(updatedGame);
+            contextLogs = updatedGame.logs;
+            setActiveGame(updatedGame);
+            setLastTokenUsage(null);
+        }
         addToast('GM 正在推演...', 'info'); // Feedback for Sync
 
         try {
             // 2. Build Context WITH RELATIONSHIP SYNC
-            const players = characters.filter(c => activeGame.playerCharIds.includes(c.id));
+            const players = characters.filter(c => updatedGame.playerCharIds.includes(c.id));
             const playerContext = await buildSyncContext(players);
 
             // 3. Build Status Warning
             let statusWarning = "";
-            if (activeGame.status.health <= 30) statusWarning += "\n[WARNING: LOW HP] 玩家濒临死亡，请描述极度的虚弱、伤痛、视野模糊或濒死体验。\n";
-            if (activeGame.status.sanity <= 30) statusWarning += "\n[WARNING: LOW SAN] 玩家理智崩溃中，请描述疯狂、幻听、幻视或不可名状的恐惧。\n";
-            
+            if (updatedGame.status.health <= 30) statusWarning += "\n[WARNING: LOW HP] 玩家濒临死亡，请描述极度的虚弱、伤痛、视野模糊或濒死体验。\n";
+            if (updatedGame.status.sanity <= 30) statusWarning += "\n[WARNING: LOW SAN] 玩家理智崩溃中，请描述疯狂、幻听、幻视或不可名状的恐惧。\n";
+
             let gameOverTrigger = "";
-            if (activeGame.status.health <= 0 || activeGame.status.sanity <= 0) {
+            if (updatedGame.status.health <= 0 || updatedGame.status.sanity <= 0) {
                 gameOverTrigger = "\n[GAME OVER TRIGGER] 玩家的生命值或理智值已归零。请生成一个悲惨或疯狂的结局 (Bad Ending)，结束本次冒险。\n";
             }
 
-            const prompt = `### 🎲 TRPG 跑团模式: ${activeGame.title}
-**当前剧本**: ${activeGame.worldSetting}
-**当前场景**: ${activeGame.status.location}
+            const contextGame = { ...updatedGame, logs: contextLogs };
+            const gameSettings = normalizeTrpgSettings(updatedGame.settings);
+            const writingStylePrompt = buildTrpgWritingStylePrompt(gameSettings.writingStyle);
+            const prompt = `### 🎲 TRPG 跑团模式: ${updatedGame.title}
+**当前剧本**: ${updatedGame.worldSetting}
+**当前场景**: ${updatedGame.status.location}
 **队伍资源**: 
-- ❤️ HP: ${activeGame.status.health}% 
-- 🧠 SAN: ${activeGame.status.sanity || 100}%
-- 💰 GOLD: ${activeGame.status.gold || 0}
-- 🎒 物品: ${activeGame.status.inventory.join(', ') || '空'}
+- ❤️ HP: ${updatedGame.status.health}%
+- 🧠 SAN: ${updatedGame.status.sanity || 100}%
+- 💰 GOLD: ${updatedGame.status.gold || 0}
+- 🎒 物品: ${updatedGame.status.inventory.join(', ') || '空'}
 
 ${statusWarning}
 ${gameOverTrigger}
@@ -523,7 +760,8 @@ ${players.map(p => `2. **${p.name}** (ID: ${p.id}) - 你的队友`).join('\n')}
 ${playerContext}
 
 ### 📝 冒险记录 (Log)
-${contextLogs.map(l => `[${l.role === 'gm' ? 'GM' : (l.speakerName || 'System')}]: ${l.content}`).join('\n')}
+${buildCompressedLogContext(contextGame)}
+${writingStylePrompt ? `\n### ✒️ 文风控制\n${writingStylePrompt}\n` : ''}
 
 ### 🎲 GM 指令 (Game Master Instructions)
 你现在是这场跑团游戏的 **主持人 (GM)**。
@@ -567,7 +805,7 @@ ${contextLogs.map(l => `[${l.role === 'gm' ? 'GM' : (l.speakerName || 'System')}
   ]
 }`;
 
-            const data = await fetchGameAPI(prompt);
+            const data = await fetchGameAPI(prompt, TRPG_MAX_OUTPUT_TOKENS, gameSettings.temperature);
             const rawContent = extractContent(data);
             if (!rawContent) throw new Error('AI 返回了空响应');
 
@@ -627,9 +865,11 @@ ${contextLogs.map(l => `[${l.role === 'gm' ? 'GM' : (l.speakerName || 'System')}
                 status: newStatus,
                 suggestedActions: res?.suggested_actions || []
             };
-            
+
             setActiveGame(finalGame);
             await DB.saveGame(finalGame);
+            const summarizedGame = await maybeAutoSummarizeGame(finalGame);
+            if (summarizedGame !== finalGame) setActiveGame(summarizedGame);
 
         } catch (e: any) {
             addToast(`GM 掉线了: ${e.message}`, 'error');
@@ -658,21 +898,25 @@ ${contextLogs.map(l => `[${l.role === 'gm' ? 'GM' : (l.speakerName || 'System')}
 
         // Keep logs up to and including the last user input
         const contextLogs = logs.slice(0, lastUserIndex + 1);
-        
+
         // Optimistic Update
-        const rolledBackGame = { ...activeGame, logs: contextLogs };
+        const rolledBackGame = {
+            ...activeGame,
+            logs: contextLogs,
+            summaries: pruneSummariesForLogs(activeGame.summaries, contextLogs)
+        };
         setActiveGame(rolledBackGame);
-        
-        await handleAction("", true); // isReroll = true
+
+        await handleAction("", true, rolledBackGame); // isReroll = true
         addToast('正在重新推演命运...', 'info');
     };
 
     const handleRollbackLog = async (index: number) => {
         if (!activeGame) return;
         if (!confirm("回退到此条记录？\n(注意：此操作将删除该条记录之后的所有内容，但不会自动重置HP/物品状态，请手动调整)")) return;
-        
+
         const newLogs = activeGame.logs.slice(0, index + 1);
-        const updated = { ...activeGame, logs: newLogs };
+        const updated = { ...activeGame, logs: newLogs, summaries: pruneSummariesForLogs(activeGame.summaries, newLogs) };
         await DB.saveGame(updated);
         setActiveGame(updated);
         addToast('时间回溯成功', 'success');
@@ -699,6 +943,7 @@ ${contextLogs.map(l => `[${l.role === 'gm' ? 'GM' : (l.speakerName || 'System')}
                 gold: 0,
                 inventory: []
             },
+            summaries: [],
             suggestedActions: [],
             lastPlayedAt: Date.now()
         };
@@ -720,20 +965,21 @@ ${contextLogs.map(l => `[${l.role === 'gm' ? 'GM' : (l.speakerName || 'System')}
         if (!activeGame) return;
         setIsArchiving(true);
         setShowSystemMenu(false);
-        
+
         try {
             const players = characters.filter(c => activeGame.playerCharIds.includes(c.id));
             const playerNames = players.map(p => p.name).join('、');
-            // Increase log context for summary
-            const logText = activeGame.logs.slice(-30).map(l => `${l.role}: ${l.content}`).join('\n');
-            
-            const prompt = `Task: Summarize the key events of this TRPG session into a short clause (what happened).
-Game: ${activeGame.title}
-Logs:
-${logText}
-Output: A concise summary in Chinese (e.g. "探索了地牢并击败了史莱姆"). No preamble.`;
+            const archiveContext = buildFinalArchiveContext(activeGame);
 
-            const data = await fetchGameAPI(prompt);
+            const prompt = `Task: Create the final archive summary for this TRPG session.
+Game: ${activeGame.title}
+Use all compressed segment summaries and the remaining unsummarized raw logs below.
+
+${archiveContext}
+
+Output: A concise but complete Chinese final summary in 1-3 sentences. Include key events, outcome, important relationship beats, and unresolved hooks if any. No preamble.`;
+
+            const data = await fetchGameAPI(prompt, TRPG_MAX_OUTPUT_TOKENS, 0.45);
             let summary = extractContent(data) || '进行了一场冒险';
             summary = summary.replace(/[。\.]$/, ''); // Remove trailing dot
 
@@ -931,6 +1177,12 @@ Output: A concise summary in Chinese (e.g. "探索了地牢并击败了史莱姆
     if (!activeGame) return null;
     const theme = GAME_THEMES[activeGame.theme];
     const activePlayers = characters.filter(c => activeGame.playerCharIds.includes(c.id));
+    const timeline = getDisplayTimeline(activeGame);
+    const gameSettings = normalizeTrpgSettings(activeGame.settings);
+    const validSummaries = getValidSummaries(activeGame);
+    const summarizedUntil = getSummarizedUntil(validSummaries);
+    const roundCount = getGameRoundCount(activeGame.logs);
+    const nextSummaryRound = summarizedUntil + SUMMARY_INTERVAL_ROUNDS + SUMMARY_BUFFER_ROUNDS;
 
     // [FIX] Changed from absolute inset-0 to h-full relative to fix overscroll and height layout issues
     return (
@@ -949,7 +1201,7 @@ Output: A concise summary in Chinese (e.g. "探索了地牢并击败了史莱姆
                                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
                                 {activeGame.status.location}
                             </span>
-                            {lastTokenUsage && <span className="text-[8px] opacity-40 font-mono" title={`Prompt: ${lastTokenUsage.prompt || '?'} | Completion: ${lastTokenUsage.completion || '?'} | Total session: ${totalTokensUsed}`}>⚡{lastTokenUsage.prompt || '?'}/{lastTokenUsage.completion || '?'} (∑{totalTokensUsed})</span>}
+                            {gameSettings.showTokenHud && lastTokenUsage && <span className="text-[8px] opacity-40 font-mono" title={`Prompt: ${lastTokenUsage.prompt || '?'} | Completion: ${lastTokenUsage.completion || '?'} | Total session: ${totalTokensUsed}`}>⚡{lastTokenUsage.prompt || '?'}/{lastTokenUsage.completion || '?'} (∑{totalTokensUsed})</span>}
                         </div>
                     </div>
                 </div>
@@ -1007,7 +1259,7 @@ Output: A concise summary in Chinese (e.g. "探索了地牢并击败了史莱姆
                     </div>
                 </div>
                 {/* Token Statistics */}
-                {lastTokenUsage && (
+                {gameSettings.showTokenHud && lastTokenUsage && (
                     <div className="mt-1.5 flex items-center justify-between bg-white/5 rounded px-2 py-1 border border-white/10">
                         <span className="text-[8px] text-white/40 font-mono">⚡ 上下文: {lastTokenUsage.prompt ?? '?'} | 回复: {lastTokenUsage.completion ?? '?'} | 本次: {lastTokenUsage.total}</span>
                         <span className="text-[8px] text-white/40 font-mono">∑ {totalTokensUsed}</span>
@@ -1020,7 +1272,23 @@ Output: A concise summary in Chinese (e.g. "探索了地牢并击败了史莱姆
                 ref={logsContainerRef} // [FIX] Attach Ref to scrollable container
                 className="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar relative animate-fade-in"
             >
-                {activeGame.logs.map((log, i) => {
+                {timeline.map((item) => {
+                    if (item.type === 'summary') {
+                        const { summary } = item;
+                        return (
+                            <div key={summary.id} className="animate-fade-in my-4 relative">
+                                <div className={`p-5 rounded-lg border-2 ${theme.border} ${theme.cardBg} shadow-sm relative mx-auto w-full text-sm`}>
+                                    <div className="absolute -top-3 left-4 bg-inherit px-2 text-[10px] font-bold uppercase tracking-widest opacity-80 border border-inherit rounded">Auto Summary</div>
+                                    <div className={`mb-3 text-[10px] font-mono ${theme.accent} opacity-80`}>
+                                        总结 {item.index + 1} · 第 {summary.startRound}-{summary.endRound} 轮原文已隐藏
+                                    </div>
+                                    <GameMarkdown content={summary.content} theme={theme} customStyle={uiSettings} />
+                                </div>
+                            </div>
+                        );
+                    }
+
+                    const { log, index: i } = item;
                     const isGM = log.role === 'gm';
                     const isSystem = log.role === 'system';
                     const isCharacter = log.role === 'character';
@@ -1160,6 +1428,19 @@ Output: A concise summary in Chinese (e.g. "探索了地牢并击败了史莱姆
                     </button>
                 </div>
             </div>
+
+            <TrpgControlBall
+                gameId={activeGame.id}
+                settings={activeGame.settings}
+                roundCount={roundCount}
+                nextSummaryRound={nextSummaryRound}
+                summariesCount={validSummaries.length}
+                summarizedUntil={summarizedUntil}
+                lastTokenUsage={lastTokenUsage}
+                totalTokensUsed={totalTokensUsed}
+                isBusy={isTyping || isRolling || isArchiving || isCreating}
+                onChangeSettings={updateActiveGameSettings}
+            />
 
             {/* System Menu Modal */}
             <Modal isOpen={showSystemMenu} title="系统菜单" onClose={() => setShowSystemMenu(false)}>

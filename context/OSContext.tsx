@@ -418,7 +418,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
             // 加载 TTS 配置
             // 加载 STT 配置
             try {
-                const assets = await DB.getAllAssets();
+                const assets = await DB.getStartupAssets();
                 const assetMap: Record<string, string> = {};
                 if (Array.isArray(assets)) {
                     assets.forEach(a => assetMap[a.id] = a.data);

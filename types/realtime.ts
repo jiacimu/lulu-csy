@@ -47,10 +47,15 @@ export interface RealtimeConfig {
 }
 
 export interface HotNewsItem {
+    id?: string;
+    cardId?: string;
     title: string;
     source?: string;
+    platform?: string;
+    rank?: number;
     url?: string;
     desc?: string;
+    fetchedAt?: number;
 }
 
 export interface HotNewsSnapshot {

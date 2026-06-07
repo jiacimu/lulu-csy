@@ -139,6 +139,20 @@ export interface GameLog {
     };
 }
 
+export interface GameSummaryChunk {
+    id: string;
+    startRound: number;
+    endRound: number;
+    content: string;
+    createdAt: number;
+}
+
+export interface GameSettings {
+    temperature?: number;
+    writingStyle?: string;
+    showTokenHud?: boolean;
+}
+
 export interface GameSession {
     id: string;
     title: string;
@@ -155,6 +169,8 @@ export interface GameSession {
     };
     sanityLocked?: boolean;
     suggestedActions?: GameActionOption[];
+    summaries?: GameSummaryChunk[];
+    settings?: GameSettings;
     createdAt: number;
     lastPlayedAt: number;
 }

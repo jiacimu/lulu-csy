@@ -68,7 +68,7 @@ export const NewsSection = React.memo<NewsProps>(({ enabled, apiKey, platforms, 
     return (
     <div className="bg-blue-50/50 p-4 rounded-2xl space-y-3">
         <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2"><span className="text-lg">📰</span><span className="text-sm font-bold text-blue-700">新闻热点</span></div>
+            <div className="flex items-center gap-2"><span className="text-lg">📰</span><span className="text-sm font-bold text-blue-700">外部热点感知</span></div>
             <label className="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" checked={enabled} onChange={e => set('newsEnabled', e.target.checked)} className="sr-only peer" />
                 <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
@@ -76,7 +76,7 @@ export const NewsSection = React.memo<NewsProps>(({ enabled, apiKey, platforms, 
         </div>
         {enabled && (
             <div className="space-y-2">
-                <p className="text-xs text-blue-600/70">默认使用中文多平台热榜，按每天 6 个时段缓存。Brave 只作为热榜失败时的回落源。</p>
+                <p className="text-xs text-blue-600/70">把微博、B站、知乎、百度、抖音等多平台热榜作为外部世界快照；char 会按兴趣自然挑话题，也能生成可跳转热点卡片。</p>
                 <div className="grid grid-cols-2 gap-2">
                     {HOT_NEWS_PLATFORM_OPTIONS.map(option => (
                         <label key={option.key} className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 text-xs font-semibold transition-colors ${selected.includes(option.key) ? 'bg-white border-blue-200 text-blue-700' : 'bg-white/45 border-transparent text-slate-400'}`}>
@@ -92,7 +92,7 @@ export const NewsSection = React.memo<NewsProps>(({ enabled, apiKey, platforms, 
                 </div>
                 <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Brave Search API Key (可选回落)</label>
                     <input type="text" value={apiKey} onChange={e => set('newsApiKey', e.target.value)} className="w-full bg-white/80 border border-blue-200 rounded-xl px-3 py-2 text-sm font-mono" placeholder="获取: brave.com/search/api" {...getGuardedInputProps({ kind: 'secret', field: 'news-api-key' })} /></div>
-                <p className="text-[10px] text-blue-500/70">Brave 可留空；只有中文热榜拉不到时才会尝试 Brave，最后再兜底 Hacker News。</p>
+                <p className="text-[10px] text-blue-500/70">Brave 可留空；只有多平台热榜拉不到时才会尝试 Brave，最后再兜底 Hacker News。</p>
             </div>
         )}
     </div>
@@ -119,7 +119,7 @@ export const HotSearchSection = React.memo<HotSearchProps>(({ enabled, set }) =>
     return (
         <div className="bg-red-50/50 p-4 rounded-2xl space-y-3">
             <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2"><span className="text-lg">🔥</span><span className="text-sm font-bold text-red-700">实时热搜</span></div>
+                <div className="flex items-center gap-2"><span className="text-lg">🔥</span><span className="text-sm font-bold text-red-700">微博热搜精筛</span></div>
                 <label className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" checked={enabled} onChange={e => set('hotSearchEnabled', e.target.checked)} className="sr-only peer" />
                     <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
@@ -127,7 +127,7 @@ export const HotSearchSection = React.memo<HotSearchProps>(({ enabled, set }) =>
             </div>
             {enabled && (
                 <div className="space-y-2">
-                    <p className="text-xs text-red-600/70">开启后，AI 将实时感知微博热搜，并能根据对话氛围和兴趣自主提取相关热门话题与你探讨。无需配置，免费使用。</p>
+                    <p className="text-xs text-red-600/70">这是外部感知里的微博补充能力：给角色做更细的微博热搜兴趣筛选。多平台入口仍由“外部热点感知”负责；两者可以同时开启。</p>
                     <button onClick={testHotSearch} className="w-full py-2 bg-red-100 text-red-600 text-xs font-bold rounded-xl active:scale-95 transition-transform">测试热搜接口</button>
                     {testStatus && <p className="text-xs text-center text-red-600/80">{testStatus}</p>}
                 </div>
