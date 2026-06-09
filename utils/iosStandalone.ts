@@ -1,6 +1,7 @@
 let hasInstalledIOSStandaloneWorkaround = false;
 let stableStandaloneHeight = 0;
 let lastStandaloneState: boolean | null = null;
+const KEYBOARD_INSET_THRESHOLD = 100;
 
 export const IOS_STANDALONE_CHANGE_EVENT = 'sully:ios-standalone-change';
 
@@ -94,28 +95,41 @@ function setViewportVars(): void {
   const topSafeInset = readSafeAreaInset('top');
   const bottomSafeInset = readSafeAreaInset('bottom');
   const standaloneBottomSafeInset = shouldStabilizeHeight ? bottomSafeInset : 0;
-  const obscuredHeight = Math.max(0, innerHeight - viewportHeight - viewportOffsetTop);
-  const keyboardInset = obscuredHeight > 120 ? obscuredHeight : 0;
-  const nextViewportHeight = Math.max(innerHeight, layoutViewportHeight, viewportHeight + viewportOffsetTop);
-  const nextAppHeight = nextViewportHeight;
+  const visualViewportBottom = viewportHeight + viewportOffsetTop;
+  const layoutAppHeight = Math.max(innerHeight, layoutViewportHeight, visualViewportBottom);
+  const measuredAppHeight = window.visualViewport ? visualViewportBottom : layoutAppHeight;
+  const keyboardBaselineHeight = stableStandaloneHeight || layoutAppHeight;
+  const obscuredHeight = Math.max(0, keyboardBaselineHeight - visualViewportBottom);
+  const keyboardInset = obscuredHeight >= KEYBOARD_INSET_THRESHOLD ? obscuredHeight : 0;
+  const isKeyboardOpen = keyboardInset > 0;
 
   if (shouldStabilizeHeight) {
-    if (!keyboardInset || !stableStandaloneHeight) {
-      stableStandaloneHeight = Math.max(stableStandaloneHeight, nextAppHeight);
+    if (!isKeyboardOpen) {
+      stableStandaloneHeight = measuredAppHeight || layoutAppHeight;
     }
   } else {
     stableStandaloneHeight = 0;
   }
 
   const appHeight = shouldStabilizeHeight
-    ? (stableStandaloneHeight || nextAppHeight)
-    : nextAppHeight;
+    ? (stableStandaloneHeight || layoutAppHeight)
+    : (isKeyboardOpen ? layoutAppHeight : measuredAppHeight);
+
+  document.documentElement.classList.toggle('keyboard-open', isKeyboardOpen);
+  document.body?.classList.toggle('keyboard-open', isKeyboardOpen);
+  document.body?.classList.toggle('ios-keyboard-open', isKeyboardOpen);
   document.documentElement.style.setProperty('--app-height', `${appHeight}px`);
   document.documentElement.style.setProperty('--visual-viewport-height', `${viewportHeight}px`);
   document.documentElement.style.setProperty('--keyboard-inset', `${keyboardInset}px`);
   document.documentElement.style.setProperty('--standalone-safe-area-bottom', `${standaloneBottomSafeInset}px`);
   document.documentElement.style.setProperty('--hardware-safe-top', `${topSafeInset}px`);
   document.documentElement.style.setProperty('--hardware-safe-bottom', `${bottomSafeInset}px`);
+  document.documentElement.style.setProperty(
+    '--effective-safe-bottom',
+    isKeyboardOpen
+      ? '0px'
+      : (shouldStabilizeHeight ? `${bottomSafeInset}px` : 'var(--safe-bottom, env(safe-area-inset-bottom, 0px))'),
+  );
 
   if (shouldStabilizeHeight) {
     document.documentElement.style.setProperty('--safe-top', `${topSafeInset}px`);
@@ -136,10 +150,14 @@ export function installIOSStandaloneWorkaround(): void {
     setViewportVars();
   };
 
+  const handleOrientationChange = () => {
+    stableStandaloneHeight = 0;
+    setViewportVars();
+  };
+
   const handleFocusIn = (event: FocusEvent) => {
     if (!isIOSDevice()) return;
     if (!isTextEntryElement(event.target)) return;
-    document.body?.classList.add('ios-keyboard-open');
     setViewportVars();
 
     const target = event.target;
@@ -165,7 +183,7 @@ export function installIOSStandaloneWorkaround(): void {
   };
 
   window.addEventListener('resize', handleViewportChange);
-  window.addEventListener('orientationchange', handleViewportChange);
+  window.addEventListener('orientationchange', handleOrientationChange);
   window.addEventListener('pageshow', handleViewportChange);
   document.addEventListener('visibilitychange', handleViewportChange);
   window.visualViewport?.addEventListener('resize', handleViewportChange);

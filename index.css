@@ -4843,6 +4843,7 @@
   --hardware-safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--standalone-safe-area-bottom, 0px));
+  --effective-safe-bottom: var(--safe-bottom, env(safe-area-inset-bottom, 0px));
   --system-status-top: 8px;
 }
 
@@ -4997,7 +4998,7 @@ select:focus {
 
 /* Utility for Safe Area */
 .pb-safe {
-  padding-bottom: var(--safe-bottom, env(safe-area-inset-bottom));
+  padding-bottom: var(--effective-safe-bottom, var(--safe-bottom, env(safe-area-inset-bottom, 0px)));
 }
 
 .sully-active-app-container > * {
@@ -5042,10 +5043,14 @@ select:focus {
   --sully-chat-header-height: max(6rem, calc(var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem)) + 4rem));
   --sully-chat-header-padding-top: max(2.5rem, var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem)));
   --sully-chat-keyboard-offset: 0px;
+  box-sizing: border-box;
+  padding-bottom: var(--keyboard-inset, 0px);
+  transition: padding-bottom 180ms ease-out;
 }
 
+html.keyboard-open .sully-chat-container,
 body.ios-keyboard-open .sully-chat-container {
-  --sully-chat-keyboard-offset: var(--keyboard-inset, 0px);
+  --sully-chat-keyboard-offset: 0px;
 }
 
 .sully-chat-header {
