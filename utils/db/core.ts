@@ -1,7 +1,7 @@
 
 
 const DB_NAME = 'AetherOS_Data';
-const DB_VERSION = 47; // Bumped for NianNian self-contained VN sessions
+const DB_VERSION = 48; // Bumped for Collection Hall books
 
 export const STORE_CHARACTERS = 'characters';
 export const STORE_MESSAGES = 'messages';
@@ -38,6 +38,7 @@ export const STORE_CHAT_CONTEXT_MIRRORS = 'chat_context_mirrors';
 export const STORE_YESTERDAY_NEWSPAPERS = 'yesterday_newspapers';
 export const STORE_VIBE_REFERENCES = 'vibe_references';
 export const STORE_NIANNIAN_SESSIONS = 'niannian_sessions';
+export const STORE_COLLECTION_BOOKS = 'collection_books';
 
 export interface ScheduledMessage {
     id: string;
@@ -239,6 +240,29 @@ export const openDB = (): Promise<IDBDatabase> => {
                 const nianNianStore = db.createObjectStore(STORE_NIANNIAN_SESSIONS, { keyPath: 'id' });
                 nianNianStore.createIndex('charId', 'charId', { unique: false });
                 nianNianStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+            }
+            if (!db.objectStoreNames.contains(STORE_COLLECTION_BOOKS)) {
+                const collectionStore = db.createObjectStore(STORE_COLLECTION_BOOKS, { keyPath: 'id' });
+                collectionStore.createIndex('charId', 'charId', { unique: false });
+                collectionStore.createIndex('charKindSourceMessage', ['charId', 'kind', 'sourceMessageId'], { unique: false });
+                collectionStore.createIndex('collectedAt', 'collectedAt', { unique: false });
+            } else {
+                const collectionStore = (event.target as IDBOpenDBRequest).transaction?.objectStore(STORE_COLLECTION_BOOKS);
+                if (collectionStore && !collectionStore.indexNames.contains('charId')) {
+                    try {
+                        collectionStore.createIndex('charId', 'charId', { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
+                if (collectionStore && !collectionStore.indexNames.contains('charKindSourceMessage')) {
+                    try {
+                        collectionStore.createIndex('charKindSourceMessage', ['charId', 'kind', 'sourceMessageId'], { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
+                if (collectionStore && !collectionStore.indexNames.contains('collectedAt')) {
+                    try {
+                        collectionStore.createIndex('collectedAt', 'collectedAt', { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
             }
         };
     });

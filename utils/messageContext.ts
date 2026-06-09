@@ -1,4 +1,5 @@
 import type { Emoji, Message } from '../types';
+import { formatCollectionKindLabel } from './collectionBooks';
 
 export type MessageContextSurface = 'chat' | 'groupDirector' | 'memoryExtraction' | 'voiceCall' | 'secondaryModel' | 'retrieval' | 'agent';
 
@@ -281,6 +282,32 @@ function formatChatForward(message: ContextMessage): string {
     }
 }
 
+function formatCollectionForward(message: ContextMessage): string {
+    try {
+        const payload = message.metadata?.collectionForward || JSON.parse(message.content || '{}');
+        const kind = payload.kind === 'heart_talk' ? 'heart_talk' : 'afterglow';
+        const title = formatScalar(payload.title || '未命名典藏');
+        const charName = formatScalar(payload.charName || '这个角色');
+        const body = formatScalar(payload.body || '').trim();
+        const excerpt = formatScalar(payload.excerpt || payload.sourceReplyExcerpt || '').trim();
+        const tags = Array.isArray(payload.tags) && payload.tags.length > 0
+            ? `\n标签: ${payload.tags.map((tag: unknown) => formatScalar(tag).trim()).filter(Boolean).join('、')}`
+            : '';
+        return [
+            `[用户从典藏馆转递了一本${formatCollectionKindLabel(kind)}]`,
+            `标题: ${title}`,
+            `来源角色: ${charName}`,
+            excerpt ? `摘录: ${excerpt}` : '',
+            tags,
+            '完整正文:',
+            body || '[正文为空]',
+            '[请把这本典藏当作用户主动递给你看的内容。你可以自然回应、回忆、解释或续写，但不要声称自己看不到全文。]',
+        ].filter(Boolean).join('\n');
+    } catch {
+        return '[用户从典藏馆转递了一本收藏内容]';
+    }
+}
+
 function formatVoice(message: ContextMessage, options: FormatMessageContextOptions): string {
     const text = formatScalar(message.metadata?.sourceText || message.content, '').trim();
     const duration = message.metadata?.duration || '?';
@@ -449,6 +476,8 @@ function formatMessageBody(message: ContextMessage, options: FormatMessageContex
             return formatCanvaCard(message);
         case 'chat_forward':
             return formatChatForward(message);
+        case 'collection_forward':
+            return formatCollectionForward(message);
         case 'moments':
             return message.content ? `[分享了朋友圈] ${clipText(message.content, maxContentChars)}` : '[分享了朋友圈]';
         case 'soul_reflection': {

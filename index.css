@@ -4263,12 +4263,22 @@
   animation: agFade 0.18s ease both;
 }
 
+.afterglow-reader-frame {
+  display: flex;
+  width: min(82vw, 420px);
+  max-height: calc(100vh - 44px);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
 .afterglow-reader-shell {
   position: relative;
   --ag-serif: "HuiwenMingchao", "Noto Serif SC", "Songti SC", STSong, SimSun, serif;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(82vw, 420px);
+  width: 100%;
   height: min(70vh, 640px);
   overflow: hidden;
   border-radius: 22px;
@@ -4319,6 +4329,64 @@
 
 .afterglow-reader-close:active {
   transform: scale(0.92);
+}
+
+.afterglow-reader-action-dock {
+  z-index: 5;
+  display: flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border: 1px solid rgba(150, 108, 68, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 250, 242, 0.86);
+  box-shadow: 0 18px 34px -24px rgba(74, 44, 20, 0.72);
+  backdrop-filter: blur(12px);
+}
+
+.afterglow-reader-action-dock > * {
+  flex: 0 0 auto;
+}
+
+.afterglow-reader-action {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid rgba(150, 108, 68, 0.22);
+  border-radius: 999px;
+  color: rgba(67, 55, 46, 0.68);
+  background: rgba(255, 250, 242, 0.82);
+  box-shadow: 0 8px 18px -14px rgba(74, 44, 20, 0.72);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease, opacity 0.16s ease;
+}
+
+.afterglow-reader-action:hover {
+  background: rgba(255, 241, 218, 0.96);
+  color: #6a3f1f;
+}
+
+.afterglow-reader-action:active {
+  transform: scale(0.94);
+}
+
+.afterglow-reader-action:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.afterglow-reader-action.is-active {
+  border-color: rgba(151, 93, 46, 0.38);
+  color: #7a4319;
+  background: rgba(255, 228, 190, 0.92);
 }
 
 .ag-head {
@@ -4725,9 +4793,24 @@
     padding: 14px 30px;
   }
 
-  .afterglow-reader-shell {
+  .afterglow-reader-frame {
     width: min(84vw, 390px);
+    gap: 8px;
+  }
+
+  .afterglow-reader-shell {
+    width: 100%;
     height: min(68vh, 580px);
+  }
+
+  .afterglow-reader-frame.has-actions .afterglow-reader-shell {
+    height: min(64vh, 540px);
+  }
+
+  .afterglow-reader-action-dock {
+    gap: 6px;
+    padding: 5px;
+    border-radius: 20px;
   }
 
   .afterglow-reader-page {
@@ -5042,15 +5125,9 @@ select:focus {
   --sully-chat-status-space: var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem));
   --sully-chat-header-height: max(6rem, calc(var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem)) + 4rem));
   --sully-chat-header-padding-top: max(2.5rem, var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem)));
-  --sully-chat-keyboard-offset: 0px;
   box-sizing: border-box;
+  min-height: 0;
   padding-bottom: var(--keyboard-inset, 0px);
-  transition: padding-bottom 180ms ease-out;
-}
-
-html.keyboard-open .sully-chat-container,
-body.ios-keyboard-open .sully-chat-container {
-  --sully-chat-keyboard-offset: 0px;
 }
 
 .sully-chat-header {
@@ -5059,14 +5136,13 @@ body.ios-keyboard-open .sully-chat-container {
 }
 
 .sully-chat-messages {
-  padding-bottom: calc(1.5rem + var(--sully-chat-keyboard-offset, 0px));
-  scroll-padding-bottom: calc(1.5rem + var(--sully-chat-keyboard-offset, 0px));
+  min-height: 0;
+  padding-bottom: 1.5rem;
+  scroll-padding-bottom: 1.5rem;
 }
 
 .sully-chat-dock {
-  transform: translate3d(0, calc(-1 * var(--sully-chat-keyboard-offset, 0px)), 0);
-  transition: transform 180ms ease-out;
-  will-change: transform;
+  transform: none;
 }
 
 .netease-profile-page {

@@ -16,6 +16,7 @@ import { TtsConfig } from './tts';
 import { SttConfig } from './stt';
 import { ImageApiPreset, ImageGenerationConfig, PhotoStylePreset, SavedVibeReference } from './photo';
 import type { NianNianSession } from './niannian';
+import type { CollectionBook } from './collection';
 
 export interface SerializedVoiceAudio {
     msgId: string | number;
@@ -118,6 +119,7 @@ export interface FullBackupData {
     yesterdayNewspapers?: YesterdayNewspaperRecord[];
     vibeReferences?: SavedVibeReference[];
     nianNianSessions?: NianNianSession[];
+    collectionBooks?: CollectionBook[];
     musicAssets?: BackupMusicAssets;
     halfSugarData?: BackupExternalIndexedDbData;
 

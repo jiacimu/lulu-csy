@@ -16,6 +16,7 @@ import * as memoryRecordStore from './memoryRecordStore';
 import * as newspaperStore from './newspaperStore';
 import * as vibeReferenceStore from './vibeReferenceStore';
 import * as niannianStore from './niannianStore';
+import * as collectionStore from './collectionStore';
 
 
 // Compose the same `DB` object shape as the original monolithic file
@@ -229,4 +230,14 @@ export const DB = {
     getNianNianSessionById: niannianStore.getNianNianSessionById,
     saveNianNianSession: niannianStore.saveNianNianSession,
     deleteNianNianSession: niannianStore.deleteNianNianSession,
+
+    // 典藏馆
+    getAllCollectionBooks: collectionStore.getAllCollectionBooks,
+    getCollectionBooksByCharId: collectionStore.getCollectionBooksByCharId,
+    getCollectionBookById: collectionStore.getCollectionBookById,
+    findCollectionBookBySource: collectionStore.findCollectionBookBySource,
+    isCollectionSourceCollected: collectionStore.isCollectionSourceCollected,
+    saveCollectionBook: collectionStore.saveCollectionBook,
+    deleteCollectionBook: collectionStore.deleteCollectionBook,
+    deleteCollectionBookBySource: collectionStore.deleteCollectionBookBySource,
 };

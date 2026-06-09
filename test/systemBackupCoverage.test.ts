@@ -407,6 +407,42 @@ describe('system backup coverage', () => {
         expect(localStorage.getItem('date_translation_char-a')).toBe('true');
     }, 15000);
 
+    it('roundtrips collection books through the system backup zip', async () => {
+        const body = '《灯雨》\n\n雨停在玻璃外，他没有把那句话说完。';
+        await DB.saveCollectionBook({
+            charId: 'char-a',
+            kind: 'afterglow',
+            title: '灯雨',
+            body,
+            cardData: {
+                cardType: 'freeform',
+                title: '番外篇',
+                body,
+                meta: { afterglowMode: 'fanfic' },
+                style: {},
+            },
+            sourceMessageId: 42,
+            sourceMessageTimestamp: 100,
+            sourceReplyExcerpt: '今晚见。',
+            tags: ['#番外'],
+            cover: { theme: '雨停之后' },
+            createdAt: 100,
+            collectedAt: 120,
+        });
+
+        const backupBlob = await exportSystemData('full', makeStateSnapshot(), noopProgress);
+        const data = await readBackupData(backupBlob);
+        expect(data.collectionBooks?.[0].title).toBe('灯雨');
+
+        resetIndexedDb();
+        localStorage.clear();
+        await importWithoutReload(new File([backupBlob], 'backup.zip', { type: 'application/zip' }));
+
+        const restored = await DB.getCollectionBooksByCharId('char-a');
+        expect(restored).toHaveLength(1);
+        expect(restored[0].sourceReplyExcerpt).toBe('今晚见。');
+    }, 15000);
+
     it('can export cloud-friendly memory record drafts without song audio', async () => {
         const record: MemoryRecord = {
             id: 'mrec-cloud',

@@ -57,6 +57,7 @@ const TrajectoryApp = React.lazy(() => import('../apps/TrajectoryApp'));
 const CrosstimeApp = React.lazy(() => import('../apps/crosstime/CrosstimeApp'));
 const LoveShowApp = React.lazy(() => import('../apps/loveshow/LoveShowApp'));
 const NianNianApp = React.lazy(() => import('../apps/niannian/NianNianApp'));
+const CollectionHallApp = React.lazy(() => import('../apps/CollectionHallApp'));
 
 const LazyValentineEvent = React.lazy(() => import('./ValentineEvent').then(m => ({
   default: m.SpecialMomentsApp
@@ -404,6 +405,7 @@ function renderActiveApp(activeApp: AppID) {
     case AppID.Crosstime: return <CrosstimeApp />;
     case AppID.LoveShow: return <LoveShowApp />;
     case AppID.NianNian: return <NianNianApp />;
+    case AppID.CollectionHall: return <CollectionHallApp />;
     case AppID.Launcher:
     default: return <Launcher />;
   }

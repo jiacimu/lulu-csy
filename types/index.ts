@@ -19,3 +19,4 @@ export * from './loveshow';
 export * from './niannian';
 export * from './newspaper';
 export * from './photo';
+export * from './collection';

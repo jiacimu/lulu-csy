@@ -42,6 +42,7 @@ export enum AppID {
     Crosstime = 'crosstime', // 跨时空对话
     LoveShow = 'love_show', // 恋综
     NianNian = 'nian_nian', // 念念浮生
+    CollectionHall = 'collection_hall', // 典藏馆
 }
 
 export interface SystemLog {

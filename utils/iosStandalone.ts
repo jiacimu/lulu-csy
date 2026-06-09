@@ -1,5 +1,6 @@
 let hasInstalledIOSStandaloneWorkaround = false;
 let stableStandaloneHeight = 0;
+let hasActiveTextEntry = false;
 let lastStandaloneState: boolean | null = null;
 const KEYBOARD_INSET_THRESHOLD = 100;
 
@@ -96,16 +97,18 @@ function setViewportVars(): void {
   const bottomSafeInset = readSafeAreaInset('bottom');
   const standaloneBottomSafeInset = shouldStabilizeHeight ? bottomSafeInset : 0;
   const visualViewportBottom = viewportHeight + viewportOffsetTop;
-  const layoutAppHeight = Math.max(innerHeight, layoutViewportHeight, visualViewportBottom);
-  const measuredAppHeight = window.visualViewport ? visualViewportBottom : layoutAppHeight;
+  const layoutAppHeight = Math.max(innerHeight, layoutViewportHeight) || visualViewportBottom;
   const keyboardBaselineHeight = stableStandaloneHeight || layoutAppHeight;
   const obscuredHeight = Math.max(0, keyboardBaselineHeight - visualViewportBottom);
-  const keyboardInset = obscuredHeight >= KEYBOARD_INSET_THRESHOLD ? obscuredHeight : 0;
-  const isKeyboardOpen = keyboardInset > 0;
+  const hasFocusedTextEntry = hasActiveTextEntry || isTextEntryElement(document.activeElement);
+  const isKeyboardOpen = hasFocusedTextEntry && obscuredHeight >= KEYBOARD_INSET_THRESHOLD;
+  const keyboardInset = isKeyboardOpen ? obscuredHeight : 0;
 
   if (shouldStabilizeHeight) {
-    if (!isKeyboardOpen) {
-      stableStandaloneHeight = measuredAppHeight || layoutAppHeight;
+    if (!isKeyboardOpen && document.visibilityState !== 'hidden' && layoutAppHeight > 0) {
+      if (!stableStandaloneHeight || layoutAppHeight > stableStandaloneHeight) {
+        stableStandaloneHeight = layoutAppHeight;
+      }
     }
   } else {
     stableStandaloneHeight = 0;
@@ -113,7 +116,7 @@ function setViewportVars(): void {
 
   const appHeight = shouldStabilizeHeight
     ? (stableStandaloneHeight || layoutAppHeight)
-    : (isKeyboardOpen ? layoutAppHeight : measuredAppHeight);
+    : layoutAppHeight;
 
   document.documentElement.classList.toggle('keyboard-open', isKeyboardOpen);
   document.body?.classList.toggle('keyboard-open', isKeyboardOpen);
@@ -124,12 +127,11 @@ function setViewportVars(): void {
   document.documentElement.style.setProperty('--standalone-safe-area-bottom', `${standaloneBottomSafeInset}px`);
   document.documentElement.style.setProperty('--hardware-safe-top', `${topSafeInset}px`);
   document.documentElement.style.setProperty('--hardware-safe-bottom', `${bottomSafeInset}px`);
-  document.documentElement.style.setProperty(
-    '--effective-safe-bottom',
-    isKeyboardOpen
-      ? '0px'
-      : (shouldStabilizeHeight ? `${bottomSafeInset}px` : 'var(--safe-bottom, env(safe-area-inset-bottom, 0px))'),
-  );
+  if (isKeyboardOpen) {
+    document.documentElement.style.setProperty('--effective-safe-bottom', '0px');
+  } else {
+    document.documentElement.style.removeProperty('--effective-safe-bottom');
+  }
 
   if (shouldStabilizeHeight) {
     document.documentElement.style.setProperty('--safe-top', `${topSafeInset}px`);
@@ -146,18 +148,37 @@ export function installIOSStandaloneWorkaround(): void {
 
   hasInstalledIOSStandaloneWorkaround = true;
 
+  const isDocumentHidden = () => document.visibilityState === 'hidden';
+
   const handleViewportChange = () => {
+    if (isDocumentHidden()) return;
     setViewportVars();
+  };
+
+  const refreshViewportVars = () => {
+    if (isDocumentHidden()) return;
+    setViewportVars();
+    window.setTimeout(handleViewportChange, 80);
+    window.setTimeout(handleViewportChange, 300);
+  };
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState !== 'visible') {
+      hasActiveTextEntry = false;
+      return;
+    }
+    refreshViewportVars();
   };
 
   const handleOrientationChange = () => {
     stableStandaloneHeight = 0;
-    setViewportVars();
+    refreshViewportVars();
   };
 
   const handleFocusIn = (event: FocusEvent) => {
     if (!isIOSDevice()) return;
     if (!isTextEntryElement(event.target)) return;
+    hasActiveTextEntry = true;
     setViewportVars();
 
     const target = event.target;
@@ -175,7 +196,9 @@ export function installIOSStandaloneWorkaround(): void {
 
   const handleFocusOut = () => {
     window.setTimeout(() => {
+      if (isDocumentHidden()) return;
       if (!isIOSDevice() || !isTextEntryElement(document.activeElement)) {
+        hasActiveTextEntry = false;
         document.body?.classList.remove('ios-keyboard-open');
       }
       setViewportVars();
@@ -184,8 +207,8 @@ export function installIOSStandaloneWorkaround(): void {
 
   window.addEventListener('resize', handleViewportChange);
   window.addEventListener('orientationchange', handleOrientationChange);
-  window.addEventListener('pageshow', handleViewportChange);
-  document.addEventListener('visibilitychange', handleViewportChange);
+  window.addEventListener('pageshow', refreshViewportVars);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
   window.visualViewport?.addEventListener('resize', handleViewportChange);
   window.visualViewport?.addEventListener('scroll', handleViewportChange);
 

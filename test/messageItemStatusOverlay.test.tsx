@@ -270,6 +270,35 @@ describe('MessageItem status overlay', () => {
         expect(await screen.findByTestId('afterglow-reader-shell')).toBeInTheDocument();
     });
 
+    it('shows the afterglow collection action outside the reader page', async () => {
+        const afterglowCard = {
+            cardType: 'freeform',
+            body: '《灯雨》\n\n雨停在玻璃外。',
+            meta: { afterglowMode: 'fanfic' },
+            style: {},
+        } satisfies StatusCardData;
+        const onToggleAfterglowCollection = vi.fn();
+
+        renderMessageItem({
+            afterglowCardData: afterglowCard,
+            onRequestAfterglow: vi.fn(),
+            getAfterglowCollectionState: vi.fn(() => 'collected'),
+            onToggleAfterglowCollection,
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: '生成番外篇' }));
+        fireEvent.click(screen.getByRole('button', { name: '打开已有' }));
+        const readerShell = await screen.findByTestId('afterglow-reader-shell');
+        const actionDock = screen.getByTestId('afterglow-reader-action-dock');
+        const collectionButton = screen.getByTestId('afterglow-reader-collection-button');
+        expect(actionDock).toContainElement(collectionButton);
+        expect(readerShell).not.toContainElement(collectionButton);
+        expect(collectionButton).toHaveTextContent('已入典藏');
+
+        fireEvent.click(collectionButton);
+        expect(onToggleAfterglowCollection).toHaveBeenCalledWith(baseMessage, afterglowCard);
+    });
+
     it('passes a specified afterglow motif and can save it into the random pool', async () => {
         const afterglowCard = {
             cardType: 'freeform',

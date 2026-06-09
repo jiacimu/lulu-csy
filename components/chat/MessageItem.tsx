@@ -3,7 +3,7 @@
 
 import React,{ useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState } from 'react';
 import ReactDOM from 'react-dom';
-import { ArrowSquareOut, ArrowsOutSimple, DownloadSimple, DeviceMobileCamera, Fire, PlayCircle, Sparkle, X } from '@phosphor-icons/react';
+import { ArrowSquareOut, ArrowsOutSimple, BookmarkSimple, DownloadSimple, DeviceMobileCamera, Fire, PlayCircle, Sparkle, X } from '@phosphor-icons/react';
 import { Message,ChatTheme } from '../../types';
 import { StatusCardData } from '../../types/statusCard';
 import { haptic } from '../../utils/haptics';
@@ -33,6 +33,7 @@ import RoomNoteCard from './cards/RoomNoteCard';
 import FurnitureInteractionCard from './cards/FurnitureInteractionCard';
 import VoiceCallSummaryCard from './cards/VoiceCallSummaryCard';
 import ForwardCard from './cards/ForwardCard';
+import CollectionForwardCard from './cards/CollectionForwardCard';
 import WeChatMomentsCard from './cards/WeChatMomentsCard';
 import SongShareCardBubble from './cards/SongShareCardBubble';
 // SoulReflectionCard removed — soul_reflection messages are now hiddenFromUser and shown via immersive panel in Chat.tsx
@@ -151,6 +152,8 @@ function normalizeAfterglowCoverMeta(value: unknown): AfterglowCoverMeta | null 
         const text = String(input || '').replace(/\s+/g, ' ').trim();
         return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
     };
+    const rawThemeSource = clean(meta.themeSource, 18);
+    const isIfTheme = rawThemeSource === 'if 前提' || rawThemeSource === 'IF命题';
     const snacks = Array.isArray(meta.snacks)
         ? meta.snacks
             .map(item => clean(item, 16))
@@ -158,8 +161,8 @@ function normalizeAfterglowCoverMeta(value: unknown): AfterglowCoverMeta | null 
             .slice(0, 3)
         : [];
     return {
-        theme: clean(meta.theme),
-        themeSource: clean(meta.themeSource, 18),
+        theme: clean(meta.theme, isIfTheme ? 18 : 42),
+        themeSource: isIfTheme ? 'IF命题' : rawThemeSource,
         type: clean(meta.type, 18),
         tone: clean(meta.tone, 18),
         snacks,
@@ -282,7 +285,10 @@ export const AfterglowReaderModal: React.FC<{
     data: StatusCardData;
     onClose: () => void;
     brand?: string;
-}> = ({ data, onClose, brand = '番外篇' }) => {
+    collectionState?: 'idle' | 'collected' | 'loading';
+    onToggleCollection?: (data: StatusCardData) => void | Promise<void>;
+    extraActions?: React.ReactNode;
+}> = ({ data, onClose, brand = '番外篇', collectionState = 'idle', onToggleCollection, extraActions }) => {
     const stageRef = useRef<HTMLDivElement | null>(null);
     const pageRef = useRef<HTMLDivElement | null>(null);
     const coverMeta = useMemo(() => normalizeAfterglowCoverMeta(data.meta?.afterglowCover), [data.meta?.afterglowCover]);
@@ -410,6 +416,7 @@ export const AfterglowReaderModal: React.FC<{
 
     const canGoPrev = pageIndex > 0;
     const canGoNext = pageIndex < pages.length - 1;
+    const hasSideActions = Boolean(onToggleCollection || extraActions);
 
     return (
         <div
@@ -419,24 +426,25 @@ export const AfterglowReaderModal: React.FC<{
                 if (event.target === event.currentTarget) onClose();
             }}
         >
-            <section
-                data-testid="afterglow-reader-shell"
-                className="afterglow-reader-shell"
-                role="dialog"
-                aria-modal="true"
-                aria-label="番外篇阅读器"
-                onClick={(event) => event.stopPropagation()}
-            >
-                <button
-                    type="button"
-                    data-testid="afterglow-reader-close-button"
-                    className="afterglow-reader-close"
-                    aria-label="关闭番外篇"
-                    title="关闭番外篇"
-                    onClick={onClose}
+            <div className={`afterglow-reader-frame${hasSideActions ? ' has-actions' : ''}`}>
+                <section
+                    data-testid="afterglow-reader-shell"
+                    className="afterglow-reader-shell"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="番外篇阅读器"
+                    onClick={(event) => event.stopPropagation()}
                 >
-                    ✕
-                </button>
+                    <button
+                        type="button"
+                        data-testid="afterglow-reader-close-button"
+                        className="afterglow-reader-close"
+                        aria-label="关闭番外篇"
+                        title="关闭番外篇"
+                        onClick={onClose}
+                    >
+                        ✕
+                    </button>
 
                 <div className="ag-head">
                     <div className="ag-brand">{pageIndex === 0 ? brand : title || brand}</div>
@@ -513,7 +521,28 @@ export const AfterglowReaderModal: React.FC<{
                         ›
                     </button>
                 </footer>
-            </section>
+                </section>
+
+                {hasSideActions && (
+                    <div className="afterglow-reader-action-dock" data-testid="afterglow-reader-action-dock">
+                        {onToggleCollection && (
+                            <button
+                                type="button"
+                                data-testid="afterglow-reader-collection-button"
+                                className={`afterglow-reader-action${collectionState === 'collected' ? ' is-active' : ''}`}
+                                disabled={collectionState === 'loading'}
+                                aria-label={collectionState === 'collected' ? '取消典藏' : '收藏到典藏馆'}
+                                title={collectionState === 'collected' ? '已入典藏，点击取消' : '收藏到典藏馆'}
+                                onClick={() => onToggleCollection(data)}
+                            >
+                                <BookmarkSimple className="h-4 w-4" weight={collectionState === 'collected' ? 'fill' : 'bold'} />
+                                <span>{collectionState === 'collected' ? '已入典藏' : '收藏'}</span>
+                            </button>
+                        )}
+                        {extraActions}
+                    </div>
+                )}
+            </div>
         </div>
     );
 };
@@ -574,6 +603,8 @@ interface MessageItemProps {
     afterglowCardData?: StatusCardData;
     isAfterglowLoading?: boolean;
     onRequestAfterglow?: (message: Message, options?: AfterglowGenerationOptions) => Promise<StatusCardData | null>;
+    getAfterglowCollectionState?: (message: Message, card: StatusCardData) => 'idle' | 'collected' | 'loading';
+    onToggleAfterglowCollection?: (message: Message, card: StatusCardData) => void | Promise<void>;
     onOpenStoryPhone?: (message: Message) => void;
     onUserAvatarAction?: (message: Message) => void;
     isUserAvatarActionLoading?: boolean;
@@ -611,6 +642,8 @@ const MessageItem = React.memo(({
     afterglowCardData,
     isAfterglowLoading,
     onRequestAfterglow,
+    getAfterglowCollectionState,
+    onToggleAfterglowCollection,
     onOpenStoryPhone,
     onUserAvatarAction,
     isUserAvatarActionLoading,
@@ -1263,6 +1296,9 @@ const MessageItem = React.memo(({
                         <AfterglowReaderModal
                             data={visibleAfterglowCard}
                             onClose={() => setShowAfterglow(false)}
+                            brand={visibleAfterglowCard.meta?.afterglowMode === 'heartTalk' ? '谈心' : '番外篇'}
+                            collectionState={getAfterglowCollectionState?.(m, visibleAfterglowCard) || 'idle'}
+                            onToggleCollection={onToggleAfterglowCollection ? (card) => onToggleAfterglowCollection(m, card) : undefined}
                         />,
                         document.body
                     )}
@@ -1431,6 +1467,15 @@ const MessageItem = React.memo(({
         try { forwardData = JSON.parse(m.content); } catch { }
         if (forwardData) {
             return <ForwardCard forwardData={forwardData} commonLayout={commonLayout} interactionProps={interactionProps} selectionMode={selectionMode} />;
+        }
+    }
+
+    if (m.type === 'collection_forward') {
+        const forwardData = m.metadata?.collectionForward || (() => {
+            try { return JSON.parse(m.content); } catch { return null; }
+        })();
+        if (forwardData) {
+            return <CollectionForwardCard data={forwardData} commonLayout={commonLayout} selectionMode={selectionMode} />;
         }
     }
 
@@ -2119,6 +2164,8 @@ const MessageItem = React.memo(({
         prev.afterglowCardData === next.afterglowCardData &&
         prev.isAfterglowLoading === next.isAfterglowLoading &&
         prev.onRequestAfterglow === next.onRequestAfterglow &&
+        prev.getAfterglowCollectionState === next.getAfterglowCollectionState &&
+        prev.onToggleAfterglowCollection === next.onToggleAfterglowCollection &&
         prev.onOpenStoryPhone === next.onOpenStoryPhone &&
         prev.onUserAvatarAction === next.onUserAvatarAction &&
         prev.isUserAvatarActionLoading === next.isUserAvatarActionLoading &&

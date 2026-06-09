@@ -106,6 +106,11 @@ import {
     UserActionSelectorApiError,
     type UserActionChoice,
 } from '../utils/userActionSelector';
+import {
+    buildCollectionBookInput,
+    buildCollectionSourceKey,
+    inferCollectionBookKind,
+} from '../utils/collectionBooks';
 import { PaperPlaneTilt, Plus, Smiley, Trash, X } from '@phosphor-icons/react';
 
 const DATE_WORLDLINE_ORB_ENABLED: boolean = false;
@@ -669,6 +674,8 @@ const Chat: React.FC = () => {
     const [soulReflectionResult, setSoulReflectionResult] = useState<{ reflection: string; anchors: string; mirrorSnippets: string[] } | null>(null);
     const [afterglowCards, setAfterglowCards] = useState<Record<number, StatusCardData>>({});
     const [afterglowLoadingIds, setAfterglowLoadingIds] = useState<Set<number>>(new Set());
+    const [afterglowCollectionIds, setAfterglowCollectionIds] = useState<Record<string, string>>({});
+    const [afterglowCollectionLoadingKeys, setAfterglowCollectionLoadingKeys] = useState<Set<string>>(new Set());
     const autoAfterglowRequestedIdsRef = useRef<Set<number>>(new Set());
     const [showAfterglowPreview, setShowAfterglowPreview] = useState(() => {
         if (!import.meta.env.DEV || typeof window === 'undefined') return false;
@@ -3919,6 +3926,112 @@ const Chat: React.FC = () => {
         }
     }, [afterglowCards, afterglowLoadingIds, char?.id, generateAfterglow]);
 
+    useEffect(() => {
+        if (!char?.id) {
+            setAfterglowCollectionIds({});
+            return;
+        }
+
+        const entries = Object.entries(afterglowCards)
+            .map(([messageId, card]) => ({ messageId: Number(messageId), card }))
+            .filter(item => Number.isFinite(item.messageId) && item.card?.body);
+        if (entries.length === 0) {
+            setAfterglowCollectionIds({});
+            return;
+        }
+
+        let cancelled = false;
+        void (async () => {
+            const next: Record<string, string> = {};
+            await Promise.all(entries.map(async ({ messageId, card }) => {
+                const kind = inferCollectionBookKind(card);
+                const key = buildCollectionSourceKey({
+                    charId: char.id,
+                    kind,
+                    sourceMessageId: messageId,
+                    body: card.body,
+                });
+                const existing = await DB.findCollectionBookBySource({
+                    charId: char.id,
+                    kind,
+                    sourceMessageId: messageId,
+                    body: card.body,
+                });
+                if (existing) next[key] = existing.id;
+            }));
+            if (!cancelled) setAfterglowCollectionIds(next);
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [afterglowCards, char?.id]);
+
+    const getAfterglowCollectionState = useCallback((sourceMessage: Message, card: StatusCardData) => {
+        const charId = char?.id;
+        if (!charId || !card?.body) return 'idle' as const;
+        const kind = inferCollectionBookKind(card);
+        const key = buildCollectionSourceKey({
+            charId,
+            kind,
+            sourceMessageId: sourceMessage.id,
+            body: card.body,
+        });
+        if (afterglowCollectionLoadingKeys.has(key)) return 'loading' as const;
+        return afterglowCollectionIds[key] ? 'collected' as const : 'idle' as const;
+    }, [afterglowCollectionIds, afterglowCollectionLoadingKeys, char?.id]);
+
+    const handleToggleAfterglowCollection = useCallback(async (sourceMessage: Message, card: StatusCardData) => {
+        const charId = char?.id;
+        if (!charId || !card?.body) return;
+        const input = buildCollectionBookInput(charId, card, sourceMessage);
+        const key = buildCollectionSourceKey({
+            charId,
+            kind: input.kind,
+            sourceMessageId: sourceMessage.id,
+            body: input.body,
+        });
+        if (afterglowCollectionLoadingKeys.has(key)) return;
+
+        setAfterglowCollectionLoadingKeys(prev => {
+            const next = new Set(prev);
+            next.add(key);
+            return next;
+        });
+
+        try {
+            const existing = await DB.findCollectionBookBySource({
+                charId,
+                kind: input.kind,
+                sourceMessageId: sourceMessage.id,
+                body: input.body,
+            });
+            if (existing) {
+                await DB.deleteCollectionBook(existing.id);
+                setAfterglowCollectionIds(prev => {
+                    const next = { ...prev };
+                    delete next[key];
+                    return next;
+                });
+                addToast('已从典藏馆移出', 'success');
+                return;
+            }
+
+            const saved = await DB.saveCollectionBook(input);
+            setAfterglowCollectionIds(prev => ({ ...prev, [key]: saved.id }));
+            addToast('已收入典藏馆', 'success');
+        } catch (error) {
+            console.error('[CollectionHall] toggle failed:', error);
+            addToast('典藏操作失败，可以稍后再试', 'error');
+        } finally {
+            setAfterglowCollectionLoadingKeys(prev => {
+                const next = new Set(prev);
+                next.delete(key);
+                return next;
+            });
+        }
+    }, [addToast, afterglowCollectionLoadingKeys, char?.id]);
+
     // --- Transfer Action ---
     const handleTransferAction = useCallback((msg: Message) => {
         setTransferActionMsg(msg);
@@ -5128,6 +5241,8 @@ const Chat: React.FC = () => {
                                 afterglowCardData={isLastAssistant && statusMode === 'afterglow' ? afterglowCards[m.id] : undefined}
                                 isAfterglowLoading={isLastAssistant && statusMode === 'afterglow' ? afterglowLoadingIds.has(m.id) : false}
                                 onRequestAfterglow={isLastAssistant && statusMode === 'afterglow' ? handleGenerateAfterglow : undefined}
+                                getAfterglowCollectionState={isLastAssistant && statusMode === 'afterglow' ? getAfterglowCollectionState : undefined}
+                                onToggleAfterglowCollection={isLastAssistant && statusMode === 'afterglow' ? handleToggleAfterglowCollection : undefined}
                                 onOpenStoryPhone={isLastAssistant && statusMode === 'story_phone' && !m.metadata?.storyPhoneConsumed && !selectionMode ? handleOpenStoryPhone : undefined}
                                 onUserAvatarAction={isUserActionTarget ? handleUserAvatarAction : undefined}
                                 isUserAvatarActionLoading={userActionSelectorLoadingId === m.id}

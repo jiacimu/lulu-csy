@@ -106,8 +106,16 @@ describe('runtimeConfig', () => {
         expect(GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS.model).toBe('gemini-3.1-flash-image-preview');
     });
 
-    it('clears app-owned Gemini style preset model locks without changing custom styles', () => {
+    it('clears app-owned GPT/Gemini style preset model locks without changing custom styles', () => {
         localStorage.setItem(PHOTO_STYLE_PRESETS_KEY, JSON.stringify([
+            {
+                id: 'loveshow-solo-real',
+                name: '单人 · 真人风',
+                providerScope: 'openai-gpt',
+                model: 'gpt-image-2',
+                positivePrompt: 'real portrait',
+                negativePrompt: '',
+            },
             {
                 id: 'gemini-nano-banana-natural-snapshot',
                 name: 'Gemini / Nano Banana 自然随拍',
@@ -132,16 +140,28 @@ describe('runtimeConfig', () => {
                 positivePrompt: 'custom snapshot',
                 negativePrompt: '',
             },
+            {
+                id: 'custom-gpt-style',
+                name: 'Custom GPT Style',
+                providerScope: 'openai-gpt',
+                model: 'custom-image-model',
+                positivePrompt: 'custom snapshot',
+                negativePrompt: '',
+            },
         ]));
 
         const presets = getPhotoStylePresets();
 
+        expect(presets.find(preset => preset.id === 'loveshow-solo-real')?.model)
+            .toBeUndefined();
         expect(presets.find(preset => preset.id === 'gemini-nano-banana-natural-snapshot')?.model)
             .toBeUndefined();
         expect(presets.find(preset => preset.id === 'loveshow-gemini-solo-real')?.model)
             .toBeUndefined();
         expect(presets.find(preset => preset.id === 'custom-gemini-style')?.model)
             .toBe('gemini-2.5-flash-image');
+        expect(presets.find(preset => preset.id === 'custom-gpt-style')?.model)
+            .toBe('custom-image-model');
     });
 
     it('writes the secondary API config to both the structured key and legacy keys', () => {

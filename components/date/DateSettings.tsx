@@ -454,6 +454,44 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
                     </div>
                 </section>
 
+                <section className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-3 block">线下生图 / 见面照片</label>
+                    <div className="space-y-3">
+                        <button
+                            type="button"
+                            onClick={() => updateCharacter(char.id, { manualPhotoEnabled: !char.manualPhotoEnabled })}
+                            className="flex w-full items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3 text-left active:scale-[0.99] transition-all"
+                            aria-pressed={!!char.manualPhotoEnabled}
+                        >
+                            <span>
+                                <span className="block text-xs font-bold text-slate-600">手动生图入口</span>
+                                <span className="mt-1 block text-[10px] leading-relaxed text-slate-400">打开后，见面右上角会显示照片按钮，可在照片面板里手动生图。</span>
+                            </span>
+                            <span className={`flex h-6 w-10 shrink-0 items-center rounded-full p-1 transition-colors ${char.manualPhotoEnabled ? 'bg-primary' : 'bg-slate-200'}`}>
+                                <span className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${char.manualPhotoEnabled ? 'translate-x-4' : ''}`} />
+                            </span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => updateCharacter(char.id, { autoPhotoEnabled: !char.autoPhotoEnabled })}
+                            className="flex w-full items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3 text-left active:scale-[0.99] transition-all"
+                            aria-pressed={!!char.autoPhotoEnabled}
+                        >
+                            <span>
+                                <span className="block text-xs font-bold text-slate-600">角色主动见面照片</span>
+                                <span className="mt-1 block text-[10px] leading-relaxed text-slate-400">打开后，角色在见面回复里判断适合发照片时，会触发隐藏照片生成流程。</span>
+                            </span>
+                            <span className={`flex h-6 w-10 shrink-0 items-center rounded-full p-1 transition-colors ${char.autoPhotoEnabled ? 'bg-primary' : 'bg-slate-200'}`}>
+                                <span className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${char.autoPhotoEnabled ? 'translate-x-4' : ''}`} />
+                            </span>
+                        </button>
+                    </div>
+                    <div className="mt-3 rounded-xl bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-500">
+                        生图供应商、风格预设、锁脸和 Vibe 参考仍在「系统设置 → 生图服务」与聊天设置中统一管理。
+                    </div>
+                </section>
+
                 {/* Output Word Count */}
                 <section className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
                     <h3 className="text-xs font-bold text-slate-400 uppercase mb-1">回复字数</h3>

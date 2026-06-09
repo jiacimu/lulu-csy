@@ -412,6 +412,38 @@ describe('message context formatter', () => {
         expect(text).toContain('本条消息正文：你要接住我后面这句话');
     });
 
+    it('formats collection forwards with the full book body for chat context', () => {
+        const fullBody = [
+            '《灯雨》',
+            '第一段。',
+            '第二段里有一条很长的内容，用来确认典藏馆转递不会走普通消息截断。',
+            '最后一句必须完整进入上下文。'
+        ].join('\n');
+        const text = formatMessageForContext(msg({
+            type: 'collection_forward',
+            content: JSON.stringify({
+                bookId: 'book-a',
+                charId: 'char-source',
+                charName: 'Sully',
+                kind: 'afterglow',
+                title: '灯雨',
+                body: fullBody,
+                excerpt: '第一段。',
+                tags: ['#番外'],
+                collectedAt: 100,
+            }),
+        }), {
+            surface: 'chat',
+            charName: '糯米',
+        });
+
+        expect(text).toContain('[用户从典藏馆转递了一本番外篇]');
+        expect(text).toContain('来源角色: Sully');
+        expect(text).toContain('完整正文:');
+        expect(text).toContain('最后一句必须完整进入上下文。');
+        expect(text).toContain('不要声称自己看不到全文');
+    });
+
     it('labels self-quoted user messages clearly in chat context', () => {
         const text = formatMessageForContext(msg({
             role: 'user',

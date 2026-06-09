@@ -122,7 +122,7 @@ describe('iosStandalone viewport handling', () => {
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('812px');
   });
 
-  it('does not shrink the full app canvas while the iOS keyboard changes visualViewport height', async () => {
+  it('does not shrink the full app canvas while a focused iOS keyboard changes visualViewport height', async () => {
     setStandaloneDisplayMode(() => true);
     setViewport({ innerHeight: 812, visualHeight: 812, clientHeight: 812 });
     setSafeAreaInsets(47, 34);
@@ -132,10 +132,66 @@ describe('iosStandalone viewport handling', () => {
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('812px');
 
     setViewport({ innerHeight: 812, visualHeight: 480, clientHeight: 812 });
-    window.dispatchEvent(new Event('resize'));
+    const textarea = document.createElement('textarea');
+    document.body.appendChild(textarea);
+    textarea.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
 
     expect(document.documentElement.style.getPropertyValue('--keyboard-inset')).toBe('332px');
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('812px');
+    expect(document.documentElement.style.getPropertyValue('--effective-safe-bottom')).toBe('0px');
+    expect(document.documentElement.classList.contains('keyboard-open')).toBe(true);
+  });
+
+  it('does not persist a smaller standalone height from a transient background restore viewport', async () => {
+    setStandaloneDisplayMode(() => true);
+    setViewport({ innerHeight: 844, visualHeight: 844, clientHeight: 844 });
+    setSafeAreaInsets(47, 34);
+
+    const { installIOSStandaloneWorkaround } = await loadIOSStandaloneModule();
+    installIOSStandaloneWorkaround();
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('844px');
+
+    setViewport({ innerHeight: 780, visualHeight: 780, clientHeight: 780 });
+    window.dispatchEvent(new Event('resize'));
+
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('844px');
+    expect(document.documentElement.style.getPropertyValue('--keyboard-inset')).toBe('0px');
+    expect(document.documentElement.classList.contains('keyboard-open')).toBe(false);
+    expect(document.body.classList.contains('ios-keyboard-open')).toBe(false);
+  });
+
+  it('does not mark the keyboard open from visualViewport shrink without text entry focus', async () => {
+    setStandaloneDisplayMode(() => true);
+    setViewport({ innerHeight: 844, visualHeight: 844, clientHeight: 844 });
+    setSafeAreaInsets(47, 34);
+
+    const { installIOSStandaloneWorkaround } = await loadIOSStandaloneModule();
+    installIOSStandaloneWorkaround();
+
+    setViewport({ innerHeight: 844, visualHeight: 520, clientHeight: 844 });
+    window.dispatchEvent(new Event('resize'));
+
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('844px');
+    expect(document.documentElement.style.getPropertyValue('--keyboard-inset')).toBe('0px');
+    expect(document.documentElement.style.getPropertyValue('--effective-safe-bottom')).toBe('');
+    expect(document.documentElement.classList.contains('keyboard-open')).toBe(false);
+  });
+
+  it('allows a new standalone height after orientation changes reset the stable height', async () => {
+    setStandaloneDisplayMode(() => true);
+    setViewport({ innerHeight: 844, visualHeight: 844, clientHeight: 844 });
+    setSafeAreaInsets(47, 34);
+
+    const { installIOSStandaloneWorkaround } = await loadIOSStandaloneModule();
+    installIOSStandaloneWorkaround();
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('844px');
+
+    setViewport({ innerHeight: 390, visualHeight: 390, clientHeight: 390 });
+    window.dispatchEvent(new Event('orientationchange'));
+
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('390px');
+    expect(document.documentElement.style.getPropertyValue('--keyboard-inset')).toBe('0px');
+    expect(document.documentElement.classList.contains('keyboard-open')).toBe(false);
   });
 
   it('tracks the iOS keyboard state for regular browser text inputs', async () => {

@@ -533,11 +533,23 @@ describe('photoGeneration helpers', () => {
     });
 
     it('uses the global LoveShow image style preset for OpenAI-compatible generation without an explicit style', () => {
-        const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible', imageStyle: 'cg' };
+        const config: ImageGenerationConfig = {
+            ...baseConfig,
+            activeProvider: 'openai-compatible',
+            imageStyle: 'cg',
+            openaiCompatible: {
+                ...baseConfig.openaiCompatible,
+                model: 'provider-image-model',
+            },
+        };
         const presets = getPhotoStylePresets();
+        const soloStyle = resolveImageStylePhotoPreset(undefined, presets, undefined, config, false);
 
-        expect(resolveImageStylePhotoPreset(undefined, presets, undefined, config, false).id).toBe('loveshow-solo-cg');
+        expect(soloStyle.id).toBe('loveshow-solo-cg');
         expect(resolveImageStylePhotoPreset(undefined, presets, undefined, config, true).id).toBe('loveshow-couple-cg');
+        const prompts = buildManualPhotoPrompt('窗边自拍', soloStyle, config);
+        const meta = createPhotoMeta('chat_auto', config, soloStyle, prompts, 123);
+        expect(meta.model).toBe('provider-image-model');
         expect(resolveImageStylePhotoPreset('custom-style', [
             {
                 id: 'custom-style',

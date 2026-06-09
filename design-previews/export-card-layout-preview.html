@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>典藏馆摘录导出卡片版式预览</title>
+  <style>
+    @font-face {
+      font-family: ZhaixinglouCN;
+      src: url("../public/fonts/zhaixinglou-cn.woff2") format("woff2");
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: ZhaixinglouBody;
+      src: url("../public/fonts/zhaixinglou-body.woff2") format("woff2");
+      font-display: swap;
+    }
+
+    :root {
+      --page: #f5efe7;
+      --ink: #2f2924;
+      --muted: #918174;
+      --serif: ZhaixinglouCN, "Noto Serif SC", "Songti SC", STSong, SimSun, serif;
+      --body: ZhaixinglouBody, "Noto Serif SC", "Songti SC", STSong, SimSun, serif;
+      --sans: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+      --shadow: 0 26px 70px -42px rgba(43, 31, 20, 0.78);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 0%, rgba(209, 220, 218, 0.55), transparent 30%),
+        radial-gradient(circle at 88% 8%, rgba(234, 210, 217, 0.6), transparent 32%),
+        linear-gradient(180deg, #fbf8f3 0%, var(--page) 100%);
+      font-family: var(--sans);
+    }
+
+    .preview-page {
+      width: min(1480px, 100%);
+      margin: 0 auto;
+      padding: 44px 28px 70px;
+    }
+
+    .preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 24px;
+      margin-bottom: 28px;
+    }
+
+    .preview-header h1 {
+      margin: 0;
+      font-family: var(--serif);
+      font-size: clamp(28px, 4vw, 48px);
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .preview-header p {
+      max-width: 540px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.8;
+      text-align: right;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 24px;
+      align-items: start;
+    }
+
+    .sample {
+      display: grid;
+      gap: 12px;
+    }
+
+    .export-card {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 9 / 16;
+      overflow: hidden;
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      isolation: isolate;
+    }
+
+    .excerpt {
+      position: relative;
+      z-index: 10;
+      margin: 0;
+      white-space: pre-line;
+      font-family: var(--body);
+      font-size: 21px;
+      font-weight: 600;
+      letter-spacing: 0;
+      line-height: 2.02;
+    }
+
+    .outside-caption {
+      padding: 0 6px;
+    }
+
+    .outside-caption strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+
+    .outside-caption span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.65;
+    }
+
+    .noise::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      opacity: 0.24;
+      mix-blend-mode: multiply;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.13'/%3E%3C/svg%3E");
+    }
+
+    .card-journal {
+      padding: 54px 34px;
+      background:
+        linear-gradient(90deg, rgba(111, 132, 140, 0.12) 1px, transparent 1px) 0 0 / 42px 42px,
+        linear-gradient(180deg, rgba(111, 132, 140, 0.08) 1px, transparent 1px) 0 0 / 42px 42px,
+        linear-gradient(180deg, #fffdf8 0%, #f1eadf 100%);
+    }
+
+    .card-journal::before {
+      content: "";
+      position: absolute;
+      inset: 32px 24px;
+      z-index: 3;
+      border: 1px solid rgba(112, 92, 70, 0.14);
+      border-radius: 22px;
+      background:
+        repeating-linear-gradient(180deg, transparent 0 41px, rgba(117, 95, 72, 0.11) 42px 43px),
+        rgba(255, 252, 246, 0.86);
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.62),
+        0 18px 40px -36px rgba(66, 41, 22, 0.72);
+    }
+
+    .card-journal::after {
+      content: "";
+      position: absolute;
+      left: 51px;
+      top: 32px;
+      bottom: 32px;
+      z-index: 4;
+      width: 1px;
+      opacity: 1;
+      mix-blend-mode: normal;
+      background: linear-gradient(180deg, transparent, rgba(185, 126, 117, 0.26), transparent);
+    }
+
+    .card-journal .tape {
+      position: absolute;
+      z-index: 6;
+      width: 74px;
+      height: 22px;
+      border-radius: 3px;
+      background:
+        repeating-linear-gradient(135deg, rgba(119, 137, 144, 0.22) 0 5px, rgba(255, 255, 255, 0.2) 5px 10px),
+        rgba(213, 224, 225, 0.54);
+      box-shadow: 0 8px 18px -14px rgba(61, 45, 34, 0.6);
+    }
+
+    .card-journal .tape.one {
+      top: 45px;
+      right: 46px;
+      transform: rotate(7deg);
+    }
+
+    .card-journal .tape.two {
+      left: 54px;
+      bottom: 58px;
+      transform: rotate(-8deg);
+      opacity: 0.72;
+    }
+
+    .card-journal .rule {
+      position: absolute;
+      z-index: 7;
+      left: 78px;
+      right: 44px;
+      top: 142px;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(81, 66, 52, 0.18), transparent);
+    }
+
+    .card-journal .excerpt {
+      width: calc(100% - 82px);
+      margin: 148px 28px 0 54px;
+      color: #3b332d;
+      text-align: left;
+    }
+
+    .card-magazine {
+      padding: 48px 36px;
+      background:
+        linear-gradient(90deg, transparent 0 22%, rgba(36, 33, 30, 0.06) 22% 22.45%, transparent 22.45%),
+        linear-gradient(180deg, #f7f1e8 0%, #e8ded2 100%);
+    }
+
+    .card-magazine::before {
+      content: "";
+      position: absolute;
+      inset: 28px;
+      z-index: 3;
+      border: 1px solid rgba(45, 38, 32, 0.18);
+      border-radius: 4px;
+    }
+
+    .card-magazine::after {
+      content: "";
+      position: absolute;
+      z-index: 4;
+      left: 28px;
+      right: 28px;
+      top: 36%;
+      height: 1px;
+      opacity: 1;
+      mix-blend-mode: normal;
+      background: linear-gradient(90deg, #2c2926 0 22%, transparent 22% 28%, rgba(44, 41, 38, 0.14) 28% 100%);
+    }
+
+    .card-magazine .number {
+      position: absolute;
+      z-index: 5;
+      left: 45px;
+      top: 52px;
+      color: rgba(45, 39, 33, 0.22);
+      font-family: Georgia, serif;
+      font-size: 86px;
+      line-height: 0.85;
+    }
+
+    .card-magazine .side-line {
+      position: absolute;
+      z-index: 5;
+      right: 44px;
+      top: 52px;
+      bottom: 56px;
+      width: 1px;
+      background: linear-gradient(180deg, rgba(42, 36, 31, 0.42), rgba(42, 36, 31, 0.06));
+    }
+
+    .card-magazine .dot-column {
+      position: absolute;
+      z-index: 5;
+      right: 36px;
+      top: 48px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .card-magazine .dot-column i {
+      display: block;
+      width: 3px;
+      height: 3px;
+      border-radius: 999px;
+      background: rgba(42, 36, 31, 0.3);
+    }
+
+    .card-magazine .excerpt {
+      width: 72%;
+      margin: 54% 0 0 auto;
+      color: #272320;
+      text-align: left;
+    }
+
+    .card-collage {
+      padding: 42px 28px;
+      background:
+        radial-gradient(circle at 18% 15%, rgba(187, 209, 214, 0.5), transparent 30%),
+        radial-gradient(circle at 86% 10%, rgba(235, 206, 216, 0.58), transparent 28%),
+        linear-gradient(180deg, #fffaf3 0%, #f0e5d8 100%);
+    }
+
+    .card-collage .paper {
+      position: absolute;
+      z-index: 3;
+      background: rgba(255, 252, 247, 0.78);
+      border: 1px solid rgba(108, 87, 67, 0.12);
+      box-shadow: 0 20px 36px -32px rgba(63, 42, 26, 0.65);
+    }
+
+    .card-collage .paper.a {
+      left: 36px;
+      right: 44px;
+      top: 48px;
+      height: 44%;
+      border-radius: 18px;
+      transform: rotate(-3deg);
+    }
+
+    .card-collage .paper.b {
+      left: 58px;
+      right: 30px;
+      bottom: 50px;
+      height: 47%;
+      border-radius: 12px;
+      transform: rotate(4deg);
+    }
+
+    .card-collage .clip {
+      position: absolute;
+      z-index: 7;
+      top: 54px;
+      left: 50%;
+      width: 62px;
+      height: 18px;
+      border-radius: 3px;
+      transform: translateX(-50%) rotate(2deg);
+      background: rgba(205, 218, 222, 0.64);
+      border: 1px solid rgba(117, 133, 138, 0.18);
+    }
+
+    .card-collage .corner {
+      position: absolute;
+      z-index: 7;
+      width: 40px;
+      height: 40px;
+      border-color: rgba(67, 56, 47, 0.36);
+    }
+
+    .card-collage .corner.tl {
+      left: 44px;
+      top: 76px;
+      border-top: 1px solid;
+      border-left: 1px solid;
+    }
+
+    .card-collage .corner.br {
+      right: 48px;
+      bottom: 84px;
+      border-right: 1px solid;
+      border-bottom: 1px solid;
+    }
+
+    .card-collage .divider {
+      position: absolute;
+      z-index: 7;
+      left: 68px;
+      right: 60px;
+      top: 49%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-collage .divider::before,
+    .card-collage .divider::after {
+      content: "";
+      height: 1px;
+      flex: 1;
+      background: rgba(72, 60, 51, 0.18);
+    }
+
+    .card-collage .divider i {
+      width: 5px;
+      height: 5px;
+      border: 1px solid rgba(72, 60, 51, 0.28);
+      transform: rotate(45deg);
+    }
+
+    .card-collage .excerpt {
+      width: 68%;
+      margin: 37% auto 0;
+      color: #3a3029;
+      text-align: center;
+    }
+
+    .card-night {
+      padding: 42px 32px;
+      background:
+        radial-gradient(circle at 25% 18%, rgba(124, 147, 170, 0.18), transparent 32%),
+        radial-gradient(circle at 70% 78%, rgba(127, 95, 126, 0.16), transparent 36%),
+        linear-gradient(160deg, #11151b 0%, #0a0c10 54%, #050506 100%);
+    }
+
+    .card-night::before {
+      content: "";
+      position: absolute;
+      inset: 28px;
+      z-index: 3;
+      border: 1px solid rgba(223, 226, 220, 0.14);
+      border-radius: 24px;
+      background:
+        radial-gradient(1px 1px at 20% 18%, rgba(232, 234, 228, 0.54), transparent),
+        radial-gradient(1px 1px at 70% 20%, rgba(232, 234, 228, 0.42), transparent),
+        radial-gradient(1px 1px at 86% 62%, rgba(232, 234, 228, 0.48), transparent),
+        radial-gradient(1px 1px at 33% 84%, rgba(232, 234, 228, 0.32), transparent);
+    }
+
+    .card-night::after {
+      content: "";
+      position: absolute;
+      inset: 50px 46px;
+      z-index: 4;
+      opacity: 1;
+      mix-blend-mode: normal;
+      border-radius: 20px;
+      background: rgba(247, 242, 230, 0.92);
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 24px 54px -36px rgba(237, 225, 199, 0.6);
+    }
+
+    .card-night .constellation {
+      position: absolute;
+      z-index: 5;
+      left: 62px;
+      right: 62px;
+      top: 76px;
+      height: 78px;
+      pointer-events: none;
+    }
+
+    .card-night .constellation span {
+      position: absolute;
+      width: 3px;
+      height: 3px;
+      border-radius: 999px;
+      background: rgba(241, 233, 215, 0.62);
+      box-shadow: 0 0 10px rgba(241, 233, 215, 0.3);
+    }
+
+    .card-night .constellation span:nth-child(1) { left: 8%; top: 52%; }
+    .card-night .constellation span:nth-child(2) { left: 29%; top: 23%; }
+    .card-night .constellation span:nth-child(3) { left: 53%; top: 40%; }
+    .card-night .constellation span:nth-child(4) { left: 80%; top: 12%; }
+
+    .card-night .constellation::before {
+      content: "";
+      position: absolute;
+      left: 10%;
+      top: 44%;
+      width: 72%;
+      height: 1px;
+      transform: rotate(-12deg);
+      background: linear-gradient(90deg, rgba(241, 233, 215, 0.14), rgba(241, 233, 215, 0.36), rgba(241, 233, 215, 0.12));
+    }
+
+    .card-night .divider {
+      position: absolute;
+      z-index: 6;
+      left: 82px;
+      right: 82px;
+      top: 28%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(50, 43, 34, 0.22), transparent);
+    }
+
+    .card-night .excerpt {
+      width: 68%;
+      margin: 47% auto 0;
+      color: #302a24;
+      text-align: left;
+    }
+
+    @media (max-width: 1180px) {
+      .grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 720px) {
+      .preview-page {
+        padding: 28px 16px 48px;
+      }
+
+      .preview-header {
+        display: block;
+      }
+
+      .preview-header p {
+        margin-top: 12px;
+        text-align: left;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .export-card {
+        max-width: 430px;
+        margin: 0 auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="preview-page">
+    <header class="preview-header">
+      <h1>摘录导出卡片版式预览</h1>
+      <p>这一版不用贴图，参考摘星楼的导出卡逻辑：靠纸面、边框、线条、网格、角标、分割符和文字块秩序做装饰。卡片成品内只保留正文摘录。</p>
+    </header>
+
+    <section class="grid" aria-label="卡片模板预览">
+      <article class="sample">
+        <div class="export-card card-journal noise">
+          <span class="tape one"></span>
+          <span class="tape two"></span>
+          <span class="rule"></span>
+          <p class="excerpt">我把这一刻，
+悄悄收进了夜色里。
+等风停下来的时候，
+它还是会轻轻发光。</p>
+        </div>
+        <div class="outside-caption">
+          <strong>手账札记</strong>
+          <span>网格底、内页线、纸胶带形状，但全部用 CSS 画。</span>
+        </div>
+      </article>
+
+      <article class="sample">
+        <div class="export-card card-magazine noise">
+          <span class="number">01</span>
+          <span class="side-line"></span>
+          <span class="dot-column"><i></i><i></i><i></i><i></i><i></i></span>
+          <p class="excerpt">我把这一刻，
+悄悄收进了夜色里。
+等风停下来的时候，
+它还是会轻轻发光。</p>
+        </div>
+        <div class="outside-caption">
+          <strong>杂志留白</strong>
+          <span>偏 editorial，靠大留白、编号、水线和非居中排版出气质。</span>
+        </div>
+      </article>
+
+      <article class="sample">
+        <div class="export-card card-collage noise">
+          <span class="paper a"></span>
+          <span class="paper b"></span>
+          <span class="clip"></span>
+          <span class="corner tl"></span>
+          <span class="corner br"></span>
+          <span class="divider"><i></i></span>
+          <p class="excerpt">我把这一刻，
+悄悄收进了夜色里。
+等风停下来的时候，
+它还是会轻轻发光。</p>
+        </div>
+        <div class="outside-caption">
+          <strong>拼贴纸层</strong>
+          <span>像手工拼贴，但不用素材图，只用叠层、夹子、角标和分割符。</span>
+        </div>
+      </article>
+
+      <article class="sample">
+        <div class="export-card card-night noise">
+          <span class="constellation"><span></span><span></span><span></span><span></span></span>
+          <span class="divider"></span>
+          <p class="excerpt">我把这一刻，
+悄悄收进了夜色里。
+等风停下来的时候，
+它还是会轻轻发光。</p>
+        </div>
+        <div class="outside-caption">
+          <strong>夜色信纸</strong>
+          <span>摘星楼一点点暗色语法，但正文仍是浅纸面，适合重情绪片段。</span>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

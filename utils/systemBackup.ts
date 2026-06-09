@@ -855,7 +855,7 @@ export const SYSTEM_BACKUP_ALWAYS_STORES = [
     'xhs_activities', 'xhs_stock',
     'vector_memories',
     'memory_records', 'memory_record_audio',
-    'scheduled_messages', 'letters', 'yesterday_newspapers', 'vibe_references'
+    'scheduled_messages', 'letters', 'yesterday_newspapers', 'vibe_references', 'niannian_sessions', 'collection_books'
 ];
 
 export const SYSTEM_BACKUP_CONDITIONAL_STORES = [
@@ -1363,6 +1363,8 @@ export async function exportSystemData(
             case 'letters': backupData.letters = processedData; break;
             case 'yesterday_newspapers': backupData.yesterdayNewspapers = processedData; break;
             case 'vibe_references': backupData.vibeReferences = processedData; break;
+            case 'niannian_sessions': backupData.nianNianSessions = processedData; break;
+            case 'collection_books': backupData.collectionBooks = processedData; break;
         }
 
         await new Promise(resolve => setTimeout(resolve, 10));

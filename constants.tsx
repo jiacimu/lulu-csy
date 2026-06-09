@@ -76,6 +76,7 @@ export const Icons: Record<string, React.FC<{ className?: string }>> = {
   Crosstime: ({ className }) => <GitBranch className={className} weight="bold" />,
   LoveShow: ({ className }) => <Heart className={className} weight="fill" />,
   NianNian: ({ className }) => <Sparkle className={className} weight="fill" />,
+  CollectionHall: ({ className }) => <Books className={className} weight="fill" />,
 };
 
 export const APP_CONFIGS: AppConfig[] = [
@@ -97,6 +98,7 @@ export const APP_CONFIGS: AppConfig[] = [
   { id: AppID.Crosstime, name: '跨时空对话', icon: 'Crosstime', color: 'violet' },
   { id: AppID.LoveShow, name: '心动放送', icon: 'LoveShow', color: 'rose' },
   { id: AppID.NianNian, name: '念念浮生', icon: 'NianNian', color: 'amber' },
+  { id: AppID.CollectionHall, name: '典藏馆', icon: 'CollectionHall', color: 'amber' },
   { id: AppID.Study, name: '自习室', icon: 'Study', color: 'emerald' },
   { id: AppID.Game, name: 'TRPG', icon: 'Game', color: 'orange' },
   { id: AppID.Novel, name: '笔友会', icon: 'Novel', color: 'amber' },
@@ -124,6 +126,7 @@ const HIDDEN_LAUNCHER_APPS = new Set<AppID>([
   AppID.Theater,
   AppID.LoveShow,
   AppID.NianNian,
+  AppID.CollectionHall,
 ]);
 
 export const INSTALLED_APPS: AppConfig[] = APP_CONFIGS.filter(app => !HIDDEN_LAUNCHER_APPS.has(app.id));
