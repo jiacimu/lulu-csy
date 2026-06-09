@@ -285,7 +285,7 @@ const ChartReading: React.FC<ChartReadingProps> = ({
         <>
             <div className="flex-1 flex flex-col overflow-hidden">
                 {/* Header */}
-                <div className="pt-12 pb-3 px-6 flex items-center justify-between shrink-0 border-b border-[#d4af37]/10">
+                <div className="sully-safe-overlay-top pt-12 pb-3 px-6 flex items-center justify-between shrink-0 border-b border-[#d4af37]/10">
                     <button
                         onClick={handleBack}
                         className="p-2 -ml-2 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-[#d4af37] border border-[#d4af37]/30 bg-black/30 backdrop-blur-md"

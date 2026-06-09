@@ -1,11 +1,115 @@
 import React,{ useState,useEffect,useRef } from 'react';
-import { CharacterProfile,Message,DateState,DialogueItem,UserProfile,DateTokenUsage,DateRequestDebugSnapshot } from '../../types';
+import { CharacterProfile,Message,DateState,DialogueItem,UserProfile,DateTokenUsage,DateRequestDebugSnapshot,type ImageProviderType,type ManualPhotoGenerationOptions,type ManualPhotoMode,type PhotoStylePreset,type SavedVibeReference,type VibeReferenceInput } from '../../types';
 import { type InnerWhisper } from '../../utils/thinkingExtractor';
+import type { StatusCardData } from '../../types/statusCard';
 import { extractTranslationPairs } from '../../utils/chatParser';
 import Modal from '../../components/os/Modal';
 import { useOS } from '../../context/OSContext';
 import DateSettings from './DateSettings';
+import DatePhotoPanel from './DatePhotoPanel';
 import SummaryFloatingBall from './SummaryFloatingBall';
+import VibeReferencePicker from '../chat/VibeReferencePicker';
+import ThinkingPanel from '../chat/ThinkingPanel';
+import { THINKING_CHAIN_UI_ENABLED } from '../../constants';
+import {
+    findLatestDateStatusDialogueMessage,
+    findLatestDateStatusMessage,
+    getRecentDateStatusMessageIds,
+} from '../../utils/dateStatusVisibility';
+
+const StatusCardRenderer = React.lazy(() => import('../chat/StatusCardRenderer'));
+
+const DateInlineStatusCard: React.FC<{ data: StatusCardData; variant: 'reader' | 'visual-page' }> = ({ data, variant }) => {
+    const { theme } = useOS();
+
+    return (
+        <div
+            className={`flex w-full min-w-0 max-w-full ${variant === 'reader' ? 'date-reader-status-card mt-5 mb-2 justify-start overflow-visible' : 'justify-center overflow-x-hidden pointer-events-auto animate-fade-in'}`}
+            onClick={(e) => e.stopPropagation()}
+        >
+            <React.Suspense fallback={<div className="rounded-lg bg-slate-900/10 px-4 py-2 text-[11px] font-bold text-slate-500">状态栏加载中...</div>}>
+                <StatusCardRenderer
+                    data={data}
+                    freeformFitMode="width"
+                    customFont={theme.customFont}
+                    stabilizeDateStatusLayout
+                />
+            </React.Suspense>
+        </div>
+    );
+};
+
+function paginateDateStatusCard(data: StatusCardData): StatusCardData[] {
+    const html = typeof data.meta?.html === 'string' ? data.meta.html : '';
+    if (!html || !html.includes('date-registry__module') || typeof DOMParser === 'undefined') {
+        return [data];
+    }
+
+    try {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const modules = Array.from(doc.querySelectorAll('.date-registry__module'));
+        if (modules.length <= 1) return [data];
+
+        const originalTitle = doc.querySelector('.date-registry__hero h1')?.textContent?.trim() || data.body;
+
+        return modules.map((sourceModule, pageIndex) => {
+            const pageDoc = new DOMParser().parseFromString(html, 'text/html');
+            const pageModules = Array.from(pageDoc.querySelectorAll('.date-registry__module'));
+            pageModules.forEach((module, moduleIndex) => {
+                if (moduleIndex !== pageIndex) module.remove();
+            });
+
+            const moduleName = sourceModule.getAttribute('data-module-name')
+                || sourceModule.querySelector('h1,h2')?.textContent?.trim()
+                || `状态栏 ${pageIndex + 1}`;
+            const heroTitle = pageDoc.querySelector('.date-registry__hero h1');
+            const heroDescription = pageDoc.querySelector('.date-registry__hero p');
+            const heroCount = pageDoc.querySelector('.date-registry__hero > strong');
+            const registry = pageDoc.querySelector('.date-registry');
+
+            if (heroTitle) heroTitle.textContent = moduleName;
+            if (heroDescription && modules.length > 1) {
+                heroDescription.textContent = `${originalTitle} · 第 ${pageIndex + 1}/${modules.length} 页`;
+            }
+            if (heroCount) heroCount.textContent = `${pageIndex + 1}/${modules.length}`;
+            registry?.setAttribute('data-page-index', String(pageIndex + 1));
+            registry?.setAttribute('data-page-count', String(modules.length));
+
+            return {
+                ...data,
+                body: moduleName,
+                meta: {
+                    ...data.meta,
+                    html: `<!DOCTYPE html>\n${pageDoc.documentElement.outerHTML}`,
+                    dateStatusPageIndex: pageIndex + 1,
+                    dateStatusPageCount: modules.length,
+                },
+            };
+        });
+    } catch {
+        return [data];
+    }
+}
+
+const DateStatusCardPages: React.FC<{ data: StatusCardData; variant: 'reader' | 'visual-page' }> = ({ data, variant }) => {
+    const pages = React.useMemo(() => paginateDateStatusCard(data), [data]);
+    const isReader = variant === 'reader';
+
+    return (
+        <div className={isReader ? 'date-reader-status-pages -mx-4 w-[calc(100%+2rem)] min-w-0 overflow-visible' : 'h-full w-full min-w-0'}>
+            {pages.map((page, index) => (
+                <section
+                    key={`${page.meta?.dateStatusPageIndex || index}-${page.body}`}
+                    className={`flex w-full min-w-0 items-center ${
+                        isReader ? 'justify-start overflow-visible py-0' : 'min-h-full justify-center overflow-x-hidden py-5'
+                    }`}
+                >
+                    <DateInlineStatusCard data={page} variant={variant} />
+                </section>
+            ))}
+        </div>
+    );
+};
 
 const isAppleMobileWebKit = () => {
     if (typeof navigator === 'undefined') return false;
@@ -131,11 +235,13 @@ interface DateSessionProps {
     userProfile: UserProfile;
     messages: Message[]; // The DB messages for history/novel mode
     peekStatus: string;  // Initial text from the Peek phase
+    peekThinking?: string;
     initialState?: DateState; // Resume state
     onSendMessage: (text: string, directorHint?: string) => Promise<{ content: string; whispers: InnerWhisper[] }>; // Returns AI content + optional whispers
     onReroll: () => Promise<{ content: string; whispers: InnerWhisper[] }>;
     onExit: (currentState: DateState, syncMode: DateExitSyncMode) => void;
     onEditMessage: (msg: Message) => void;
+    onEditStatusCard: (msg: Message) => void;
     onDeleteMessage: (msg: Message) => void;
     isSummaryGenerating: boolean;
     hasPendingSummary: boolean;
@@ -168,6 +274,22 @@ interface DateSessionProps {
     onToggleTranslation?: (enabled: boolean) => void;
     onSetTranslateSourceLang?: (lang: string) => void;
     onSetTranslateTargetLang?: (lang: string) => void;
+    // Date photos
+    photoMessages?: Message[];
+    photoConfigReady?: boolean;
+    manualPhotoEnabled?: boolean;
+    manualPhotoGenerating?: boolean;
+    hasUnreadDatePhoto?: boolean;
+    photoStylePresets?: PhotoStylePreset[];
+    savedVibeReferences?: SavedVibeReference[];
+    imageProviderType?: ImageProviderType;
+    onManualPhotoGenerate?: (prompt: string, stylePresetId?: string, vibeReferences?: VibeReferenceInput[], options?: ManualPhotoGenerationOptions) => Promise<void>;
+    onSaveVibeReference?: (reference: VibeReferenceInput) => Promise<SavedVibeReference | undefined>;
+    onImportVibeFile?: (file: File) => Promise<SavedVibeReference | undefined>;
+    onRenameSavedVibe?: (id: string, name: string) => Promise<void>;
+    onDeleteSavedVibe?: (id: string) => Promise<void>;
+    onClearSavedVibeCache?: (id: string) => Promise<void>;
+    onMarkDatePhotosSeen?: () => void;
 }
 
 export type DateExitSyncMode = 'summary' | 'raw' | 'none';
@@ -177,11 +299,13 @@ const DateSession: React.FC<DateSessionProps> = ({
     userProfile,
     messages, 
     peekStatus, 
+    peekThinking = '',
     initialState,
     onSendMessage, 
     onReroll, 
     onExit,
     onEditMessage,
+    onEditStatusCard,
     onDeleteMessage,
     isSummaryGenerating,
     hasPendingSummary,
@@ -189,7 +313,6 @@ const DateSession: React.FC<DateSessionProps> = ({
     canAutoSummary,
     summaryDisabledReason,
     lastTokenUsage,
-    requestDebugSnapshots = [],
     onRequestSummary,
     onReviewPendingSummary,
     onDiscardPendingSummary,
@@ -210,7 +333,22 @@ const DateSession: React.FC<DateSessionProps> = ({
     translateTargetLang,
     onToggleTranslation,
     onSetTranslateSourceLang,
-    onSetTranslateTargetLang}) => {
+    onSetTranslateTargetLang,
+    photoMessages = [],
+    photoConfigReady = false,
+    manualPhotoEnabled = false,
+    manualPhotoGenerating = false,
+    hasUnreadDatePhoto = false,
+    photoStylePresets = [],
+    savedVibeReferences = [],
+    imageProviderType = 'novelai',
+    onManualPhotoGenerate,
+    onSaveVibeReference,
+    onImportVibeFile,
+    onRenameSavedVibe,
+    onDeleteSavedVibe,
+    onClearSavedVibeCache,
+    onMarkDatePhotosSeen}) => {
     const { addToast, registerBackHandler } = useOS();
     const textScale = Math.min(Math.max(fontScale ?? 1, 0.85), 1.3);
     const scaledFont = (basePx: number) => `${Math.round(basePx * textScale * 10) / 10}px`;
@@ -234,7 +372,6 @@ const DateSession: React.FC<DateSessionProps> = ({
     const [isTyping, setIsTyping] = useState(false); // Waiting for API
     const [showExitModal, setShowExitModal] = useState(false);
     const [showRequestDebug, setShowRequestDebug] = useState(false);
-    const [selectedRequestDebugId, setSelectedRequestDebugId] = useState<string | null>(null);
     
     // Inner Whispers State (内心低语)
     const [activeWhispers, setActiveWhispers] = useState<InnerWhisper[]>([]);
@@ -245,23 +382,72 @@ const DateSession: React.FC<DateSessionProps> = ({
     const [showSettings, setShowSettings] = useState(false);
 
     // Edit Msg Logic
-    const [modalType, setModalType] = useState<'none' | 'options'>('none');
+    const [modalType, setModalType] = useState<'none' | 'options' | 'manual-photo'>('none');
     const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+    const [dismissedStatusMessageIds, setDismissedStatusMessageIds] = useState<Set<number>>(() => new Set());
+    const [showPhotoPanel, setShowPhotoPanel] = useState(false);
+    const [manualPhotoPrompt, setManualPhotoPrompt] = useState('');
+    const [manualPhotoStyleId, setManualPhotoStyleId] = useState('');
+    const [manualPhotoVibes, setManualPhotoVibes] = useState<VibeReferenceInput[]>([]);
+    const [manualPhotoMode, setManualPhotoMode] = useState<ManualPhotoMode>('direct');
+    const [manualPhotoUseAppearance, setManualPhotoUseAppearance] = useState(true);
+    const [manualPhotoUseUserAppearance, setManualPhotoUseUserAppearance] = useState(false);
+    const [naiAppearanceTagsDraft, setNaiAppearanceTagsDraft] = useState(char.naiAppearanceTags || '');
+    const [naiAppearanceNegativeDraft, setNaiAppearanceNegativeDraft] = useState(char.naiAppearanceNegativeTags || '');
+    const [appearancePromptDraft, setAppearancePromptDraft] = useState(char.photoAppearancePrompt || '');
+    const [userNaiAppearanceTagsDraft, setUserNaiAppearanceTagsDraft] = useState(userProfile.naiAppearanceTags || '');
+    const [userNaiAppearanceNegativeDraft, setUserNaiAppearanceNegativeDraft] = useState(userProfile.naiAppearanceNegativeTags || '');
+    const [userAppearancePromptDraft, setUserAppearancePromptDraft] = useState(userProfile.photoAppearancePrompt || '');
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const touchStartRef = useRef<{x: number, y: number} | null>(null);
     const novelScrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const isResumedRef = useRef(false);
-    const selectedRequestDebug = requestDebugSnapshots.find(item => item.id === selectedRequestDebugId) || requestDebugSnapshots[0] || null;
-    const requestDebugText = React.useMemo(() => {
-        if (!selectedRequestDebug) return '';
-        return selectedRequestDebug.messages.map((message, index) => (
-            `#${index + 1} ${message.role.toUpperCase()} (${message.content.length.toLocaleString('zh-CN')} 字符)\n${message.content}`
-        )).join('\n\n' + '-'.repeat(64) + '\n\n');
-    }, [selectedRequestDebug]);
-    const requestDebugCharCount = selectedRequestDebug
-        ? selectedRequestDebug.messages.reduce((sum, message) => sum + message.content.length, 0)
-        : 0;
+    const photoButtonVisible = manualPhotoEnabled || manualPhotoGenerating || photoMessages.length > 0;
+    const realPhotoStylePresets = photoStylePresets.filter(style => style.id !== 'no-style');
+    const effectiveManualPhotoStyleId = photoStylePresets.some(style => style.id === manualPhotoStyleId)
+        ? manualPhotoStyleId
+        : (char.defaultPhotoStylePresetId && photoStylePresets.some(style => style.id === char.defaultPhotoStylePresetId)
+            ? char.defaultPhotoStylePresetId
+            : realPhotoStylePresets[0]?.id || photoStylePresets[0]?.id || '');
+    const hasNaiAppearanceBinding = Boolean((char.naiAppearanceTags || '').trim());
+    const hasOpenAIAppearanceBinding = Boolean((char.photoAppearancePrompt || '').trim());
+    const hasUserAppearanceBinding = imageProviderType === 'novelai'
+        ? Boolean((userProfile.naiAppearanceTags || '').trim())
+        : Boolean((userProfile.photoAppearancePrompt || '').trim());
+
+    const openDatePhotoPanel = () => {
+        setShowPhotoPanel(prev => !prev);
+        onMarkDatePhotosSeen?.();
+    };
+
+    const openManualPhotoModal = () => {
+        setShowPhotoPanel(false);
+        setModalType('manual-photo');
+    };
+
+    const handleManualPhotoSubmit = async () => {
+        if (!onManualPhotoGenerate) return;
+        await onManualPhotoGenerate(
+            manualPhotoPrompt,
+            effectiveManualPhotoStyleId || undefined,
+            imageProviderType === 'novelai' ? manualPhotoVibes : [],
+            {
+                mode: manualPhotoMode,
+                useAppearance: manualPhotoUseAppearance,
+                useUserAppearance: manualPhotoUseUserAppearance,
+                appearanceTags: imageProviderType === 'novelai' ? naiAppearanceTagsDraft : undefined,
+                appearanceNegativeTags: imageProviderType === 'novelai' ? naiAppearanceNegativeDraft : undefined,
+                userAppearanceTags: imageProviderType === 'novelai' ? userNaiAppearanceTagsDraft : undefined,
+                userAppearanceNegativeTags: imageProviderType === 'novelai' ? userNaiAppearanceNegativeDraft : undefined,
+                appearancePrompt: appearancePromptDraft,
+                userAppearancePrompt: userAppearancePromptDraft,
+            },
+        );
+        setManualPhotoPrompt('');
+        setManualPhotoVibes([]);
+        setModalType('none');
+    };
 
     useEffect(() => {
         return () => {
@@ -275,6 +461,18 @@ const DateSession: React.FC<DateSessionProps> = ({
             }
         };
     }, []);
+
+    useEffect(() => {
+        setNaiAppearanceTagsDraft(char.naiAppearanceTags || '');
+        setNaiAppearanceNegativeDraft(char.naiAppearanceNegativeTags || '');
+        setAppearancePromptDraft(char.photoAppearancePrompt || '');
+    }, [char.id, char.naiAppearanceTags, char.naiAppearanceNegativeTags, char.photoAppearancePrompt]);
+
+    useEffect(() => {
+        setUserNaiAppearanceTagsDraft(userProfile.naiAppearanceTags || '');
+        setUserNaiAppearanceNegativeDraft(userProfile.naiAppearanceNegativeTags || '');
+        setUserAppearancePromptDraft(userProfile.photoAppearancePrompt || '');
+    }, [userProfile.naiAppearanceTags, userProfile.naiAppearanceNegativeTags, userProfile.photoAppearancePrompt]);
 
     // Back Handler
     useEffect(() => {
@@ -291,11 +489,19 @@ const DateSession: React.FC<DateSessionProps> = ({
                 setShowRequestDebug(false);
                 return true;
             }
+            if (showPhotoPanel) {
+                setShowPhotoPanel(false);
+                return true;
+            }
+            if (modalType === 'manual-photo') {
+                setModalType('none');
+                return true;
+            }
             setShowExitModal(true);
             return true;
         });
         return unregister;
-    }, [showSettings, showExitModal, showRequestDebug, registerBackHandler]);
+    }, [showSettings, showExitModal, showRequestDebug, showPhotoPanel, modalType, registerBackHandler]);
 
     // Filter messages for Novel Mode: Show only current session
     // Logic: Find the LAST message with `isOpening: true`. Show all messages from there onwards.
@@ -308,6 +514,45 @@ const DateSession: React.FC<DateSessionProps> = ({
         // Fallback: If no opening found (legacy data), show all
         return visibleMessages;
     }, [messages]);
+    const latestDateStatusMessage = React.useMemo(
+        () => findLatestDateStatusMessage(sessionMessages),
+        [sessionMessages],
+    );
+    const latestDateStatusCard = latestDateStatusMessage?.metadata?.statusCardData as StatusCardData | undefined;
+    const latestSessionMessage = sessionMessages[sessionMessages.length - 1] || null;
+    const latestDialogueMessage = React.useMemo(
+        () => findLatestDateStatusDialogueMessage(sessionMessages) || null,
+        [sessionMessages],
+    );
+    const latestDateStatusMessageId = latestDateStatusMessage?.id;
+    const recentDateStatusMessageIds = React.useMemo(
+        () => getRecentDateStatusMessageIds(sessionMessages),
+        [sessionMessages],
+    );
+    const showVisualDateStatusPage = char.dateStatusBarEnabled === true
+        && !!latestDateStatusCard
+        && latestDateStatusMessageId !== undefined
+        && !dismissedStatusMessageIds.has(latestDateStatusMessageId)
+        && latestDateStatusMessage?.id === latestDialogueMessage?.id
+        && !isTyping
+        && !isTextAnimating
+        && (dialogueQueue || []).length === 0;
+    const showDateThinking = THINKING_CHAIN_UI_ENABLED && char.showThinking !== false;
+    const getDateThinking = (message: Message | null | undefined): string => {
+        if (!showDateThinking || message?.role !== 'assistant') return '';
+        return typeof message.metadata?.thinking === 'string' ? message.metadata.thinking.trim() : '';
+    };
+    const peekThinkingText = showDateThinking ? peekThinking.trim() : '';
+    const latestAssistantThinking = getDateThinking(latestSessionMessage) || (latestSessionMessage ? '' : peekThinkingText);
+
+    const dismissVisualDateStatusPage = () => {
+        if (latestDateStatusMessageId === undefined) return;
+        setDismissedStatusMessageIds(prev => {
+            const next = new Set(prev);
+            next.add(latestDateStatusMessageId);
+            return next;
+        });
+    };
 
     // Initialization
     useEffect(() => {
@@ -634,13 +879,24 @@ const DateSession: React.FC<DateSessionProps> = ({
             ></div>
 
             {/* Menu Layer */}
-            <div className="absolute top-0 right-0 p-4 pt-12 z-[100] flex justify-end gap-3 pointer-events-auto">
+            <div className="sully-safe-floating-top absolute top-0 right-0 p-4 z-[100] flex justify-end gap-3 pointer-events-auto">
                 {!isTyping && canReroll && (
                     <button onClick={(e) => { e.stopPropagation(); handleRerollClick(); }} className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all shadow-lg active:scale-95 ${isNovelMode ? 'bg-white/10 backdrop-blur-md border-slate-300/30 text-slate-400 hover:bg-white/20' : 'bg-black/30 backdrop-blur-md border-white/20 text-white hover:bg-white/20'}`}>
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
                     </button>
                 )}
-                
+                {photoButtonVisible && (
+                    <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); openDatePhotoPanel(); }}
+                        className={`relative w-10 h-10 rounded-full flex items-center justify-center border transition-all shadow-lg active:scale-95 ${showPhotoPanel ? 'bg-white text-black border-white' : 'bg-black/30 backdrop-blur-md border-white/20 text-white hover:bg-white/20'}`}
+                        aria-label="见面照片"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.7} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 9.186 4.5h5.628a2.31 2.31 0 0 1 2.359 1.675l.513 1.797a.75.75 0 0 0 .721.545h.843A2.25 2.25 0 0 1 21.5 10.75v6.5a2.25 2.25 0 0 1-2.25 2.25H4.75a2.25 2.25 0 0 1-2.25-2.25v-6.5A2.25 2.25 0 0 1 4.75 8.5h.843a.75.75 0 0 0 .721-.545l.513-1.78Z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 13.5a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" /></svg>
+                        {manualPhotoGenerating && <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border border-black/40 bg-amber-300 animate-pulse" />}
+                        {!manualPhotoGenerating && hasUnreadDatePhoto && <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border border-black/40 bg-rose-400" />}
+                    </button>
+                )}
                 {/* Novel Mode Toggle */}
                 <button onClick={(e) => { e.stopPropagation(); setIsNovelMode(!isNovelMode); }} className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all shadow-lg active:scale-95 ${isNovelMode ? 'bg-white text-black border-white' : 'bg-black/30 backdrop-blur-md border-white/20 text-white hover:bg-white/20'}`}>
                     {isNovelMode ? (
@@ -670,8 +926,6 @@ const DateSession: React.FC<DateSessionProps> = ({
                 canAutoSummary={canAutoSummary}
                 disabledReason={summaryDisabledReason}
                 lastTokenUsage={lastTokenUsage}
-                requestDebugCount={requestDebugSnapshots.length}
-                onOpenRequestDebug={() => setShowRequestDebug(true)}
                 onRequestManualSummary={onRequestSummary}
                 onReviewPendingSummary={onReviewPendingSummary}
                 onDiscardPendingSummary={onDiscardPendingSummary}
@@ -695,20 +949,35 @@ const DateSession: React.FC<DateSessionProps> = ({
                 onSetTranslateTargetLang={onSetTranslateTargetLang}
             />
 
+            {showPhotoPanel && (
+                <DatePhotoPanel
+                    photos={photoMessages}
+                    manualPhotoEnabled={manualPhotoEnabled}
+                    manualPhotoGenerating={manualPhotoGenerating}
+                    onClose={() => setShowPhotoPanel(false)}
+                    onOpenManualPhoto={openManualPhotoModal}
+                />
+            )}
+
             {/* Novel Mode View */}
             {isNovelMode && (
-                <div ref={novelScrollRef} className={`absolute inset-0 z-20 overflow-y-auto no-scrollbar pt-24 pb-32 px-8 mask-image-gradient overscroll-contain ${char.dateLightReading ? 'bg-[#faf8f5]' : 'bg-black/90 backdrop-blur-sm'}`} onClick={(e) => { e.stopPropagation(); setShowInputBox(true); }}>
-                    <div className="min-h-full flex flex-col justify-end">
-                        <div className="max-w-2xl mx-auto animate-fade-in space-y-6">
+                <div ref={novelScrollRef} className={`absolute inset-0 z-20 overflow-y-auto overflow-x-hidden no-scrollbar pt-24 pb-32 pl-8 pr-4 mask-image-gradient overscroll-contain ${char.dateLightReading ? 'bg-[#faf8f5]' : 'bg-black/90 backdrop-blur-sm'}`} onClick={(e) => { e.stopPropagation(); setShowInputBox(true); }}>
+                    <div className="flex min-h-full w-full min-w-0 flex-col justify-end">
+                        <div className="mx-auto w-full min-w-0 max-w-2xl box-border animate-fade-in space-y-6">
                             {sessionMessages.length === 0 && peekStatus && (
-                                <div className={`italic text-center mb-8 px-4 ${char.dateLightReading ? 'text-stone-400' : 'text-slate-200/50'}`} style={{ fontSize: scaledFont(14) }}>
-                                    {cleanTextForDisplay(peekStatus).split('\n').map((line, idx) => line.trim() && <p key={idx} className="whitespace-pre-wrap leading-relaxed tracking-wide my-2">{line}</p>)}
+                                <div className={`w-full min-w-0 max-w-full box-border overflow-hidden italic text-center mb-8 px-4 ${char.dateLightReading ? 'text-stone-400' : 'text-slate-200/50'}`} style={{ fontSize: scaledFont(14) }}>
+                                    <ThinkingPanel
+                                        thinking={peekThinkingText}
+                                        textColor={char.dateLightReading ? '#57534e' : '#e2e8f0'}
+                                        className="mb-3 text-left"
+                                    />
+                                    {cleanTextForDisplay(peekStatus).split('\n').map((line, idx) => line.trim() && <p key={idx} className="date-reader-text whitespace-pre-wrap leading-relaxed tracking-wide my-2">{line}</p>)}
                                 </div>
                             )}
                             {sessionMessages.map((msg) => (
                                 <div
                                     key={msg.id}
-                                    className={`group relative rounded-xl transition-colors -mx-4 px-4 py-2 ${char.dateLightReading ? 'active:bg-stone-100' : 'active:bg-white/5'}`}
+                                    className={`group relative -mx-4 w-[calc(100%+2rem)] min-w-0 max-w-[calc(100%+2rem)] box-border overflow-visible rounded-xl px-4 py-2 transition-colors ${char.dateLightReading ? 'active:bg-stone-100' : 'active:bg-white/5'}`}
                                     onTouchStart={(e) => handleMsgTouchStart(e, msg)}
                                     onTouchEnd={handleMsgTouchEnd}
                                     onTouchMove={handleMsgTouchMove}
@@ -719,24 +988,39 @@ const DateSession: React.FC<DateSessionProps> = ({
                                     onContextMenu={(e) => { e.preventDefault(); setSelectedMessage(msg); setModalType('options'); }}
                                 >
                                     {msg.role === 'user' ? (
-                                        <p className={`whitespace-pre-wrap font-[inherit] text-right leading-loose tracking-wide italic pr-4 ${char.dateLightReading ? 'text-stone-400 border-r-2 border-stone-300/50' : 'text-slate-400 border-r-2 border-slate-600/50'}`} style={{ fontSize: scaledFont(16) }}>{cleanTextForDisplay(msg.content)} <span className="text-[10px] uppercase not-italic ml-2 opacity-50">{userProfile.name}</span></p>
+                                        <p className={`date-reader-text whitespace-pre-wrap font-[inherit] text-right leading-loose tracking-wide italic pr-4 ${char.dateLightReading ? 'text-stone-400 border-r-2 border-stone-300/50' : 'text-slate-400 border-r-2 border-slate-600/50'}`} style={{ fontSize: scaledFont(16) }}>{cleanTextForDisplay(msg.content)} <span className="text-[10px] uppercase not-italic ml-2 opacity-50">{userProfile.name}</span></p>
                                     ) : (
-                                        <div>
+                                        <div className="w-full min-w-0 max-w-full box-border overflow-visible">
                                             {(() => {
                                                 // Use parseDialogue to handle both plain text and <翻译> XML
                                                 const items = parseDialogue(msg.content || '', 'normal');
-                                                return items.map((item, idx) => {
+                                                const statusCard = msg.metadata?.statusCardData as StatusCardData | undefined;
+                                                const shouldRenderStatusCard = recentDateStatusMessageIds.has(msg.id);
+                                                const thinking = getDateThinking(msg);
+                                                return (
+                                                    <>
+                                                        <ThinkingPanel
+                                                            thinking={thinking}
+                                                            textColor={char.dateLightReading ? '#57534e' : '#e2e8f0'}
+                                                            className="mb-3 pl-4"
+                                                        />
+                                                        {items.map((item, idx) => {
                                                     const cleanLine = cleanTextForDisplay(item.text);
                                                     if (!cleanLine) return null;
                                                     return (
-                                                        <div key={idx} className="mb-4 last:mb-0">
-                                                            <p className={`whitespace-pre-wrap font-[inherit] text-justify leading-loose tracking-wide pl-4 ${char.dateLightReading ? 'text-stone-700 border-l-2 border-stone-200' : 'text-slate-200 drop-shadow-md border-l-2 border-white/10'}`} style={{ fontSize: scaledFont(18) }}>{cleanLine}</p>
+                                                        <div key={idx} className="mb-4 w-full min-w-0 max-w-full box-border overflow-hidden last:mb-0">
+                                                            <p className={`date-reader-text whitespace-pre-wrap font-[inherit] text-left sm:text-justify leading-loose tracking-wide pl-4 ${char.dateLightReading ? 'text-stone-700 border-l-2 border-stone-200' : 'text-slate-200 drop-shadow-md border-l-2 border-white/10'}`} style={{ fontSize: scaledFont(18) }}>{cleanLine}</p>
                                                             {item.translationText && (
-                                                                <p className={`whitespace-pre-wrap font-[inherit] text-justify leading-relaxed tracking-wide pl-4 mt-1 ${char.dateLightReading ? 'text-stone-400 border-l-2 border-stone-200/50' : 'text-slate-400/60 border-l-2 border-white/5'}`} style={{ fontSize: scaledFont(14) }}>{item.translationText}</p>
+                                                                <p className={`date-reader-text whitespace-pre-wrap font-[inherit] text-left sm:text-justify leading-relaxed tracking-wide pl-4 mt-1 ${char.dateLightReading ? 'text-stone-400 border-l-2 border-stone-200/50' : 'text-slate-400/60 border-l-2 border-white/5'}`} style={{ fontSize: scaledFont(14) }}>{item.translationText}</p>
                                                             )}
                                                         </div>
                                                     );
-                                                });
+                                                        })}
+                                                        {char.dateStatusBarEnabled === true && statusCard && shouldRenderStatusCard && (
+                                                            <DateStatusCardPages data={statusCard} variant="reader" />
+                                                        )}
+                                                    </>
+                                                );
                                             })()}
                                         </div>
                                     )}
@@ -758,6 +1042,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                             {/* VN Dialogue Box */}
                             <div className={`w-[90%] max-w-lg rounded-2xl border border-white/10 p-6 min-h-[140px] shadow-2xl animate-slide-up hover:bg-black/70 cursor-pointer ${transientUiActive ? 'bg-black/70' : 'bg-black/60 backdrop-blur-xl'}`}>
                                 <div className="absolute -top-3 left-6"><div className="bg-white/90 text-black px-4 py-1 rounded-sm text-xs font-bold tracking-widest uppercase shadow-[0_4px_10px_rgba(0,0,0,0.3)] transform -skew-x-12">{char.name}</div></div>
+                                <ThinkingPanel thinking={latestAssistantThinking} textColor="#ffffff" className="mb-2 mt-1" maxHeight={180} />
                                 <p className="text-white/90 leading-relaxed font-light tracking-wide drop-shadow-md mt-2" style={{ fontSize: scaledFont(16) }}>{displayedText}{isTextAnimating && <span className="inline-block w-2 h-4 bg-white/70 ml-1 animate-pulse align-middle"></span>}</p>
                                 {/* Translation subtitle — fades in after typewriter finishes */}
                                 {!isTextAnimating && currentTranslation && (
@@ -804,11 +1089,69 @@ const DateSession: React.FC<DateSessionProps> = ({
                             )}
                         </div>
                     )}
+                    {showVisualDateStatusPage && latestDateStatusCard && latestDateStatusMessage && (
+                        <div
+                            className="absolute inset-0 z-40 flex flex-col bg-black/60 px-4 pb-[calc(18px+env(safe-area-inset-bottom))] pt-[calc(18px+env(safe-area-inset-top))] backdrop-blur-xl"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="mx-auto flex w-full max-w-lg items-center justify-between gap-3 rounded-full border border-white/10 bg-white/10 px-4 py-2 text-white shadow-2xl">
+                                <div className="min-w-0">
+                                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-white/45">Date Status</div>
+                                    <div className="truncate text-sm font-bold">{char.name} 的本轮状态栏</div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={dismissVisualDateStatusPage}
+                                    className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold text-white/80 active:scale-95"
+                                >
+                                    跳过
+                                </button>
+                            </div>
+                            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden no-scrollbar py-5">
+                                <DateStatusCardPages data={latestDateStatusCard} variant="visual-page" />
+                            </div>
+                            <div className="mx-auto flex w-full max-w-lg gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        onEditStatusCard(latestDateStatusMessage);
+                                        dismissVisualDateStatusPage();
+                                    }}
+                                    className="h-12 flex-1 rounded-full border border-white/15 bg-white/10 text-sm font-bold text-white shadow-lg active:scale-95"
+                                >
+                                    编辑状态栏
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={dismissVisualDateStatusPage}
+                                    className="h-12 flex-1 rounded-full bg-white text-sm font-bold text-black shadow-lg active:scale-95"
+                                >
+                                    继续
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </>
             )}
 
             {/* Whisper fade-in keyframes (injected inline for isolation) */}
             <style>{`
+                .date-reader-text {
+                    display: block;
+                    width: 100%;
+                    max-width: 100%;
+                    min-width: 0;
+                    box-sizing: border-box;
+                    white-space: pre-wrap;
+                    overflow-wrap: anywhere;
+                    word-break: break-word;
+                }
+
+                .date-reader-status-pages,
+                .date-reader-status-card {
+                    contain: layout;
+                }
+
                 @keyframes whisperFadeIn {
                     from { opacity: 0; transform: translateY(8px); }
                     to { opacity: 1; transform: translateY(0); }
@@ -840,51 +1183,173 @@ const DateSession: React.FC<DateSessionProps> = ({
                 </div>
             )}
 
-            <Modal isOpen={showRequestDebug} title="最近请求输入" onClose={() => setShowRequestDebug(false)}>
-                <div className="space-y-3 text-slate-600">
-                    {requestDebugSnapshots.length === 0 || !selectedRequestDebug ? (
-                        <div className="py-6 text-center text-sm text-slate-400">还没有记录到见面请求。</div>
-                    ) : (
-                        <>
-                            <div className="flex gap-2 overflow-x-auto pb-1">
-                                {requestDebugSnapshots.map((snapshot, index) => {
-                                    const active = selectedRequestDebug.id === snapshot.id;
-                                    return (
-                                        <button
-                                            key={snapshot.id}
-                                            type="button"
-                                            onClick={() => setSelectedRequestDebugId(snapshot.id)}
-                                            className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-bold transition-colors ${active ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'}`}
-                                        >
-                                            {index === 0 ? '最新' : `#${index + 1}`} · {snapshot.label}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                            <div className="rounded-2xl bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-500">
-                                <div>时间：{new Date(selectedRequestDebug.updatedAt).toLocaleString()}</div>
-                                <div>模型：{selectedRequestDebug.model || '--'}</div>
-                                <div>消息：{selectedRequestDebug.messages.length} 条，合计 {requestDebugCharCount.toLocaleString('zh-CN')} 字符</div>
-                                <div>参数：temperature {selectedRequestDebug.temperature ?? '--'}{selectedRequestDebug.maxTokens ? `，max_tokens ${selectedRequestDebug.maxTokens.toLocaleString('zh-CN')}` : ''}</div>
-                            </div>
-                            <textarea
-                                readOnly
-                                value={requestDebugText}
-                                className="h-[52vh] w-full resize-none rounded-2xl bg-slate-950 p-3 font-mono text-[11px] leading-relaxed text-slate-100 outline-none"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    navigator.clipboard.writeText(requestDebugText)
-                                        .then(() => addToast('已复制请求输入', 'success'))
-                                        .catch(() => addToast('复制失败', 'error'));
-                                }}
-                                className="w-full rounded-2xl bg-slate-900 py-3 text-sm font-bold text-white"
-                            >
-                                复制当前输入
-                            </button>
-                        </>
+            <Modal
+                isOpen={modalType === 'manual-photo'}
+                title="手动生图"
+                onClose={() => setModalType('none')}
+                footer={
+                    <button
+                        type="button"
+                        onClick={() => { void handleManualPhotoSubmit().catch(() => undefined); }}
+                        disabled={!photoConfigReady || manualPhotoGenerating || !onManualPhotoGenerate}
+                        className={`w-full rounded-2xl py-3 font-bold ${photoConfigReady && !manualPhotoGenerating && onManualPhotoGenerate ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400'}`}
+                    >
+                        {manualPhotoGenerating ? '生成中...' : '生成并保存'}
+                    </button>
+                }
+            >
+                <div className="space-y-3">
+                    {!photoConfigReady && (
+                        <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+                            请先在系统设置的「生图服务」里配置当前生图供应商。
+                        </div>
                     )}
+                    <div className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1">
+                        {([
+                            ['direct', '手写模式'],
+                            ['story', '剧情模式'],
+                        ] as Array<[ManualPhotoMode, string]>).map(([mode, label]) => (
+                            <button
+                                key={mode}
+                                type="button"
+                                onClick={() => setManualPhotoMode(mode)}
+                                className={`rounded-xl py-2 text-xs font-bold transition-colors ${manualPhotoMode === mode ? 'bg-white text-primary shadow-sm' : 'text-slate-500'}`}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+                    <p className="text-[10px] leading-relaxed text-slate-400">
+                        {manualPhotoMode === 'story'
+                            ? '剧情模式会读取这场见面的上下文，用副 API 整理成适合生图的画面。'
+                            : '手写模式会直接使用你输入的 prompt，不调用副 API。'}
+                    </p>
+
+                    <button
+                        type="button"
+                        onClick={() => setManualPhotoUseAppearance(prev => !prev)}
+                        className="flex w-full items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-left"
+                    >
+                        <span>
+                            <span className="block text-xs font-bold text-slate-600">使用角色锁脸</span>
+                            <span className="mt-0.5 block text-[10px] text-slate-400">
+                                {imageProviderType === 'novelai'
+                                    ? (hasNaiAppearanceBinding ? '会拼入角色 NAI 外貌 tags。' : '可在下方填写角色 NAI tags。')
+                                    : (hasOpenAIAppearanceBinding ? '会拼入角色自然语言外貌。' : '可在下方填写角色自然语言外貌。')}
+                            </span>
+                        </span>
+                        <span className={`flex h-6 w-10 items-center rounded-full p-1 transition-colors ${manualPhotoUseAppearance ? 'bg-primary' : 'bg-slate-200'}`}>
+                            <span className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${manualPhotoUseAppearance ? 'translate-x-4' : ''}`} />
+                        </span>
+                    </button>
+                    {manualPhotoUseAppearance && (
+                        <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-3">
+                            <div className="mb-2 text-[11px] font-bold text-slate-500">
+                                {imageProviderType === 'novelai' ? '角色外貌 NAI tags' : '角色锁脸描述'}
+                            </div>
+                            {imageProviderType === 'novelai' ? (
+                                <>
+                                    <textarea
+                                        value={naiAppearanceTagsDraft}
+                                        onChange={e => setNaiAppearanceTagsDraft(e.target.value)}
+                                        placeholder="例：1girl, solo, long black hair, blue eyes"
+                                        className="mb-2 h-20 w-full resize-none rounded-xl border border-slate-100 bg-white px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                    />
+                                    <textarea
+                                        value={naiAppearanceNegativeDraft}
+                                        onChange={e => setNaiAppearanceNegativeDraft(e.target.value)}
+                                        placeholder="外貌相关 negative tags，可留空"
+                                        className="h-14 w-full resize-none rounded-xl border border-slate-100 bg-white px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                    />
+                                </>
+                            ) : (
+                                <textarea
+                                    value={appearancePromptDraft}
+                                    onChange={e => setAppearancePromptDraft(e.target.value)}
+                                    placeholder="例：黑色长发，蓝灰色眼睛，清瘦，常穿深色衬衫"
+                                    className="h-24 w-full resize-none rounded-xl border border-slate-100 bg-white px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                />
+                            )}
+                        </div>
+                    )}
+
+                    <button
+                        type="button"
+                        onClick={() => setManualPhotoUseUserAppearance(prev => !prev)}
+                        className="flex w-full items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-left"
+                    >
+                        <span>
+                            <span className="block text-xs font-bold text-slate-600">使用我的锁脸</span>
+                            <span className="mt-0.5 block text-[10px] text-slate-400">
+                                {hasUserAppearanceBinding ? '合照或画面包含你时打开。' : '可先填写你的锁脸，合照时使用。'}
+                            </span>
+                        </span>
+                        <span className={`flex h-6 w-10 items-center rounded-full p-1 transition-colors ${manualPhotoUseUserAppearance ? 'bg-primary' : 'bg-slate-200'}`}>
+                            <span className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${manualPhotoUseUserAppearance ? 'translate-x-4' : ''}`} />
+                        </span>
+                    </button>
+                    {manualPhotoUseUserAppearance && (
+                        <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-3">
+                            <div className="mb-2 text-[11px] font-bold text-slate-500">
+                                {imageProviderType === 'novelai' ? '我的外貌 NAI tags' : '我的锁脸描述'}
+                            </div>
+                            {imageProviderType === 'novelai' ? (
+                                <>
+                                    <textarea
+                                        value={userNaiAppearanceTagsDraft}
+                                        onChange={e => setUserNaiAppearanceTagsDraft(e.target.value)}
+                                        placeholder="合照用 tags，建议不要写 solo"
+                                        className="mb-2 h-20 w-full resize-none rounded-xl border border-slate-100 bg-white px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                    />
+                                    <textarea
+                                        value={userNaiAppearanceNegativeDraft}
+                                        onChange={e => setUserNaiAppearanceNegativeDraft(e.target.value)}
+                                        placeholder="我的外貌 negative tags，可留空"
+                                        className="h-14 w-full resize-none rounded-xl border border-slate-100 bg-white px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                    />
+                                </>
+                            ) : (
+                                <textarea
+                                    value={userAppearancePromptDraft}
+                                    onChange={e => setUserAppearancePromptDraft(e.target.value)}
+                                    placeholder="例：年轻女性，黑色中长发，日常浅色衣服，神情温柔"
+                                    className="h-24 w-full resize-none rounded-xl border border-slate-100 bg-white px-3 py-2 text-xs outline-none focus:border-primary/40"
+                                />
+                            )}
+                        </div>
+                    )}
+
+                    <textarea
+                        value={manualPhotoPrompt}
+                        onChange={e => setManualPhotoPrompt(e.target.value)}
+                        placeholder={manualPhotoMode === 'story' ? '想让这张图更偏向什么情节、动作或氛围...' : '直接输入 NAI prompt 或画面描述...'}
+                        className="h-32 w-full resize-none rounded-2xl bg-slate-100 p-4 text-sm"
+                    />
+                    <div>
+                        <label className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">风格预设</label>
+                        <select
+                            value={effectiveManualPhotoStyleId}
+                            onChange={e => setManualPhotoStyleId(e.target.value)}
+                            className="w-full rounded-xl bg-slate-100 px-3 py-2.5 text-sm"
+                        >
+                            {photoStylePresets.map(style => (
+                                <option key={style.id} value={style.id}>{style.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <VibeReferencePicker
+                        enabled={imageProviderType === 'novelai'}
+                        value={manualPhotoVibes}
+                        savedVibes={savedVibeReferences}
+                        disabled={manualPhotoGenerating}
+                        onChange={setManualPhotoVibes}
+                        onSaveReference={onSaveVibeReference}
+                        onImportVibeFile={onImportVibeFile}
+                        onRenameSavedVibe={onRenameSavedVibe}
+                        onDeleteSavedVibe={onDeleteSavedVibe}
+                        onClearSavedVibeCache={onClearSavedVibeCache}
+                        addToast={addToast}
+                    />
                 </div>
             </Modal>
 
@@ -913,6 +1378,9 @@ const DateSession: React.FC<DateSessionProps> = ({
                         setModalType('none');
                     }} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl">复制文本</button>
                     <button onClick={() => { onEditMessage(selectedMessage!); setModalType('none'); }} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl">编辑内容</button>
+                    {selectedMessage?.metadata?.statusCardData && (
+                        <button onClick={() => { onEditStatusCard(selectedMessage!); setModalType('none'); }} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl">编辑状态栏</button>
+                    )}
                     <button onClick={() => { onDeleteMessage(selectedMessage!); setModalType('none'); }} className="w-full py-3 bg-red-50 text-red-500 font-medium rounded-2xl">删除记录</button>
                 </div>
             </Modal>

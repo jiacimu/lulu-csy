@@ -240,4 +240,87 @@ describe('vectorMemoryExtractor memory context selection', () => {
         expect(prompt).not.toContain('https://cdn.example/stickers/night.png');
         expect(prompt).not.toContain('data:image');
     });
+
+    it('reports complete status for direct Date L0 extraction', async () => {
+        getVectorMemoryHeaders.mockResolvedValue([]);
+
+        await expect(VectorMemoryExtractor.extractFromMessages(
+            'char-1',
+            'Sully',
+            [{
+                id: 1,
+                charId: 'char-1',
+                role: 'user',
+                type: 'text',
+                content: '线下见面后值得记住的一句话',
+                timestamp: 1000,
+            }],
+            { baseUrl: 'https://llm.example.com/v1', apiKey: 'llm-key', model: 'test-model' },
+            'embedding-key',
+        )).resolves.toEqual({ status: 'complete', count: 0 });
+
+        expect(acquireExtractionLock).toHaveBeenCalledWith('char-1');
+        expect(releaseExtractionLock).toHaveBeenCalledWith('char-1');
+        expect(callLLM).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports busy status for direct Date L0 extraction when another extraction owns the lock', async () => {
+        hasExtractionLock.mockReturnValue(true);
+
+        await expect(VectorMemoryExtractor.extractFromMessages(
+            'char-1',
+            'Sully',
+            [{
+                id: 1,
+                charId: 'char-1',
+                role: 'user',
+                type: 'text',
+                content: '还没轮到这次见面提取',
+                timestamp: 1000,
+            }],
+            { baseUrl: 'https://llm.example.com/v1', apiKey: 'llm-key', model: 'test-model' },
+            'embedding-key',
+        )).resolves.toEqual({ status: 'busy', count: 0 });
+
+        expect(acquireExtractionLock).not.toHaveBeenCalled();
+        expect(releaseExtractionLock).not.toHaveBeenCalled();
+        expect(callLLM).not.toHaveBeenCalled();
+    });
+
+    it('reports empty status for direct Date L0 extraction without source messages', async () => {
+        await expect(VectorMemoryExtractor.extractFromMessages(
+            'char-1',
+            'Sully',
+            [],
+            { baseUrl: 'https://llm.example.com/v1', apiKey: 'llm-key', model: 'test-model' },
+            'embedding-key',
+        )).resolves.toEqual({ status: 'empty', count: 0 });
+
+        expect(hasExtractionLock).not.toHaveBeenCalled();
+        expect(acquireExtractionLock).not.toHaveBeenCalled();
+        expect(releaseExtractionLock).not.toHaveBeenCalled();
+    });
+
+    it('reports failed status for direct Date L0 extraction errors and releases the lock', async () => {
+        getVectorMemoryHeaders.mockResolvedValue([]);
+        callLLM.mockRejectedValueOnce(new Error('llm down'));
+
+        await expect(VectorMemoryExtractor.extractFromMessages(
+            'char-1',
+            'Sully',
+            [{
+                id: 1,
+                charId: 'char-1',
+                role: 'user',
+                type: 'text',
+                content: '这次提取会失败',
+                timestamp: 1000,
+            }],
+            { baseUrl: 'https://llm.example.com/v1', apiKey: 'llm-key', model: 'test-model' },
+            'embedding-key',
+        )).resolves.toEqual({ status: 'failed', count: 0, error: 'llm down' });
+
+        expect(acquireExtractionLock).toHaveBeenCalledWith('char-1');
+        expect(releaseExtractionLock).toHaveBeenCalledWith('char-1');
+    });
 });

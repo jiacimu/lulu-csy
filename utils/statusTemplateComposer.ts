@@ -158,10 +158,14 @@ export function composeCustomStatusTemplateHtml(
     const htmlBody = normalizeBlock(template.htmlBody);
     if (!htmlBody) return '';
 
+    const headTemplate = normalizeBlock(template.headTemplate);
     const cssTemplate = normalizeBlock(template.cssTemplate);
     const jsTemplate = stripScriptWrapper(normalizeBlock(template.jsTemplate));
     const shouldIncludeScripts = options.includeScripts ?? template.allowScripts === true;
 
+    const substitutedHead = headTemplate
+        ? substituteTemplatePlaceholders(headTemplate, options)
+        : '';
     const substitutedBody = substituteTemplatePlaceholders(htmlBody, options);
     const substitutedCss = substituteTemplatePlaceholders(cssTemplate, options);
     const substitutedJs = substituteTemplatePlaceholders(jsTemplate, options);
@@ -178,6 +182,7 @@ export function composeCustomStatusTemplateHtml(
 <html>
 <head>
 <meta charset="UTF-8">
+${substitutedHead}
 <style>
 ${BASE_LAYERED_CSS}
 ${substitutedCss}

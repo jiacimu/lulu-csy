@@ -143,6 +143,85 @@ describe('StatusCardRenderer', () => {
         });
     });
 
+    it('does not height-scale freeform cards in width-only fit mode', async () => {
+        setViewportSize(1000, 496);
+
+        const data: StatusCardData = {
+            cardType: 'freeform',
+            body: 'Tall Date card',
+            meta: {
+                html: '<html><body><div style="width:192px;height:792px">tall</div></body></html>',
+            },
+            style: {},
+        };
+
+        render(<StatusCardRenderer data={data} freeformFitMode="width" />);
+
+        const frame = screen.getByTitle('Freeform creative card') as HTMLIFrameElement;
+        const fitShell = screen.getByTestId('freeform-status-card-fit');
+        loadFrame(frame);
+        const channel = frame.getAttribute('data-preview-channel');
+
+        reportFrameSize(frame, channel, 192, 792);
+
+        await waitFor(() => {
+            expect(fitShell).toHaveStyle({ width: '192px' });
+            expect(fitShell).toHaveStyle({ height: '800px' });
+            expect(fitShell.style.maxHeight).toBe('');
+            expect(frame).toHaveStyle({ width: '192px' });
+            expect(frame).toHaveStyle({ height: '800px' });
+            expect(frame.style.transform).toBe('translate(-50%, -50%) scale(1)');
+        });
+    });
+
+    it('keeps width-only freeform cards from shrinking after interactive remeasurements', async () => {
+        setViewportSize(390, 800);
+
+        const data: StatusCardData = {
+            cardType: 'freeform',
+            body: 'Interactive Date card',
+            meta: {
+                html: '<html><body><details><summary>展开</summary><div style="width:330px;height:500px">content</div></details></body></html>',
+            },
+            style: {},
+        };
+
+        render(<StatusCardRenderer data={data} freeformFitMode="width" />);
+
+        const frame = screen.getByTitle('Freeform creative card') as HTMLIFrameElement;
+        const fitShell = screen.getByTestId('freeform-status-card-fit');
+        loadFrame(frame);
+        const channel = frame.getAttribute('data-preview-channel');
+
+        reportFrameSize(frame, channel, 330, 220);
+
+        await waitFor(() => {
+            expect(fitShell).toHaveStyle({ width: '330px' });
+            expect(frame).toHaveStyle({ width: '330px' });
+            expect(frame.style.transform).toBe('translate(-50%, -50%) scale(1)');
+        });
+
+        reportFrameSize(frame, channel, 260, 520);
+
+        await waitFor(() => {
+            expect(fitShell).toHaveStyle({ width: '330px' });
+            expect(fitShell).toHaveStyle({ height: '528px' });
+            expect(frame).toHaveStyle({ width: '330px' });
+            expect(frame).toHaveStyle({ height: '528px' });
+            expect(frame.style.transform).toBe('translate(-50%, -50%) scale(1)');
+        });
+
+        reportFrameSize(frame, channel, 220, 180);
+
+        await waitFor(() => {
+            expect(fitShell).toHaveStyle({ width: '330px' });
+            expect(fitShell).toHaveStyle({ height: '188px' });
+            expect(frame).toHaveStyle({ width: '330px' });
+            expect(frame).toHaveStyle({ height: '188px' });
+            expect(frame.style.transform).toBe('translate(-50%, -50%) scale(1)');
+        });
+    });
+
     it('uses the smaller scale when both freeform card axes overflow', async () => {
         setViewportSize(420, 496);
 
@@ -201,6 +280,49 @@ describe('StatusCardRenderer', () => {
                 '*',
             );
         });
+    });
+
+    it('injects host font and stable Date status layout overrides when requested', async () => {
+        setViewportSize(390, 800);
+
+        const data: StatusCardData = {
+            cardType: 'freeform',
+            body: 'Date status card',
+            meta: {
+                html: '<!DOCTYPE html><html><head><style>.date-status-v2{width:330px;max-width:calc(100vw - 24px)}</style></head><body><main class="status-card-frame"><section class="date-status-v2 date-registry__module">状态</section></main></body></html>',
+            },
+            style: {},
+        };
+
+        render(
+            <StatusCardRenderer
+                data={data}
+                customFont="data:font/woff2;base64,AAAA"
+                stabilizeDateStatusLayout
+            />,
+        );
+
+        const frame = screen.getByTitle('Freeform creative card') as HTMLIFrameElement;
+        const postMessageSpy = vi.spyOn(frame.contentWindow!, 'postMessage');
+
+        loadFrame(frame);
+
+        await waitFor(() => {
+            expect(postMessageSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'preview-update',
+                    html: expect.stringContaining('--status-card-host-viewport-width:390px'),
+                }),
+                '*',
+            );
+        });
+
+        const postedHtml = String(postMessageSpy.mock.calls[0]?.[0]?.html || '');
+        expect(postedHtml).toContain('--status-card-host-width:min(330px,calc(var(--status-card-host-viewport-width) - 24px))');
+        expect(postedHtml).toContain('.status-card-frame,.date-status-v2,.date-registry__module{width:var(--status-card-host-width)!important');
+        expect(postedHtml).toContain('@font-face{font-family:"StatusCardHostFont"');
+        expect(postedHtml).toContain('--cn-serif:var(--status-card-host-font)');
+        expect(postedHtml).toContain('.status-card-frame,.status-card-frame *{font-family:var(--status-card-host-font)!important}');
     });
 
     it('renders custom text cards with the dedicated non-fallback shell', () => {

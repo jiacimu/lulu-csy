@@ -2,7 +2,7 @@
  * Thinking Chain Extractor — 思考链提取器（前端版）
  *
  * 纯函数，零依赖。与后端 thinkingExtractor.ts 共用同一套正则逻辑。
- * 从 LLM 原始输出中提取 <think>/<thinking> 标签内的推理过程，
+ * 从 LLM 原始输出中提取 <thinking>/<think> 标签内的推理过程，
  * 返回清洗后的显示文本 + 可选的思考链内容。
  */
 
@@ -23,33 +23,35 @@ export function safeThinkingFallbackReply(_thinkingContent?: string): string {
  * 从 LLM 原始输出中提取思考链并清洗内容。
  *
  * 支持的标签格式（按优先级）：
- * 1. `<think>...</think>` — DeepSeek-R1, Qwen3 等原生推理标签
- * 2. 未闭合 `<think>...` — 输出被截断的情况
- * 3. `<thinking>...</thinking>` — CoT 协议标签（本项目主用）
- * 4. 未闭合 `<thinking>...` — 输出被截断的情况
+ * 1. `<thinking>...</thinking>` — CoT 协议标签（本项目主用）
+ * 2. 未闭合 `<thinking>...` — 输出被截断的情况
+ * 3. `<think>...</think>` — DeepSeek-R1, Qwen3 等原生推理标签兜底
+ * 4. 未闭合 `<think>...` — 输出被截断的情况
  */
 export function extractThinking(raw: string): ExtractionResult {
     let thinking = '';
 
-    // ── 1. 提取 <think> 原生标签 ──────────────────────────
-    const nativeMatch = raw.match(/<think>([\s\S]*?)<\/think>/i);
-    if (nativeMatch) {
-        thinking = nativeMatch[1].trim();
-    } else {
-        const unclosed = raw.match(/<think>([\s\S]*)$/i);
-        if (unclosed) {
-            thinking = unclosed[1].replace(/<\/?think>/gi, '').trim();
-        }
-    }
-
-    // ── 2. 提取 <thinking> CoT 协议标签 ─────────────────────
+    // ── 1. 优先提取 <thinking> 项目 CoT 协议标签 ─────────────
     const cotMatch = raw.match(/<thinking>([\s\S]*?)<\/thinking>/i);
     if (cotMatch) {
-        thinking += (thinking ? '\n\n' : '') + cotMatch[1].trim();
-    } else if (!thinking) {
+        thinking = cotMatch[1].trim();
+    } else {
         const unclosedCot = raw.match(/<thinking>([\s\S]*)$/i);
         if (unclosedCot) {
             thinking = unclosedCot[1].replace(/<\/?thinking>/gi, '').trim();
+        }
+    }
+
+    // ── 2. 没有项目 CoT 时才兜底提取 <think> 原生标签 ────────
+    if (!thinking) {
+        const nativeMatch = raw.match(/<think>([\s\S]*?)<\/think>/i);
+        if (nativeMatch) {
+            thinking = nativeMatch[1].trim();
+        } else {
+            const unclosed = raw.match(/<think>([\s\S]*)$/i);
+            if (unclosed) {
+                thinking = unclosed[1].replace(/<\/?think>/gi, '').trim();
+            }
         }
     }
 
@@ -70,7 +72,112 @@ export function extractThinking(raw: string): ExtractionResult {
 
     return {
         content,
-        thinking: thinking || undefined,
+        thinking: cleanThinkingForDisplay(thinking) || undefined,
+    };
+}
+
+function stripStatusBlocks(value: string): string {
+    return value
+        .replace(/<status\b[^>]*>[\s\S]*?<\/status>/gi, '')
+        .replace(/<status\b[^>]*>[\s\S]*$/gi, '')
+        .trim();
+}
+
+export function cleanThinkingForDisplay(value: string): string {
+    return stripStatusBlocks(value);
+}
+
+export function selectThinkingForDisplay(
+    projectThinking?: string,
+    nativeThinking?: string,
+): string | undefined {
+    return cleanThinkingForDisplay(projectThinking || '')
+        || cleanThinkingForDisplay(nativeThinking || '')
+        || undefined;
+}
+
+function stringifyCompletionContent(value: unknown): string {
+    if (typeof value === 'string') return value;
+    if (value == null) return '';
+
+    if (Array.isArray(value)) {
+        return value.map(part => {
+            if (typeof part === 'string') return part;
+            if (!part || typeof part !== 'object') return '';
+
+            const record = part as Record<string, unknown>;
+            if (typeof record.text === 'string') return record.text;
+            if (typeof record.content === 'string') return record.content;
+            return '';
+        }).join('');
+    }
+
+    return String(value);
+}
+
+function stringifyThinkingCandidate(value: unknown): string {
+    if (typeof value === 'string') return value.trim();
+
+    if (Array.isArray(value)) {
+        return value
+            .map(stringifyThinkingCandidate)
+            .filter(Boolean)
+            .join('\n\n')
+            .trim();
+    }
+
+    if (value && typeof value === 'object') {
+        const record = value as Record<string, unknown>;
+        return stringifyThinkingCandidate(
+            record.text ??
+            record.content ??
+            record.reasoning_content ??
+            record.reasoning ??
+            record.thinking ??
+            '',
+        );
+    }
+
+    return '';
+}
+
+/**
+ * Extract thinking from OpenAI-compatible Chat Completion responses.
+ *
+ * Some providers put reasoning in native fields instead of embedding
+ * `<think>/<thinking>` tags in message.content. Prefer the project's explicit
+ * `<thinking>` CoT when present, and only fall back to native fields otherwise.
+ */
+export function extractThinkingFromChatCompletionResponse(data: unknown): ExtractionResult {
+    const root = data && typeof data === 'object' ? data as Record<string, unknown> : {};
+    const choices = Array.isArray(root.choices) ? root.choices : [];
+    const choice = choices[0] && typeof choices[0] === 'object' ? choices[0] as Record<string, unknown> : {};
+    const message = choice.message && typeof choice.message === 'object' ? choice.message as Record<string, unknown> : {};
+    const contentParts = Array.isArray(message.content) ? message.content : [];
+
+    const rawContent = stringifyCompletionContent(message.content ?? choice.text ?? '');
+    const extracted = extractThinking(rawContent);
+    const nativeThinking = [
+        message.reasoning_content,
+        message.thinking,
+        message.reasoning,
+        choice.reasoning_content,
+        choice.thinking,
+        choice.reasoning,
+        ...contentParts.map(part => {
+            if (!part || typeof part !== 'object') return '';
+            const record = part as Record<string, unknown>;
+            return record.reasoning_content ?? record.thinking ?? record.reasoning ?? '';
+        }),
+    ]
+        .map(stringifyThinkingCandidate)
+        .filter(Boolean)
+        .join('\n\n')
+        .trim();
+
+    return {
+        content: extracted.content,
+        thinking: selectThinkingForDisplay(extracted.thinking, nativeThinking),
     };
 }
 

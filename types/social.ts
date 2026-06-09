@@ -1,4 +1,18 @@
 
+export type SocialAuthorType = 'user' | 'character' | 'npc';
+
+export type SocialCommentTone =
+    | '吐槽'
+    | '吃瓜'
+    | '认真分析'
+    | '阴阳怪气'
+    | '共情'
+    | '玩梗'
+    | '好奇追问'
+    | '路过锐评';
+
+export type SocialTargetType = 'user_comment' | 'post_author' | 'thread_general';
+
 export interface SocialComment {
     id: string;
     authorName: string;
@@ -6,6 +20,13 @@ export interface SocialComment {
     content: string;
     likes: number;
     isCharacter?: boolean;
+    authorType?: SocialAuthorType;
+    charId?: string;
+    subAccountId?: string;
+    authorHandle?: string;
+    replyToCommentId?: string;
+    tone?: SocialCommentTone;
+    targetType?: SocialTargetType;
 }
 
 export interface SocialPost {
@@ -22,6 +43,10 @@ export interface SocialPost {
     timestamp: number;
     tags: string[];
     bgStyle?: string;
+    authorType?: SocialAuthorType;
+    charId?: string;
+    subAccountId?: string;
+    authorHandle?: string;
 }
 
 export interface SubAccount {

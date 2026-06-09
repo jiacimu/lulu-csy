@@ -96,7 +96,7 @@ function stripLeakedVoiceHistoryLabels(text: string): string {
         .replace(/[【\[]\s*(?:你上一条语音|你上一條語音|上一条语音|上一條語音|你刚才的语音|你剛才的語音|你发出的语音|你發出的語音)(?:消息)?(?:[（(]\s*\d+\s*秒\s*[）)])?\s*[】\]]\s*/g, '');
 }
 
-const LEAKED_REPLY_CONTEXT_LABEL_RE = /(?:引用回复上下文[：:]\s*)?这条消息正在回复[^「」\r\n]{0,60}的消息「[^」\r\n]{1,220}」[。.]?\s*本条消息正文[：:]\s*/g;
+const LEAKED_REPLY_CONTEXT_LABEL_RE = /(?:(?:引用回复上下文[：:]\s*)?\[用户引用了[^\]「\r\n]{0,80}「[^」\r\n]{1,220}」[^\]\r\n]*\]\s*本条消息正文[：:]\s*|(?:引用回复上下文[：:]\s*)?这条消息正在回复[^「」\r\n]{0,60}的消息「[^」\r\n]{1,220}」[。.]?\s*本条消息正文[：:]\s*)/g;
 
 function stripLeakedReplyContextLabels(text: string): string {
     return text.replace(LEAKED_REPLY_CONTEXT_LABEL_RE, '');

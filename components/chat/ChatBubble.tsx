@@ -1,7 +1,8 @@
-import React,{ useRef,useEffect,useState } from 'react';
+import React,{ useRef,useEffect } from 'react';
 import { renderMarkdown } from '../../utils/markdownLite';
 import type { BubbleStyle,Message } from '../../types/chat';
 import { useSafeImageLoad } from './useSafeImageLoad';
+import ThinkingPanel from './ThinkingPanel';
 
 /**
  * ChatBubble — 可主题化气泡壳组件
@@ -69,7 +70,6 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
     const radius = styleConfig.borderRadius ?? 6;
     const showTail = !styleConfig.hideTail;
     const bubbleRef = useRef<HTMLDivElement>(null);
-    const [thinkingExpanded, setThinkingExpanded] = useState(false);
     const isImageReply = !!replyTo && (
         replyTo.type === 'image'
         || !!replyTo.thumbnailUrl
@@ -189,72 +189,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
                 )}
 
                 {/* Layer 2.5: Thinking Chain Panel (editorial collapsible) */}
-                {thinking && (
-                    <div className="relative z-10 select-none" style={{ marginBottom: thinkingExpanded ? '6px' : '2px' }}>
-                        {/* Collapsed toggle */}
-                        <div
-                            onClick={(e) => { e.stopPropagation(); e.preventDefault(); setThinkingExpanded(prev => !prev); }}
-                            className="flex items-center gap-1.5 cursor-pointer active:opacity-60 transition-opacity"
-                            style={{ userSelect: 'none' }}
-                        >
-                            <span style={{
-                                fontFamily: "'Georgia', 'Palatino Linotype', 'Book Antiqua', 'Palatino', serif",
-                                fontStyle: 'italic',
-                                fontSize: '10px',
-                                letterSpacing: '0.5px',
-                                color: styleConfig.textColor ? `${styleConfig.textColor}66` : 'rgba(120, 110, 95, 0.55)',
-                            }}>
-                                ‹ 𝘛𝘩𝘪𝘯𝘬𝘪𝘯𝘨 ›
-                            </span>
-                            <svg
-                                viewBox="0 0 10 6" fill="none" className="transition-transform duration-200"
-                                style={{
-                                    width: '8px', height: '5px',
-                                    transform: thinkingExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                                    opacity: 0.35,
-                                }}
-                            >
-                                <path d="M1 1L5 5L9 1" stroke={styleConfig.textColor || '#786e5f'} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                        </div>
-
-                        {/* Expanded content */}
-                        <div
-                            className="transition-all duration-300 ease-in-out"
-                            style={{
-                                maxHeight: thinkingExpanded ? '240px' : '0',
-                                opacity: thinkingExpanded ? 1 : 0,
-                                overflow: 'hidden',
-                                marginTop: thinkingExpanded ? '4px' : '0',
-                            }}
-                        >
-                            <div
-                                className="overflow-y-auto no-scrollbar"
-                                style={{
-                                    maxHeight: '220px',
-                                    padding: '8px 10px',
-                                    borderRadius: '6px',
-                                    background: styleConfig.textColor
-                                        ? `${styleConfig.textColor}08`
-                                        : 'rgba(140, 130, 115, 0.06)',
-                                    borderTop: `1px solid ${styleConfig.textColor ? `${styleConfig.textColor}12` : 'rgba(140, 130, 115, 0.1)'}`,
-                                    borderBottom: `1px solid ${styleConfig.textColor ? `${styleConfig.textColor}12` : 'rgba(140, 130, 115, 0.1)'}`,
-                                }}
-                            >
-                                <div style={{
-                                    fontSize: '11px',
-                                    lineHeight: '1.65',
-                                    color: styleConfig.textColor ? `${styleConfig.textColor}88` : 'rgba(80, 72, 60, 0.55)',
-                                    fontFamily: "'Georgia', 'Palatino Linotype', serif",
-                                    whiteSpace: 'pre-wrap',
-                                    wordBreak: 'break-word',
-                                }}>
-                                    {thinking}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                <ThinkingPanel thinking={thinking} textColor={styleConfig.textColor} />
 
                 {/* Layer 3: Reply/Quote Block */}
                 {replyTo && (

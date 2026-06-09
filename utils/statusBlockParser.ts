@@ -9,12 +9,56 @@ type StatusFieldDef = {
     description?: string;
 };
 
+export const STATUS_MODULE_DISPLAY_NAME_TO_ID: Record<string, string> = {
+    命途: 'plot_anchor',
+    此幕: 'scene_progress',
+    草蛇灰线: 'clue_foreshadow',
+    人心向背: 'character_stance',
+    怦然: 'romance_affection',
+    暗涌: 'romance_tension',
+    此身: 'player_condition',
+    风云录: 'world_faction',
+    伏机: 'event_trigger',
+    执笔: 'narrative_control',
+};
+
+export const STATUS_MODULE_ID_TO_DISPLAY_NAME: Record<string, string> = Object.fromEntries(
+    Object.entries(STATUS_MODULE_DISPLAY_NAME_TO_ID).map(([name, id]) => [id, name]),
+);
+
+const STATUS_MODULE_LEGACY_NAME_TO_DISPLAY_NAME: Record<string, string> = {
+    剧情锚点栏: '命途',
+    场景推进栏: '此幕',
+    线索伏笔栏: '草蛇灰线',
+    角色立场栏: '人心向背',
+    恋爱心动栏: '怦然',
+    恋爱拉扯栏: '暗涌',
+    玩家状态栏: '此身',
+    世界势力栏: '风云录',
+    事件触发栏: '伏机',
+    叙事控制栏: '执笔',
+};
+
 const STATUS_BLOCK_RE = /<status>([\s\S]*?)<\/status>/i;
 const FIELD_LINE_RE = /^\s*([^:：\n][^:：]*?)\s*[:：]\s*(.*?)\s*$/;
 const LIST_ITEM_RE = /^\s*-\s*(.*?)\s*$/;
 
+export function normalizeStatusModuleFieldName(value: string): string {
+    const key = value.trim();
+    const separatorMatch = key.match(/^(.+?)[-－—–](.+)$/);
+    if (!separatorMatch) return key;
+
+    const rawModuleName = separatorMatch[1].trim();
+    const fieldName = separatorMatch[2].trim();
+    const displayName = STATUS_MODULE_LEGACY_NAME_TO_DISPLAY_NAME[rawModuleName]
+        || STATUS_MODULE_ID_TO_DISPLAY_NAME[rawModuleName]
+        || (STATUS_MODULE_DISPLAY_NAME_TO_ID[rawModuleName] ? rawModuleName : '');
+
+    return displayName ? `${displayName}-${fieldName}` : key;
+}
+
 function normalizeFieldName(value: string): string {
-    return value.trim().replace(/\s+/g, '').toLocaleLowerCase();
+    return normalizeStatusModuleFieldName(value).trim().replace(/\s+/g, '').toLocaleLowerCase();
 }
 
 function getEditDistance(a: string, b: string): number {
@@ -44,7 +88,7 @@ function getEditDistance(a: string, b: string): number {
 }
 
 function resolveFieldName(rawKey: string, fieldDefs?: Array<{ name: string }>): string {
-    const key = rawKey.trim();
+    const key = normalizeStatusModuleFieldName(rawKey);
     if (!fieldDefs?.length) return key;
 
     const normalizedKey = normalizeFieldName(key);
@@ -75,6 +119,25 @@ function resolveFieldName(rawKey: string, fieldDefs?: Array<{ name: string }>): 
     return best.distance <= threshold ? best.name : key;
 }
 
+function resolveFieldDef(key: string, fieldDefs?: StatusFieldDef[]): StatusFieldDef | undefined {
+    if (!fieldDefs?.length) return undefined;
+
+    const normalizedKey = normalizeFieldName(key);
+    return fieldDefs.find(field => normalizeFieldName(field.name) === normalizedKey);
+}
+
+function splitInlineListValue(value: string): string[] {
+    const cleaned = value.trim();
+    if (!cleaned) return [];
+
+    const dashedParts = cleaned
+        .split(/\s+-\s+/)
+        .map(item => item.trim())
+        .filter(Boolean);
+
+    return dashedParts.length > 1 ? dashedParts : [cleaned];
+}
+
 function appendListItem(
     fields: Record<string, string | string[]>,
     currentKey: string | null,
@@ -94,7 +157,7 @@ function appendListItem(
 
 export function parseStatusBlock(
     aiOutput: string,
-    fieldDefs?: Array<{ name: string }>,
+    fieldDefs?: StatusFieldDef[],
 ): ParsedStatusBlock | null {
     const blockMatch = (aiOutput || '').match(STATUS_BLOCK_RE);
     if (!blockMatch) return null;
@@ -117,9 +180,10 @@ export function parseStatusBlock(
         if (fieldMatch) {
             const key = resolveFieldName(fieldMatch[1], fieldDefs);
             const value = fieldMatch[2].trim();
+            const fieldDef = resolveFieldDef(key, fieldDefs);
 
             if (value) {
-                fields[key] = value;
+                fields[key] = fieldDef?.type === 'list' ? splitInlineListValue(value) : value;
                 currentListKey = null;
             } else {
                 fields[key] = Array.isArray(fields[key]) ? fields[key] : [];

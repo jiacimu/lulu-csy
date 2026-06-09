@@ -19,7 +19,7 @@ const GAME_THEMES: Record<GameTheme, { bg: string, text: string, accent: string,
         bg: 'bg-[#1a120b]',
         text: 'text-[#e5e5e5]',
         accent: 'text-[#fbbf24]',
-        font: 'font-serif',
+        font: 'font-sans',
         border: 'border-[#78350f]',
         cardBg: 'bg-[#2a2018]',
         gradient: 'from-[#451a03] to-[#1a120b]',
@@ -31,7 +31,7 @@ const GAME_THEMES: Record<GameTheme, { bg: string, text: string, accent: string,
         bg: 'bg-[#020617]',
         text: 'text-[#94a3b8]',
         accent: 'text-[#22d3ee]',
-        font: 'font-mono',
+        font: 'font-sans',
         border: 'border-[#1e293b]',
         cardBg: 'bg-[#0f172a]/80',
         gradient: 'from-[#0f172a] to-[#020617]',
@@ -43,7 +43,7 @@ const GAME_THEMES: Record<GameTheme, { bg: string, text: string, accent: string,
         bg: 'bg-[#0f0000]',
         text: 'text-[#d4d4d8]',
         accent: 'text-[#ef4444]',
-        font: 'font-serif',
+        font: 'font-sans',
         border: 'border-[#450a0a]',
         cardBg: 'bg-[#2b0e0e]',
         gradient: 'from-[#450a0a] to-[#000000]',
@@ -201,7 +201,7 @@ const GameMarkdown: React.FC<{ content: string, theme: any, customStyle?: { font
                 return <em key={i} className="italic opacity-70 text-[95%] mx-0.5">{part.slice(1, -1)}</em>;
             }
             if (part.startsWith('`') && part.endsWith('`')) {
-                return <code key={i} className="bg-black/20 px-1 py-0.5 rounded font-mono text-[0.9em] opacity-90 mx-0.5">{part.slice(1, -1)}</code>;
+                return <code key={i} className="bg-black/20 px-1 py-0.5 rounded font-sans text-[0.9em] opacity-90 mx-0.5">{part.slice(1, -1)}</code>;
             }
             return <span key={i}>{part}</span>;
         });
@@ -238,7 +238,7 @@ const GameMarkdown: React.FC<{ content: string, theme: any, customStyle?: { font
                 // Numbered list
                 const numMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
                 if (numMatch) {
-                    return <div key={i} className="flex gap-2 pl-1"><span className={`font-mono opacity-60 ${theme.accent}`}>{numMatch[1]}.</span><span>{parseInline(numMatch[2])}</span></div>;
+                    return <div key={i} className="flex gap-2 pl-1"><span className={`font-sans opacity-60 ${theme.accent}`}>{numMatch[1]}.</span><span>{parseInline(numMatch[2])}</span></div>;
                 }
 
                 // Separator
@@ -1055,7 +1055,7 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
                 <div className="absolute inset-0 z-0 opacity-20" style={{ backgroundImage: 'url("https://www.transparenttextures.com/patterns/stardust.png")' }}></div>
 
                 {/* Header */}
-                <div className="h-20 flex items-end justify-between px-6 pb-4 shrink-0 z-10">
+                <div className="sully-safe-topbar h-20 flex items-end justify-between px-6 pb-4 shrink-0 z-10">
                     <button onClick={closeApp} className="p-2 -ml-2 hover:bg-white/10 rounded-full text-white/70 transition-colors">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                     </button>
@@ -1087,11 +1087,11 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
                                 
                                 <div className="relative z-10 flex flex-col gap-2">
                                     <div className="flex justify-between items-start">
-                                        <h3 className={`font-bold text-lg text-white leading-tight drop-shadow-md font-serif`}>{g.title}</h3>
-                                        <span className={`text-[10px] px-2 py-0.5 rounded border border-white/20 text-white/80 uppercase font-mono tracking-wider bg-black/20`}>{g.theme}</span>
+                                        <h3 className={`font-bold text-lg text-white leading-tight drop-shadow-md font-sans`}>{g.title}</h3>
+                                        <span className={`text-[10px] px-2 py-0.5 rounded border border-white/20 text-white/80 uppercase font-sans tracking-wider bg-black/20`}>{g.theme}</span>
                                     </div>
                                     
-                                    <p className="text-xs text-white/60 line-clamp-2 leading-relaxed italic font-serif border-l-2 border-white/20 pl-2">
+                                    <p className="text-xs text-white/60 line-clamp-2 leading-relaxed italic font-sans border-l-2 border-white/20 pl-2">
                                         "{g.worldSetting}"
                                     </p>
                                     
@@ -1101,7 +1101,7 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
                                                 <img key={c.id} src={c.avatar} className="w-8 h-8 rounded-full border-2 border-black/50 object-cover shadow-sm" />
                                             ))}
                                         </div>
-                                        <div className="text-[10px] text-white/40 font-mono">
+                                        <div className="text-[10px] text-white/40 font-sans">
                                             {new Date(g.lastPlayedAt).toLocaleDateString()}
                                         </div>
                                     </div>
@@ -1127,7 +1127,7 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
     if (view === 'create') {
         return (
             <div className="h-full w-full bg-slate-50 flex flex-col font-sans">
-                <div className="h-20 flex items-end px-4 pb-3 border-b border-slate-200 bg-white shrink-0 sticky top-0 z-10">
+                <div className="sully-safe-topbar h-20 flex items-end px-4 pb-3 border-b border-slate-200 bg-white shrink-0 sticky top-0 z-10">
                     <button onClick={() => setView('lobby')} className="p-2 -ml-2 text-slate-500"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg></button>
                     <span className="font-bold text-slate-700 ml-2 mb-1.5">创建世界</span>
                 </div>
@@ -1189,7 +1189,7 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
         <div className={`h-full w-full relative flex flex-col ${theme.bg} ${theme.text} ${theme.font} transition-colors duration-500 overflow-hidden`}>
             
             {/* Header */}
-            <div className={`h-20 flex items-end justify-between px-4 pb-3 border-b ${theme.border} shrink-0 bg-opacity-90 backdrop-blur z-20 relative`}>
+            <div className={`sully-safe-topbar h-20 flex items-end justify-between px-4 pb-3 border-b ${theme.border} shrink-0 bg-opacity-90 backdrop-blur z-20 relative`}>
                 <div className="flex items-center gap-2">
                     <button onClick={handleLeave} className={`p-2 -ml-2 rounded hover:bg-white/10 active:scale-95 transition-transform`}>
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
@@ -1201,7 +1201,7 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
                                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
                                 {activeGame.status.location}
                             </span>
-                            {gameSettings.showTokenHud && lastTokenUsage && <span className="text-[8px] opacity-40 font-mono" title={`Prompt: ${lastTokenUsage.prompt || '?'} | Completion: ${lastTokenUsage.completion || '?'} | Total session: ${totalTokensUsed}`}>⚡{lastTokenUsage.prompt || '?'}/{lastTokenUsage.completion || '?'} (∑{totalTokensUsed})</span>}
+                            {gameSettings.showTokenHud && lastTokenUsage && <span className="text-[8px] opacity-40 font-sans" title={`Prompt: ${lastTokenUsage.prompt || '?'} | Completion: ${lastTokenUsage.completion || '?'} | Total session: ${totalTokensUsed}`}>⚡{lastTokenUsage.prompt || '?'}/{lastTokenUsage.completion || '?'} (∑{totalTokensUsed})</span>}
                         </div>
                     </div>
                 </div>
@@ -1242,7 +1242,7 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
                 <div className="grid grid-cols-3 gap-2">
                     <div className="flex flex-col items-center bg-red-500/20 rounded p-1 border border-red-500/30">
                         <span className="text-[8px] text-red-300 font-bold uppercase">HP (生命)</span>
-                        <span className="text-xs font-mono font-bold text-red-100">{activeGame.status.health || 100}</span>
+                        <span className="text-xs font-sans font-bold text-red-100">{activeGame.status.health || 100}</span>
                     </div>
                     <div
                         onClick={toggleSanityLock}
@@ -1251,18 +1251,18 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
                         <span className="text-[8px] text-blue-300 font-bold uppercase flex items-center gap-1">
                             SAN (理智) {sanityLocked && <span className="text-blue-400">🔒</span>}
                         </span>
-                        <span className="text-xs font-mono font-bold text-blue-100">{activeGame.status.sanity || 100}</span>
+                        <span className="text-xs font-sans font-bold text-blue-100">{activeGame.status.sanity || 100}</span>
                     </div>
                     <div className="flex flex-col items-center bg-yellow-500/20 rounded p-1 border border-yellow-500/30">
                         <span className="text-[8px] text-yellow-300 font-bold uppercase">GOLD (金币)</span>
-                        <span className="text-xs font-mono font-bold text-yellow-100">{activeGame.status.gold || 0}</span>
+                        <span className="text-xs font-sans font-bold text-yellow-100">{activeGame.status.gold || 0}</span>
                     </div>
                 </div>
                 {/* Token Statistics */}
                 {gameSettings.showTokenHud && lastTokenUsage && (
                     <div className="mt-1.5 flex items-center justify-between bg-white/5 rounded px-2 py-1 border border-white/10">
-                        <span className="text-[8px] text-white/40 font-mono">⚡ 上下文: {lastTokenUsage.prompt ?? '?'} | 回复: {lastTokenUsage.completion ?? '?'} | 本次: {lastTokenUsage.total}</span>
-                        <span className="text-[8px] text-white/40 font-mono">∑ {totalTokensUsed}</span>
+                        <span className="text-[8px] text-white/40 font-sans">⚡ 上下文: {lastTokenUsage.prompt ?? '?'} | 回复: {lastTokenUsage.completion ?? '?'} | 本次: {lastTokenUsage.total}</span>
+                        <span className="text-[8px] text-white/40 font-sans">∑ {totalTokensUsed}</span>
                     </div>
                 )}
             </div>
@@ -1279,7 +1279,7 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
                             <div key={summary.id} className="animate-fade-in my-4 relative">
                                 <div className={`p-5 rounded-lg border-2 ${theme.border} ${theme.cardBg} shadow-sm relative mx-auto w-full text-sm`}>
                                     <div className="absolute -top-3 left-4 bg-inherit px-2 text-[10px] font-bold uppercase tracking-widest opacity-80 border border-inherit rounded">Auto Summary</div>
-                                    <div className={`mb-3 text-[10px] font-mono ${theme.accent} opacity-80`}>
+                                    <div className={`mb-3 text-[10px] font-sans ${theme.accent} opacity-80`}>
                                         总结 {item.index + 1} · 第 {summary.startRound}-{summary.endRound} 轮原文已隐藏
                                     </div>
                                     <GameMarkdown content={summary.content} theme={theme} customStyle={uiSettings} />
@@ -1297,7 +1297,7 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
                     if (isSystem) {
                         return (
                             <div key={log.id || i} className="flex flex-col items-center my-4 animate-fade-in gap-1 group">
-                                <span className="text-[10px] opacity-50 border-b border-dashed border-current pb-0.5 font-mono">{log.content}</span>
+                                <span className="text-[10px] opacity-50 border-b border-dashed border-current pb-0.5 font-sans">{log.content}</span>
                                 <button onClick={() => handleRollbackLog(i)} className="text-[9px] text-red-400 opacity-0 group-hover:opacity-100 transition-opacity hover:underline">回退到此处</button>
                             </div>
                         );
@@ -1337,7 +1337,7 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
                             <div className="flex items-center gap-2 mb-1">
                                 <span className={`text-[10px] font-bold opacity-60`}>{log.speakerName}</span>
                                 {log.diceRoll && (
-                                    <span className="text-[10px] bg-white/20 px-1.5 rounded text-yellow-500 font-mono">
+                                    <span className="text-[10px] bg-white/20 px-1.5 rounded text-yellow-500 font-sans">
                                         🎲 {log.diceRoll.result}
                                     </span>
                                 )}
@@ -1349,7 +1349,7 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
                         </div>
                     );
                 })}
-                {isTyping && <div className="text-xs opacity-50 animate-pulse pl-2 font-mono">GM 正在计算结果...</div>}
+                {isTyping && <div className="text-xs opacity-50 animate-pulse pl-2 font-sans">GM 正在计算结果...</div>}
                 
                 {/* [FIX] Removed logsEndRef usage */}
             </div>
@@ -1460,7 +1460,7 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
                                     onChange={e => setUiSettings({...uiSettings, fontSize: parseInt(e.target.value)})} 
                                     className="flex-1 h-1.5 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-orange-500" 
                                 />
-                                <span className="text-xs font-mono text-slate-600 w-6 text-right">{uiSettings.fontSize}</span>
+                                <span className="text-xs font-sans text-slate-600 w-6 text-right">{uiSettings.fontSize}</span>
                             </div>
                             <div className="flex items-center gap-3">
                                 <span className="text-xs text-slate-400 w-8">颜色</span>
@@ -1494,7 +1494,7 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
             {isArchiving && (
                 <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center text-white flex-col gap-4 animate-fade-in">
                     <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-xs tracking-widest font-mono">正在传递记忆...</span>
+                    <span className="text-xs tracking-widest font-sans">正在传递记忆...</span>
                 </div>
             )}
         </div>

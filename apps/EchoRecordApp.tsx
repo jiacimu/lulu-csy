@@ -1345,7 +1345,7 @@ const EchoRecordApp: React.FC = () => {
                 <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,7,11,0.18),rgba(8,7,11,0.88)_48%,rgba(8,7,11,0.98)),linear-gradient(115deg,rgba(242,210,144,0.16),transparent_34%,rgba(139,184,241,0.12)_74%,transparent)]" />
             </div>
 
-            <header className="relative z-10 shrink-0 px-4 pt-[calc(0.85rem+env(safe-area-inset-top))] sm:px-5">
+            <header className="sully-safe-overlay-top relative z-10 shrink-0 px-4 pt-[calc(0.85rem+env(safe-area-inset-top))] sm:px-5">
                 <div className="mx-auto max-w-[1120px] overflow-hidden rounded-[24px] border border-[#f2d290]/16 bg-[#100d12]/72 shadow-[0_24px_58px_rgba(0,0,0,0.34)] backdrop-blur-xl">
                     <div className="relative px-4 py-4 sm:px-5">
                         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(120deg,rgba(255,255,255,0.07),transparent_38%,rgba(242,210,144,0.09))]" />

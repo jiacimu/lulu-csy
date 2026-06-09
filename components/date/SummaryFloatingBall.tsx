@@ -1,4 +1,4 @@
-import React,{ memo,useEffect,useMemo,useRef,useState } from 'react';
+import React,{ memo,useEffect,useRef,useState } from 'react';
 import { motion,useMotionValue,PanInfo } from 'framer-motion';
 import { GearSix,NotePencil,X,WarningCircle,ArrowCounterClockwise,ClipboardText } from '@phosphor-icons/react';
 import { CharacterProfile,DateTokenUsage } from '../../types';
@@ -41,6 +41,7 @@ interface SummaryFloatingBallProps {
 const BALL_SIZE = 56;
 const DEFAULT_THRESHOLD = 20;
 const SUMMARY_HEARTS_ICON = '/images/date-summary-hearts.png';
+const PANEL_WIDTH = 224;
 
 const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
 
@@ -208,19 +209,18 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
         return () => window.removeEventListener('resize', onResize);
     }, [storageKey, x, y]);
 
-    const panelPlacement = useMemo(() => {
-        if (typeof window === 'undefined') return { horizontal: 'right' as const, vertical: 'down' as const };
-        return {
-            horizontal: position.x > window.innerWidth - 220 ? 'left' as const : 'right' as const,
-            vertical: position.y > window.innerHeight - 260 ? 'up' as const : 'down' as const,
-        };
-    }, [position]);
-
     const panelStyle: React.CSSProperties = {
-        left: panelPlacement.horizontal === 'right' ? BALL_SIZE + 10 : undefined,
-        right: panelPlacement.horizontal === 'left' ? BALL_SIZE + 10 : undefined,
-        top: panelPlacement.vertical === 'down' ? 0 : undefined,
-        bottom: panelPlacement.vertical === 'up' ? 0 : undefined,
+        left: typeof window === 'undefined'
+            ? BALL_SIZE + 10
+            : `calc(50vw - ${position.x}px - ${PANEL_WIDTH / 2}px)`,
+        top: typeof window === 'undefined'
+            ? 0
+            : `calc(50vh - ${position.y}px)`,
+        maxHeight: typeof window === 'undefined'
+            ? undefined
+            : `calc(100vh - ${SAFE_ZONE.top + SAFE_ZONE.bottom}px)`,
+        overflowY: 'auto',
+        transform: typeof window === 'undefined' ? undefined : 'translateY(-50%)',
     };
 
     const commitPosition = (_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
@@ -293,8 +293,8 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
                     Panel — warm cream light-neumorphism
                    ═══════════════════════════════════════ */}
                 {panelOpen && (
-                    <div className="control-panel absolute" style={{
-                        ...panelStyle, width: 224, borderRadius: 20, padding: '14px 14px 12px',
+                    <div className="control-panel absolute no-scrollbar" style={{
+                        ...panelStyle, width: PANEL_WIDTH, borderRadius: 20, padding: '14px 14px 12px',
                         background: C.base,
                         boxShadow: `3px 4px 10px rgba(180,170,160,0.35), 0 1px 3px rgba(160,150,140,0.15), inset 0 0.5px 0 ${C.hi}`,
                         fontFamily: '"Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
@@ -356,21 +356,22 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
                                     {lastTokenUsage ? '接口未返回 usage 时显示 --' : '发送后显示最近一轮'}
                                 </div>
                             )}
-                            <button
-                                type="button"
-                                disabled={!requestDebugCount}
-                                onClick={onOpenRequestDebug}
-                                className="transition-all active:scale-[0.97] disabled:opacity-35"
-                                style={{
-                                    width: '100%', marginTop: 7, border: 'none', borderRadius: 10,
-                                    background: C.base, boxShadow: raisedSm, cursor: requestDebugCount ? 'pointer' : 'default',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
-                                    padding: '5px 0', fontSize: 10, fontWeight: 600, color: C.accent,
-                                }}
-                            >
-                                <ClipboardText size={12} color={C.accent} />
-                                查看输入{requestDebugCount ? ` ${requestDebugCount}` : ''}
-                            </button>
+                            {onOpenRequestDebug && requestDebugCount > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={onOpenRequestDebug}
+                                    className="transition-all active:scale-[0.97]"
+                                    style={{
+                                        width: '100%', marginTop: 7, border: 'none', borderRadius: 10,
+                                        background: C.base, boxShadow: raisedSm, cursor: 'pointer',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                                        padding: '5px 0', fontSize: 10, fontWeight: 600, color: C.accent,
+                                    }}
+                                >
+                                    <ClipboardText size={12} color={C.accent} />
+                                    查看输入 {requestDebugCount}
+                                </button>
+                            )}
                         </div>
 
                         {/* ── Section 1: 总结 ── */}

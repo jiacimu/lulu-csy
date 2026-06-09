@@ -15,7 +15,7 @@ import { StatusBar as CapStatusBar,Style as StatusBarStyle,Animation as StatusBa
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
 import { requestSystemFullscreen } from '../utils/systemFullscreen';
-import { isIOSStandaloneWebApp } from '../utils/iosStandalone';
+import { IOS_STANDALONE_CHANGE_EVENT,isIOSStandaloneBrowserWebApp,isIOSStandaloneWebApp } from '../utils/iosStandalone';
 import { usePerformanceMode } from '../hooks/usePerformanceMode';
 
 // --- Lazy-loaded Apps (only downloaded when user opens them) ---
@@ -413,15 +413,21 @@ const ActiveAppContainer = memo(function ActiveAppContainer({
   activeApp,
   onCloseApp,
   useIOSStandaloneLayout,
+  topInset,
 }: {
   activeApp: AppID;
   onCloseApp: () => void;
   useIOSStandaloneLayout: boolean;
+  topInset: string | number;
 }) {
   return (
     <div
-      className="flex-1 relative overflow-hidden"
-      style={{ contain: useIOSStandaloneLayout ? undefined : 'layout style paint' }}
+      className="sully-active-app-container flex-1 relative overflow-hidden"
+      data-testid="phone-shell-active-app-container"
+      style={{
+        contain: useIOSStandaloneLayout ? undefined : 'layout style paint',
+        '--active-app-top-inset': typeof topInset === 'number' ? `${topInset}px` : topInset,
+      } as React.CSSProperties}
     >
       <AppErrorBoundary onCloseApp={onCloseApp}>
         <Suspense fallback={<AppSplashScreen appId={activeApp} />}>
@@ -434,12 +440,38 @@ const ActiveAppContainer = memo(function ActiveAppContainer({
 
 const PhoneShell: React.FC = () => {
   const { theme, isLocked, unlock, activeApp, closeApp, openApp, isDataLoaded, toasts, unreadMessages, characters, handleBack } = useOS();
-  const useIOSStandaloneLayout = isIOSStandaloneWebApp();
+  const [useIOSStandaloneLayout, setUseIOSStandaloneLayout] = useState(() => (
+    typeof window !== 'undefined' && isIOSStandaloneWebApp()
+  ));
+  const [hasNativeIOSBrowserStatusBar, setHasNativeIOSBrowserStatusBar] = useState(() => (
+    typeof window !== 'undefined' && isIOSStandaloneBrowserWebApp()
+  ));
   const { isLite } = usePerformanceMode();
   const [showIdleOverlays, setShowIdleOverlays] = useState(false);
   const isNestedPhoneApp = activeApp === AppID.CheckPhone;
   const showSystemChrome = !isNestedPhoneApp;
+  const showSimulatedStatusBar = showSystemChrome && !theme.hideStatusBar && !hasNativeIOSBrowserStatusBar;
   const showAmbientOverlays = showSystemChrome && showIdleOverlays;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const syncIOSStandaloneFlags = () => {
+      setUseIOSStandaloneLayout(isIOSStandaloneWebApp());
+      setHasNativeIOSBrowserStatusBar(isIOSStandaloneBrowserWebApp());
+    };
+
+    syncIOSStandaloneFlags();
+    window.addEventListener(IOS_STANDALONE_CHANGE_EVENT, syncIOSStandaloneFlags);
+    window.addEventListener('pageshow', syncIOSStandaloneFlags);
+    window.addEventListener('resize', syncIOSStandaloneFlags);
+
+    return () => {
+      window.removeEventListener(IOS_STANDALONE_CHANGE_EVENT, syncIOSStandaloneFlags);
+      window.removeEventListener('pageshow', syncIOSStandaloneFlags);
+      window.removeEventListener('resize', syncIOSStandaloneFlags);
+    };
+  }, []);
 
   // Use a ref so that the popstate / backButton handlers always see the latest values
   // without needing to be re-registered every time state changes.
@@ -526,6 +558,11 @@ const PhoneShell: React.FC = () => {
 
         if (platform === 'android') {
           await CapStatusBar.setOverlaysWebView({ overlay: true });
+          try {
+            await CapStatusBar.setBackgroundColor({ color: '#00000000' });
+          } catch {
+            // Android 15+ can ignore status bar color APIs when edge-to-edge is enforced.
+          }
           await CapStatusBar.hide();
         } else if (platform === 'ios') {
           await CapStatusBar.hide({ animation: StatusBarAnimation.None });
@@ -685,6 +722,10 @@ const PhoneShell: React.FC = () => {
 
   const bgImageValue = getBgStyle(theme.wallpaper);
   const contentColor = theme.contentColor || '#ffffff';
+  const safeTop = 'var(--safe-top, env(safe-area-inset-top, 0px))';
+  const activeAppTopInset = activeApp === AppID.Launcher
+    ? 0
+    : `max(${safeTop}, 2.75rem)`;
 
   if (isLocked) {
     return (
@@ -700,7 +741,7 @@ const PhoneShell: React.FC = () => {
 
   return (
     <div
-      className="relative w-full h-full overflow-hidden bg-gradient-to-br from-pink-200 via-purple-200 to-indigo-200 text-slate-900 font-sans select-none overscroll-none"
+      className="sully-system-text-scope relative w-full h-full overflow-hidden bg-gradient-to-br from-pink-200 via-purple-200 to-indigo-200 text-slate-900 font-sans select-none overscroll-none"
       data-testid="phone-shell-root"
       data-performance-mode={isLite ? 'lite' : 'full'}
       data-system-chrome={showSystemChrome ? 'visible' : 'hidden'}
@@ -721,22 +762,25 @@ const PhoneShell: React.FC = () => {
 
       <div className={`absolute inset-0 transition-all ${isLite ? 'duration-200' : 'duration-500'} ${activeApp === AppID.Launcher ? 'bg-transparent' : isLite ? 'bg-white/45' : 'bg-white/50 backdrop-blur-3xl'}`} />
 
-      {/* Full-screen app container. Individual apps handle their own safe-area spacing. */}
+      {/* Full-bleed app viewport. The app root receives the top inset so its own background reaches behind the status area. */}
       <div
         className="absolute inset-0 z-10 w-full h-full overflow-hidden bg-transparent overscroll-none flex flex-col"
+        data-testid="phone-shell-app-viewport"
         style={{
-          paddingTop: activeApp !== AppID.Launcher ? 'var(--safe-top, env(safe-area-inset-top))' : 0,
-          paddingBottom: activeApp !== AppID.Launcher ? 'var(--safe-bottom, env(safe-area-inset-bottom))' : 0
+          paddingTop: 0,
+          paddingBottom: 0,
+          boxSizing: 'border-box',
         }}
       >
         <ActiveAppContainer
           activeApp={activeApp}
           onCloseApp={handleCloseActiveApp}
           useIOSStandaloneLayout={useIOSStandaloneLayout}
+          topInset={activeAppTopInset}
         />
 
         {/* Overlays: Status Bar (Top) */}
-        {showSystemChrome && !theme.hideStatusBar && <StatusBar />}
+        {showSimulatedStatusBar && <StatusBar />}
 
         {/* Overlays: Dynamic Island (Music mini player) */}
         {showAmbientOverlays && (

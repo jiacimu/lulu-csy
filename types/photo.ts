@@ -145,7 +145,7 @@ export interface PhotoPromptBundle {
 }
 
 export interface PhotoMeta {
-    source: 'manual' | 'chat_auto';
+    source: 'manual' | 'chat_auto' | 'date_manual' | 'date_auto';
     providerType: ImageProviderType;
     photoHint?: PhotoHint;
     directorResult?: PhotoDirectorResult;

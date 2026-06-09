@@ -20,6 +20,7 @@
   width: 100%;
   height: 100%;
   min-height: 0;
+  --music-safe-top: var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem));
   --music-safe-bottom: var(--safe-bottom, env(safe-area-inset-bottom, 0px));
   background: var(--wy-bg);
   display: flex;
@@ -34,12 +35,13 @@
 .music-navbar {
   display: flex;
   align-items: center;
-  padding: 10px 16px;
+  box-sizing: border-box;
+  padding: var(--music-safe-top) 16px 10px;
   background: var(--wy-card);
   border-bottom: 0.5px solid var(--wy-border);
   z-index: 10;
   flex-shrink: 0;
-  min-height: 44px;
+  min-height: calc(var(--music-safe-top) + 44px);
 }
 
 .music-navbar-back {
@@ -114,7 +116,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px 4px;
+  padding: var(--music-safe-top) 16px 4px;
   background: var(--wy-card);
 }
 

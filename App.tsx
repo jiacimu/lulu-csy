@@ -7,7 +7,7 @@ import FeaturePreviewPage from './components/FeaturePreviewPage';
 import { startKeepAlive,startBackendHeartbeat } from './utils/keepAlive';
 import { installGlobalAutofillSuppression } from './utils/autofillSuppression';
 import { isFullscreenEnabled,requestSystemFullscreenForMobileRestore } from './utils/systemFullscreen';
-import { isIOSStandaloneWebApp } from './utils/iosStandalone';
+import { IOS_STANDALONE_CHANGE_EVENT,isIOSStandaloneWebApp } from './utils/iosStandalone';
 
 const EDITABLE_SELECTION_SELECTOR = 'input:not([readonly]), textarea:not([readonly]), select, [contenteditable="true"], [data-allow-text-selection="true"]';
 
@@ -39,7 +39,28 @@ function isFeaturePreviewRoute(): boolean {
 }
 
 const SullyOSApp: React.FC = () => {
-  const useAbsoluteShell = typeof window !== 'undefined' && isIOSStandaloneWebApp();
+  const [useAbsoluteShell, setUseAbsoluteShell] = useState(() => (
+    typeof window !== 'undefined' && isIOSStandaloneWebApp()
+  ));
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const syncIOSStandaloneShell = () => {
+      setUseAbsoluteShell(isIOSStandaloneWebApp());
+    };
+
+    syncIOSStandaloneShell();
+    window.addEventListener(IOS_STANDALONE_CHANGE_EVENT, syncIOSStandaloneShell);
+    window.addEventListener('pageshow', syncIOSStandaloneShell);
+    window.addEventListener('resize', syncIOSStandaloneShell);
+
+    return () => {
+      window.removeEventListener(IOS_STANDALONE_CHANGE_EVENT, syncIOSStandaloneShell);
+      window.removeEventListener('pageshow', syncIOSStandaloneShell);
+      window.removeEventListener('resize', syncIOSStandaloneShell);
+    };
+  }, []);
 
   useEffect(() => {
     startKeepAlive();

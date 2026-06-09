@@ -407,9 +407,28 @@ describe('message context formatter', () => {
         });
 
         expect(text).toContain('引用回复上下文');
-        expect(text).toContain('正在回复糯米的消息');
+        expect(text).toContain('用户引用了你之前说的');
         expect(text).toContain('你发消息之前都不自己检查一遍的吗。');
         expect(text).toContain('本条消息正文：你要接住我后面这句话');
+    });
+
+    it('labels self-quoted user messages clearly in chat context', () => {
+        const text = formatMessageForContext(msg({
+            role: 'user',
+            content: '我想补一句',
+            replyTo: {
+                id: 92,
+                name: '我',
+                content: '刚才我说得太急了',
+                type: 'text',
+            },
+        }), {
+            surface: 'chat',
+            charName: '糯米',
+        });
+
+        expect(text).toContain('用户引用了自己说的「刚才我说得太急了」');
+        expect(text).toContain('本条消息正文：我想补一句');
     });
 
     it('formats image reply prefixes without leaking raw image URLs', () => {
@@ -428,7 +447,7 @@ describe('message context formatter', () => {
             charName: '糯米',
         });
 
-        expect(text).toContain('正在回复糯米的消息「窗边自拍」');
+        expect(text).toContain('用户引用了你之前说的「窗边自拍」');
         expect(text).toContain('好帅');
         expect(text).not.toContain('https://cdn.example.com');
     });
@@ -453,7 +472,7 @@ describe('message context formatter', () => {
             charName: '糯米',
         });
 
-        expect(text).toContain('正在回复糯米的消息「图片」');
+        expect(text).toContain('用户引用了你之前说的「图片」');
         expect(text).toContain('好帅');
         expect(text).not.toContain('画面：');
         expect(text).not.toContain('镜头：');
@@ -519,6 +538,21 @@ describe('message context formatter', () => {
             expect(shouldIncludeMessageInContext(message)).toBe(false);
             expect(formatMessageForContext(message, { surface: 'memoryExtraction', charName: '糯米' })).toBeNull();
         }
+    });
+
+    it('keeps DateApp dialogue when the message also carries an inline status card', () => {
+        const message = msg({
+            role: 'assistant',
+            content: '[happy] 他把伞往她那边又偏了一点。',
+            metadata: {
+                source: 'date',
+                hasDateStatusCard: true,
+                statusCardData: { cardType: 'freeform', body: '心情=柔软', style: {} },
+            },
+        });
+
+        expect(shouldIncludeMessageInContext(message)).toBe(true);
+        expect(formatMessageForContext(message, { surface: 'memoryExtraction', charName: '糯米' })).toContain('他把伞往她那边又偏了一点。');
     });
 
     it('uses the shared formatter for memory extraction windows', () => {

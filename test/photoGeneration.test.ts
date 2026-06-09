@@ -26,6 +26,7 @@ import {
     testOpenAICompatibleImageConnection,
 } from '../utils/photoGeneration';
 import {
+    GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
     getImageGenerationConfig,
     getPhotoStylePresets,
     IMAGE_GENERATION_CONFIG_KEY,
@@ -1018,7 +1019,7 @@ describe('photoGeneration helpers', () => {
         await expect(generatePhotoImage(config, openAICompatibleMeta)).rejects.toThrow('接口返回 HTML 页面');
     });
 
-    it('sends the real OpenAI-compatible model id when a display label was stored', async () => {
+    it('sends stored OpenAI-compatible model names verbatim', async () => {
         const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
         const meta: PhotoMeta = { ...openAICompatibleMeta, model: '【0.08】米/gpt-image-2' };
         vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
@@ -1028,16 +1029,20 @@ describe('photoGeneration helpers', () => {
         await generatePhotoImage(config, meta);
 
         const [, init] = (fetch as any).mock.calls[0];
-        expect(JSON.parse(init.body).model).toBe('gpt-image-2');
+        expect(JSON.parse(init.body).model).toBe('【0.08】米/gpt-image-2');
     });
 
-    it('cleans display model labels but preserves real provider-prefixed model ids before requesting', async () => {
+    it('preserves provider-prefixed model names before requesting', async () => {
         const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
         const cases: Array<[string, string]> = [
-            ['假流/gemini-3.1-flash-image-preview', GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL],
-            ['fake-stream/gemini-3-pro-image-preview', 'fake-stream/gemini-3-pro-image-preview'],
-            ['假流/gemini-3.1-flash-image-preview / gemini-3.1-flash-image-preview', GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL],
             ['openai/gpt-image-2', 'openai/gpt-image-2'],
+            ['provider/gpt-image-2', 'provider/gpt-image-2'],
+            ['provider:gpt-image-2', 'provider:gpt-image-2'],
+            ['sonetto/gpt-image-2', 'sonetto/gpt-image-2'],
+            ['【0.08】米/gpt-image-2', '【0.08】米/gpt-image-2'],
+            ['假流/gemini-3.1-flash-image-preview', '假流/gemini-3.1-flash-image-preview'],
+            ['fake-stream/gemini-3-pro-image-preview', 'fake-stream/gemini-3-pro-image-preview'],
+            ['假流/gemini-3.1-flash-image-preview / gemini-3.1-flash-image-preview', '假流/gemini-3.1-flash-image-preview / gemini-3.1-flash-image-preview'],
         ];
         const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({
             data: [{ b64_json: 'aGVsbG8=' }],
@@ -1883,12 +1888,12 @@ describe('photoGeneration helpers', () => {
         expect(result.ok).toBe(true);
         expect(result.models).toEqual([
             'image2',
-            'gpt-image-2',
+            '【0.08】米/gpt-image-2',
             'fake-stream/gemini-3-pro-image-preview',
         ]);
         expect(result.modelOptions).toEqual([
             { id: 'image2', name: 'Image 2', displayName: 'Image 2 / image2' },
-            { id: 'gpt-image-2', name: '【0.08】米/gpt-image-2', displayName: '【0.08】米/gpt-image-2 / gpt-image-2' },
+            { id: '【0.08】米/gpt-image-2', name: '【0.08】米/gpt-image-2', displayName: '【0.08】米/gpt-image-2' },
             { id: 'fake-stream/gemini-3-pro-image-preview', name: '假流/gemini-3-pro-image-preview', displayName: '假流/gemini-3-pro-image-preview / fake-stream/gemini-3-pro-image-preview' },
         ]);
         expect(fetch).toHaveBeenCalledWith('https://imagegen.example/v1/models', expect.objectContaining({
@@ -1946,11 +1951,11 @@ describe('photoGeneration helpers', () => {
 
         expect(result.models).toEqual([
             'models/gemini-2.5-flash-image',
-            'gemini-3-pro-image-preview',
+            '假流/gemini-3-pro-image-preview',
         ]);
         expect(result.modelOptions).toEqual([
             { id: 'models/gemini-2.5-flash-image', name: 'models/gemini-2.5-flash-image', displayName: 'models/gemini-2.5-flash-image' },
-            { id: 'gemini-3-pro-image-preview', name: '假流/gemini-3-pro-image-preview', displayName: '假流/gemini-3-pro-image-preview / gemini-3-pro-image-preview' },
+            { id: '假流/gemini-3-pro-image-preview', name: '假流/gemini-3-pro-image-preview', displayName: '假流/gemini-3-pro-image-preview' },
         ]);
     });
 

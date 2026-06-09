@@ -180,7 +180,7 @@ const StarMirror: React.FC<Props> = ({ onBack, isUser = true, isApiConfigured, o
                 />
 
                 {/* History drawer toggle in header — overlay */}
-                <div className="absolute top-0 right-0 pt-12 pr-5 z-[60]">
+                <div className="sully-safe-overlay-top absolute top-0 right-0 pt-12 pr-5 z-[60]">
                     <button
                         onClick={() => setShowHistory(!showHistory)}
                         className={`p-2 -mr-1 rounded-full active:scale-90 transition-all border backdrop-blur-md ${showHistory

@@ -1304,7 +1304,7 @@ const CognitiveNetworkApp: React.FC = () => {
                 <button
                     aria-label="打开认知网络菜单"
                     onClick={() => { setSidebarOpen(true); haptic.light(); }}
-                    className="fixed top-[max(0.6rem,calc(env(safe-area-inset-top)+0.25rem))] left-3 z-40 flex h-6 w-6 items-center justify-center text-[#e5d08f]/80 transition-transform active:scale-95"
+                    className="fixed top-[calc(var(--active-app-top-inset,2.75rem)+0.25rem)] left-3 z-40 flex h-6 w-6 items-center justify-center text-[#e5d08f]/80 transition-transform active:scale-95"
                 >
                     <span className="relative flex h-[18px] w-[18px] rotate-[-8deg] items-center justify-center rounded-[6px] border border-[#e5d08f]/36 bg-[#0d0c11]/18 shadow-[0_0_8px_rgba(229,208,143,0.10),0_1px_0_rgba(255,255,255,0.08)_inset] backdrop-blur-[2px]">
                         <span className="absolute inset-[3px] rounded-[4px] border border-[#e5d08f]/16" />
@@ -1330,7 +1330,7 @@ const CognitiveNetworkApp: React.FC = () => {
                         <div className="pointer-events-none absolute inset-0 opacity-[0.045] [background-image:radial-gradient(circle_at_1px_1px,rgba(255,232,163,0.72)_1px,transparent_0)] [background-size:18px_18px]" />
 
                         {/* Header */}
-                        <div className="relative z-10 flex items-center justify-between px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-4">
+                        <div className="relative z-10 flex items-center justify-between px-5 pt-[max(1.25rem,var(--active-app-top-inset,2.75rem))] pb-4">
                             <div className="flex items-center gap-2.5">
                                 <div className="w-8 h-8 rounded-xl border border-[#d7b56c]/38 bg-[#172235] shadow-[0_8px_18px_rgba(0,0,0,0.24)] flex items-center justify-center">
                                     <span className="text-[#ffe8a3] text-[11px] font-serif italic">N</span>

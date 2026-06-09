@@ -160,7 +160,7 @@ const XhsFreeRoamApp: React.FC = () => {
         if (!showCharPicker) return null;
         return (
             <div className="fixed inset-0 z-50 bg-black/30" onClick={() => setShowCharPicker(false)}>
-                <div className="absolute top-14 left-4 right-4 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden animate-fade-in" onClick={e => e.stopPropagation()}>
+                <div className="sully-safe-floating-top absolute top-0 left-4 right-4 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden animate-fade-in" onClick={e => e.stopPropagation()}>
                     <div className="p-3 border-b border-slate-50">
                         <p className="text-xs font-bold text-slate-400">选择角色</p>
                     </div>
@@ -417,7 +417,7 @@ const XhsFreeRoamApp: React.FC = () => {
     return (
         <div className="h-full flex flex-col bg-gradient-to-b from-rose-50 to-white">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 shrink-0">
+            <div className="sully-safe-topbar-compact flex items-center justify-between px-4 py-3 border-b border-slate-100 shrink-0">
                 <div className="flex items-center gap-2">
                     <button onClick={closeApp} className="w-8 h-8 flex items-center justify-center text-slate-400 active:scale-90">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>

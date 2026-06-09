@@ -62,7 +62,7 @@ const ModeSelectOverlay: React.FC<ModeSelectOverlayProps> = ({
     };
 
     return (
-        <div className="absolute inset-0 flex flex-col items-center pt-16 pb-24 px-6 vc-animate-fade overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
+        <div className="sully-safe-floating-top absolute inset-0 flex flex-col items-center pt-16 pb-24 px-6 vc-animate-fade overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
 
             {/* 标题区 */}
             <div className="text-center mb-10 vc-animate-slide-up">

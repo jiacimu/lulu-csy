@@ -1704,6 +1704,17 @@ pre{margin:0;white-space:pre-wrap;font:500 10px/1.5 "SF Mono","Fira Code",monosp
                             label: '🔄 优化字段',
                             mode: 'polish',
                         })}
+                        {!isLegacyRegexTemplate && (
+                            <button
+                                type="button"
+                                onClick={() => updateActiveTemplate({
+                                    extractRegex: '<status>\\s*([\\s\\S]*?)\\s*<\\/status>',
+                                }, ['system', 'html', 'css', 'js'])}
+                                className="rounded-2xl border border-amber-200/10 bg-amber-200/[0.06] px-4 py-2.5 text-[12px] font-semibold text-amber-100/72 transition-all hover:bg-amber-200/[0.10] active:scale-[0.98]"
+                            >
+                                启用正则捕获
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -2017,7 +2028,7 @@ pre{margin:0;white-space:pre-wrap;font:500 10px/1.5 "SF Mono","Fira Code",monosp
                 <div className="absolute bottom-[-90px] left-[-70px] h-72 w-72 rounded-full bg-emerald-500/[0.05] blur-[110px]" />
             </div>
 
-            <div className="relative z-10 flex shrink-0 items-start justify-between gap-3 px-4 pb-3 pt-3 sm:px-5 sm:pt-4">
+            <div className="sully-safe-topbar relative z-10 flex shrink-0 items-start justify-between gap-3 px-4 pb-3 pt-3 sm:px-5 sm:pt-4">
                 <button
                     onClick={closeApp}
                     className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/[0.05] bg-white/[0.06] backdrop-blur-sm transition-all hover:bg-white/10 active:scale-90"

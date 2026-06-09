@@ -305,6 +305,11 @@ export interface CharacterProfile {
     customStatusTemplates?: CustomStatusTemplate[];  // User-defined templates for 'custom' mode
     activeCustomTemplateId?: string;          // 当前活跃的自定义模板 ID
     lastStatusCard?: StatusCardData;           // Last generated creative card data
+
+    // DateApp status cards (线下见面状态栏)
+    dateStatusBarEnabled?: boolean;            // Whether DateApp generates a status card after each in-person reply
+    dateStatusTemplateId?: string;             // Built-in or workshop template ID used by DateApp
+    dateStatusModuleIds?: string[];            // Built-in DateApp status modules selected by the user
 }
 
 export interface CharacterExportData extends Omit<CharacterProfile, 'id' | 'memories' | 'refinedMemories' | 'activeMemoryMonths' | 'impression' | 'hideBeforeMessageId' | 'vectorMemoryEnabled' | 'vectorMemoryAutoExtract' | 'vectorMemoryExtractInterval' | 'vectorMemoryLastExtractAt' | 'vectorMemoryTakeover' | 'vectorMemoryMode' | 'moodState'> {

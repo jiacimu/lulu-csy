@@ -699,7 +699,7 @@ export const ValentineSession: React.FC<ValentineSessionProps> = ({ charId, onCl
     if (phase === 'select') {
         return (
             <div className="fixed inset-0 z-[9997] bg-gradient-to-b from-pink-50 via-white to-rose-50 flex flex-col animate-fade-in">
-                <div className="h-16 flex items-center justify-between px-4 border-b border-pink-100 bg-white/80 backdrop-blur-sm shrink-0">
+                <div className="sully-safe-topbar-compact h-16 flex items-center justify-between px-4 border-b border-pink-100 bg-white/80 backdrop-blur-sm shrink-0">
                     <button onClick={onClose} className="p-2 -ml-2 rounded-full hover:bg-pink-50">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-slate-600"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                     </button>
@@ -875,7 +875,7 @@ export const ValentineSession: React.FC<ValentineSessionProps> = ({ charId, onCl
             </div>
 
             {/* 顶部标题 */}
-            <div className="absolute top-0 left-0 right-0 pt-14 text-center z-20">
+            <div className="sully-safe-floating-top absolute top-0 left-0 right-0 pt-14 text-center z-20">
                 <div className="text-[10px] font-mono text-pink-400/40 tracking-[0.3em] uppercase mb-1 pointer-events-none">Valentine's Day Special</div>
                 <h2 className="text-2xl font-light text-white/80 tracking-[0.2em] pointer-events-none">{char?.name}</h2>
                 {/* 返回按钮 */}
@@ -1022,7 +1022,7 @@ export const ValentineSession: React.FC<ValentineSessionProps> = ({ charId, onCl
             {showRecord && (
                 <div className="absolute inset-0 z-[60] flex flex-col bg-black/90 backdrop-blur-sm animate-fade-in" onClick={(e) => e.stopPropagation()}>
                     {/* 顶部工具栏 */}
-                    <div className="shrink-0 flex items-center justify-between px-4 pt-12 pb-3">
+                    <div className="sully-safe-overlay-top shrink-0 flex items-center justify-between px-4 pt-12 pb-3">
                         <button onClick={() => setShowRecord(false)} className="p-2 rounded-full bg-white/10 active:scale-90 transition-transform">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-white/80"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
                         </button>
@@ -1205,7 +1205,7 @@ export const SpecialMomentsApp: React.FC = () => {
     return (
         <div className="h-full w-full bg-gradient-to-b from-pink-50 via-white to-rose-50 flex flex-col font-light">
             {/* Header */}
-            <div className="h-16 flex items-center justify-between px-4 border-b border-pink-100 bg-white/80 backdrop-blur-sm shrink-0">
+            <div className="sully-safe-topbar-compact h-16 flex items-center justify-between px-4 border-b border-pink-100 bg-white/80 backdrop-blur-sm shrink-0">
                 <button onClick={closeApp} className="p-2 -ml-2 rounded-full hover:bg-pink-50">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-slate-600"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                 </button>

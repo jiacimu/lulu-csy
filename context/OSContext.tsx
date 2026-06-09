@@ -11,6 +11,8 @@ import { preloadImages } from '../utils/preloadResources';
 import { useAutoBackup } from '../hooks/useAutoBackup';
 import { usePerformanceMode } from '../hooks/usePerformanceMode';
 import {
+    APPEARANCE_FONT_SCALE_DEFAULT,
+    APPEARANCE_SYSTEM_TEXT_COLOR_DEFAULT,
     APPEARANCE_PRESET_ASSET_PREFIX,
     createAppearancePreset,
     exportAppearancePresetBlob,
@@ -85,6 +87,8 @@ const defaultTheme: OSTheme = {
     wallpaper: 'linear-gradient(135deg, #FFDEE9 0%, #B5FFFC 100%)',
     darkMode: false,
     contentColor: '#ffffff',
+    fontScale: APPEARANCE_FONT_SCALE_DEFAULT,
+    systemTextColor: APPEARANCE_SYSTEM_TEXT_COLOR_DEFAULT,
     customIconFrame: true,
     inputEffectEnabled: false,
     inputEffectScale: 1,
@@ -94,6 +98,34 @@ const defaultTheme: OSTheme = {
     inputEffectDuration: 0.95,
     inputEffectSpinSpeed: 1,
 };
+
+const TAILWIND_TEXT_TOKEN_BASES: Array<[string, number]> = [
+    ['--text-xs', 0.75],
+    ['--text-sm', 0.875],
+    ['--text-base', 1],
+    ['--text-lg', 1.125],
+    ['--text-xl', 1.25],
+    ['--text-2xl', 1.5],
+    ['--text-3xl', 1.875],
+    ['--text-4xl', 2.25],
+    ['--text-5xl', 3],
+    ['--text-6xl', 3.75],
+    ['--text-7xl', 4.5],
+    ['--text-8xl', 6],
+];
+
+function mergeChatThemesById(existing: ChatTheme[], incoming: ChatTheme[]): ChatTheme[] {
+    const merged = [...existing];
+    for (const theme of incoming) {
+        const index = merged.findIndex(item => item.id === theme.id);
+        if (index >= 0) {
+            merged[index] = theme;
+        } else {
+            merged.push(theme);
+        }
+    }
+    return merged;
+}
 
 const generateAvatar = (seed: string) => {
     const colors = ['FF9AA2', 'FFB7B2', 'FFDAC1', 'E2F0CB', 'B5EAD7', 'C7CEEA', 'e2e8f0', 'fcd34d', 'fca5a5'];
@@ -522,10 +554,18 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
         const h = theme.hue ?? 245;
         const s = theme.saturation ?? 25;
         const l = theme.lightness ?? 65;
+        const fontScale = theme.fontScale ?? APPEARANCE_FONT_SCALE_DEFAULT;
+        const systemTextColor = theme.systemTextColor || APPEARANCE_SYSTEM_TEXT_COLOR_DEFAULT;
 
         root.style.setProperty('--primary-hue', String(h));
         root.style.setProperty('--primary-sat', `${s}%`);
         root.style.setProperty('--primary-lightness', `${l}%`);
+        root.style.setProperty('--app-font-scale', String(fontScale));
+        root.style.setProperty('--app-system-text', systemTextColor);
+
+        for (const [token, baseRem] of TAILWIND_TEXT_TOKEN_BASES) {
+            root.style.setProperty(token, `${(baseRem * fontScale).toFixed(4)}rem`);
+        }
     }, [theme]);
 
     // --- Scheduled Messages with Unread Flags & Web Notifications ---
@@ -723,7 +763,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
         }
 
         if (launcherWidgets !== undefined) {
-            const slots = ['tl', 'tr', 'wide', 'bl', 'br'];
+            const slots = ['tl', 'tr', 'wide', 'dsq', 'bl', 'br'];
             for (const slot of slots) {
                 const val = newTheme.launcherWidgets?.[slot];
                 if (val && val.startsWith('data:')) {
@@ -793,7 +833,7 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     // --- Appearance Presets ---
     const saveAppearancePreset = async (name: string) => {
         const presetName = name.trim() || `预设 ${new Date().toLocaleDateString('zh-CN')}`;
-        const preset = createAppearancePreset(presetName, theme, customIcons);
+        const preset = createAppearancePreset(presetName, theme, customIcons, customThemes);
         setAppearancePresets(prev => [preset, ...prev]);
         await DB.saveAsset(`${APPEARANCE_PRESET_ASSET_PREFIX}${preset.id}`, JSON.stringify(preset));
         addToast(`外观预设「${presetName}」已保存`, 'success');
@@ -808,6 +848,10 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
         setTheme(nextTheme);
         setCustomIcons(preset.customIcons ? { ...preset.customIcons } : {});
         applyCustomFont(nextTheme.customFont);
+        if (preset.chatThemes?.length) {
+            await Promise.all(preset.chatThemes.map(chatTheme => DB.saveTheme(chatTheme)));
+            setCustomThemes(prev => mergeChatThemesById(prev, preset.chatThemes || []));
+        }
         localStorage.setItem('os_theme', JSON.stringify(stripAppearanceThemeForLocalStorage(nextTheme)));
         addToast(`已应用预设「${preset.name}」`, 'success');
     };

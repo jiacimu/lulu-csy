@@ -1,5 +1,6 @@
 import { Message } from '../types';
 import { stripTranslationTags } from './chatParser';
+import { formatDatePhotoContextContent, formatDatePhotoFailureContextContent, isDatePhotoFailureMessage, isDatePhotoMessage } from './datePhotos';
 
 export const DATE_RECAP_SYSTEM_PROMPT = '你负责把一次线下见面整理成一段交接 recap——主角带着它回到线上对话，好让线上能自然接上“刚刚线下发生了什么、以什么状态结束的”。只输出 recap 正文。';
 
@@ -38,6 +39,12 @@ export const formatMessagesForSummary = (messages: Message[], charName: string, 
     return messages
         .map((msg) => {
             const speaker = msg.role === 'user' ? userName : charName;
+            if (isDatePhotoMessage(msg)) {
+                return `${speaker}: ${formatDatePhotoContextContent(msg)}`;
+            }
+            if (isDatePhotoFailureMessage(msg)) {
+                return `${speaker}: ${formatDatePhotoFailureContextContent(msg)}`;
+            }
             return `${speaker}: ${stripSummaryNoise(msg.content || '')}`;
         })
         .filter(line => line.trim().length > 0)

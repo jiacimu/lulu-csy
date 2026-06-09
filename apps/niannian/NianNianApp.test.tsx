@@ -139,6 +139,38 @@ describe('NianNianApp', () => {
         expect(mockedSaveSession).not.toHaveBeenCalled();
     });
 
+    it('treats cleared preset identity and opening fields as intentional custom blanks', async () => {
+        render(<NianNianApp />);
+
+        await screen.findByText('副本初始化');
+        await screen.findByDisplayValue('上元灯节,人海重逢。');
+
+        fireEvent.change(screen.getByLabelText('角色身份'), {
+            target: { value: '' },
+        });
+        fireEvent.change(screen.getByLabelText('主角身份'), {
+            target: { value: '' },
+        });
+        fireEvent.change(screen.getByLabelText('开场情境'), {
+            target: { value: '' },
+        });
+        fireEvent.click(screen.getByText('初始化 Session'));
+
+        await screen.findByLabelText('念念浮生输入区');
+        expect(screen.queryByText('上元灯节,人海重逢。')).not.toBeInTheDocument();
+        expect(screen.queryByText('先弯腰拾起落在脚边的那件失物,递还过去。')).not.toBeInTheDocument();
+
+        const saved = mockedSaveSession.mock.calls[0][0] as NianNianSession;
+        expect(saved.world.charIdentity).toBe('');
+        expect(saved.world.protagonistIdentity).toBe('');
+        expect(saved.world.opening).toBe('');
+        expect(saved.world.openingStep).toBeUndefined();
+        expect(saved.currentStep.sceneText).toBe('');
+        expect(saved.currentStep.options).toEqual([]);
+        expect(saved.status.me.身份).toBe('未设定');
+        expect(saved.status.scene.情境).toBe('');
+    });
+
     it('applies real main and director replies when the player clicks an opening option', async () => {
         vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
             if (!String(url).includes('/chat/completions')) {
@@ -241,7 +273,7 @@ npc: 无
         expect(saved.currentStep.sceneText).not.toContain('旁白');
         expect(saved.currentStep.options[0].label).toBe('问他是否也来猜灯谜');
 
-        fireEvent.click(screen.getByText('先弯腰拾起落在脚边的那件失物,递还过去。'));
+        fireEvent.click(screen.getByRole('button', { name: '下一页' }));
         await screen.findByText('他接过那枚旧玉扣,指尖停在半空。');
         fireEvent.click(screen.getByRole('button', { name: '上一页' }));
         await screen.findByText('先弯腰拾起落在脚边的那件失物,递还过去。');

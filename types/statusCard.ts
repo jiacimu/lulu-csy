@@ -82,6 +82,7 @@ export interface CustomStatusTemplate {
     extractRegex: string;           // 用户自定义的提取正则（从 AI 输出中提取渲染内容）
     htmlTemplate?: string;          // 旧版完整 HTML 模板（支持 $1, $2 等正则捕获组替换）
     htmlBody?: string;              // 新版分层模板：body 内 HTML 骨架
+    headTemplate?: string;          // 新版分层模板：可选 head 片段（如字体 link）
     cssTemplate?: string;           // 新版分层模板：状态栏内联 CSS
     jsTemplate?: string;            // 新版分层模板：可选 classic inline JS（不含 <script> 标签）
     templateVersion?: number;       // 模板结构版本。2=分层模板；缺省=旧版完整 HTML

@@ -1,5 +1,6 @@
 import type { Message } from '../types';
 import { stripTranslationTags } from './chatParser';
+import { formatDatePhotoContextContent, formatDatePhotoFailureContextContent, isDatePhotoFailureMessage, isDatePhotoMessage } from './datePhotos';
 import { shouldIncludeMessageInContext } from './messageContext';
 
 export interface DateRequestContextMessage {
@@ -18,6 +19,8 @@ function compareMessagesByTimeline(a: Message, b: Message): number {
 }
 
 export function isMainChatContextMessageForDate(message: Message): boolean {
+    if (isDatePhotoMessage(message)) return true;
+    if (isDatePhotoFailureMessage(message)) return true;
     const source = getMessageSource(message);
     if ((source === 'date' || source === 'theater') && message.metadata?.isDateContextBridge === true) {
         return true;
@@ -27,6 +30,8 @@ export function isMainChatContextMessageForDate(message: Message): boolean {
 }
 
 export function formatDateContextContent(message: Message): string {
+    if (isDatePhotoMessage(message)) return formatDatePhotoContextContent(message);
+    if (isDatePhotoFailureMessage(message)) return formatDatePhotoFailureContextContent(message);
     if (message.type === 'image') return '[User sent an image]';
     return stripTranslationTags(message.content || '');
 }
@@ -62,7 +67,7 @@ export function buildDateRequestContextMessages(input: {
     );
 
     const currentSessionMessages = (input.currentSessionMessages || [])
-        .filter(shouldIncludeMessageInContext);
+        .filter(message => isDatePhotoMessage(message) || isDatePhotoFailureMessage(message) || shouldIncludeMessageInContext(message));
     const currentSessionContext = selectRecentDateContextMessages(
         currentSessionMessages,
         contextLimit,

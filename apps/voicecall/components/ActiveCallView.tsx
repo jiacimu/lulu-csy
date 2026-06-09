@@ -277,7 +277,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
     }, [handleSend]);
 
     return (
-        <div className="absolute inset-0 flex flex-col items-center pt-10 pb-4 vc-animate-fade">
+        <div className="sully-safe-overlay-top absolute inset-0 flex flex-col items-center pt-10 pb-4 vc-animate-fade">
 
             {/* 接通闪光 */}
             {showFlash && (

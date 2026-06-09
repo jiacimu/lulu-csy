@@ -1,4 +1,6 @@
 
+import type { ChatTheme } from './chat';
+
 export enum AppID {
     Launcher = 'launcher',
     Settings = 'settings',
@@ -79,9 +81,11 @@ export interface OSTheme {
     darkMode: boolean;
     contentColor?: string;
     launcherWidgetImage?: string; // kept for backward compat, migrated to launcherWidgets['wide']
-    launcherWidgets?: Record<string, string>; // slots: 'tl' | 'tr' | 'wide'
+    launcherWidgets?: Record<string, string>; // slots: 'tl' | 'tr' | 'wide' | 'dsq'
     desktopDecorations?: DesktopDecoration[];
     customFont?: string;
+    fontScale?: number;
+    systemTextColor?: string;
     inputEffectEnabled?: boolean;
     inputEffectAsset?: string;
     inputEffectScale?: number;
@@ -100,6 +104,8 @@ export interface AppearancePreset {
     createdAt: number;
     theme: OSTheme;
     customIcons?: Record<string, string>;
+    chatThemes?: ChatTheme[];
+    chatLayout?: Record<string, unknown>;
 }
 
 export interface TranslationConfig {

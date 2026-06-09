@@ -49,6 +49,28 @@ describe('statusBlockParser', () => {
         expect(parsed?.fields.地点).toBe('书桌');
     });
 
+    it('normalizes legacy date status module prefixes to v2 names', () => {
+        const parsed = parseStatusBlock('<status>\n场景推进栏-当前场景: 雨窗边\n剧情锚点栏-锚点阶段: 逼近\n</status>', [
+            { name: '此幕-当前场景' },
+            { name: '命途-锚点阶段' },
+        ]);
+
+        expect(parsed?.fields['此幕-当前场景']).toBe('雨窗边');
+        expect(parsed?.fields['命途-锚点阶段']).toBe('逼近');
+    });
+
+    it('splits inline dashed list values for list fields', () => {
+        const parsed = parseStatusBlock('<status>\n此幕-节拍进度: ✓ 借故入仓 - ✓ 他递来围巾 - … 尚未问到正题\n</status>', [
+            { name: '此幕-节拍进度', type: 'list' },
+        ]);
+
+        expect(parsed?.fields['此幕-节拍进度']).toEqual([
+            '✓ 借故入仓',
+            '✓ 他递来围巾',
+            '… 尚未问到正题',
+        ]);
+    });
+
     it('builds scalar and list samples', () => {
         expect(buildStatusSampleV2([
             { name: '时间', type: 'text' },

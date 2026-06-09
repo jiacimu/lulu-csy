@@ -8,6 +8,7 @@ import { VirtualTimeProvider } from '../context/VirtualTimeContext';
 import { useOS } from '../context/OSContext';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar as CapStatusBar } from '@capacitor/status-bar';
+import { isIOSStandaloneBrowserWebApp, isIOSStandaloneWebApp } from '../utils/iosStandalone';
 
 let launcherRenderCount = 0;
 let statusBarRenderCount = 0;
@@ -135,6 +136,7 @@ vi.mock('@capacitor/app', () => ({
 vi.mock('@capacitor/status-bar', () => ({
     StatusBar: {
         hide: vi.fn(),
+        setBackgroundColor: vi.fn(),
         setOverlaysWebView: vi.fn(),
         setStyle: vi.fn(),
     },
@@ -157,7 +159,15 @@ vi.mock('../utils/systemFullscreen', () => ({
     requestSystemFullscreen: vi.fn(),
 }));
 
+vi.mock('../utils/iosStandalone', () => ({
+    IOS_STANDALONE_CHANGE_EVENT: 'sully:ios-standalone-change',
+    isIOSStandaloneBrowserWebApp: vi.fn(() => false),
+    isIOSStandaloneWebApp: vi.fn(() => false),
+}));
+
 const mockedUseOS = vi.mocked(useOS);
+const mockedIsIOSStandaloneWebApp = vi.mocked(isIOSStandaloneWebApp);
+const mockedIsIOSStandaloneBrowserWebApp = vi.mocked(isIOSStandaloneBrowserWebApp);
 
 describe('PhoneShell active app rendering', () => {
     beforeEach(() => {
@@ -172,6 +182,8 @@ describe('PhoneShell active app rendering', () => {
         localStorage.setItem('sullyos_disclaimer_accepted', '1');
         vi.mocked(Capacitor.isNativePlatform).mockReturnValue(false);
         vi.mocked(Capacitor.getPlatform).mockReturnValue('web');
+        mockedIsIOSStandaloneWebApp.mockReturnValue(false);
+        mockedIsIOSStandaloneBrowserWebApp.mockReturnValue(false);
 
         window.scrollTo = vi.fn();
         window.requestIdleCallback = ((callback: IdleRequestCallback) => window.setTimeout(() => callback({
@@ -354,6 +366,103 @@ describe('PhoneShell active app rendering', () => {
         expect(await screen.findByText('EchoRecord App', {}, { timeout: 3000 })).toBeTruthy();
     });
 
+    it('keeps opened apps full-bleed while giving app roots a stable top inset', async () => {
+        vi.useRealTimers();
+        mockedUseOS.mockReturnValue({
+            activeApp: AppID.EchoRecord,
+            characters: [],
+            closeApp: vi.fn(),
+            handleBack: vi.fn(() => true),
+            isDataLoaded: true,
+            isLocked: false,
+            theme: {
+                wallpaper: 'linear-gradient(#000000, #111111)',
+                hideStatusBar: false,
+            },
+            toasts: [],
+            unreadMessages: {},
+            unlock: vi.fn(),
+        } as any);
+
+        render(
+            <VirtualTimeProvider>
+                <PhoneShell />
+            </VirtualTimeProvider>,
+        );
+
+        expect(await screen.findByText('EchoRecord App', {}, { timeout: 3000 })).toBeTruthy();
+        expect(screen.getByTestId('phone-shell-app-viewport')).toHaveStyle({
+            paddingTop: '0px',
+            paddingBottom: '0px',
+        });
+        expect(screen.getByTestId('phone-shell-active-app-container').style.getPropertyValue('--active-app-top-inset'))
+            .toBe('max(var(--safe-top, env(safe-area-inset-top, 0px)), 2.75rem)');
+    });
+
+    it('does not move app content when the simulated status bar is hidden', async () => {
+        vi.useRealTimers();
+        mockedUseOS.mockReturnValue({
+            activeApp: AppID.EchoRecord,
+            characters: [],
+            closeApp: vi.fn(),
+            handleBack: vi.fn(() => true),
+            isDataLoaded: true,
+            isLocked: false,
+            theme: {
+                wallpaper: 'linear-gradient(#000000, #111111)',
+                hideStatusBar: true,
+            },
+            toasts: [],
+            unreadMessages: {},
+            unlock: vi.fn(),
+        } as any);
+
+        render(
+            <VirtualTimeProvider>
+                <PhoneShell />
+            </VirtualTimeProvider>,
+        );
+
+        expect(await screen.findByText('EchoRecord App', {}, { timeout: 3000 })).toBeTruthy();
+        expect(screen.queryByTestId('status-bar')).toBeNull();
+        expect(screen.getByTestId('phone-shell-app-viewport')).toHaveStyle({
+            paddingTop: '0px',
+            paddingBottom: '0px',
+        });
+        expect(screen.getByTestId('phone-shell-active-app-container').style.getPropertyValue('--active-app-top-inset'))
+            .toBe('max(var(--safe-top, env(safe-area-inset-top, 0px)), 2.75rem)');
+    });
+
+    it('does not draw the simulated status bar over the native iOS browser status bar', async () => {
+        vi.useRealTimers();
+        mockedIsIOSStandaloneWebApp.mockReturnValue(true);
+        mockedIsIOSStandaloneBrowserWebApp.mockReturnValue(true);
+
+        render(
+            <VirtualTimeProvider>
+                <PhoneShell />
+            </VirtualTimeProvider>,
+        );
+
+        expect(await screen.findByText('Launcher App', {}, { timeout: 3000 })).toBeTruthy();
+        expect(screen.queryByTestId('status-bar')).toBeNull();
+    });
+
+    it('keeps the simulated status bar for native shells that hide the real iOS status bar', async () => {
+        vi.useRealTimers();
+        mockedIsIOSStandaloneWebApp.mockReturnValue(true);
+        mockedIsIOSStandaloneBrowserWebApp.mockReturnValue(false);
+
+        render(
+            <VirtualTimeProvider>
+                <PhoneShell />
+            </VirtualTimeProvider>,
+        );
+
+        expect(await screen.findByText('Launcher App', {}, { timeout: 3000 })).toBeTruthy();
+        expect(screen.getByTestId('status-bar')).toBeTruthy();
+    });
+
     it('does not call the Android-only overlay API before hiding the iOS status bar', async () => {
         vi.useRealTimers();
         vi.mocked(Capacitor.isNativePlatform).mockReturnValue(true);
@@ -372,5 +481,26 @@ describe('PhoneShell active app rendering', () => {
 
         expect(CapStatusBar.setOverlaysWebView).not.toHaveBeenCalled();
         expect(CapStatusBar.hide).toHaveBeenCalledWith({ animation: 'NONE' });
+    });
+
+    it('sets Android native status bar to a transparent overlay before hiding it', async () => {
+        vi.useRealTimers();
+        vi.mocked(Capacitor.isNativePlatform).mockReturnValue(true);
+        vi.mocked(Capacitor.getPlatform).mockReturnValue('android');
+
+        render(
+            <VirtualTimeProvider>
+                <PhoneShell />
+            </VirtualTimeProvider>,
+        );
+
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(CapStatusBar.setOverlaysWebView).toHaveBeenCalledWith({ overlay: true });
+        expect(CapStatusBar.setBackgroundColor).toHaveBeenCalledWith({ color: '#00000000' });
+        expect(CapStatusBar.hide).toHaveBeenCalled();
     });
 });

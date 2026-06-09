@@ -3,29 +3,64 @@ import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { useVirtualTime } from '../context/VirtualTimeContext';
 import { DB } from '../utils/db';
-import { CharacterProfile,Message,DateState,UserProfile,DateTokenUsage,DateRequestDebugSnapshot } from '../types';
+import { CharacterProfile,Message,DateState,UserProfile,DateTokenUsage,DateRequestDebugSnapshot,type ManualPhotoGenerationOptions,type PhotoDirectorResult,type PhotoHintTrigger,type PhotoMeta,type PhotoStylePreset,type SavedVibeEncoding,type SavedVibeReference,type VibeReferenceInput } from '../types';
 import { ContextBuilder } from '../utils/context';
 import { safeResponseJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
 import DateSession,{ DateExitSyncMode } from '../components/date/DateSession';
 import DateSettings from '../components/date/DateSettings';
-import { buildDatePreamble,buildIdentityIntro,buildTheaterScene,buildDateTail,buildDateTimeBlock } from '../utils/datePrompts';
+import { buildDatePreamble,buildIdentityIntro,buildDateTimeBlock,buildDateLongTermMemoryContext,buildDateSystemRulesModule } from '../utils/datePrompts';
 import { pronoun } from '../utils/genderWords';
-import { extractThinking, extractInnerWhispers, type InnerWhisper } from '../utils/thinkingExtractor';
+import { extractThinkingFromChatCompletionResponse, extractInnerWhispers, type InnerWhisper } from '../utils/thinkingExtractor';
 import { DATE_RECAP_SYSTEM_PROMPT,DEFAULT_DATE_SUMMARY_PROMPT,buildSummaryPrompt,formatDateMessagesForBridge,formatMessagesForSummary } from '../utils/dateSummaryPrompts';
-import { getEmbeddingConfig,getSecondaryApiConfig } from '../utils/runtimeConfig';
+import { getEmbeddingConfig,getImageGenerationDraftConfig,getSecondaryApiConfig,selectSecondaryApiConfig } from '../utils/runtimeConfig';
 import { renderMarkdown } from '../utils/markdownLite';
 import { stripTranslationTags } from '../utils/chatParser';
 import { trackedApiRequest } from '../utils/apiRequestLedger';
 import { buildTemporalContext } from '../utils/temporalContext';
 import { EventExtractor } from '../utils/eventExtractor';
 import { buildDateRequestContextMessages, type DateRequestContextMessage } from '../utils/dateContext';
-import { buildDateHistoryContextBlock, injectDateHistoryAfterPreference } from '../utils/datePromptHistory';
+import { buildDateHistoryContextBlock } from '../utils/datePromptHistory';
+import {
+    buildLatestDateStatusSnapshotBlock,
+    buildDateStatusInlineInstruction,
+    createDateStatusCardDataFromRaw,
+    extractDateStatusCardFromMainOutput,
+    resolveDateStatusTemplate,
+} from '../utils/dateStatusTemplates';
+import {
+    NO_PHOTO_STYLE_PRESET,
+    NO_PHOTO_STYLE_PRESET_ID,
+    buildManualPhotoPrompt,
+    buildPhotoContextSummary,
+    buildPhotoHintFromDecision,
+    buildPhotoPromptFromDirector,
+    createPhotoMeta,
+    extractPhotoDecision,
+    extractPhotoHint,
+    generatePhotoImage,
+    getCompatiblePhotoStylePresets,
+    getOpenAIStyleFamilyForConfig,
+    inferExplicitPhotoDecisionFromConversation,
+    isImageGenerationConfigured,
+    resolveImageStylePhotoPreset,
+    resolvePhotoStylePreset,
+    runManualPhotoDirector,
+    runPhotoDirector,
+    shouldIncludeUserAppearanceForPhoto,
+} from '../utils/photoGeneration';
+import { prepareGeneratedImageStorage } from '../utils/generatedImageStorage';
+import { DATE_PHOTO_FAILED_SOURCE, DATE_PHOTO_SOURCE, filterDatePhotoFailureMessages, filterDatePhotoMessages, formatDatePhotoContextContent, formatDatePhotoFailureContextContent, isDatePhotoFailureMessage, isDatePhotoMessage } from '../utils/datePhotos';
+import { buildSavedVibeFromImage, buildVibeInputFromSaved, getSavedVibeEncoding, parseNaiv4VibeFile } from '../utils/vibeReferences';
+import type { StatusCardData } from '../types/statusCard';
+import type { DirectExtractionResult } from '../utils/vectorMemoryExtractor';
 
 type SummaryType = 'auto' | 'manual';
 type DateOpeningMode = 'sense' | 'coming_over' | 'chance' | 'rendezvous' | 'custom';
+type DatePromptMessage = { role: 'system' | 'user'; content: string };
 const DATE_SUMMARY_CONTEXT_KEEP_COUNT = 5;
 const DATE_CHAT_MAX_TOKENS = 65536;
+const EMPTY_PHOTO_STYLE_PRESETS: PhotoStylePreset[] = [];
 const DATE_OPENING_MODE_OPTIONS: Array<{ key: DateOpeningMode; label: string }> = [
     { key: 'sense', label: '靠近' },
     { key: 'coming_over', label: '造访' },
@@ -45,7 +80,36 @@ type SummaryDraft = {
     fromPendingAuto?: boolean;
     /** Set only during exit flow — after saving, also create bridge + finishExit */
     bridgeOnSave?: boolean;
+    savedSummaryId?: number;
 };
+
+export type DateBridgeCreationResult =
+    | { ok: true; bridgeId: number; reused?: boolean }
+    | { ok: false; reason: string };
+
+export type DateRecapBridgeFirstSyncResult =
+    | { ok: true; summaryMsgId: number; bridgeId: number }
+    | { ok: false; summaryMsgId: number; reason: string };
+
+export async function runDateRecapBridgeFirstSync({
+    saveSummaryRecord,
+    syncBridge,
+    finishExitSession,
+    startL0Extraction,
+}: {
+    saveSummaryRecord: () => Promise<number>;
+    syncBridge: (summaryMsgId: number) => Promise<DateBridgeCreationResult>;
+    finishExitSession: () => void;
+    startL0Extraction: () => void;
+}): Promise<DateRecapBridgeFirstSyncResult> {
+    const summaryMsgId = await saveSummaryRecord();
+    if (!summaryMsgId) return { ok: false, summaryMsgId, reason: 'recap 保存失败' };
+    const bridge = await syncBridge(summaryMsgId);
+    if (!bridge.ok) return { ok: false, summaryMsgId, reason: bridge.reason };
+    finishExitSession();
+    startL0Extraction();
+    return { ok: true, summaryMsgId, bridgeId: bridge.bridgeId };
+}
 
 const isDateSummaryMessage = (m: Message) => m.metadata?.source === 'date' && m.metadata?.isSummary === true;
 const isDateBridgeMessage = (m: Message) => {
@@ -167,7 +231,13 @@ ${timeContinuityInstruction}
 const getCurrentSessionMessages = (msgs: Message[]) => {
     const dateMsgs = msgs.filter(isDateRawDialogueMessage).sort((a, b) => a.timestamp - b.timestamp);
     const openingIndex = dateMsgs.map(m => m.metadata?.isOpening).lastIndexOf(true);
-    return openingIndex >= 0 ? dateMsgs.slice(openingIndex) : dateMsgs;
+    const rawSessionMessages = openingIndex >= 0 ? dateMsgs.slice(openingIndex) : dateMsgs;
+    const sessionStartMsgId = rawSessionMessages[0]?.id;
+    if (sessionStartMsgId === undefined) return rawSessionMessages;
+    const photoMessages = filterDatePhotoMessages(msgs, sessionStartMsgId);
+    const photoFailureMessages = filterDatePhotoFailureMessages(msgs, sessionStartMsgId);
+    return [...rawSessionMessages, ...photoMessages, ...photoFailureMessages]
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0) || (a.id || 0) - (b.id || 0));
 };
 
 const buildDateSummaryMemoryPrompt = (msgs: Message[]) => {
@@ -237,30 +307,130 @@ const normalizeDateTokenUsage = (payload: unknown, source: DateTokenUsage['sourc
 export const buildDateSessionSystemPrompt = ({
     char,
     userProfile,
-    allMsgs,
-    historyContextBlock,
+    statusPromptBlock,
 }: {
     char: CharacterProfile;
     userProfile: UserProfile;
     allMsgs: Message[];
     historyContextBlock?: string;
+    statusSnapshotBlock?: string;
+    photoPromptBlock?: string;
+    statusPromptBlock?: string;
 }): string => {
-    let systemPrompt = buildDatePreamble(char.name, userProfile.name);
-    systemPrompt += ContextBuilder.buildCoreContext(char, userProfile);
-    systemPrompt = injectDateHistoryAfterPreference(systemPrompt, historyContextBlock || '');
-    systemPrompt += buildIdentityIntro(char.name, userProfile.name);
-    if (char.dateTimeAwarenessEnabled !== false) {
-        systemPrompt += buildDateTimeBlock();
-    }
-    systemPrompt += buildDateSummaryMemoryPrompt(allMsgs);
     const REQUIRED_EMOTIONS = ['normal', 'happy', 'angry', 'sad', 'shy'];
     const dateEmotions = [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])];
     const userPov = char.datePerspective || 'second';
     const charPov = char.dateCharPerspective || 'third';
-    systemPrompt += buildTheaterScene(char.name, userProfile.name, dateEmotions, userPov, charPov, undefined, char.dateOutputWordCount, char.dateWritingStyle, char.gender ?? 'male');
-    systemPrompt += buildDateTail(char.name, userProfile.name, userPov, charPov, char.gender ?? 'male', char.dateTimeAwarenessEnabled !== false);
-    return systemPrompt;
+    return buildDateSystemRulesModule({
+        char,
+        userProfile,
+        dateEmotions,
+        userPov,
+        charPov,
+        statusPromptBlock,
+    });
 };
+
+const buildDateRuntimeTimeText = (char: CharacterProfile): string => {
+    if (char.dateTimeAwarenessEnabled === false) return 'disabled';
+    return buildDateTimeBlock()
+        .replace(/^\s*### 【当前时间】\s*/u, '')
+        .trim();
+};
+
+export const buildDateSessionContextPackagePrompt = ({
+    char,
+    userProfile,
+    allMsgs,
+    historyContextBlock,
+    statusSnapshotBlock,
+    photoPromptBlock,
+    runtimeScene = '正式见面回复',
+    currentLocation = '面对面现场，未指定具体地点',
+    conversationTempo = '',
+    specialNote = '',
+}: {
+    char: CharacterProfile;
+    userProfile: UserProfile;
+    allMsgs: Message[];
+    historyContextBlock?: string;
+    statusSnapshotBlock?: string;
+    photoPromptBlock?: string;
+    runtimeScene?: string;
+    currentLocation?: string;
+    conversationTempo?: string;
+    specialNote?: string;
+}): string => {
+    const notes = [
+        photoPromptBlock?.trim(),
+        specialNote.trim(),
+    ].filter(Boolean).join('\n\n') || '无';
+    const snapshot = statusSnapshotBlock?.trim() || '无上一轮状态栏快照。';
+    const recentSummary = buildDateSummaryMemoryPrompt(allMsgs).trim() || '无已总结上下文。';
+    const lastTurnsRaw = historyContextBlock?.trim() || '无最近未压缩原文。';
+    const longTermMemory = buildDateLongTermMemoryContext(char, userProfile).trim();
+
+    return `==============================
+MODULE 2 / CONTEXT_PACKAGE
+本轮资料包，不是新输入
+==============================
+
+<runtime_context>
+current_time: ${buildDateRuntimeTimeText(char)}
+current_mode: offline_date
+current_scene: ${runtimeScene}
+current_location: ${currentLocation}
+conversation_tempo: ${conversationTempo || '未指定'}
+special_note: ${notes}
+</runtime_context>
+
+<state_snapshot>
+以下是上一轮状态栏快照，只用于承接，不是新的用户输入。
+不要复述，不要机械继承；只用它判断剧情边界、未完成钩子、位置和情绪连续性。
+
+${snapshot}
+</state_snapshot>
+
+<long_term_memory>
+以下是长期关系记忆，只在自然触发时调用。
+不要主动总结这些记忆，不要把它们写成说明。
+
+${longTermMemory}
+</long_term_memory>
+
+<recent_summary>
+以下是本次见面较早内容或最近若干轮的压缩总结。
+它们是已经发生过的共同经历，不是新的用户消息。
+
+${recentSummary}
+</recent_summary>
+
+<last_turns_raw>
+以下是最近未压缩原文，用于接话、语气连续和动作承接。
+
+${lastTurnsRaw}
+</last_turns_raw>`;
+};
+
+export const buildDateCurrentUserInputPrompt = (currentUserInput: string): string => `==============================
+MODULE 3 / CURRENT_USER_INPUT
+本轮真实输入，模型只回应这里
+==============================
+
+<current_user_input>
+${currentUserInput}
+</current_user_input>`;
+
+export const buildDateSessionPromptMessages = ({
+    currentUserInput,
+    ...contextOpts
+}: Parameters<typeof buildDateSessionContextPackagePrompt>[0] & {
+    currentUserInput: string;
+}): DatePromptMessage[] => [
+    { role: 'system', content: buildDateSessionSystemPrompt(contextOpts) },
+    { role: 'user', content: buildDateSessionContextPackagePrompt(contextOpts) },
+    { role: 'user', content: buildDateCurrentUserInputPrompt(currentUserInput) },
+];
 
 export const appendDateTemporalContext = (content: string, temporalContext?: string): string => {
     const normalized = temporalContext?.trim();
@@ -314,6 +484,31 @@ const fetchDateChatCompletion = (
         body: JSON.stringify(body),
     }));
 };
+
+const buildDateStatusPromptForMainApi = (char: CharacterProfile): string => {
+    if (char.dateStatusBarEnabled !== true) return '';
+    return buildDateStatusInlineInstruction(resolveDateStatusTemplate(char));
+};
+
+const buildDatePhotoPromptForMainApi = (char: CharacterProfile): string => {
+    if (char.autoPhotoEnabled !== true) return '';
+    return `\n\n### 【请求发送见面照片】\n当这一轮线下见面很适合浮现一张照片，或用户明确要求你生图、画一张、拍一张、发照片、给他看看画面时，输出隐藏标签：\`[[PHOTO_DECISION:true]]\`。\n规则：\n- 标签外继续正常写见面正文，用户不会看见这个标签。\n- 不要展示判断过程。\n- 不要在正文里说“发了”“已经发过了”“看到了吗”等完成态；可以说“等一下”“给你看看”这类进行态。\n- 不发图时不要输出 false 标签。`;
+};
+
+const splitMainApiDateStatus = (char: CharacterProfile, content: string) => {
+    if (char.dateStatusBarEnabled !== true) return { content };
+    return extractDateStatusCardFromMainOutput(content, resolveDateStatusTemplate(char));
+};
+
+const createDateStatusMetadata = (statusResult: { cardData?: StatusCardData; templateId?: string }) => (
+    statusResult.cardData
+        ? {
+            statusCardData: statusResult.cardData,
+            dateStatusTemplateId: statusResult.templateId,
+            hasDateStatusCard: true,
+        }
+        : {}
+);
 
 export const buildHistorySessions = (msgs: Message[]): DateHistorySession[] => {
     const dateMsgs = msgs
@@ -379,7 +574,7 @@ export const buildHistorySessions = (msgs: Message[]): DateHistorySession[] => {
 };
 
 const DateApp: React.FC = () => {
-    const { closeApp, characters, activeCharacterId, setActiveCharacterId, apiConfig, addToast, updateCharacter, userProfile } = useOS();
+    const { closeApp, characters, activeCharacterId, setActiveCharacterId, apiConfig, addToast, updateCharacter, userProfile, imageGenerationConfig, photoStylePresets } = useOS();
     const virtualTime = useVirtualTime();
 
     // Modes: 'select' -> 'peek' -> 'session' | 'settings' | 'history'
@@ -389,6 +584,8 @@ const DateApp: React.FC = () => {
 
     const [peekStatus, setPeekStatus] = useState<string>('');
     const [peekThinking, setPeekThinking] = useState<string>('');
+    const [peekStatusCardData, setPeekStatusCardData] = useState<StatusCardData | null>(null);
+    const [peekStatusTemplateId, setPeekStatusTemplateId] = useState<string | undefined>(undefined);
     const [peekLoading, setPeekLoading] = useState(false);
     const [lastDateTokenUsage, setLastDateTokenUsage] = useState<DateTokenUsage | null>(null);
     const [dateRequestDebugSnapshots, setDateRequestDebugSnapshots] = useState<DateRequestDebugSnapshot[]>([]);
@@ -406,13 +603,20 @@ const DateApp: React.FC = () => {
 
     // --- NEW: Editing State lifted to here for DB sync ---
     const [dateMessages, setDateMessages] = useState<Message[]>([]);
+    const [datePhotoMessages, setDatePhotoMessages] = useState<Message[]>([]);
+    const [hasUnreadDatePhoto, setHasUnreadDatePhoto] = useState(false);
+    const [manualPhotoGenerating, setManualPhotoGenerating] = useState(false);
+    const [savedVibeReferences, setSavedVibeReferences] = useState<SavedVibeReference[]>([]);
     const [hasSavedOpening, setHasSavedOpening] = useState(false);
     const [forceFreshSession, setForceFreshSession] = useState(false);
+    const manualPhotoInFlightRef = useRef(false);
+    const autoPhotoInFlightRef = useRef<Set<string>>(new Set());
 
     // Edit Modal State
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [editTargetMsg, setEditTargetMsg] = useState<Message | null>(null);
     const [editContent, setEditContent] = useState('');
+    const [editMode, setEditMode] = useState<'content' | 'status'>('content');
 
     const recordDateRequestDebugSnapshot = (snapshot: Omit<DateRequestDebugSnapshot, 'id' | 'updatedAt'>) => {
         const updatedAt = Date.now();
@@ -430,12 +634,26 @@ const DateApp: React.FC = () => {
     const [activeSummaryDraft, setActiveSummaryDraft] = useState<SummaryDraft | null>(null);
     const [pendingAutoSummary, setPendingAutoSummary] = useState<SummaryDraft | null>(null);
     const [isDateMemoryExtracting, setIsDateMemoryExtracting] = useState(false);
+    const [isDateBridgeSyncing, setIsDateBridgeSyncing] = useState(false);
+    const [summaryBridgeError, setSummaryBridgeError] = useState('');
     const [showSummarySettings, setShowSummarySettings] = useState(false);
     const [summaryPromptDraft, setSummaryPromptDraft] = useState('');
     const summaryGeneratingRef = useRef(false);
 
     const char = characters.find(c => c.id === activeCharacterId);
     const pendingChar = pendingSessionCharId ? characters.find(c => c.id === pendingSessionCharId) : null;
+    const effectiveImageGenerationConfig = getImageGenerationDraftConfig() || imageGenerationConfig;
+    const effectivePhotoStylePresets = photoStylePresets || EMPTY_PHOTO_STYLE_PRESETS;
+    const activeOpenAIStyleFamily = getOpenAIStyleFamilyForConfig(effectiveImageGenerationConfig);
+    const activePhotoStylePresets = [
+        NO_PHOTO_STYLE_PRESET,
+        ...getCompatiblePhotoStylePresets(
+            effectivePhotoStylePresets,
+            effectiveImageGenerationConfig.activeProvider,
+            activeOpenAIStyleFamily,
+        ).filter(style => style.id !== NO_PHOTO_STYLE_PRESET_ID),
+    ];
+    const isDatePhotoConfigReady = isImageGenerationConfigured(effectiveImageGenerationConfig);
     const secondaryApiConfig = getSecondaryApiConfig();
     const canManualSummary = hasCompleteApiConfig(secondaryApiConfig) || hasCompleteApiConfig(apiConfig);
     const canAutoSummary = hasCompleteApiConfig(secondaryApiConfig);
@@ -469,6 +687,19 @@ const DateApp: React.FC = () => {
         localStorage.setItem(`date_trans_tgt_${char.id}`, dateTranslateTargetLang);
     }, [char?.id, dateTranslateTargetLang]);
 
+    const refreshSavedVibeReferences = async () => {
+        try {
+            const vibes = await DB.getSavedVibeReferences();
+            setSavedVibeReferences(vibes);
+        } catch (error) {
+            console.warn('[DatePhoto] failed to load saved vibe references:', error);
+        }
+    };
+
+    useEffect(() => {
+        void refreshSavedVibeReferences();
+    }, []);
+
     // --- Data Loading ---
     const loadDateMessages = async () => {
         if (char) {
@@ -476,6 +707,9 @@ const DateApp: React.FC = () => {
             // 只筛选 source='date' 的消息用于小说模式显示
             const filtered = msgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp);
             setDateMessages(filtered);
+            const currentSession = getCurrentSessionMessages(msgs);
+            const sessionStartMsgId = currentSession.find(message => message.metadata?.isOpening)?.id || currentSession[0]?.metadata?.sessionStartMsgId || currentSession[0]?.id;
+            setDatePhotoMessages(sessionStartMsgId === undefined ? [] : filterDatePhotoMessages(msgs, sessionStartMsgId));
 
             // 检查数据库中是否已经包含当前的 peekStatus（通过内容比对），避免重复保存
             if (peekStatus && filtered.some(m => m.content === peekStatus && m.role === 'assistant')) {
@@ -507,22 +741,225 @@ const DateApp: React.FC = () => {
         setHistorySessions(buildHistorySessions(msgs));
     };
 
+    const buildDefaultVibeReferencesForChar = (targetChar?: { defaultVibeReferenceIds?: string[] }): VibeReferenceInput[] => {
+        const ids = (targetChar?.defaultVibeReferenceIds || []).slice(0, 3);
+        return ids
+            .map(id => savedVibeReferences.find(vibe => vibe.id === id))
+            .filter((vibe): vibe is SavedVibeReference => Boolean(vibe))
+            .map(buildVibeInputFromSaved);
+    };
+
+    const prepareVibeReferencesForGeneration = (
+        references: VibeReferenceInput[] | undefined,
+        meta: PhotoMeta,
+        config = effectiveImageGenerationConfig,
+    ): VibeReferenceInput[] => {
+        if (config.activeProvider !== 'novelai') return [];
+        const model = meta.naiModel || meta.model;
+        return (references || []).slice(0, 3).map(reference => {
+            const saved = reference.savedVibeId
+                ? savedVibeReferences.find(vibe => vibe.id === reference.savedVibeId)
+                : undefined;
+            const informationExtracted = reference.informationExtracted
+                || saved?.defaultInformationExtracted
+                || 0.6;
+            const cached = saved ? getSavedVibeEncoding(saved, model, informationExtracted) : undefined;
+            return {
+                ...reference,
+                name: reference.name || saved?.name || 'Vibe 参考图',
+                previewUrl: reference.previewUrl || saved?.previewUrl,
+                imageDataUrl: reference.imageDataUrl || saved?.imageDataUrl,
+                encodedReference: reference.encodedReference || cached?.encodedReference,
+                strength: reference.strength || saved?.defaultStrength || 0.6,
+                informationExtracted,
+            };
+        });
+    };
+
+    const handleVibeReferenceEncoded = async (
+        reference: VibeReferenceInput,
+        encoding: SavedVibeEncoding,
+    ) => {
+        if (!reference.savedVibeId) return;
+        await DB.upsertSavedVibeEncoding(reference.savedVibeId, encoding);
+        await refreshSavedVibeReferences();
+    };
+
+    const handleSaveVibeReference = async (reference: VibeReferenceInput): Promise<SavedVibeReference> => {
+        const saved = buildSavedVibeFromImage(reference);
+        await DB.saveSavedVibeReference(saved);
+        await refreshSavedVibeReferences();
+        return saved;
+    };
+
+    const handleImportVibeFile = async (file: File): Promise<SavedVibeReference> => {
+        const saved = await parseNaiv4VibeFile(file);
+        await DB.saveSavedVibeReference(saved);
+        await refreshSavedVibeReferences();
+        return saved;
+    };
+
+    const handleRenameSavedVibe = async (id: string, name: string) => {
+        await DB.renameSavedVibeReference(id, name);
+        await refreshSavedVibeReferences();
+    };
+
+    const handleDeleteSavedVibe = async (id: string) => {
+        await DB.deleteSavedVibeReference(id);
+        if (char?.defaultVibeReferenceIds?.includes(id)) {
+            updateCharacter(char.id, {
+                defaultVibeReferenceIds: char.defaultVibeReferenceIds.filter(vibeId => vibeId !== id),
+            });
+        }
+        await refreshSavedVibeReferences();
+    };
+
+    const handleClearSavedVibeCache = async (id: string) => {
+        await DB.clearSavedVibeReferenceCache(id);
+        await refreshSavedVibeReferences();
+    };
+
+    const buildDatePhotoDirectorMessages = async (targetCharId: string): Promise<Message[]> => {
+        const contentCharId = await DB.resolveCharacterContentId(targetCharId);
+        const allMsgs = await DB.getMessagesByCharId(contentCharId);
+        return getCurrentSessionMessages(allMsgs).map(message => (
+            isDatePhotoMessage(message)
+                ? { ...message, type: 'text', content: formatDatePhotoContextContent(message) }
+                : isDatePhotoFailureMessage(message)
+                    ? { ...message, type: 'text', content: formatDatePhotoFailureContextContent(message) }
+                : message
+        ));
+    };
+
+    const saveGeneratedDatePhoto = async (
+        targetCharId: string,
+        dataUrl: string,
+        photoMeta: PhotoMeta,
+        caption?: string,
+    ): Promise<number> => {
+        const timestamp = Date.now();
+        const contentCharId = await DB.resolveCharacterContentId(targetCharId);
+        const allMsgs = await DB.getMessagesByCharId(contentCharId);
+        const currentSession = getCurrentSessionMessages(allMsgs);
+        const sessionStartMsgId = currentSession.find(message => message.metadata?.isOpening)?.id || currentSession[0]?.id;
+        const imageId = `date-photo-${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
+        const imageStorage = await prepareGeneratedImageStorage(imageId, dataUrl);
+        const visualSummary = buildPhotoContextSummary(photoMeta, caption);
+        const metadata = {
+            source: DATE_PHOTO_SOURCE,
+            hiddenFromUser: true,
+            isDatePhoto: true,
+            imageId,
+            status: 'ready',
+            caption,
+            thumbnailUrl: imageStorage.thumbnailUrl,
+            originalAssetId: imageStorage.originalAssetId,
+            visualSummary,
+            photoMeta,
+            sessionStartMsgId,
+        };
+        const imageMessageId = await DB.saveMessage({
+            charId: contentCharId,
+            role: 'assistant',
+            type: 'image',
+            content: imageStorage.displayUrl,
+            timestamp,
+            metadata,
+        });
+
+        const contextLines = currentSession.slice(-10).map(message => {
+            if (isDatePhotoMessage(message)) return formatDatePhotoContextContent(message);
+            if (isDatePhotoFailureMessage(message)) return formatDatePhotoFailureContextContent(message);
+            const speaker = message.role === 'user' ? userProfile.name : char?.name || '角色';
+            return `${speaker}: ${(message.content || '').slice(0, 120)}`;
+        });
+        await DB.saveGalleryImage({
+            id: imageId,
+            charId: contentCharId,
+            url: imageStorage.displayUrl,
+            timestamp,
+            savedDate: new Date(timestamp).toISOString().split('T')[0],
+            chatContext: contextLines,
+            thumbnailUrl: imageStorage.thumbnailUrl,
+            originalAssetId: imageStorage.originalAssetId,
+            visualSummary,
+            photoMeta,
+        });
+
+        await loadDateMessages();
+        setHasUnreadDatePhoto(true);
+        return imageMessageId;
+    };
+
+    const saveDatePhotoFailure = async (
+        targetCharId: string,
+        error: unknown,
+        sourceMessageId?: number,
+    ) => {
+        const contentCharId = await DB.resolveCharacterContentId(targetCharId);
+        const allMsgs = await DB.getMessagesByCharId(contentCharId);
+        const currentSession = getCurrentSessionMessages(allMsgs);
+        const sessionStartMsgId = currentSession.find(message => message.metadata?.isOpening)?.id
+            || currentSession[0]?.metadata?.sessionStartMsgId
+            || currentSession[0]?.id;
+        await DB.saveMessage({
+            charId: contentCharId,
+            role: 'system',
+            type: 'system',
+            content: '[见面照片发送失败]\n刚才尝试生成一张见面照片，但图片没有成功送达。下一轮不要声称已经发过照片；如果用户还想要，可以重新尝试。',
+            timestamp: Date.now(),
+            metadata: {
+                hiddenFromUser: true,
+                source: DATE_PHOTO_FAILED_SOURCE,
+                sessionStartMsgId,
+                sourceMessageId,
+                errorMessage: error instanceof Error ? error.message : String(error || 'unknown'),
+            },
+        });
+    };
+
     const closeEditModal = () => {
         setIsEditModalOpen(false);
         setEditTargetMsg(null);
         setEditContent('');
+        setEditMode('content');
     };
 
     const openEditModal = (msg: Message) => {
         setEditTargetMsg(msg);
         setEditContent(msg.content);
+        setEditMode('content');
+        setIsEditModalOpen(true);
+    };
+
+    const getEditableDateStatusText = (msg: Message): string => {
+        const cardData = msg.metadata?.statusCardData as StatusCardData | undefined;
+        const raw = cardData?.meta?.dateStatusRaw;
+        if (typeof raw === 'string' && raw.trim()) return raw.trim();
+
+        const fields = cardData?.meta?.dateStatusFields;
+        if (fields && typeof fields === 'object') {
+            return Object.entries(fields)
+                .map(([key, value]) => Array.isArray(value)
+                    ? `${key}:\n${value.map(item => `  - ${item}`).join('\n')}`
+                    : `${key}: ${String(value)}`)
+                .join('\n');
+        }
+
+        return cardData?.body || '';
+    };
+
+    const openEditStatusModal = (msg: Message) => {
+        setEditTargetMsg(msg);
+        setEditContent(getEditableDateStatusText(msg));
+        setEditMode('status');
         setIsEditModalOpen(true);
     };
 
     const renderEditModal = () => (
         <Modal
             isOpen={isEditModalOpen}
-            title="编辑内容"
+            title={editMode === 'status' ? '编辑状态栏' : '编辑内容'}
             onClose={closeEditModal}
             footer={
                 <>
@@ -531,10 +968,15 @@ const DateApp: React.FC = () => {
                 </>
             }
         >
+            {editMode === 'status' && (
+                <p className="mb-3 text-xs leading-relaxed text-slate-400">
+                    修改这里会重新渲染本条见面状态栏，不会改动上方剧情正文。
+                </p>
+            )}
             <textarea
                 value={editContent}
                 onChange={e => setEditContent(e.target.value)}
-                className="w-full h-32 bg-slate-100 rounded-2xl p-4 resize-none focus:ring-1 focus:ring-primary/20 transition-all text-sm leading-relaxed"
+                className={`${editMode === 'status' ? 'h-56' : 'h-32'} w-full bg-slate-100 rounded-2xl p-4 resize-none focus:ring-1 focus:ring-primary/20 transition-all text-sm leading-relaxed`}
             />
         </Modal>
     );
@@ -627,7 +1069,7 @@ const DateApp: React.FC = () => {
 
             if (!response.ok) throw new Error(`Summary API Error: ${response.status}`);
             const data = await safeResponseJson(response);
-            const extracted = extractThinking(data.choices?.[0]?.message?.content || '');
+            const extracted = extractThinkingFromChatCompletionResponse(data);
             const content = extracted.content.trim();
             if (!content) throw new Error('Summary content empty');
 
@@ -749,7 +1191,7 @@ ${exitPromptContent}
             );
             if (!response.ok) throw new Error(`Summary API Error: ${response.status}`);
             const data = await safeResponseJson(response);
-            const extracted = extractThinking(data.choices?.[0]?.message?.content || '');
+            const extracted = extractThinkingFromChatCompletionResponse(data);
             const content = extracted.content.trim();
             if (!content) throw new Error('Exit summary content empty');
 
@@ -785,20 +1227,18 @@ ${exitPromptContent}
         return savedSummaryId;
     };
 
-    const extractDateL0Memories = async (coveredMsgIds?: number[]): Promise<number> => {
-        if (!char || !char.vectorMemoryEnabled) return 0;
+    const extractDateL0Memories = async (coveredMsgIds?: number[]): Promise<DirectExtractionResult> => {
+        if (!char || !char.vectorMemoryEnabled) return { status: 'empty', count: 0 };
 
         const secondaryConfig = getSecondaryApiConfig();
         const selectedApi = hasCompleteApiConfig(secondaryConfig) ? secondaryConfig : apiConfig;
         if (!hasCompleteApiConfig(selectedApi)) {
-            addToast('L0 记忆提取已跳过：请先配置主 API 或副 API', 'info');
-            return 0;
+            return { status: 'failed', count: 0, error: '请先配置主 API 或副 API' };
         }
 
         const embeddingApiKey = getEmbeddingConfig().apiKey;
         if (!embeddingApiKey) {
-            addToast('L0 记忆提取已跳过：未配置 Embedding API Key', 'info');
-            return 0;
+            return { status: 'failed', count: 0, error: '未配置 Embedding API Key' };
         }
 
         setIsDateMemoryExtracting(true);
@@ -809,7 +1249,7 @@ ${exitPromptContent}
             const sourceMessages = coveredSet.size > 0
                 ? sessionMessages.filter(message => coveredSet.has(message.id))
                 : sessionMessages;
-            if (sourceMessages.length === 0) return 0;
+            if (sourceMessages.length === 0) return { status: 'empty', count: 0 };
 
             const { VectorMemoryExtractor } = await import('../utils/vectorMemoryExtractor');
             return await VectorMemoryExtractor.extractFromMessages(
@@ -823,23 +1263,56 @@ ${exitPromptContent}
             );
         } catch (e: any) {
             console.error('[DateApp] Date L0 extraction failed', e);
-            addToast(`L0 记忆提取失败: ${e.message || e}`, 'error');
-            return 0;
+            return { status: 'failed', count: 0, error: e?.message || String(e) };
         } finally {
             setIsDateMemoryExtracting(false);
         }
     };
 
-    const finishSummarySave = async (draft: SummaryDraft, l0MemoryCount = 0) => {
-        const memorySuffix = l0MemoryCount > 0 ? `，已提取 ${l0MemoryCount} 条 L0 记忆` : '';
-        // If this save was triggered from exit flow, create bridge then exit
-        if (draft.bridgeOnSave && draft.exitState) {
-            const bridged = await createBridgeFromSummary();
-            addToast(bridged ? `交接 recap 已同步到主聊天${memorySuffix}` : `交接 recap 已保存${memorySuffix}`, 'success');
-            finishExitSession(draft.exitState);
-        } else {
-            addToast(`交接 recap 已保存${memorySuffix}`, 'success');
-            if (draft.exitState) finishExitSession(draft.exitState);
+    const runDateL0ExtractionInBackground = (coveredMsgIds?: number[], attempt = 0) => {
+        if (!char?.vectorMemoryEnabled) return;
+
+        void (async () => {
+            const result = await extractDateL0Memories(coveredMsgIds);
+            if (result.status === 'complete') {
+                addToast(result.count > 0 ? `已提取 ${result.count} 条 L0 记忆` : '未提取到新的 L0 记忆', result.count > 0 ? 'success' : 'info');
+                return;
+            }
+            if (result.status === 'empty') {
+                addToast('未提取到新的 L0 记忆', 'info');
+                return;
+            }
+
+            if (attempt < 1) {
+                addToast('L0 记忆提取未完成，正在重试', 'info');
+                window.setTimeout(() => runDateL0ExtractionInBackground(coveredMsgIds, attempt + 1), 1500);
+                return;
+            }
+
+            const reason = result.status === 'busy'
+                ? '已有记忆提取任务正在运行，请稍后重试'
+                : result.error || '请稍后重试';
+            addToast(`L0 记忆提取失败: ${reason}`, 'error');
+        })();
+    };
+
+    const createBridgeFromSummaryWithRetry = async (summaryMsgId: number): Promise<DateBridgeCreationResult> => {
+        setIsDateBridgeSyncing(true);
+        setSummaryBridgeError('');
+        try {
+            let result = await createBridgeFromSummary(summaryMsgId);
+            if (result.ok) return result;
+
+            addToast('主聊天注入失败，正在重试...', 'info');
+            await new Promise(resolve => window.setTimeout(resolve, 800));
+
+            result = await createBridgeFromSummary(summaryMsgId);
+            if (!result.ok) {
+                setSummaryBridgeError(result.reason);
+            }
+            return result;
+        } finally {
+            setIsDateBridgeSyncing(false);
         }
     };
 
@@ -852,23 +1325,48 @@ ${exitPromptContent}
         }
 
         const normalizedDraft = { ...draft, content };
+        setSummaryBridgeError('');
+
+        if (normalizedDraft.bridgeOnSave && normalizedDraft.exitState) {
+            const result = await runDateRecapBridgeFirstSync({
+                saveSummaryRecord: async () => normalizedDraft.savedSummaryId || await saveSummaryRecord(normalizedDraft),
+                syncBridge: createBridgeFromSummaryWithRetry,
+                finishExitSession: () => {
+                    addToast(char.vectorMemoryEnabled ? '交接 recap 已同步到主聊天，L0 记忆后台提取中' : '交接 recap 已同步到主聊天', 'success');
+                    finishExitSession(normalizedDraft.exitState!);
+                },
+                startL0Extraction: () => runDateL0ExtractionInBackground(normalizedDraft.coveredMsgIds),
+            });
+
+            if (!result.ok) {
+                const nextDraft = { ...normalizedDraft, savedSummaryId: result.summaryMsgId };
+                setActiveSummaryDraft(nextDraft);
+                setSummaryBridgeError(result.reason);
+                addToast(`主聊天注入失败: ${result.reason}`, 'error');
+                return;
+            }
+
+            setActiveSummaryDraft(null);
+            return;
+        }
+
         const savedSummaryId = await saveSummaryRecord(normalizedDraft);
         if (savedSummaryId) {
-            const l0MemoryCount = normalizedDraft.bridgeOnSave
-                ? await extractDateL0Memories(normalizedDraft.coveredMsgIds)
-                : 0;
             setActiveSummaryDraft(null);
-            await finishSummarySave(normalizedDraft, l0MemoryCount);
+            addToast('交接 recap 已保存', 'success');
+            if (normalizedDraft.exitState) finishExitSession(normalizedDraft.exitState);
         }
     };
 
     const closeSummaryModal = () => {
+        setSummaryBridgeError('');
         setActiveSummaryDraft(null);
     };
 
     const discardSummaryDraft = () => {
         if (!char || !activeSummaryDraft) return;
         const draft = activeSummaryDraft;
+        setSummaryBridgeError('');
         if (draft.summaryType === 'auto') {
             updateCharacter(char.id, { dateSummaryLastAutoMsgId: draft.lastCoveredMsgId });
             setPendingAutoSummary(null);
@@ -918,7 +1416,10 @@ ${exitPromptContent}
 
     const requestManualSummary = async () => {
         const draft = await generateSummaryDraft('manual');
-        if (draft) setActiveSummaryDraft(draft);
+        if (draft) {
+            setSummaryBridgeError('');
+            setActiveSummaryDraft(draft);
+        }
     };
 
     const maybeTriggerAutoSummary = async (msgs: Message[]) => {
@@ -945,6 +1446,7 @@ ${exitPromptContent}
         }
         setPendingAutoSummary(null);
         setActiveSummaryDraft(null);
+        setSummaryBridgeError('');
         setMode('select');
         setPeekStatus('');
         setHasSavedOpening(false);
@@ -993,41 +1495,53 @@ ${exitPromptContent}
         }
     };
 
-    /** Create a bridge message from an existing saved summary */
-    const createBridgeFromSummary = async (): Promise<boolean> => {
-        if (!char) return false;
-        const allMsgs = await DB.getMessagesByCharId(char.id);
-        const sessionMessages = getCurrentSessionMessages(allMsgs);
-        if (sessionMessages.length === 0) return false;
-        const sessionStartMsgId = sessionMessages[0].id;
-        const sessionMsgIds = new Set(sessionMessages.map(m => m.id));
-        const savedSummary = allMsgs
-            .filter(isDateSummaryMessage)
-            .sort((a, b) => b.timestamp - a.timestamp || b.id - a.id)
-            .find(m => m.metadata?.sessionStartMsgId === sessionStartMsgId
-                || (Array.isArray(m.metadata?.coveredMsgIds) && m.metadata.coveredMsgIds.some((id: unknown) => typeof id === 'number' && sessionMsgIds.has(id as number))));
-        if (!savedSummary) return false;
-        const existingBridge = allMsgs.find(m =>
-            m.metadata?.source === 'date' && m.metadata?.isDateContextBridge === true && m.metadata?.summarySourceMsgId === savedSummary.id
-        );
-        if (existingBridge) return true;
-        const coveredMsgIds = Array.isArray(savedSummary.metadata?.coveredMsgIds)
-            ? savedSummary.metadata.coveredMsgIds.filter((id: unknown): id is number => typeof id === 'number')
-            : sessionMessages.map(m => m.id);
-        await DB.saveMessage({
-            charId: char.id, role: 'system', type: 'text', content: savedSummary.content,
-            metadata: {
-                source: 'date', hiddenFromUser: true, isDateContextBridge: true, bridgeType: 'summary',
-                coveredMsgIds, sessionStartMsgId, summarySourceMsgId: savedSummary.id,
-                promptSnapshot: savedSummary.metadata?.promptSnapshot || '',
-            },
-        });
-        return true;
+    /** Create a bridge message from the just-saved summary. */
+    const createBridgeFromSummary = async (summaryMsgId: number): Promise<DateBridgeCreationResult> => {
+        if (!char) return { ok: false, reason: '未选择角色' };
+
+        try {
+            const allMsgs = await DB.getMessagesByCharId(char.id);
+            const savedSummary = allMsgs.find(m => m.id === summaryMsgId && isDateSummaryMessage(m));
+            if (!savedSummary) return { ok: false, reason: '没有找到刚保存的 recap' };
+
+            const sessionMessages = getCurrentSessionMessages(allMsgs);
+            const coveredMsgIds = Array.isArray(savedSummary.metadata?.coveredMsgIds)
+                ? savedSummary.metadata.coveredMsgIds.filter((id: unknown): id is number => typeof id === 'number')
+                : sessionMessages.map(m => m.id);
+            const sessionStartMsgId = typeof savedSummary.metadata?.sessionStartMsgId === 'number'
+                ? savedSummary.metadata.sessionStartMsgId
+                : sessionMessages[0]?.id;
+            if (sessionStartMsgId === undefined) return { ok: false, reason: '没有找到本次见面的起始消息' };
+
+            const existingBridge = allMsgs.find(m =>
+                m.metadata?.source === 'date'
+                && m.metadata?.isDateContextBridge === true
+                && m.metadata?.summarySourceMsgId === savedSummary.id
+            );
+            if (existingBridge) return { ok: true, bridgeId: existingBridge.id, reused: true };
+
+            const bridgeId = await DB.saveMessage({
+                charId: char.id, role: 'system', type: 'text', content: savedSummary.content,
+                metadata: {
+                    source: 'date', hiddenFromUser: true, isDateContextBridge: true, bridgeType: 'summary',
+                    coveredMsgIds, sessionStartMsgId, summarySourceMsgId: savedSummary.id,
+                    promptSnapshot: savedSummary.metadata?.promptSnapshot || '',
+                },
+            });
+            return { ok: true, bridgeId };
+        } catch (error: any) {
+            console.error('[DateApp] Date bridge creation failed', error);
+            return { ok: false, reason: error?.message || String(error) || '主聊天注入失败' };
+        }
     };
 
     const renderSummaryModal = () => {
         if (!activeSummaryDraft) return null;
-        const saveLabel = activeSummaryDraft.bridgeOnSave ? '保存并同步' : activeSummaryDraft.exitState ? '保存并退出' : '保存';
+        const saveLabel = isDateBridgeSyncing
+            ? '同步到主聊天...'
+            : summaryBridgeError && activeSummaryDraft.bridgeOnSave
+                ? '重试同步'
+                : activeSummaryDraft.bridgeOnSave ? '保存并同步' : activeSummaryDraft.exitState ? '保存并退出' : '保存';
         return (
             <Modal
                 isOpen={!!activeSummaryDraft}
@@ -1043,16 +1557,21 @@ ${exitPromptContent}
                         </button>
                         <button onClick={discardSummaryDraft} className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-500 font-bold">丢弃</button>
                         <button
-                            disabled={!activeSummaryDraft.content.trim() || isDateMemoryExtracting}
+                            disabled={!activeSummaryDraft.content.trim() || isDateBridgeSyncing}
                             onClick={() => saveSummaryDraft(activeSummaryDraft)}
                             className="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-2xl disabled:opacity-50"
                         >
-                            {isDateMemoryExtracting ? '提取记忆...' : saveLabel}
+                            {saveLabel}
                         </button>
                     </>
                 }
             >
                 <div className="flex flex-col gap-4">
+                    {summaryBridgeError && (
+                        <div className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs leading-relaxed text-rose-600">
+                            主聊天注入失败：{summaryBridgeError}。可以点击“重试同步”再次尝试，recap 不会丢失。
+                        </div>
+                    )}
                     <div>
                         <div className="mb-2 flex items-center justify-between text-[11px] font-bold text-slate-400">
                             <span>recap 正文</span>
@@ -1191,8 +1710,18 @@ ${exitPromptContent}
                         thinking: peekThinking || undefined,
                         openingMode: peekOpeningMode,
                         openingKeywords: peekOpeningKeywords || undefined,
+                        ...(peekStatusCardData
+                            ? {
+                                statusCardData: peekStatusCardData,
+                                dateStatusTemplateId: peekStatusTemplateId,
+                                hasDateStatusCard: true,
+                            }
+                            : {}),
                     }
                 });
+                if (peekStatusCardData) {
+                    updateCharacter(char.id, { lastStatusCard: peekStatusCardData });
+                }
                 setHasSavedOpening(true);
             } catch (e) {
                 console.error("Failed to save opening", e);
@@ -1220,6 +1749,8 @@ ${exitPromptContent}
         setMode('peek');
         setPeekLoading(true);
         setPeekStatus('');
+        setPeekStatusCardData(null);
+        setPeekStatusTemplateId(undefined);
         setHasSavedOpening(false);
         setLastDateTokenUsage(null);
         setPeekOpeningMode(openingMode);
@@ -1242,11 +1773,12 @@ ${exitPromptContent}
             // Build system prompt: dreamweaver + core context + identity intro
             let peekSystemPrompt = buildDatePreamble(c.name, userProfile.name);
             peekSystemPrompt += ContextBuilder.buildCoreContext(c, userProfile, false);
-            peekSystemPrompt = injectDateHistoryAfterPreference(
-                peekSystemPrompt,
-                buildDateRequestHistoryBlock(requestContext, c.name, userProfile.name),
-            );
             peekSystemPrompt += buildIdentityIntro(c.name, userProfile.name);
+            const peekHistoryContextBlock = buildDateRequestHistoryBlock(requestContext, c.name, userProfile.name);
+            if (peekHistoryContextBlock.trim()) {
+                peekSystemPrompt += `\n\n${peekHistoryContextBlock.trim()}\n`;
+            }
+            peekSystemPrompt += buildDateStatusPromptForMainApi(c);
 
             // Force separator to signal new scene
             const contextSeparator = dateTimeAwarenessEnabled && gapHint ? `\n\n--- [TIME SKIP: ${gapHint}] ---\n\n` : `\n\n--- [NEW SCENE START] ---\n\n`;
@@ -1295,9 +1827,11 @@ ${exitPromptContent}
             if (!response.ok) throw new Error('Failed to sense presence');
             const data = await safeResponseJson(response);
             setLastDateTokenUsage(normalizeDateTokenUsage(data, 'peek'));
-            const rawPeek = data.choices[0].message.content;
-            const peekExtracted = extractThinking(rawPeek);
-            setPeekStatus(peekExtracted.content);
+            const peekExtracted = extractThinkingFromChatCompletionResponse(data);
+            const statusResult = splitMainApiDateStatus(c, peekExtracted.content);
+            setPeekStatus(statusResult.content);
+            setPeekStatusCardData(statusResult.cardData || null);
+            setPeekStatusTemplateId(statusResult.templateId);
             setPeekThinking(peekExtracted.thinking || '');
 
         } catch (e: any) {
@@ -1306,6 +1840,254 @@ ${exitPromptContent}
             setPeekLoading(false);
         }
         return true;
+    };
+
+    const handleManualDatePhotoGenerate = async (
+        prompt: string,
+        stylePresetId?: string,
+        vibeReferences?: VibeReferenceInput[],
+        options?: ManualPhotoGenerationOptions,
+    ) => {
+        if (!char) throw new Error('No char');
+        const imageConfigForManual = getImageGenerationDraftConfig() || effectiveImageGenerationConfig;
+        const openAIStyleFamilyForManual = getOpenAIStyleFamilyForConfig(imageConfigForManual);
+        if (!isImageGenerationConfigured(imageConfigForManual)) {
+            const error = new Error('请先在设置里配置当前生图供应商');
+            addToast(error.message, 'error');
+            throw error;
+        }
+        const cleanPrompt = prompt.trim();
+        if (!cleanPrompt) {
+            const error = new Error('请先写一点想生成的画面');
+            addToast(error.message, 'info');
+            throw error;
+        }
+        if (manualPhotoInFlightRef.current) {
+            const error = new Error('图片还在生成中，请稍等一下');
+            addToast(error.message, 'info');
+            throw error;
+        }
+
+        manualPhotoInFlightRef.current = true;
+        setManualPhotoGenerating(true);
+        try {
+            const manualMode = options?.mode || 'direct';
+            const includeAppearance = options?.useAppearance !== false;
+            const includeUserAppearance = includeAppearance && options?.useUserAppearance === true;
+            const isNaiProvider = imageConfigForManual.activeProvider === 'novelai';
+            const appearanceTags = includeAppearance && isNaiProvider ? (options?.appearanceTags ?? char.naiAppearanceTags ?? '').trim() : '';
+            const appearanceNegativeTags = includeAppearance && isNaiProvider ? (options?.appearanceNegativeTags ?? char.naiAppearanceNegativeTags ?? '').trim() : '';
+            const userAppearanceTags = includeUserAppearance && isNaiProvider ? (options?.userAppearanceTags ?? userProfile.naiAppearanceTags ?? '').trim() : '';
+            const userAppearanceNegativeTags = includeUserAppearance && isNaiProvider ? (options?.userAppearanceNegativeTags ?? userProfile.naiAppearanceNegativeTags ?? '').trim() : '';
+            const appearancePrompt = includeAppearance ? (options?.appearancePrompt ?? char.photoAppearancePrompt ?? '').trim() : '';
+            const userAppearancePrompt = includeUserAppearance ? (options?.userAppearancePrompt ?? userProfile.photoAppearancePrompt ?? '').trim() : '';
+            const style = resolveImageStylePhotoPreset(stylePresetId, activePhotoStylePresets, char, imageConfigForManual, includeUserAppearance, {
+                allowUnboundRequested: Boolean(stylePresetId),
+                openAIStyleFamily: openAIStyleFamilyForManual,
+            });
+            const seed = Math.floor(Math.random() * 9999999999);
+            let directorResult: PhotoDirectorResult | undefined;
+            let prompts: ReturnType<typeof buildManualPhotoPrompt>;
+
+            if (manualMode === 'story') {
+                const secondaryConfig = selectSecondaryApiConfig();
+                if (!hasCompleteApiConfig(secondaryConfig)) {
+                    throw new Error('剧情模式需要先配置副 API');
+                }
+                const gallery = await DB.getGalleryImages(char.id);
+                const recentPhotoMetas = gallery
+                    .sort((a, b) => a.timestamp - b.timestamp)
+                    .map(item => item.photoMeta)
+                    .filter((meta): meta is PhotoMeta => Boolean(meta))
+                    .slice(-8);
+                const director = await runManualPhotoDirector({
+                    apiConfig: secondaryConfig,
+                    char,
+                    userProfile,
+                    currentMsgs: await buildDatePhotoDirectorMessages(char.id),
+                    userPrompt: cleanPrompt,
+                    stylePresets: activePhotoStylePresets,
+                    recentPhotoMetas,
+                    providerType: imageConfigForManual.activeProvider,
+                    openAIStyleFamily: openAIStyleFamilyForManual,
+                    appearanceTags,
+                    appearanceNegativeTags,
+                    userAppearanceTags,
+                    userAppearanceNegativeTags,
+                    appearancePrompt,
+                    userAppearancePrompt,
+                });
+                if (!director) throw new Error('剧情模式没有返回可用生图结果');
+                const hasDirectorScene = imageConfigForManual.activeProvider === 'openai-compatible'
+                    ? Boolean(director.scene_zh.trim())
+                    : Boolean(
+                        director.scene_zh.trim()
+                        || director.subject_tags?.trim()
+                        || director.pose_tags?.trim()
+                        || director.scene_tags?.trim()
+                        || director.clothing_tags?.trim()
+                        || director.expression_tags?.trim()
+                        || director.camera_tags?.trim()
+                        || director.mood_tags?.trim()
+                    );
+                if (!hasDirectorScene) throw new Error('剧情模式没有返回可用画面内容');
+                directorResult = {
+                    ...director,
+                    shouldGeneratePhoto: true,
+                    stylePresetId: style.id,
+                    intent: director.intent || 'date_scene',
+                };
+                prompts = buildPhotoPromptFromDirector(directorResult, undefined, style, imageConfigForManual, {
+                    appearanceTags,
+                    appearanceNegativeTags,
+                    userAppearanceTags,
+                    userAppearanceNegativeTags,
+                    appearancePrompt,
+                    userAppearancePrompt,
+                    includeAppearance,
+                    includeUserAppearance,
+                });
+            } else {
+                prompts = buildManualPhotoPrompt(cleanPrompt, style, imageConfigForManual, {
+                    appearanceTags,
+                    appearanceNegativeTags,
+                    userAppearanceTags,
+                    userAppearanceNegativeTags,
+                    appearancePrompt,
+                    userAppearancePrompt,
+                    includeAppearance,
+                    includeUserAppearance,
+                });
+            }
+
+            const meta = createPhotoMeta('date_manual', imageConfigForManual, style, prompts, seed, directorResult);
+            const selectedVibes = vibeReferences && vibeReferences.length > 0
+                ? vibeReferences
+                : buildDefaultVibeReferencesForChar(char);
+            const result = await generatePhotoImage(imageConfigForManual, meta, {
+                vibeReferences: prepareVibeReferencesForGeneration(selectedVibes, meta, imageConfigForManual),
+                onVibeReferenceEncoded: handleVibeReferenceEncoded,
+            });
+            await saveGeneratedDatePhoto(char.id, result.dataUrl, meta, directorResult?.caption || cleanPrompt);
+            addToast('见面照片已保存到相册', 'success');
+        } catch (error: any) {
+            console.error('[DatePhoto] manual generation failed:', error);
+            addToast(error?.message || '见面生图失败', 'error');
+            throw error;
+        } finally {
+            manualPhotoInFlightRef.current = false;
+            setManualPhotoGenerating(false);
+        }
+    };
+
+    const handleDatePhotoHint = (payload: PhotoHintTrigger) => {
+        if (!payload?.char?.id || !payload.hint) return;
+        if (!payload.char.autoPhotoEnabled) return;
+        const imageConfigForJob = getImageGenerationDraftConfig() || effectiveImageGenerationConfig;
+        const openAIStyleFamilyForJob = getOpenAIStyleFamilyForConfig(imageConfigForJob);
+        if (!isImageGenerationConfigured(imageConfigForJob)) {
+            addToast('见面照片已触发，但当前生图供应商还没有配置完整', 'error');
+            return;
+        }
+        const autoPhotoKey = [
+            payload.char.id,
+            payload.sourceMessageId || 'no-source',
+            payload.hint.anchor_text,
+            payload.hint.share_intent,
+        ].join('|');
+        if (autoPhotoInFlightRef.current.has(autoPhotoKey)) return;
+        autoPhotoInFlightRef.current.add(autoPhotoKey);
+
+        window.setTimeout(() => {
+            (async () => {
+                try {
+                    const secondaryConfig = selectSecondaryApiConfig();
+                    if (!hasCompleteApiConfig(secondaryConfig)) {
+                        throw new Error('主动见面照片需要先配置副 API');
+                    }
+                    const gallery = await DB.getGalleryImages(payload.char.id);
+                    const recentPhotoMetas = gallery
+                        .sort((a, b) => a.timestamp - b.timestamp)
+                        .map(item => item.photoMeta)
+                        .filter((meta): meta is PhotoMeta => Boolean(meta))
+                        .slice(-8);
+                    const isNaiProvider = imageConfigForJob.activeProvider === 'novelai';
+                    const hintIncludesUser = shouldIncludeUserAppearanceForPhoto(undefined, payload.aiReply, payload.hint);
+                    const director = await runPhotoDirector({
+                        apiConfig: secondaryConfig,
+                        char: payload.char,
+                        userProfile: payload.userProfile,
+                        currentMsgs: payload.currentMsgs,
+                        aiReply: payload.aiReply,
+                        thinking: payload.thinking,
+                        hint: payload.hint,
+                        stylePresets: activePhotoStylePresets,
+                        recentPhotoMetas,
+                        providerType: imageConfigForJob.activeProvider,
+                        openAIStyleFamily: openAIStyleFamilyForJob,
+                        appearanceTags: isNaiProvider ? payload.char.naiAppearanceTags : '',
+                        appearanceNegativeTags: isNaiProvider ? payload.char.naiAppearanceNegativeTags : '',
+                        userAppearanceTags: isNaiProvider && hintIncludesUser ? payload.userProfile.naiAppearanceTags : '',
+                        userAppearanceNegativeTags: isNaiProvider && hintIncludesUser ? payload.userProfile.naiAppearanceNegativeTags : '',
+                        appearancePrompt: payload.char.photoAppearancePrompt,
+                        userAppearancePrompt: hintIncludesUser ? payload.userProfile.photoAppearancePrompt : '',
+                        contextOptions: payload.contextOptions as any,
+                    });
+                    if (!director) throw new Error('Photo Director 没有返回可用导演结果，已停止生图');
+                    if (!director.shouldGeneratePhoto && payload.hint.strength < 0.85) return;
+                    const hasDirectorScene = imageConfigForJob.activeProvider === 'openai-compatible'
+                        ? Boolean(director.scene_zh.trim())
+                        : Boolean(
+                            director.scene_zh.trim()
+                            || director.subject_tags?.trim()
+                            || director.pose_tags?.trim()
+                            || director.scene_tags?.trim()
+                            || director.clothing_tags?.trim()
+                        );
+                    if (!hasDirectorScene) throw new Error('Photo Director 没有返回可用画面内容，已停止生图');
+
+                    const finalDirector: PhotoDirectorResult = {
+                        ...director,
+                        shouldGeneratePhoto: true,
+                        intent: director.intent || 'date_scene',
+                    };
+                    const includeUserAppearance = shouldIncludeUserAppearanceForPhoto(finalDirector, payload.aiReply, payload.hint);
+                    const style = imageConfigForJob.activeProvider === 'openai-compatible'
+                        ? resolveImageStylePhotoPreset(undefined, activePhotoStylePresets, payload.char, imageConfigForJob, includeUserAppearance, {
+                            openAIStyleFamily: openAIStyleFamilyForJob,
+                        })
+                        : resolvePhotoStylePreset(finalDirector.stylePresetId, activePhotoStylePresets, payload.char, imageConfigForJob.activeProvider, {
+                            openAIStyleFamily: openAIStyleFamilyForJob,
+                        });
+                    const prompts = buildPhotoPromptFromDirector(finalDirector, payload.hint, style, imageConfigForJob, {
+                        appearanceTags: isNaiProvider ? payload.char.naiAppearanceTags : '',
+                        appearanceNegativeTags: isNaiProvider ? payload.char.naiAppearanceNegativeTags : '',
+                        userAppearanceTags: isNaiProvider && includeUserAppearance ? payload.userProfile.naiAppearanceTags : '',
+                        userAppearanceNegativeTags: isNaiProvider && includeUserAppearance ? payload.userProfile.naiAppearanceNegativeTags : '',
+                        appearancePrompt: payload.char.photoAppearancePrompt,
+                        userAppearancePrompt: includeUserAppearance ? payload.userProfile.photoAppearancePrompt : '',
+                        includeAppearance: true,
+                        includeUserAppearance,
+                    });
+                    const seed = Math.floor(Math.random() * 9999999999);
+                    const meta = createPhotoMeta('date_auto', imageConfigForJob, style, prompts, seed, finalDirector, payload.hint);
+                    const defaultVibes = buildDefaultVibeReferencesForChar(payload.char);
+                    const result = await generatePhotoImage(imageConfigForJob, meta, {
+                        vibeReferences: prepareVibeReferencesForGeneration(defaultVibes, meta, imageConfigForJob),
+                        onVibeReferenceEncoded: handleVibeReferenceEncoded,
+                    });
+                    await saveGeneratedDatePhoto(payload.char.id, result.dataUrl, meta, finalDirector.caption);
+                    addToast(`${payload.char.name}的见面照片已保存`, 'success');
+                } catch (error: any) {
+                    console.error('[DatePhoto] auto generation failed:', error);
+                    await saveDatePhotoFailure(payload.char.id, error, payload.sourceMessageId)
+                        .catch(saveError => console.warn('[DatePhoto] failed to save failure event:', saveError));
+                    addToast(error?.message || '主动见面照片失败', 'error');
+                } finally {
+                    autoPhotoInFlightRef.current.delete(autoPhotoKey);
+                }
+            })();
+        }, 800);
     };
 
     // --- Session API Logic ---
@@ -1337,22 +2119,30 @@ ${exitPromptContent}
             ? buildTemporalContext(temporalHistory, Date.now(), char.id)
                 || getTimeGapHint(previousContextMsg?.timestamp)
             : '';
-        const userPromptText = appendDateTemporalContext(text, temporalContext);
 
         const historyContextBlock = buildDateRequestHistoryBlock(requestContext, char.name, userProfile.name, userMessageId);
-        const systemPrompt = buildDateSessionSystemPrompt({ char, userProfile, allMsgs, historyContextBlock });
-        const finalUserPrompt = `${userPromptText}\n\n(System Note: 严格遵守沉浸剧场格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签。叙述人称严格遵守当前视角设定。${directorHint ? `\n<director_note>${directorHint}</director_note>` : ''}${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。规则：
+        const statusSnapshotBlock = buildLatestDateStatusSnapshotBlock(sessionMessages);
+        const specialNote = `System Note: 严格遵守沉浸剧场格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签。叙述人称严格遵守当前视角设定。${temporalContext ? `\n\n<temporal_context>${temporalContext}</temporal_context>` : ''}${directorHint ? `\n\n<director_note>${directorHint}</director_note>` : ''}${dateTranslationEnabled ? `\n\n[Reminder: 双语模式已开启。规则：
 • 每一行仍然必须以 [emotion] 开头，<翻译> 标签只能出现在 [emotion] 后面，不能放在行首。
 • 只有${char.name}的「台词/说的话」用${dateTranslateSourceLang}写，并写成 [emotion]<翻译><原文>${dateTranslateSourceLang}台词</原文><译文>${dateTranslateTargetLang}译文</译文></翻译>。
 • 叙述、动作描写、心理活动、环境描写 → 保持中文不变，不用 <翻译> 标签。
 • <原文> 和 <译文> 内不要再写 [emotion] 标签。
 示例：
 [happy]<翻译><原文>「おはよう！今日はいい天気だね」</原文><译文>「早上好！今天天气真好呢」</译文></翻译>
-[shy] ${pronoun(char.gender ?? 'male')}的脸颊微微泛红，视线移向了窗外。]` : ''})`;
-        const requestMessages = [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: finalUserPrompt },
-        ];
+[shy] ${pronoun(char.gender ?? 'male')}的脸颊微微泛红，视线移向了窗外。]` : ''}`;
+        const requestMessages = buildDateSessionPromptMessages({
+            char,
+            userProfile,
+            allMsgs,
+            historyContextBlock,
+            statusSnapshotBlock,
+            photoPromptBlock: buildDatePhotoPromptForMainApi(char),
+            statusPromptBlock: buildDateStatusPromptForMainApi(char),
+            runtimeScene: directorHint ? '见面导演提示回复' : '见面聊天回复',
+            conversationTempo: directorHint ? '导演提示介入' : '普通推进',
+            specialNote,
+            currentUserInput: text,
+        });
         const requestBody = {
             model: apiConfig.model,
             messages: requestMessages,
@@ -1379,23 +2169,71 @@ ${exitPromptContent}
         if (!response.ok) throw new Error('API Error');
         const data = await safeResponseJson(response);
         setLastDateTokenUsage(normalizeDateTokenUsage(data, 'send'));
-        const rawContent = data.choices[0].message.content;
-        const extracted = extractThinking(rawContent);
+        const extracted = extractThinkingFromChatCompletionResponse(data);
+        const photoHintExtraction = extractPhotoHint(extracted.content);
+        const photoDecisionExtraction = extractPhotoDecision(photoHintExtraction.content);
+        const recentUserPhotoContext = requestContext
+            .filter(message => message.role === 'user')
+            .slice(-4)
+            .map(message => String(message.content || ''))
+            .join('\n');
+        const explicitPhotoDecision = char.autoPhotoEnabled === true
+            ? inferExplicitPhotoDecisionFromConversation(text, photoDecisionExtraction.content, recentUserPhotoContext)
+            : false;
+        const shouldGeneratePhotoByDecision = photoDecisionExtraction.shouldGeneratePhoto === true || explicitPhotoDecision;
+        const decisionHint = char.autoPhotoEnabled === true && !photoHintExtraction.hint && shouldGeneratePhotoByDecision
+            ? buildPhotoHintFromDecision(
+                text,
+                photoDecisionExtraction.content,
+                explicitPhotoDecision ? '用户在见面中明确要求发送或生成一张图片' : '见面主模型判断本轮应该浮现一张照片',
+            )
+            : null;
+        const photoHint = photoHintExtraction.hint || decisionHint;
+        const statusResult = splitMainApiDateStatus(char, photoDecisionExtraction.content);
         // Extract inner whispers from the cleaned content
-        const whisperResult = extractInnerWhispers(extracted.content);
+        const whisperResult = extractInnerWhispers(statusResult.content);
         const content = whisperResult.content;
 
         // Keep bilingual XML in storage so replay/novel mode can show subtitles later.
         // Context and summaries strip translation tags before they are sent to the model.
-        await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content, metadata: { source: 'date', thinking: extracted.thinking } });
+        const assistantMessageId = await DB.saveMessage({
+            charId: char.id,
+            role: 'assistant',
+            type: 'text',
+            content,
+            metadata: {
+                source: 'date',
+                thinking: extracted.thinking,
+                ...createDateStatusMetadata(statusResult),
+            },
+        });
+        if (statusResult.cardData) {
+            updateCharacter(char.id, { lastStatusCard: statusResult.cardData });
+        }
 
         // Refresh local state
         const freshMsgs = await DB.getMessagesByCharId(char.id);
         setDateMessages(freshMsgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp));
+        const freshSession = getCurrentSessionMessages(freshMsgs);
+        const freshSessionStartMsgId = freshSession.find(message => message.metadata?.isOpening)?.id || freshSession[0]?.id;
+        setDatePhotoMessages(freshSessionStartMsgId === undefined ? [] : filterDatePhotoMessages(freshMsgs, freshSessionStartMsgId));
         if (char.dateTimeAwarenessEnabled !== false) {
             maybeExtractDateTemporalEvent(char.id, text, secondaryApiConfig);
         }
         void maybeTriggerAutoSummary(freshMsgs);
+
+        if (photoHint && char.autoPhotoEnabled === true) {
+            const payload: PhotoHintTrigger = {
+                char: { ...char },
+                userProfile,
+                currentMsgs: await buildDatePhotoDirectorMessages(char.id),
+                aiReply: content,
+                thinking: extracted.thinking || undefined,
+                hint: photoHint,
+                sourceMessageId: assistantMessageId,
+            };
+            handleDatePhotoHint(payload);
+        }
 
         return { content, whispers: whisperResult.whispers };
     };
@@ -1429,14 +2267,22 @@ ${exitPromptContent}
             ? buildTemporalContext(temporalHistory, Date.now(), char.id)
                 || getTimeGapHint(previousContextMsg?.timestamp)
             : '';
-        const userPromptText = appendDateTemporalContext(lastUserMsg.content, temporalContext);
         const historyContextBlock = buildDateRequestHistoryBlock(requestContext, char.name, userProfile.name, lastUserMsg.id);
-        const systemPrompt = buildDateSessionSystemPrompt({ char, userProfile, allMsgs, historyContextBlock });
-        const rerollUserPrompt = `${userPromptText}\n\n(System Note: Reroll. 用不同的角度重写。严格遵守沉浸剧场格式、当前叙述人称。${dateTranslationEnabled ? `\n[Reminder: 双语模式已开启。每一行仍必须以 [emotion] 开头。只有${char.name}的台词用${dateTranslateSourceLang}写成 [emotion]<翻译><原文>...</原文><译文>...</译文></翻译>；叙述/动作/心理描写保持中文不变，不用 <翻译>。]` : ''})`;
-        const requestMessages = [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: rerollUserPrompt },
-        ];
+        const statusSnapshotBlock = buildLatestDateStatusSnapshotBlock(validSessionMessages);
+        const specialNote = `System Note: Reroll. 用不同的角度重写。严格遵守沉浸剧场格式、当前叙述人称。${temporalContext ? `\n\n<temporal_context>${temporalContext}</temporal_context>` : ''}${dateTranslationEnabled ? `\n\n[Reminder: 双语模式已开启。每一行仍必须以 [emotion] 开头。只有${char.name}的台词用${dateTranslateSourceLang}写成 [emotion]<翻译><原文>...</原文><译文>...</译文></翻译>；叙述/动作/心理描写保持中文不变，不用 <翻译>。]` : ''}`;
+        const requestMessages = buildDateSessionPromptMessages({
+            char,
+            userProfile,
+            allMsgs,
+            historyContextBlock,
+            statusSnapshotBlock,
+            photoPromptBlock: buildDatePhotoPromptForMainApi(char),
+            statusPromptBlock: buildDateStatusPromptForMainApi(char),
+            runtimeScene: '见面回复重掷',
+            conversationTempo: '重掷改写',
+            specialNote,
+            currentUserInput: lastUserMsg.content,
+        });
         const requestBody = {
             model: apiConfig.model,
             messages: requestMessages,
@@ -1463,13 +2309,45 @@ ${exitPromptContent}
         if (!response.ok) throw new Error('API Error');
         const data = await safeResponseJson(response);
         setLastDateTokenUsage(normalizeDateTokenUsage(data, 'reroll'));
-        const rawContent = data.choices[0].message.content;
-        const extracted = extractThinking(rawContent);
+        const extracted = extractThinkingFromChatCompletionResponse(data);
+        const photoHintExtraction = extractPhotoHint(extracted.content);
+        const photoDecisionExtraction = extractPhotoDecision(photoHintExtraction.content);
+        const recentUserPhotoContext = requestContext
+            .filter(message => message.role === 'user')
+            .slice(-4)
+            .map(message => String(message.content || ''))
+            .join('\n');
+        const explicitPhotoDecision = char.autoPhotoEnabled === true
+            ? inferExplicitPhotoDecisionFromConversation(lastUserMsg.content, photoDecisionExtraction.content, recentUserPhotoContext)
+            : false;
+        const shouldGeneratePhotoByDecision = photoDecisionExtraction.shouldGeneratePhoto === true || explicitPhotoDecision;
+        const decisionHint = char.autoPhotoEnabled === true && !photoHintExtraction.hint && shouldGeneratePhotoByDecision
+            ? buildPhotoHintFromDecision(
+                lastUserMsg.content,
+                photoDecisionExtraction.content,
+                explicitPhotoDecision ? '用户在见面中明确要求发送或生成一张图片' : '见面主模型判断本轮应该浮现一张照片',
+            )
+            : null;
+        const photoHint = photoHintExtraction.hint || decisionHint;
+        const statusResult = splitMainApiDateStatus(char, photoDecisionExtraction.content);
         // Also strip inner whispers on reroll (same as normal send)
-        const whisperResult = extractInnerWhispers(extracted.content);
+        const whisperResult = extractInnerWhispers(statusResult.content);
         const content = whisperResult.content;
 
-        await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content, metadata: { source: 'date', thinking: extracted.thinking } });
+        const assistantMessageId = await DB.saveMessage({
+            charId: char.id,
+            role: 'assistant',
+            type: 'text',
+            content,
+            metadata: {
+                source: 'date',
+                thinking: extracted.thinking,
+                ...createDateStatusMetadata(statusResult),
+            },
+        });
+        if (statusResult.cardData) {
+            updateCharacter(char.id, { lastStatusCard: statusResult.cardData });
+        }
 
         // 3. Now safely delete the old AI message since the new one is saved
         await DB.deleteMessage(lastMsg.id);
@@ -1477,6 +2355,22 @@ ${exitPromptContent}
         // Sync
         const freshMsgs = await DB.getMessagesByCharId(char.id);
         setDateMessages(freshMsgs.filter(isDateDialogueMessage).sort((a, b) => a.timestamp - b.timestamp));
+        const freshSession = getCurrentSessionMessages(freshMsgs);
+        const freshSessionStartMsgId = freshSession.find(message => message.metadata?.isOpening)?.id || freshSession[0]?.id;
+        setDatePhotoMessages(freshSessionStartMsgId === undefined ? [] : filterDatePhotoMessages(freshMsgs, freshSessionStartMsgId));
+
+        if (photoHint && char.autoPhotoEnabled === true) {
+            const payload: PhotoHintTrigger = {
+                char: { ...char },
+                userProfile,
+                currentMsgs: await buildDatePhotoDirectorMessages(char.id),
+                aiReply: content,
+                thinking: extracted.thinking || undefined,
+                hint: photoHint,
+                sourceMessageId: assistantMessageId,
+            };
+            handleDatePhotoHint(payload);
+        }
 
         return { content, whispers: whisperResult.whispers };
     };
@@ -1496,6 +2390,52 @@ ${exitPromptContent}
         if (!editTargetMsg) return;
         const targetMsg = editTargetMsg;
         const nextContent = editContent;
+        if (editMode === 'status') {
+            const targetChar = characters.find(c => c.id === targetMsg.charId) || char;
+            const template = targetChar
+                ? resolveDateStatusTemplate({
+                    ...targetChar,
+                    dateStatusTemplateId: targetMsg.metadata?.dateStatusTemplateId || targetChar.dateStatusTemplateId,
+                })
+                : undefined;
+            const nextCardData = createDateStatusCardDataFromRaw(nextContent, template);
+            if (!nextCardData) {
+                addToast('状态栏内容不能为空', 'error');
+                return;
+            }
+
+            const metadataUpdates = {
+                statusCardData: nextCardData,
+                hasDateStatusCard: true,
+                dateStatusEditedAt: Date.now(),
+            };
+            await DB.updateMessageMetadata(targetMsg.id, metadataUpdates);
+
+            if (mode === 'history') {
+                await loadHistorySessions(targetMsg.charId);
+            } else {
+                setDateMessages(prev => prev.map(m => m.id === targetMsg.id ? {
+                    ...m,
+                    metadata: {
+                        ...(m.metadata || {}),
+                        ...metadataUpdates,
+                    },
+                } : m));
+            }
+
+            const latestStatusMessage = [...dateMessages].reverse().find(m => (
+                m.role === 'assistant'
+                && m.metadata?.statusCardData
+            ));
+            if (targetChar && latestStatusMessage?.id === targetMsg.id) {
+                updateCharacter(targetChar.id, { lastStatusCard: nextCardData });
+            }
+
+            closeEditModal();
+            addToast('状态栏已更新', 'success');
+            return;
+        }
+
         await DB.updateMessage(targetMsg.id, nextContent);
         if (mode === 'history') {
             await loadHistorySessions(targetMsg.charId);
@@ -1508,7 +2448,10 @@ ${exitPromptContent}
 
     const handleDeleteHistorySession = async (session: DateHistorySession) => {
         if (!char) return;
-        const sessionMessageIds = Array.from(new Set([...session.rawMsgs, ...session.summaries, ...session.bridges].map(msg => msg.id)));
+        const allMsgs = await DB.getMessagesByCharId(char.id);
+        const sessionPhotos = filterDatePhotoMessages(allMsgs, session.startMsgId);
+        const sessionPhotoFailures = filterDatePhotoFailureMessages(allMsgs, session.startMsgId);
+        const sessionMessageIds = Array.from(new Set([...session.rawMsgs, ...session.summaries, ...session.bridges, ...sessionPhotos, ...sessionPhotoFailures].map(msg => msg.id)));
         if (sessionMessageIds.length === 0) return;
         if (!window.confirm(`删除这次见面记录？共 ${sessionMessageIds.length} 条消息会被移除。`)) return;
         await DB.deleteMessages(sessionMessageIds);
@@ -1531,6 +2474,7 @@ ${exitPromptContent}
         }
         const draft = await generateExitSummaryDraft();
         if (!draft) { addToast('未同步总结，仅保存进度', 'info'); finishExitSession(finalState); return; }
+        setSummaryBridgeError('');
         setActiveSummaryDraft({ ...draft, bridgeOnSave: true, exitState: finalState });
     };
 
@@ -1545,7 +2489,7 @@ ${exitPromptContent}
     if (mode === 'select' || !char) {
         return (
             <div className="h-full w-full bg-slate-50 flex flex-col font-light">
-                <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200 bg-white sticky top-0 z-10">
+                <div className="sully-safe-topbar-compact h-16 flex items-center justify-between px-4 border-b border-slate-200 bg-white sticky top-0 z-10">
                     <button onClick={closeApp} className="p-2 -ml-2 rounded-full hover:bg-slate-100">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                     </button>
@@ -1610,7 +2554,7 @@ ${exitPromptContent}
         return (
             <>
                 <div className="h-full w-full bg-slate-50 flex flex-col font-light">
-                <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200 bg-white sticky top-0 z-10">
+                <div className="sully-safe-topbar-compact h-16 flex items-center justify-between px-4 border-b border-slate-200 bg-white sticky top-0 z-10">
                     <button onClick={handleBack} className="p-2 -ml-2 rounded-full hover:bg-slate-100"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg></button>
                     <span className="font-bold text-slate-700">见面记录</span>
                     <div className="w-8"></div>
@@ -1739,11 +2683,13 @@ ${exitPromptContent}
                     userProfile={userProfile}
                     messages={dateMessages}
                     peekStatus={peekStatus}
+                    peekThinking={peekThinking}
                     initialState={forceFreshSession ? undefined : char.savedDateState}
                     onSendMessage={handleSendMessage}
                     onReroll={handleReroll}
                     onExit={onExitSession}
                     onEditMessage={openEditModal}
+                    onEditStatusCard={openEditStatusModal}
                     onDeleteMessage={handleDeleteMessage}
                     isSummaryGenerating={isSummaryGenerating}
                     hasPendingSummary={!!pendingAutoSummary}
@@ -1753,7 +2699,11 @@ ${exitPromptContent}
                     lastTokenUsage={lastDateTokenUsage}
                     requestDebugSnapshots={dateRequestDebugSnapshots}
                     onRequestSummary={requestManualSummary}
-                    onReviewPendingSummary={() => pendingAutoSummary && setActiveSummaryDraft({ ...pendingAutoSummary, fromPendingAuto: true })}
+                    onReviewPendingSummary={() => {
+                        if (!pendingAutoSummary) return;
+                        setSummaryBridgeError('');
+                        setActiveSummaryDraft({ ...pendingAutoSummary, fromPendingAuto: true });
+                    }}
                     onDiscardPendingSummary={discardPendingAutoSummary}
                     onToggleAutoSummary={(enabled) => updateCharacter(char.id, { dateSummaryAutoEnabled: enabled })}
                     onToggleAutoHideSummary={async (enabled) => {
@@ -1779,12 +2729,24 @@ ${exitPromptContent}
                     onToggleTranslation={setDateTranslationEnabled}
                     onSetTranslateSourceLang={setDateTranslateSourceLang}
                     onSetTranslateTargetLang={setDateTranslateTargetLang}
+                    photoMessages={datePhotoMessages}
+                    photoConfigReady={isDatePhotoConfigReady}
+                    manualPhotoEnabled={!!char.manualPhotoEnabled}
+                    manualPhotoGenerating={manualPhotoGenerating}
+                    hasUnreadDatePhoto={hasUnreadDatePhoto}
+                    photoStylePresets={activePhotoStylePresets}
+                    savedVibeReferences={savedVibeReferences}
+                    imageProviderType={effectiveImageGenerationConfig.activeProvider}
+                    onManualPhotoGenerate={handleManualDatePhotoGenerate}
+                    onSaveVibeReference={handleSaveVibeReference}
+                    onImportVibeFile={handleImportVibeFile}
+                    onRenameSavedVibe={handleRenameSavedVibe}
+                    onDeleteSavedVibe={handleDeleteSavedVibe}
+                    onClearSavedVibeCache={handleClearSavedVibeCache}
+                    onMarkDatePhotosSeen={() => setHasUnreadDatePhoto(false)}
                 />
 
-                {/* Global Message Edit Modal for Session Mode */}
-                <Modal isOpen={isEditModalOpen} title="编辑内容" onClose={() => setIsEditModalOpen(false)} footer={<><button onClick={() => setIsEditModalOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-2xl">取消</button><button onClick={confirmEditMessage} className="flex-1 py-3 bg-primary text-white font-bold rounded-2xl">保存</button></>}>
-                    <textarea value={editContent} onChange={e => setEditContent(e.target.value)} className="w-full h-32 bg-slate-100 rounded-2xl p-4 resize-none focus:ring-1 focus:ring-primary/20 transition-all text-sm leading-relaxed" />
-                </Modal>
+                {renderEditModal()}
                 {renderSummaryModal()}
                 {renderSummarySettingsModal()}
             </>

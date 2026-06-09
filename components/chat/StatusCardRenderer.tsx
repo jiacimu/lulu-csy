@@ -70,7 +70,65 @@ function getFontFamily(fontStyle: StatusCardData['style']['fontStyle']): string 
     }
 }
 
-const FreeformStatusCard: React.FC<{ html: string; allowScripts?: boolean }> = ({ html, allowScripts = false }) => {
+type FreeformFitMode = 'viewport' | 'width';
+
+function escapeCssString(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]/g, '');
+}
+
+function isUsableFontSource(value: string | undefined): value is string {
+    if (!value) return false;
+    return /^(data:|https?:)/i.test(value.trim());
+}
+
+function injectHtmlHeadStyle(html: string, css: string): string {
+    const trimmedCss = css.trim();
+    if (!trimmedCss) return html;
+
+    const styleBlock = `<style data-status-card-host-overrides>\n${trimmedCss}\n</style>`;
+    if (/<\/head>/i.test(html)) {
+        return html.replace(/<\/head>/i, `${styleBlock}\n</head>`);
+    }
+    if (/<body\b/i.test(html)) {
+        return html.replace(/<body\b([^>]*)>/i, `<body$1>\n${styleBlock}`);
+    }
+    return `${styleBlock}\n${html}`;
+}
+
+function buildHostOverrideCss(customFont: string | undefined, stabilizeDateStatusLayout: boolean): string {
+    const cssParts: string[] = [];
+
+    if (stabilizeDateStatusLayout) {
+        const hostViewportWidth = typeof window === 'undefined'
+            ? STATUS_CARD_WIDTH_PX
+            : Math.max(160, Math.round(window.innerWidth));
+        cssParts.push(`:root{--status-card-host-viewport-width:${hostViewportWidth}px;--status-card-host-width:min(330px,calc(var(--status-card-host-viewport-width) - 24px))}
+.status-card-frame,.date-status-v2,.date-registry__module{width:var(--status-card-host-width)!important;max-width:var(--status-card-host-width)!important}`);
+    }
+
+    if (isUsableFontSource(customFont)) {
+        const fontSource = escapeCssString(customFont.trim());
+        cssParts.push(`@font-face{font-family:"StatusCardHostFont";src:url("${fontSource}");font-display:swap}
+:root{--status-card-host-font:"StatusCardHostFont","PingFang SC","Microsoft YaHei",sans-serif;--cn-sans:var(--status-card-host-font);--cn-serif:var(--status-card-host-font);--brush:var(--status-card-host-font)}
+.status-card-frame,.status-card-frame *{font-family:var(--status-card-host-font)!important}`);
+    }
+
+    return cssParts.join('\n');
+}
+
+const FreeformStatusCard: React.FC<{
+    html: string;
+    allowScripts?: boolean;
+    fitMode?: FreeformFitMode;
+    customFont?: string;
+    stabilizeDateStatusLayout?: boolean;
+}> = ({
+    html,
+    allowScripts = false,
+    fitMode = 'viewport',
+    customFont,
+    stabilizeDateStatusLayout = false,
+}) => {
     const previewRef = useRef<HTMLIFrameElement>(null);
     const frameChannel = useId().replace(/:/g, '_');
     const [previewReady, setPreviewReady] = useState(false);
@@ -81,16 +139,22 @@ const FreeformStatusCard: React.FC<{ html: string; allowScripts?: boolean }> = (
     const [hasMeasuredSize, setHasMeasuredSize] = useState(false);
     const [viewportLimits, setViewportLimits] = useState(getFreeformViewportLimits);
     const previousHtmlRef = useRef(html);
+    const lockedWidthRef = useRef<number | null>(null);
+    const renderedHtml = useMemo(
+        () => injectHtmlHeadStyle(html, buildHostOverrideCss(customFont, stabilizeDateStatusLayout)),
+        [customFont, html, stabilizeDateStatusLayout, viewportLimits.width],
+    );
 
     useEffect(() => {
-        if (previousHtmlRef.current === html) return;
-        previousHtmlRef.current = html;
+        if (previousHtmlRef.current === renderedHtml) return;
+        previousHtmlRef.current = renderedHtml;
         setPreviewSize({
             width: STATUS_CARD_WIDTH_PX,
             height: STATUS_CARD_MIN_HEIGHT_PX,
         });
+        lockedWidthRef.current = null;
         setHasMeasuredSize(false);
-    }, [html]);
+    }, [renderedHtml]);
 
     useEffect(() => {
         const updateViewportLimits = () => setViewportLimits(getFreeformViewportLimits());
@@ -104,13 +168,18 @@ const FreeformStatusCard: React.FC<{ html: string; allowScripts?: boolean }> = (
             if (event.data?.type !== 'preview-height') return;
             if (event.data.channel !== frameChannel) return;
 
-            const nextWidth = typeof event.data.width === 'number'
-                ? Math.max(event.data.width + STATUS_CARD_MEASURE_BUFFER_PX, 1)
+            let nextWidth = typeof event.data.width === 'number'
+                ? Math.max(event.data.width + (fitMode === 'width' ? 0 : STATUS_CARD_MEASURE_BUFFER_PX), 1)
                 : STATUS_CARD_WIDTH_PX;
 
             const nextHeight = typeof event.data.height === 'number'
                 ? Math.max(event.data.height + STATUS_CARD_MEASURE_BUFFER_PX, 1)
                 : STATUS_CARD_MIN_HEIGHT_PX;
+
+            if (fitMode === 'width') {
+                lockedWidthRef.current = Math.max(lockedWidthRef.current ?? nextWidth, nextWidth);
+                nextWidth = lockedWidthRef.current;
+            }
 
             setPreviewSize({
                 width: nextWidth,
@@ -121,21 +190,25 @@ const FreeformStatusCard: React.FC<{ html: string; allowScripts?: boolean }> = (
 
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [frameChannel]);
+    }, [fitMode, frameChannel]);
 
     useEffect(() => {
         if (!previewReady) return;
 
         previewRef.current?.contentWindow?.postMessage(
-            { type: 'preview-update', channel: frameChannel, html, allowScripts },
+            { type: 'preview-update', channel: frameChannel, html: renderedHtml, allowScripts },
             '*',
         );
-    }, [allowScripts, frameChannel, html, previewReady]);
+    }, [allowScripts, frameChannel, renderedHtml, previewReady]);
 
     const measuredWidth = hasMeasuredSize ? previewSize.width : viewportLimits.width;
     const measuredHeight = hasMeasuredSize ? previewSize.height : 1;
-    const fitScale = hasMeasuredSize
-        ? Math.min(1, viewportLimits.width / measuredWidth, viewportLimits.height / measuredHeight)
+    const fitScale = hasMeasuredSize && fitMode === 'viewport'
+        ? Math.min(
+            1,
+            viewportLimits.width / measuredWidth,
+            viewportLimits.height / measuredHeight,
+        )
         : 1;
     const fittedWidth = Math.ceil(measuredWidth * fitScale);
     const fittedHeight = Math.ceil(measuredHeight * fitScale);
@@ -148,7 +221,7 @@ const FreeformStatusCard: React.FC<{ html: string; allowScripts?: boolean }> = (
                 width: `${fittedWidth}px`,
                 height: `${fittedHeight}px`,
                 maxWidth: `calc(100vw - ${FREEFORM_VIEWPORT_PADDING_X_PX}px)`,
-                maxHeight: `calc(100vh - ${FREEFORM_VIEWPORT_PADDING_Y_PX}px)`,
+                maxHeight: fitMode === 'viewport' ? `calc(100vh - ${FREEFORM_VIEWPORT_PADDING_Y_PX}px)` : undefined,
                 display: 'block',
                 opacity: hasMeasuredSize ? 1 : 0,
                 transition: 'opacity 120ms ease',
@@ -298,9 +371,17 @@ const CardLoadingFallback: React.FC = () => (
 // ─── Main Renderer ──────────────────────────────────────────────
 interface StatusCardRendererProps {
     data: StatusCardData;
+    freeformFitMode?: FreeformFitMode;
+    customFont?: string;
+    stabilizeDateStatusLayout?: boolean;
 }
 
-const StatusCardRenderer: React.FC<StatusCardRendererProps> = ({ data }) => {
+const StatusCardRenderer: React.FC<StatusCardRendererProps> = ({
+    data,
+    freeformFitMode = 'viewport',
+    customFont,
+    stabilizeDateStatusLayout = false,
+}) => {
     // Sanitize style values
     const sanitizedData = useMemo<StatusCardData>(() => ({
         ...data,
@@ -325,6 +406,9 @@ const StatusCardRenderer: React.FC<StatusCardRendererProps> = ({ data }) => {
             <FreeformStatusCard
                 html={sanitizedData.meta.html}
                 allowScripts={sanitizedData.meta.allowScripts === true}
+                fitMode={freeformFitMode}
+                customFont={customFont}
+                stabilizeDateStatusLayout={stabilizeDateStatusLayout}
             />
         );
     }

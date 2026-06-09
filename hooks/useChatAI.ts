@@ -11,7 +11,7 @@ import { VectorMemoryExtractor } from '../utils/vectorMemoryExtractor';
 import { MindSnapshotExtractor,type AfterglowGenerationOptions,type SecondaryFullContextOptions } from '../utils/mindSnapshotExtractor';
 import { loadCharacterGoals, formatGoalListStr } from '../utils/goalService';
 import { EventExtractor } from '../utils/eventExtractor';
-import { extractThinking, safeThinkingFallbackReply } from '../utils/thinkingExtractor';
+import { extractThinking, safeThinkingFallbackReply, selectThinkingForDisplay } from '../utils/thinkingExtractor';
 import { isDeepSeekMode } from '../utils/deepseekPrompts';
 import { DEFAULT_CHAT_TEMPERATURE,getEmbeddingConfig,normalizeChatTemperature,selectSecondaryApiConfig } from '../utils/runtimeConfig';
 import {
@@ -307,14 +307,58 @@ function getPreviousAssistantThinking(messages: Message[], maxLength = 1200): st
     return undefined;
 }
 
+type QuoteReplyTarget = { id: number; content: string; name: string };
+
 const LEAKED_REPLY_CONTEXT_RE = /(?:引用回复上下文[：:]\s*)?这条消息正在回复[^「」\r\n]{0,60}的消息「([^」\r\n]{1,220})」[。.]?\s*本条消息正文[：:]\s*([\s\S]*)/;
+const LEAKED_REPLY_CONTEXT_BOX_RE = /(?:引用回复上下文[：:]\s*)?\[用户引用了[^\]「\r\n]{0,80}「([^」\r\n]{1,220})」[^\]\r\n]*\]\s*本条消息正文[：:]\s*([\s\S]*)/;
 
 function normalizeLeakedReplyContextForQuote(text: string): string {
-    return text.replace(LEAKED_REPLY_CONTEXT_RE, (_match, quotedText: string, body: string) => {
+    const normalize = (_match: string, quotedText: string, body: string) => {
         const quoted = quotedText.trim();
         const content = body.trim();
         return `[[QUOTE: ${quoted}]]${content ? `\n${content}` : ''}`;
-    });
+    };
+    return text
+        .replace(LEAKED_REPLY_CONTEXT_BOX_RE, normalize)
+        .replace(LEAKED_REPLY_CONTEXT_RE, normalize);
+}
+
+function buildQuoteCandidates(quotedTextRaw: string): string[] {
+    const raw = (quotedTextRaw || '').trim();
+    const candidates: string[] = [];
+    const pushCandidate = (value?: string) => {
+        const candidate = (value || '').trim();
+        if (candidate && !candidates.includes(candidate)) candidates.push(candidate);
+    };
+
+    for (const match of raw.matchAll(/<原文>([\s\S]*?)<\/原文>/g)) pushCandidate(match[1]);
+    for (const match of raw.matchAll(/<译文>([\s\S]*?)<\/译文>/g)) pushCandidate(match[1]);
+    raw.split(/%%\s*BILINGUAL\s*%%/i).forEach(pushCandidate);
+    pushCandidate(raw.replace(/<\/?翻译>|<\/?原文>|<\/?译文>/g, '').replace(/%%\s*BILINGUAL\s*%%/gi, ''));
+
+    return candidates;
+}
+
+function resolveQuoteTarget(historySlice: Message[], quotedTextRaw: string, userName: string): QuoteReplyTarget | undefined {
+    const users = historySlice.filter((m: Message) => (
+        m.role === 'user'
+        && typeof m.content === 'string'
+        && !!m.content.trim()
+        && typeof m.id === 'number'
+    ));
+    const reversedUsers = users.slice().reverse();
+    let targetMsg: Message | undefined;
+
+    for (const quotedText of buildQuoteCandidates(quotedTextRaw)) {
+        targetMsg = reversedUsers.find((m: Message) => m.content.includes(quotedText))
+            || (quotedText.length > 10 ? reversedUsers.find((m: Message) => m.content.includes(quotedText.slice(0, 10))) : undefined);
+        if (targetMsg) break;
+    }
+
+    targetMsg ||= users.filter((m: Message) => m.type === 'text' || !m.type).slice(-1)[0] || users.slice(-1)[0];
+    if (!targetMsg || typeof targetMsg.id !== 'number') return undefined;
+    const truncated = targetMsg.content.length > 10 ? `${targetMsg.content.slice(0, 10)}...` : targetMsg.content;
+    return { id: targetMsg.id, content: truncated, name: userName };
 }
 
 export const useChatAI = ({
@@ -619,6 +663,7 @@ export const useChatAI = ({
 - 多句话就输出多个<翻译>标签，一句一个
 - <翻译>标签外不要写任何文字
 - 表情包命令 [[SEND_EMOJI: ...]] 放在所有<翻译>标签外面
+- 引用命令 [[QUOTE: ...]] 也放在所有<翻译>标签外面；引用内容请原样照抄用户说过的原文，不要翻译、不要包<翻译>标签
 
 示例（${translationConfig.sourceLang}→${translationConfig.targetLang}）：
 <翻译>
@@ -811,9 +856,8 @@ export const useChatAI = ({
                 throw new Error(`AI 生成了空白内容。可能是触发了风控拦截，或者超出了该模型的上下文窗口上限${hint}。请尝试清理聊天上下文或更换更大上下文的模型。`);
             }
 
-            // 4.0 Extract thinking chain — try native Gemini thinking field first,
-            // then fall back to <thinking>/<think> tag extraction for DeepSeek/Qwen3.
-            // Gemini returns thinking in message.reasoning_content or via content_parts.
+            // 4.0 Extract thinking chain — prefer the project's explicit
+            // <thinking>/<think> block, then fall back to native provider reasoning.
             const nativeThinking: string = (
                 data.choices[0]?.message?.reasoning_content ||
                 data.choices[0]?.message?.thinking ||
@@ -833,8 +877,7 @@ export const useChatAI = ({
 
             // Extract embedded text thinking if present
             const extracted = extractThinking(aiContent);
-            // Prefer native thinking field; fall back to text-embedded tags
-            const thinkingContent = nativeThinking.trim() || extracted.thinking || '';
+            const thinkingContent = selectThinkingForDisplay(extracted.thinking, nativeThinking) || '';
             
             // ALWAYS use the extracted content, which safely strips all thinking tags.
             // This prevents the tag leak when nativeThinking is true, and fixes unclosed tag leaks.
@@ -1005,18 +1048,7 @@ export const useChatAI = ({
             const REPLY_CLEAN_CN = /\[回复\s*[""\u201C][^""\u201D]*?[""\u201D](?:\.{0,3})\]\s*[：:]?\s*/g;
             let aiReplyTarget: { id: number, content: string, name: string } | undefined;
             const firstQuoteMatch = aiContent.match(QUOTE_RE_DOUBLE) || aiContent.match(QUOTE_RE_SINGLE) || aiContent.match(REPLY_RE_CN);
-            if (firstQuoteMatch) {
-                const quotedText = firstQuoteMatch[1].trim();
-                if (quotedText) {
-                    // Try exact include first, then fuzzy match (first 10 chars)
-                    const targetMsg = historySlice.slice().reverse().find((m: Message) => m.role === 'user' && m.content.includes(quotedText))
-                        || (quotedText.length > 10 ? historySlice.slice().reverse().find((m: Message) => m.role === 'user' && m.content.includes(quotedText.slice(0, 10))) : undefined);
-                    if (targetMsg) {
-                        const truncated = targetMsg.content.length > 10 ? targetMsg.content.slice(0, 10) + '...' : targetMsg.content;
-                        aiReplyTarget = { id: targetMsg.id, content: truncated, name: userProfile.name };
-                    }
-                }
-            }
+            if (firstQuoteMatch) aiReplyTarget = resolveQuoteTarget(historySlice, firstQuoteMatch[1], userProfile.name);
             // Clean all quote tag variants from content
             aiContent = aiContent.replace(QUOTE_CLEAN_DOUBLE, '').replace(QUOTE_CLEAN_SINGLE, '').replace(REPLY_CLEAN_CN, '').trim();
 
@@ -1442,18 +1474,10 @@ export const useChatAI = ({
                                 await new Promise(r => setTimeout(r, delay));
 
                                 let chunkReplyTarget: { id: number, content: string, name: string } | undefined;
-                                const chunkQuoteMatch = chunk.match(QUOTE_RE_DOUBLE) || chunk.match(QUOTE_RE_SINGLE);
+                                const chunkQuoteMatch = chunk.match(QUOTE_RE_DOUBLE) || chunk.match(QUOTE_RE_SINGLE) || chunk.match(REPLY_RE_CN);
                                 if (chunkQuoteMatch) {
-                                    const quotedText = chunkQuoteMatch[1].trim();
-                                    if (quotedText) {
-                                        const targetMsg = historySlice.slice().reverse().find((m: Message) => m.role === 'user' && m.content.includes(quotedText))
-                                            || (quotedText.length > 10 ? historySlice.slice().reverse().find((m: Message) => m.role === 'user' && m.content.includes(quotedText.slice(0, 10))) : undefined);
-                                        if (targetMsg) {
-                                            const truncated = targetMsg.content.length > 10 ? targetMsg.content.slice(0, 10) + '...' : targetMsg.content;
-                                            chunkReplyTarget = { id: targetMsg.id, content: truncated, name: userProfile.name };
-                                        }
-                                    }
-                                    chunk = chunk.replace(QUOTE_CLEAN_DOUBLE, '').replace(QUOTE_CLEAN_SINGLE, '').trim();
+                                    chunkReplyTarget = resolveQuoteTarget(historySlice, chunkQuoteMatch[1], userProfile.name);
+                                    chunk = chunk.replace(QUOTE_CLEAN_DOUBLE, '').replace(QUOTE_CLEAN_SINGLE, '').replace(REPLY_CLEAN_CN, '').trim();
                                 }
 
                                 const replyData = chunkReplyTarget || (globalMsgIndex === 0 ? aiReplyTarget : undefined);

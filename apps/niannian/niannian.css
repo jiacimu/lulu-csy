@@ -18,7 +18,7 @@
 
 .nn-topbar {
     position: absolute;
-    top: max(34px, calc(env(safe-area-inset-top) + 28px));
+    top: max(34px, calc(var(--hardware-safe-top, env(safe-area-inset-top, 0px)) + 28px));
     left: 12px;
     right: 12px;
     z-index: 30;
@@ -90,7 +90,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
     gap: 14px;
-    padding: max(76px, calc(env(safe-area-inset-top) + 68px)) 16px 22px;
+    padding: max(76px, calc(var(--hardware-safe-top, env(safe-area-inset-top, 0px)) + 68px)) 16px 22px;
 }
 
 .nn-setup-panel,
@@ -259,21 +259,21 @@
 }
 
 .nn-vn-layer.is-dialogue {
-    bottom: max(20px, calc(env(safe-area-inset-bottom) + 16px));
+    bottom: max(20px, calc(var(--hardware-safe-bottom, env(safe-area-inset-bottom, 0px)) + 16px));
 }
 
 .nn-vn-layer.is-choice {
-    bottom: max(10px, calc(env(safe-area-inset-bottom) + 8px));
+    bottom: max(10px, calc(var(--hardware-safe-bottom, env(safe-area-inset-bottom, 0px)) + 8px));
 }
 
 .nn-vn-layer.is-choice.is-reviewing {
-    bottom: max(20px, calc(env(safe-area-inset-bottom) + 16px));
+    bottom: max(20px, calc(var(--hardware-safe-bottom, env(safe-area-inset-bottom, 0px)) + 16px));
 }
 
 .nn-choice-review-hotspot {
     position: absolute;
-    top: max(116px, calc(env(safe-area-inset-top) + 108px));
-    bottom: max(104px, calc(env(safe-area-inset-bottom) + 100px));
+    top: max(116px, calc(var(--hardware-safe-top, env(safe-area-inset-top, 0px)) + 108px));
+    bottom: max(104px, calc(var(--hardware-safe-bottom, env(safe-area-inset-bottom, 0px)) + 100px));
     left: 0;
     z-index: 11;
     width: 34%;
@@ -294,7 +294,7 @@
 .nn-scene-label {
     position: absolute;
     left: 14px;
-    bottom: max(214px, calc(env(safe-area-inset-bottom) + 214px));
+    bottom: max(214px, calc(var(--hardware-safe-bottom, env(safe-area-inset-bottom, 0px)) + 214px));
     z-index: 2;
     max-width: calc(100% - 28px);
     padding: 5px 9px;
@@ -459,7 +459,7 @@
 
 .nn-status-orb {
     position: absolute;
-    top: max(92px, calc(env(safe-area-inset-top) + 84px));
+    top: max(92px, calc(var(--hardware-safe-top, env(safe-area-inset-top, 0px)) + 84px));
     right: 12px;
     z-index: 20;
     display: grid;
@@ -500,7 +500,7 @@
 
 .nn-history-toggle {
     position: absolute;
-    top: max(94px, calc(env(safe-area-inset-top) + 86px));
+    top: max(94px, calc(var(--hardware-safe-top, env(safe-area-inset-top, 0px)) + 86px));
     left: 12px;
     z-index: 20;
     display: inline-flex;
@@ -542,7 +542,7 @@
 
 .nn-history-panel {
     position: absolute;
-    top: max(150px, calc(env(safe-area-inset-top) + 142px));
+    top: max(150px, calc(var(--hardware-safe-top, env(safe-area-inset-top, 0px)) + 142px));
     left: 10px;
     z-index: 24;
     display: grid;
@@ -709,7 +709,7 @@
 
 .nn-fate-book {
     position: absolute;
-    top: max(160px, calc(env(safe-area-inset-top) + 152px));
+    top: max(160px, calc(var(--hardware-safe-top, env(safe-area-inset-top, 0px)) + 152px));
     right: 10px;
     z-index: 22;
     display: grid;
@@ -1295,7 +1295,7 @@
     }
 
     .nn-scene-label {
-        bottom: max(202px, calc(env(safe-area-inset-bottom) + 198px));
+        bottom: max(202px, calc(var(--hardware-safe-bottom, env(safe-area-inset-bottom, 0px)) + 198px));
     }
 
     .nn-dialogue-card {
@@ -1311,15 +1311,15 @@
     }
 
     .nn-vn-layer.is-dialogue {
-        bottom: max(14px, calc(env(safe-area-inset-bottom) + 12px));
+        bottom: max(14px, calc(var(--hardware-safe-bottom, env(safe-area-inset-bottom, 0px)) + 12px));
     }
 
     .nn-vn-layer.is-choice {
-        bottom: max(8px, calc(env(safe-area-inset-bottom) + 6px));
+        bottom: max(8px, calc(var(--hardware-safe-bottom, env(safe-area-inset-bottom, 0px)) + 6px));
     }
 
     .nn-vn-layer.is-choice.is-reviewing {
-        bottom: max(14px, calc(env(safe-area-inset-bottom) + 12px));
+        bottom: max(14px, calc(var(--hardware-safe-bottom, env(safe-area-inset-bottom, 0px)) + 12px));
     }
 
     .nn-vn-layer.is-choice .nn-dialogue-card {
@@ -1355,19 +1355,19 @@
     }
 
     .nn-fate-book {
-        top: max(148px, calc(env(safe-area-inset-top) + 140px));
+        top: max(148px, calc(var(--hardware-safe-top, env(safe-area-inset-top, 0px)) + 140px));
         width: calc(100% - 20px);
         max-height: min(68vh, 466px);
     }
 
     .nn-history-toggle {
-        top: max(92px, calc(env(safe-area-inset-top) + 84px));
+        top: max(92px, calc(var(--hardware-safe-top, env(safe-area-inset-top, 0px)) + 84px));
         height: 40px;
         min-width: 82px;
     }
 
     .nn-history-panel {
-        top: max(144px, calc(env(safe-area-inset-top) + 136px));
+        top: max(144px, calc(var(--hardware-safe-top, env(safe-area-inset-top, 0px)) + 136px));
         max-height: min(60vh, 452px);
         padding: 10px;
     }

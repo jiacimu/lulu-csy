@@ -1,11 +1,18 @@
 
 import React,{ useState,useRef,useEffect } from 'react';
 import { useOS } from '../../context/OSContext';
-import { CharacterProfile,SpriteConfig,SkinSet } from '../../types';
+import { AppID,CharacterProfile,SpriteConfig,SkinSet } from '../../types';
 import { processImage } from '../../utils/file';
 import { getGuardedInputProps } from '../../utils/inputGuards';
 import { DEFAULT_DATE_SUMMARY_PROMPT } from '../../utils/dateSummaryPrompts';
 import { DATE_WRITING_STYLE_PRESETS, DATE_DEFAULT_WORD_COUNT, resolveDateWritingStylePreset } from '../../utils/datePrompts';
+import {
+    DATE_STATUS_MODULE_REGISTRY,
+    DEFAULT_DATE_STATUS_MODULE_IDS,
+    getDateStatusTemplateOptions,
+    getSelectedDateStatusModuleIds,
+    resolveDateStatusTemplate,
+} from '../../utils/dateStatusTemplates';
 import WritingStyleSheet, { isPresetKey } from './WritingStyleSheet';
 
 // 标准情绪列表
@@ -18,7 +25,7 @@ interface DateSettingsProps {
 }
 
 const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
-    const { updateCharacter, addToast, userProfile } = useOS();
+    const { updateCharacter, addToast, userProfile, openApp } = useOS();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const [uploadTarget, setUploadTarget] = useState<'bg' | 'sprite' | 'skin-sprite'>('bg');
@@ -217,6 +224,58 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
     };
 
     const customEmotions = char.customDateSprites || [];
+    const dateStatusTemplateOptions = React.useMemo(
+        () => getDateStatusTemplateOptions(char),
+        [char.customStatusTemplates],
+    );
+    const dateStatusWorkshopOptions = React.useMemo(
+        () => dateStatusTemplateOptions.filter(option => option.source === 'workshop'),
+        [dateStatusTemplateOptions],
+    );
+    const selectedDateStatusModuleIds = React.useMemo(
+        () => getSelectedDateStatusModuleIds(char),
+        [char.dateStatusModuleIds, char.dateStatusTemplateId],
+    );
+    const selectedDateStatusModuleIdSet = React.useMemo(
+        () => new Set(selectedDateStatusModuleIds),
+        [selectedDateStatusModuleIds],
+    );
+    const isDateStatusEnabled = char.dateStatusBarEnabled === true;
+    const activeDateStatusTemplate = resolveDateStatusTemplate(char);
+    const selectedWorkshopTemplateId = dateStatusWorkshopOptions.some(option => option.id === char.dateStatusTemplateId)
+        ? char.dateStatusTemplateId
+        : '';
+
+    const handleToggleDateStatusBar = () => {
+        const nextEnabled = char.dateStatusBarEnabled !== true;
+        updateCharacter(char.id, {
+            dateStatusBarEnabled: nextEnabled,
+            dateStatusModuleIds: selectedDateStatusModuleIds.length > 0
+                ? selectedDateStatusModuleIds
+                : DEFAULT_DATE_STATUS_MODULE_IDS,
+            dateStatusTemplateId: selectedWorkshopTemplateId || undefined,
+        });
+    };
+
+    const handleToggleDateStatusModule = (moduleId: string) => {
+        const nextIds = selectedDateStatusModuleIdSet.has(moduleId)
+            ? selectedDateStatusModuleIds.filter(id => id !== moduleId)
+            : [...selectedDateStatusModuleIds, moduleId];
+
+        updateCharacter(char.id, {
+            dateStatusBarEnabled: nextIds.length > 0,
+            dateStatusModuleIds: nextIds,
+            dateStatusTemplateId: undefined,
+        });
+    };
+
+    const handleSelectDateStatusWorkshop = (templateId: string) => {
+        updateCharacter(char.id, {
+            dateStatusBarEnabled: templateId ? true : isDateStatusEnabled,
+            dateStatusTemplateId: templateId || undefined,
+            dateStatusModuleIds: templateId ? [] : DEFAULT_DATE_STATUS_MODULE_IDS,
+        });
+    };
 
     const handleAddCustomEmotion = () => {
         const key = newEmotionName.trim().toLowerCase().replace(/\s+/g, '_');
@@ -242,7 +301,7 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
 
     return (
         <div className="h-full w-full bg-slate-50 flex flex-col">
-            <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200 bg-white shrink-0 z-20">
+            <div className="sully-safe-topbar-compact h-16 flex items-center justify-between px-4 border-b border-slate-200 bg-white shrink-0 z-20">
                 <button onClick={onBack} className="p-2 -ml-2 text-slate-600 active:scale-95 transition-transform">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                 </button>
@@ -310,6 +369,87 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
                             className={`w-12 h-7 rounded-full transition-colors relative shrink-0 ${char.dateTimeAwarenessEnabled !== false ? 'bg-primary' : 'bg-slate-200'}`}
                         >
                             <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform ${char.dateTimeAwarenessEnabled !== false ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
+                        </button>
+                    </div>
+                </section>
+
+                <section className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <h3 className="text-xs font-bold text-slate-400 uppercase">线下状态栏</h3>
+                            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">见面回复后随主 API 生成本轮状态。内置状态栏可多选，工坊方案仍可单独使用。</p>
+                        </div>
+                        <button
+                            onClick={handleToggleDateStatusBar}
+                            className={`w-12 h-7 rounded-full transition-colors relative shrink-0 ${char.dateStatusBarEnabled === true ? 'bg-primary' : 'bg-slate-200'}`}
+                        >
+                            <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform ${char.dateStatusBarEnabled === true ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
+                        </button>
+                    </div>
+
+                    <div className="mt-4 space-y-4">
+                        <div>
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                                <label className="text-[11px] font-bold text-slate-500">内置状态栏多选</label>
+                                <span className="text-[10px] text-slate-400">已选 {selectedDateStatusModuleIds.length} 个状态栏</span>
+                            </div>
+                            <div className="grid grid-cols-1 gap-2">
+                                {DATE_STATUS_MODULE_REGISTRY.map(module => {
+                                    const selected = selectedDateStatusModuleIdSet.has(module.id);
+                                    return (
+                                        <button
+                                            key={module.id}
+                                            type="button"
+                                            onClick={() => handleToggleDateStatusModule(module.id)}
+                                            className={`w-full rounded-xl border px-3 py-2.5 text-left transition-all active:scale-[0.99] ${
+                                                selected
+                                                    ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                                                    : 'border-slate-100 bg-slate-50 text-slate-600 hover:border-slate-200 hover:bg-white'
+                                            }`}
+                                        >
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${selected ? 'border-white bg-white text-slate-900' : 'border-slate-300 bg-white text-transparent'}`}>
+                                                            ✓
+                                                        </span>
+                                                        <span className="text-xs font-bold">{module.name}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {dateStatusWorkshopOptions.length > 0 && (
+                            <div>
+                                <label className="mb-2 block text-[11px] font-bold text-slate-500">状态栏工坊方案</label>
+                                <select
+                                    value={selectedWorkshopTemplateId}
+                                    onChange={e => handleSelectDateStatusWorkshop(e.target.value)}
+                                    className="w-full rounded-xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:ring-1 focus:ring-primary/30"
+                                >
+                                    <option value="">不使用工坊方案</option>
+                                    {dateStatusWorkshopOptions.map(option => (
+                                        <option key={option.id} value={option.id}>{option.name}</option>
+                                    ))}
+                                </select>
+                                <p className="mt-2 text-[10px] leading-relaxed text-slate-400">工坊模板带独立正则和 HTML，目前单独使用；选择工坊后会关闭内置状态栏多选。</p>
+                            </div>
+                        )}
+
+                        <div className="rounded-xl bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-500">
+                            当前：<span className="font-bold text-slate-700">{isDateStatusEnabled ? (activeDateStatusTemplate?.name || '未命名状态栏') : '默认不生成状态栏'}</span>
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={() => openApp(AppID.StatusWorkshop)}
+                            className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white active:scale-95 transition-all"
+                        >
+                            打开状态栏工坊
                         </button>
                     </div>
                 </section>

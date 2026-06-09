@@ -166,12 +166,15 @@
 /* ── Archive Header ── */
 
 .traj-archive-header {
+    --traj-active-top-inset: var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem));
     position: relative;
     z-index: 20;
     display: flex;
     align-items: center;
-    padding: 16px 20px;
+    min-height: calc(var(--traj-active-top-inset) + 3.5rem);
+    padding: var(--traj-active-top-inset) 20px 16px;
     gap: 14px;
+    box-sizing: border-box;
     background: linear-gradient(180deg, rgba(9, 11, 16, 0.97) 0%, rgba(9, 11, 16, 0.75) 100%);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);

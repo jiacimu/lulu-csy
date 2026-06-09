@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     ArrowCounterClockwise,
     BookOpenText,
@@ -62,6 +62,9 @@ interface SetupDraft {
     opening: string;
     customPrompt: string;
 }
+
+type SetupDraftField = Exclude<keyof SetupDraft, 'charId'>;
+type SetupTouchedState = Partial<Record<SetupDraftField, boolean>>;
 
 type DialogueSide = 'left' | 'right' | 'none';
 type DialogueKind = 'narrator' | 'user' | 'character';
@@ -142,22 +145,74 @@ function resolveCharacter(characters: CharacterProfile[], charId: string): Chara
     return characters.find(char => char.id === charId) || characters[0] || null;
 }
 
-function buildWorldBible(draft: SetupDraft, baseWorld?: NianNianWorldBible | null): NianNianWorldBible {
+function cloneRecord<T extends Record<string, any>>(value: T | undefined): T | undefined {
+    return value ? JSON.parse(JSON.stringify(value)) as T : undefined;
+}
+
+function buildSeedStatus(
+    seedStatus: Record<string, any> | undefined,
+    draft: SetupDraft,
+    touched: SetupTouchedState,
+): Record<string, any> | undefined {
+    const next = cloneRecord(seedStatus);
+    if (!next) return undefined;
+
+    if (touched.protagonistIdentity) {
+        next.me = { ...(next.me || {}) };
+        const identity = draft.protagonistIdentity.trim();
+        if (identity) {
+            next.me.身份 = identity;
+        } else {
+            delete next.me.身份;
+        }
+    }
+
+    if (touched.opening) {
+        const opening = draft.opening.trim();
+        if (opening) {
+            next.scene = { 情境: opening };
+        } else {
+            delete next.scene;
+        }
+    }
+
+    return next;
+}
+
+function resolveSetupField(
+    draft: SetupDraft,
+    touched: SetupTouchedState,
+    field: SetupDraftField,
+    fallback = '',
+): string {
+    const value = draft[field].trim();
+    return touched[field] ? value : value || fallback;
+}
+
+function buildWorldBible(
+    draft: SetupDraft,
+    baseWorld?: NianNianWorldBible | null,
+    touched: SetupTouchedState = {},
+): NianNianWorldBible {
     const fallbackWorld = baseWorld || createEmptyWorldBible();
+    const openingTouched = Boolean(touched.opening);
+    const opening = resolveSetupField(draft, touched, 'opening', fallbackWorld.opening);
     return {
         ...createEmptyWorldBible(),
         ...fallbackWorld,
-        theme: draft.theme.trim() || fallbackWorld.theme,
-        tone: draft.tone.trim() || fallbackWorld.tone,
-        charIdentity: draft.charIdentity.trim() || fallbackWorld.charIdentity,
-        protagonistIdentity: draft.protagonistIdentity.trim() || fallbackWorld.protagonistIdentity,
-        opening: draft.opening.trim() || fallbackWorld.opening,
-        customPrompt: draft.customPrompt.trim() || fallbackWorld.customPrompt,
+        theme: resolveSetupField(draft, touched, 'theme', fallbackWorld.theme),
+        tone: resolveSetupField(draft, touched, 'tone', fallbackWorld.tone),
+        charIdentity: resolveSetupField(draft, touched, 'charIdentity', fallbackWorld.charIdentity),
+        protagonistIdentity: resolveSetupField(draft, touched, 'protagonistIdentity', fallbackWorld.protagonistIdentity),
+        opening,
+        customPrompt: draft.customPrompt.trim(),
         statusSchema: fallbackWorld.statusSchema || [],
         eventWeights: fallbackWorld.eventWeights || {},
         worldStyle: fallbackWorld.worldStyle,
-        seedStatus: fallbackWorld.seedStatus,
-        openingStep: fallbackWorld.openingStep,
+        seedStatus: buildSeedStatus(fallbackWorld.seedStatus, draft, touched),
+        openingStep: openingTouched
+            ? undefined
+            : fallbackWorld.openingStep,
         hiddenVarsSeed: fallbackWorld.hiddenVarsSeed,
     };
 }
@@ -306,9 +361,10 @@ function buildPlaybackUnits(session: NianNianSession): PlaybackUnit[] {
         if (units.length > 0) return units;
     }
 
-    pushDisplayItems(session.currentStep.id, [
-        buildNarratorItem(session.currentStep.sceneText || session.world.opening || 'TODO(人工)：开场情境待填写。'),
-    ]);
+    const fallbackOpening = session.currentStep.sceneText || session.world.opening;
+    if (fallbackOpening.trim()) {
+        pushDisplayItems(session.currentStep.id, [buildNarratorItem(fallbackOpening)]);
+    }
     return units.length > 0 ? units : [{
         key: 'empty',
         kind: 'narrator',
@@ -536,6 +592,8 @@ const NianNianApp: React.FC = () => {
     const [sessions, setSessions] = useState<NianNianSession[]>([]);
     const [session, setSession] = useState<NianNianSession | null>(null);
     const [setupDraft, setSetupDraft] = useState<SetupDraft>(() => makeSetupDraft(activeCharacterId, userName));
+    const [setupTouched, setSetupTouched] = useState<SetupTouchedState>({});
+    const setupTouchedRef = useRef<SetupTouchedState>({});
     const [inputBeats, setInputBeats] = useState<Array<NianNianInputBeat & { id: string }>>(() => [
         createInputBeat('speech'),
         createInputBeat('action'),
@@ -559,6 +617,13 @@ const NianNianApp: React.FC = () => {
     const sessionCharacter = session ? resolveCharacter(characters, session.charId) : null;
     const sendableBeats = useMemo(() => sanitizeNianNianInputBeats(inputBeats), [inputBeats]);
 
+    const updateSetupField = (field: SetupDraftField, value: string) => {
+        const nextTouched = { ...setupTouchedRef.current, [field]: true };
+        setupTouchedRef.current = nextTouched;
+        setSetupTouched(nextTouched);
+        setSetupDraft(prev => ({ ...prev, [field]: value }));
+    };
+
     useEffect(() => {
         let cancelled = false;
         const loadWorldPackage = async () => {
@@ -568,14 +633,14 @@ const NianNianApp: React.FC = () => {
                 setWorldPackage(world);
                 setSetupDraft(prev => ({
                     ...prev,
-                    theme: prev.theme || world.theme,
-                    tone: prev.tone || world.tone,
-                    charIdentity: prev.charIdentity || world.charIdentity,
+                    theme: setupTouchedRef.current.theme ? prev.theme : prev.theme || world.theme,
+                    tone: setupTouchedRef.current.tone ? prev.tone : prev.tone || world.tone,
+                    charIdentity: setupTouchedRef.current.charIdentity ? prev.charIdentity : prev.charIdentity || world.charIdentity,
                     protagonistIdentity:
-                        prev.protagonistIdentity && prev.protagonistIdentity !== userName
+                        setupTouchedRef.current.protagonistIdentity
                             ? prev.protagonistIdentity
                             : world.protagonistIdentity || prev.protagonistIdentity,
-                    opening: prev.opening || world.opening,
+                    opening: setupTouchedRef.current.opening ? prev.opening : prev.opening || world.opening,
                 }));
             } catch (err) {
                 if (!cancelled) console.warn('[NianNian] failed to load world package', err);
@@ -586,7 +651,7 @@ const NianNianApp: React.FC = () => {
         return () => {
             cancelled = true;
         };
-    }, [userName]);
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -624,6 +689,11 @@ const NianNianApp: React.FC = () => {
         () => session ? buildPlaybackUnits(session) : [],
         [session],
     );
+    const shouldShowFreeOpeningInput = Boolean(
+        session
+        && session.currentStep.options.length === 0
+        && playbackUnits.every(unit => !unit.text.trim()),
+    );
     const historyEntries = useMemo(
         () => session ? buildHistoryEntries(session) : [],
         [session],
@@ -635,10 +705,10 @@ const NianNianApp: React.FC = () => {
 
     useEffect(() => {
         setPlaybackIndex(0);
-        setPhase('dialogue');
+        setPhase(shouldShowFreeOpeningInput ? 'choice' : 'dialogue');
         setChoiceReviewOpen(false);
         setActiveHistoryEntryKey(null);
-    }, [playbackSignature]);
+    }, [playbackSignature, shouldShowFreeOpeningInput]);
 
     const lastDialogueIndex = Math.max(0, playbackUnits.length - 1);
     const currentUnit = playbackUnits[Math.min(playbackIndex, lastDialogueIndex)];
@@ -740,13 +810,15 @@ const NianNianApp: React.FC = () => {
             charId: char.id,
             charName: char.name,
             userName,
-            world: buildWorldBible(setupDraft, worldPackage),
+            world: buildWorldBible(setupDraft, worldPackage, setupTouched),
         });
+        const shouldStartAtChoice = !nextSession.currentStep.sceneText.trim()
+            && nextSession.currentStep.options.length === 0;
         setStatusExpanded(false);
         setActiveFatePageKey(null);
         setHistoryOpen(false);
         setActiveHistoryEntryKey(null);
-        setPhase('dialogue');
+        setPhase(shouldStartAtChoice ? 'choice' : 'dialogue');
         setChoiceReviewOpen(false);
         setTurnError(null);
         await persistSession(nextSession);
@@ -1006,6 +1078,8 @@ const NianNianApp: React.FC = () => {
         setPhase('dialogue');
         setChoiceReviewOpen(false);
         setTurnError(null);
+        setupTouchedRef.current = {};
+        setSetupTouched({});
         setSetupDraft(makeSetupDraft(activeCharacterId, userName));
     };
 
@@ -1072,7 +1146,7 @@ const NianNianApp: React.FC = () => {
                             <BookOpenText size={18} weight="bold" />
                             <div>
                                 <h1>副本初始化</h1>
-                                <p>世界包、开场和状态种子会在这里装入。</p>
+                                <p>世界包会预填设定；你修改或清空后，会以你的版本为准。</p>
                             </div>
                         </div>
 
@@ -1091,30 +1165,30 @@ const NianNianApp: React.FC = () => {
                         <div className="nn-setup-grid">
                             <label>
                                 <span>题材 theme</span>
-                                <input value={setupDraft.theme} onChange={event => setSetupDraft(prev => ({ ...prev, theme: event.target.value }))} placeholder="TODO(人工)" />
+                                <input value={setupDraft.theme} onChange={event => updateSetupField('theme', event.target.value)} placeholder="古代、现代、仙侠、民国..." />
                             </label>
                             <label>
                                 <span>基调 tone</span>
-                                <input value={setupDraft.tone} onChange={event => setSetupDraft(prev => ({ ...prev, tone: event.target.value }))} placeholder="TODO(人工)" />
+                                <input value={setupDraft.tone} onChange={event => updateSetupField('tone', event.target.value)} placeholder="慢热、克制、甜虐、悬疑..." />
                             </label>
                             <label>
-                                <span>角色前世身份</span>
-                                <input value={setupDraft.charIdentity} onChange={event => setSetupDraft(prev => ({ ...prev, charIdentity: event.target.value }))} placeholder="TODO(人工)" />
+                                <span>角色身份</span>
+                                <input value={setupDraft.charIdentity} onChange={event => updateSetupField('charIdentity', event.target.value)} placeholder="清空后由模型按角色本人人设生成" />
                             </label>
                             <label>
                                 <span>主角身份</span>
-                                <input value={setupDraft.protagonistIdentity} onChange={event => setSetupDraft(prev => ({ ...prev, protagonistIdentity: event.target.value }))} placeholder="TODO(人工)" />
+                                <input value={setupDraft.protagonistIdentity} onChange={event => updateSetupField('protagonistIdentity', event.target.value)} placeholder="清空后由模型在剧情里自然补足" />
                             </label>
                         </div>
 
                         <label>
                             <span>开场情境</span>
-                            <textarea value={setupDraft.opening} onChange={event => setSetupDraft(prev => ({ ...prev, opening: event.target.value }))} placeholder="TODO(人工)：开场情境接口" />
+                            <textarea value={setupDraft.opening} onChange={event => updateSetupField('opening', event.target.value)} placeholder="清空后模型会按当前设定自然起笔" />
                         </label>
 
                         <label>
-                            <span>自定义提示词接口</span>
-                            <textarea value={setupDraft.customPrompt} onChange={event => setSetupDraft(prev => ({ ...prev, customPrompt: event.target.value }))} placeholder="TODO(人工)：主/副模型提示词由人工后续打磨" />
+                            <span>补充提示词（可选）</span>
+                            <textarea value={setupDraft.customPrompt} onChange={event => updateSetupField('customPrompt', event.target.value)} placeholder="额外规则、禁忌、关系边界或剧情偏好..." />
                         </label>
 
                         <button type="button" className="nn-primary-btn" onClick={handleStartSession}>

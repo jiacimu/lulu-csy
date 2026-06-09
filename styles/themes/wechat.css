@@ -6,10 +6,9 @@
 /* ===== WeChat Header Proportion ===== */
 .theme-default .sully-chat-header {
     height: auto !important;
-    min-height: 44px !important;
+    min-height: calc(var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem)) + 44px) !important;
     max-height: none !important;
-    padding: 0 16px !important;
-    padding-top: 40px !important;
+    padding: var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem)) 16px 0 !important;
     background: #ededed !important;
     border-bottom: 0.5px solid rgba(0, 0, 0, 0.08) !important;
     box-shadow: none !important;

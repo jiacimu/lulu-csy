@@ -7,6 +7,12 @@ import { processImage } from '../utils/file';
 import { Capacitor } from '@capacitor/core';
 import { Directory,Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import {
+    APPEARANCE_FONT_SCALE_DEFAULT,
+    APPEARANCE_FONT_SCALE_MAX,
+    APPEARANCE_FONT_SCALE_MIN,
+    APPEARANCE_SYSTEM_TEXT_COLOR_DEFAULT,
+} from '../utils/appearancePresets';
 
 interface PresetManagerProps {
     presets: AppearancePreset[];
@@ -34,6 +40,20 @@ const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve,
     reader.onerror = () => reject(reader.error || new Error('文件读取失败'));
     reader.readAsDataURL(file);
 });
+
+const FONT_SCALE_PRESETS = [
+    { label: '小', value: 0.95 },
+    { label: '默认', value: APPEARANCE_FONT_SCALE_DEFAULT },
+    { label: '大', value: 1.08 },
+    { label: '特大', value: 1.16 },
+];
+
+const SYSTEM_TEXT_COLOR_PRESETS = [
+    { label: '默认', value: APPEARANCE_SYSTEM_TEXT_COLOR_DEFAULT },
+    { label: '墨色', value: '#111827' },
+    { label: '雾灰', value: '#475569' },
+    { label: '柔白', value: '#F8FAFC' },
+];
 
 const extractInputEffectAssetFromCode = (source: string): string => {
     const text = source.trim();
@@ -279,6 +299,8 @@ const Appearance: React.FC = () => {
   const [showPresetPicker, setShowPresetPicker] = useState(false);
 
   const decorations = theme.desktopDecorations || [];
+  const currentFontScale = theme.fontScale ?? APPEARANCE_FONT_SCALE_DEFAULT;
+  const currentSystemTextColor = theme.systemTextColor || APPEARANCE_SYSTEM_TEXT_COLOR_DEFAULT;
 
   // Preset decoration SVGs (cute decorative elements)
   const PRESET_DECOS: { name: string; content: string; category: string }[] = [
@@ -489,7 +511,7 @@ const Appearance: React.FC = () => {
 
   return (
     <div className="h-full w-full bg-slate-50 flex flex-col font-light">
-      <div className="h-20 bg-white/70 backdrop-blur-md flex items-end pb-3 px-4 border-b border-white/40 shrink-0 z-10 sticky top-0">
+      <div className="sully-safe-topbar h-20 bg-white/70 backdrop-blur-md flex items-end pb-3 px-4 border-b border-white/40 shrink-0 z-10 sticky top-0">
         <div className="flex items-center gap-2 w-full">
             <button onClick={closeApp} className="p-2 -ml-2 rounded-full hover:bg-black/5 active:scale-90 transition-transform">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-slate-600">
@@ -546,7 +568,7 @@ const Appearance: React.FC = () => {
                         </div>
                         <div>
                             <div className="flex justify-between text-xs text-slate-500 mb-2 font-medium">
-                                <span>Text/Widget Color</span>
+                                <span>桌面文字/小组件颜色</span>
                             </div>
                             <div className="flex gap-4 items-center bg-slate-50 p-2 rounded-xl border border-slate-100">
                                 <div 
@@ -626,6 +648,84 @@ const Appearance: React.FC = () => {
                     {theme.customFont && (
                         <button onClick={() => updateTheme({ customFont: undefined })} className="w-full py-2 text-xs font-bold text-red-400 bg-red-50 rounded-lg hover:bg-red-100 mt-2">恢复默认字体</button>
                     )}
+
+                    <div className="mt-5 border-t border-slate-100 pt-5 space-y-5">
+                        <div>
+                            <div className="flex justify-between text-xs text-slate-500 mb-2 font-medium">
+                                <span>全局字号</span>
+                                <span className="font-mono">{Math.round(currentFontScale * 100)}%</span>
+                            </div>
+                            <div className="grid grid-cols-4 gap-2 mb-3">
+                                {FONT_SCALE_PRESETS.map(preset => (
+                                    <button
+                                        key={preset.label}
+                                        type="button"
+                                        aria-label={`字号 ${preset.label}`}
+                                        aria-pressed={Math.abs(currentFontScale - preset.value) < 0.01}
+                                        onClick={() => updateTheme({ fontScale: preset.value })}
+                                        className={`py-2 rounded-xl text-xs font-bold border transition-all active:scale-95 ${Math.abs(currentFontScale - preset.value) < 0.01 ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-500 border-slate-200'}`}
+                                    >
+                                        {preset.label}
+                                    </button>
+                                ))}
+                            </div>
+                            <input
+                                aria-label="全局字号微调"
+                                type="range"
+                                min={APPEARANCE_FONT_SCALE_MIN}
+                                max={APPEARANCE_FONT_SCALE_MAX}
+                                step="0.01"
+                                value={currentFontScale}
+                                onChange={(e) => updateTheme({ fontScale: parseFloat(e.target.value) })}
+                                className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-primary"
+                            />
+                        </div>
+
+                        <div>
+                            <div className="flex justify-between text-xs text-slate-500 mb-2 font-medium">
+                                <span>系统文字颜色</span>
+                                <span className="font-mono">{currentSystemTextColor}</span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3 bg-slate-50 p-2 rounded-xl border border-slate-100">
+                                {SYSTEM_TEXT_COLOR_PRESETS.map(preset => (
+                                    <button
+                                        key={preset.label}
+                                        type="button"
+                                        aria-label={`系统文字颜色 ${preset.label}`}
+                                        aria-pressed={currentSystemTextColor.toLowerCase() === preset.value.toLowerCase()}
+                                        onClick={() => updateTheme({ systemTextColor: preset.value })}
+                                        className={`flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition-all active:scale-95 ${currentSystemTextColor.toLowerCase() === preset.value.toLowerCase() ? 'border-primary bg-white text-primary shadow-sm' : 'border-slate-200 bg-white text-slate-500'}`}
+                                    >
+                                        <span className="h-4 w-4 rounded-full border border-black/10 shadow-sm" style={{ backgroundColor: preset.value }} />
+                                        {preset.label}
+                                    </button>
+                                ))}
+                                <div className="h-6 w-px bg-slate-200" />
+                                <input
+                                    aria-label="自定义系统文字颜色"
+                                    type="color"
+                                    value={currentSystemTextColor}
+                                    onChange={(e) => updateTheme({ systemTextColor: e.target.value })}
+                                    className="w-8 h-8 rounded-lg border-none cursor-pointer bg-transparent p-0"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => updateTheme({ systemTextColor: APPEARANCE_SYSTEM_TEXT_COLOR_DEFAULT })}
+                                    className="ml-auto px-3 py-1.5 rounded-lg bg-white text-slate-400 text-[10px] font-bold border border-slate-200 active:scale-95 transition-all"
+                                >
+                                    重置文字颜色
+                                </button>
+                            </div>
+                        </div>
+
+                        <div
+                            className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3"
+                            style={{ color: currentSystemTextColor, fontSize: `calc(14px * ${currentFontScale})` }}
+                        >
+                            <div className="font-bold leading-snug">SullyOS 字体预览</div>
+                            <div className="mt-1 opacity-70 leading-relaxed">系统通用文字会随这里微调，聊天气泡和特色卡片保留自己的主题。</div>
+                        </div>
+                    </div>
                 </section>
 
                 {/* Status Bar Toggle */}

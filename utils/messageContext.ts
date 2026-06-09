@@ -130,6 +130,10 @@ export function isStatusEcosystemMessage(message: ContextMessage): boolean {
     const metadata = message.metadata || {};
     const source = String(metadata.source || '');
 
+    if (source === 'date' && metadata.hasDateStatusCard === true) {
+        return false;
+    }
+
     return STATUS_ECOSYSTEM_TYPES.has(type)
         || STATUS_ECOSYSTEM_SOURCES.has(source)
         || typeof metadata.innerVoice === 'string'
@@ -164,7 +168,7 @@ function looksLikeImageReplyContent(value: string | undefined): boolean {
     return !!value && IMAGE_REPLY_CONTENT_RE.test(value.trim());
 }
 
-function formatReplyPrefix(message: ContextMessage): string {
+function formatReplyPrefix(message: ContextMessage, options: FormatMessageContextOptions): string {
     const reply = message.replyTo;
     if (!reply?.content) return '';
     const isImageReply = reply.type === 'image'
@@ -176,7 +180,10 @@ function formatReplyPrefix(message: ContextMessage): string {
         : reply.content;
     const replyName = compactText(reply.name || '对方');
     const replyContent = truncateInline(content, 80);
-    return `引用回复上下文：这条消息正在回复${replyName}的消息「${replyContent}」。本条消息正文：`;
+    const whose = replyName === compactText(options.charName || '')
+        ? '你之前说的'
+        : (replyName === '我' ? '自己说的' : `${replyName}说的`);
+    return `引用回复上下文：\n[用户引用了${whose}「${replyContent}」，并针对这句话回复 ↓]\n本条消息正文：`;
 }
 
 function formatTransfer(message: ContextMessage, options: FormatMessageContextOptions): string {
@@ -380,7 +387,7 @@ function getEmojiContextName(message: ContextMessage, options: FormatMessageCont
 function formatMessageBody(message: ContextMessage, options: FormatMessageContextOptions): string | null {
     const type = String(message.type || 'text');
     const maxContentChars = options.maxContentChars ?? (options.surface === 'chat' ? undefined : DEFAULT_CONTENT_LIMIT);
-    const replyPrefix = formatReplyPrefix(message);
+    const replyPrefix = formatReplyPrefix(message, options);
 
     if (isDateContextBridgeMessage(message)) {
         const source = String(message.metadata?.source || '');

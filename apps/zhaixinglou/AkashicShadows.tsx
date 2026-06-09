@@ -417,7 +417,7 @@ const AkashicShadows: React.FC<Props> = ({
                 }} />
 
                 {/* ═══ TOP ZONE: Header + Oracle Panel ═══ */}
-                <div className="relative z-30 pt-12 pb-2 px-6 flex items-center shrink-0">
+                <div className="sully-safe-overlay-top relative z-30 pt-12 pb-2 px-6 flex items-center shrink-0">
                     <button
                         onClick={handleExit}
                         className="p-2 -ml-2 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-[#c0c8d8] border border-[#c0c8d8]/20 bg-black/30 backdrop-blur-md"

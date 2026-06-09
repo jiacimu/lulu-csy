@@ -294,7 +294,7 @@ const HotNewsApp: React.FC = () => {
 
     return (
         <div className="absolute inset-0 flex h-full w-full flex-col overflow-hidden bg-[#f6f1e8] text-stone-900">
-            <header className="shrink-0 border-b border-stone-300 bg-[#f6f1e8]/95 px-4 pb-3 pt-12 backdrop-blur">
+            <header className="sully-safe-overlay-top shrink-0 border-b border-stone-300 bg-[#f6f1e8]/95 px-4 pb-3 pt-12 backdrop-blur">
                 <div className="flex items-center gap-3">
                     <button
                         type="button"

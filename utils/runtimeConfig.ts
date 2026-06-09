@@ -410,7 +410,9 @@ function normalizeString(value: unknown): string {
 export function getOpenAICompatibleStyleFamily(
     config: Pick<OpenAICompatibleImageProviderConfig, 'baseUrl' | 'model'> | null | undefined,
 ): OpenAICompatibleStyleFamily {
-    const source = `${String(config?.baseUrl || '')} ${String(config?.model || '')}`.toLowerCase();
+    const rawModel = normalizeString(config?.model);
+    const bareModel = rawModel.split(/[/:]/).filter(Boolean).pop() || rawModel;
+    const source = `${String(config?.baseUrl || '')} ${bareModel}`.toLowerCase();
     return /gemini|generativelanguage|googleapis|nano[-_\s]?banana|imagen/.test(source) ? 'gemini' : 'gpt';
 }
 

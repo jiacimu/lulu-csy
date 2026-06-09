@@ -333,7 +333,7 @@ CRITICAL: Stay in character. If there's conversation context, your comment shoul
     const renderDetail = () => selectedImage && (
         <div className="flex flex-col h-full bg-black relative animate-fade-in">
             {/* Header */}
-            <div className="absolute top-0 left-0 w-full p-4 flex justify-between items-start z-50 pointer-events-none">
+            <div className="sully-safe-floating-top absolute top-0 left-0 w-full p-4 flex justify-between items-start z-50 pointer-events-none">
                 <button onClick={() => setView('grid')} className="text-white bg-black/40 backdrop-blur-md p-2 rounded-full pointer-events-auto active:scale-95 transition-transform hover:bg-black/60 border border-white/10">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                 </button>
@@ -430,7 +430,7 @@ CRITICAL: Stay in character. If there's conversation context, your comment shoul
 
             {/* Header */}
             {view !== 'detail' && (
-                <div className="h-16 bg-white/80 backdrop-blur-xl flex items-center px-4 border-b border-slate-100/60 shrink-0 z-10 sticky top-0">
+                <div className="sully-safe-topbar-compact h-16 bg-white/80 backdrop-blur-xl flex items-center px-4 border-b border-slate-100/60 shrink-0 z-10 sticky top-0">
                     <button onClick={handleBack} className="p-2 -ml-2 rounded-full hover:bg-black/5 active:scale-90 transition-transform">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-slate-600"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                     </button>

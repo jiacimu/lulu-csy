@@ -54,6 +54,18 @@ interface DirectExtractOptions {
     userInitiated?: boolean;
 }
 
+export type DirectExtractionResult = {
+    status: 'complete' | 'busy' | 'empty' | 'failed';
+    count: number;
+    error?: string;
+};
+
+function toDirectExtractionError(error: unknown): string {
+    if (error instanceof Error && error.message) return error.message;
+    if (typeof error === 'string' && error.trim()) return error;
+    return '未知错误';
+}
+
 function normalizeProvidedExtractionMessages(messages: Message[]): Message[] {
     return messages
         .filter(message => (
@@ -325,13 +337,13 @@ export const VectorMemoryExtractor = {
         embeddingApiKey: string,
         subApiConfig?: { baseUrl: string; model: string; apiKey: string },
         options: DirectExtractOptions = {},
-    ): Promise<number> {
+    ): Promise<DirectExtractionResult> {
         const sourceMessages = normalizeProvidedExtractionMessages(messages);
-        if (sourceMessages.length === 0) return 0;
+        if (sourceMessages.length === 0) return { status: 'empty', count: 0 };
 
         if (hasExtractionLock(charId)) {
             console.log('🧠 [VectorExtract] Direct extract skipped: already extracting for', charId);
-            return 0;
+            return { status: 'busy', count: 0 };
         }
         acquireExtractionLock(charId);
 
@@ -379,7 +391,11 @@ export const VectorMemoryExtractor = {
             }
 
             console.log(`🧠 [VectorExtract] Direct extract complete: ${ids.length} memories affected`);
-            return ids.length;
+            return { status: 'complete', count: ids.length };
+        } catch (error) {
+            const message = toDirectExtractionError(error);
+            console.error('🧠 [VectorExtract] Direct extract failed:', error);
+            return { status: 'failed', count: 0, error: message };
         } finally {
             releaseExtractionLock(charId);
         }

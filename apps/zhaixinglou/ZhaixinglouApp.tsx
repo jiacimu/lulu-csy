@@ -225,7 +225,7 @@ const ZhaixinglouApp: React.FC = () => {
             return (
                 <>
                     {/* Header */}
-                    <div className={`pt-12 pb-4 px-6 flex items-center justify-between shrink-0 h-24 z-30 transition-all duration-700 ${flippingCardId ? 'opacity-0 -translate-y-4 pointer-events-none' : 'opacity-100'}`}>
+                    <div className={`sully-safe-topbar-spacious pt-12 pb-4 px-6 flex items-center justify-between shrink-0 h-24 z-30 transition-all duration-700 ${flippingCardId ? 'opacity-0 -translate-y-4 pointer-events-none' : 'opacity-100'}`}>
                         <button onClick={closeApp} className="p-2 -ml-2 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-[#d4af37] border border-[#d4af37]/30 bg-black/30 backdrop-blur-md">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                         </button>

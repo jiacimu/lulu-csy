@@ -1,5 +1,8 @@
 let hasInstalledIOSStandaloneWorkaround = false;
 let stableStandaloneHeight = 0;
+let lastStandaloneState: boolean | null = null;
+
+export const IOS_STANDALONE_CHANGE_EVENT = 'sully:ios-standalone-change';
 
 type NavigatorWithStandalone = Navigator & { standalone?: boolean };
 type CapacitorGlobal = {
@@ -54,6 +57,26 @@ export function isIOSStandaloneWebApp(): boolean {
   return isIOSDevice() && (isStandaloneDisplayMode() || isCapacitorIOS());
 }
 
+export function isIOSStandaloneBrowserWebApp(): boolean {
+  return isIOSDevice() && isStandaloneDisplayMode() && !isCapacitorIOS();
+}
+
+function syncIOSStandaloneState(): boolean {
+  const useStandaloneFixes = isIOSStandaloneWebApp();
+  document.documentElement.classList.toggle('ios-standalone', useStandaloneFixes);
+  document.body?.classList.toggle('ios-standalone', useStandaloneFixes);
+  document.documentElement.dataset.iosStandalone = useStandaloneFixes ? 'true' : 'false';
+
+  if (lastStandaloneState !== useStandaloneFixes) {
+    lastStandaloneState = useStandaloneFixes;
+    window.dispatchEvent(new CustomEvent(IOS_STANDALONE_CHANGE_EVENT, {
+      detail: { isStandalone: useStandaloneFixes },
+    }));
+  }
+
+  return useStandaloneFixes;
+}
+
 function isTextEntryElement(target: EventTarget | null): target is HTMLElement {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
@@ -63,34 +86,46 @@ function isTextEntryElement(target: EventTarget | null): target is HTMLElement {
 function setViewportVars(): void {
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
 
-  const shouldStabilizeHeight = isIOSStandaloneWebApp();
+  const shouldStabilizeHeight = syncIOSStandaloneState();
   const innerHeight = Math.round(window.innerHeight);
   const viewportHeight = Math.round(window.visualViewport?.height || innerHeight);
   const viewportOffsetTop = Math.round(window.visualViewport?.offsetTop || 0);
-  const bottomSafeInset = shouldStabilizeHeight ? readSafeAreaInset('bottom') : 0;
+  const layoutViewportHeight = Math.round(document.documentElement.clientHeight || 0);
+  const topSafeInset = readSafeAreaInset('top');
+  const bottomSafeInset = readSafeAreaInset('bottom');
+  const standaloneBottomSafeInset = shouldStabilizeHeight ? bottomSafeInset : 0;
   const obscuredHeight = Math.max(0, innerHeight - viewportHeight - viewportOffsetTop);
   const keyboardInset = obscuredHeight > 120 ? obscuredHeight : 0;
-  const nextViewportHeight = Math.max(innerHeight, viewportHeight + viewportOffsetTop);
+  const nextViewportHeight = Math.max(innerHeight, layoutViewportHeight, viewportHeight + viewportOffsetTop);
+  const nextAppHeight = shouldStabilizeHeight
+    ? nextViewportHeight + standaloneBottomSafeInset
+    : nextViewportHeight;
 
   if (shouldStabilizeHeight) {
     if (!keyboardInset || !stableStandaloneHeight) {
-      stableStandaloneHeight = nextViewportHeight;
+      stableStandaloneHeight = Math.max(stableStandaloneHeight, nextAppHeight);
     }
   } else {
     stableStandaloneHeight = 0;
   }
 
   const appHeight = shouldStabilizeHeight
-    ? (stableStandaloneHeight || nextViewportHeight)
-    : nextViewportHeight;
-  const fullAppHeight = shouldStabilizeHeight
-    ? appHeight + bottomSafeInset
-    : appHeight;
-
-  document.documentElement.style.setProperty('--app-height', `${fullAppHeight}px`);
+    ? (stableStandaloneHeight || nextAppHeight)
+    : nextAppHeight;
+  document.documentElement.style.setProperty('--app-height', `${appHeight}px`);
   document.documentElement.style.setProperty('--visual-viewport-height', `${viewportHeight}px`);
   document.documentElement.style.setProperty('--keyboard-inset', `${keyboardInset}px`);
-  document.documentElement.style.setProperty('--standalone-safe-area-bottom', `${bottomSafeInset}px`);
+  document.documentElement.style.setProperty('--standalone-safe-area-bottom', `${standaloneBottomSafeInset}px`);
+  document.documentElement.style.setProperty('--hardware-safe-top', `${topSafeInset}px`);
+  document.documentElement.style.setProperty('--hardware-safe-bottom', `${bottomSafeInset}px`);
+
+  if (shouldStabilizeHeight) {
+    document.documentElement.style.setProperty('--safe-top', `${topSafeInset}px`);
+    document.documentElement.style.setProperty('--safe-bottom', `${bottomSafeInset}px`);
+  } else {
+    document.documentElement.style.removeProperty('--safe-top');
+    document.documentElement.style.removeProperty('--safe-bottom');
+  }
 }
 
 export function installIOSStandaloneWorkaround(): void {
@@ -98,17 +133,13 @@ export function installIOSStandaloneWorkaround(): void {
   if (hasInstalledIOSStandaloneWorkaround) return;
 
   hasInstalledIOSStandaloneWorkaround = true;
-  const useStandaloneFixes = isIOSStandaloneWebApp();
-  if (useStandaloneFixes) {
-    document.documentElement.classList.add('ios-standalone');
-    document.body?.classList.add('ios-standalone');
-  }
 
   const handleViewportChange = () => {
     setViewportVars();
   };
 
   const handleFocusIn = (event: FocusEvent) => {
+    if (!isIOSStandaloneWebApp()) return;
     if (!isTextEntryElement(event.target)) return;
     document.body?.classList.add('ios-keyboard-open');
     setViewportVars();
@@ -128,7 +159,7 @@ export function installIOSStandaloneWorkaround(): void {
 
   const handleFocusOut = () => {
     window.setTimeout(() => {
-      if (!isTextEntryElement(document.activeElement)) {
+      if (!isIOSStandaloneWebApp() || !isTextEntryElement(document.activeElement)) {
         document.body?.classList.remove('ios-keyboard-open');
       }
       setViewportVars();
@@ -136,13 +167,21 @@ export function installIOSStandaloneWorkaround(): void {
   };
 
   window.addEventListener('resize', handleViewportChange);
+  window.addEventListener('orientationchange', handleViewportChange);
+  window.addEventListener('pageshow', handleViewportChange);
+  document.addEventListener('visibilitychange', handleViewportChange);
   window.visualViewport?.addEventListener('resize', handleViewportChange);
   window.visualViewport?.addEventListener('scroll', handleViewportChange);
 
-  if (useStandaloneFixes) {
-    document.addEventListener('focusin', handleFocusIn);
-    document.addEventListener('focusout', handleFocusOut);
-  }
+  const standaloneQuery = window.matchMedia?.('(display-mode: standalone)');
+  const fullscreenQuery = window.matchMedia?.('(display-mode: fullscreen)');
+  [standaloneQuery, fullscreenQuery].forEach(query => {
+    query?.addEventListener?.('change', handleViewportChange);
+    query?.addListener?.(handleViewportChange);
+  });
+
+  document.addEventListener('focusin', handleFocusIn);
+  document.addEventListener('focusout', handleFocusOut);
 
   setViewportVars();
 }

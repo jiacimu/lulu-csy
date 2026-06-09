@@ -78,6 +78,7 @@ vi.mock('../utils/eventExtractor', () => ({
 
 vi.mock('../utils/thinkingExtractor', () => ({
     extractThinking: vi.fn((content: string) => ({ thinking: '', content })),
+    selectThinkingForDisplay: vi.fn((projectThinking?: string, nativeThinking?: string) => projectThinking || nativeThinking || undefined),
     safeThinkingFallbackReply: vi.fn(() => 'fallback'),
 }));
 
@@ -319,6 +320,70 @@ describe('useChatAI context loading', () => {
             role: 'assistant',
             type: 'text',
             content: '我的错，一时嘴快。',
+            replyTo: {
+                id: 7,
+                content: '你刚刚叫我什么？',
+                name: 'Tester',
+            },
+        }));
+    });
+
+    it('resolves bilingual quote targets from translated quote candidates', async () => {
+        const quotedUserMessage = makeMessage(7, '你刚刚叫我什么？');
+        mockedDB.getRecentMessagesByCharId.mockResolvedValueOnce([quotedUserMessage]);
+        mockedSafeFetchJson.mockResolvedValueOnce({
+            choices: [{
+                message: {
+                    content: [
+                        '[[QUOTE: <翻译><原文>What did you just call me?</原文><译文>你刚刚叫我什么？</译文></翻译>]]',
+                        '<翻译><原文>Sorry, I blurted it out.</原文><译文>抱歉，我刚才嘴快了。</译文></翻译>',
+                    ].join('\n'),
+                },
+            }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+        } as any);
+
+        const char = {
+            id: 'char-1',
+            name: 'Sully',
+            avatar: '',
+            description: '',
+            systemPrompt: '',
+            memories: [],
+            contextLimit: 777,
+            statusBarMode: 'off',
+        } as CharacterProfile;
+
+        const { result } = renderHook(() => useChatAI({
+            char,
+            userProfile: { name: 'Tester', avatar: '' } as any,
+            apiConfig: {
+                baseUrl: 'https://example.test',
+                apiKey: 'sk-test',
+                model: 'test-model',
+                disablePrefill: true,
+            },
+            translationConfig: {
+                enabled: true,
+                sourceLang: 'English',
+                targetLang: '中文',
+            },
+            groups: [],
+            emojis: [],
+            categories: [],
+            addToast: vi.fn(),
+            setMessages: vi.fn(),
+        }));
+
+        await act(async () => {
+            await result.current.triggerAI([quotedUserMessage]);
+        });
+
+        expect(mockedDB.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
+            charId: 'char-1',
+            role: 'assistant',
+            type: 'text',
+            content: 'Sorry, I blurted it out.\n%%BILINGUAL%%\n抱歉，我刚才嘴快了。',
             replyTo: {
                 id: 7,
                 content: '你刚刚叫我什么？',

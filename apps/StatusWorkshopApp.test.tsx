@@ -296,6 +296,15 @@ describe('StatusWorkshopApp workflow', () => {
         expect(screen.queryByText(/旧版正则模式/)).not.toBeInTheDocument();
     });
 
+    it('can opt a new template into regex capture mode', () => {
+        renderWorkshop(createTemplate());
+
+        fireEvent.click(screen.getByText('启用正则捕获'));
+
+        expect(screen.getByText('旧版正则模式兼容设置')).toBeInTheDocument();
+        expect(screen.getByDisplayValue('<status>\\s*([\\s\\S]*?)\\s*<\\/status>')).toBeInTheDocument();
+    });
+
     it('shows legacy extractRegex inside a compatibility panel', () => {
         renderWorkshop(createTemplate({
             extractRegex: 'old regex',

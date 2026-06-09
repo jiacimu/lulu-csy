@@ -948,7 +948,7 @@ ${attachedImagesNote}
     if (view === 'list') {
         return (
             <div className="h-full w-full bg-slate-50 flex flex-col font-light">
-                <div className="h-20 bg-white/70 backdrop-blur-md flex items-end pb-3 px-4 border-b border-white/40 shrink-0 z-10 sticky top-0">
+                <div className="sully-safe-topbar h-20 bg-white/70 backdrop-blur-md flex items-end pb-3 px-4 border-b border-white/40 shrink-0 z-10 sticky top-0">
                     <button onClick={closeApp} className="p-2 -ml-2 rounded-full hover:bg-black/5 active:scale-90 transition-transform">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-slate-600"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                     </button>
@@ -1017,7 +1017,7 @@ ${attachedImagesNote}
     return (
         <div className="h-full w-full bg-[#f0f4f8] flex flex-col font-sans relative">
             {/* Header */}
-            <div className="h-24 bg-white/80 backdrop-blur-xl px-5 flex items-end pb-4 border-b border-slate-200/60 shrink-0 z-30 sticky top-0 shadow-sm transition-all">
+            <div className="sully-safe-topbar-spacious h-24 bg-white/80 backdrop-blur-xl px-5 flex items-end pb-4 border-b border-slate-200/60 shrink-0 z-30 sticky top-0 shadow-sm transition-all">
                 {selectionMode ? (
                     <div className="flex items-center justify-between w-full">
                         <button onClick={() => { setSelectionMode(false); setSelectedMsgIds(new Set()); }} className="text-sm font-bold text-slate-500 px-2 py-1">取消</button>

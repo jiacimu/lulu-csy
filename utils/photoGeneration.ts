@@ -1074,20 +1074,7 @@ function logPhotoResponse(label: string, response: Response, text: string, conte
 }
 
 function normalizeOpenAICompatibleModelId(value: unknown): string {
-    const raw = String(value || '').trim();
-    if (!raw) return '';
-    const displayDelimiterParts = raw.split(/\s+\/\s+/).map(part => part.trim()).filter(Boolean);
-    if (displayDelimiterParts.length > 1) {
-        return displayDelimiterParts[displayDelimiterParts.length - 1];
-    }
-    const slashIndex = raw.lastIndexOf('/');
-    if (slashIndex > 0 && slashIndex < raw.length - 1) {
-        const prefix = raw.slice(0, slashIndex);
-        const suffix = raw.slice(slashIndex + 1).trim();
-        const prefixLooksLikeDisplay = /[\u4e00-\u9fff【】￥¥$]|\[[^\]]+\]|\([^)]+\)|价格|元|米/.test(prefix);
-        if (prefixLooksLikeDisplay && suffix) return suffix;
-    }
-    return raw;
+    return String(value || '').trim();
 }
 
 function normalizeOpenAICompatibleModelOption(item: any): OpenAICompatibleModelOption | null {

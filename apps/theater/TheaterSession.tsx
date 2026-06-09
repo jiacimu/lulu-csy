@@ -822,7 +822,7 @@ const TheaterSession: React.FC<TheaterSessionProps> = ({
             )}
 
             {/* Top Bar — minimal */}
-            <div className="relative z-50 flex items-center justify-between px-4 pt-12 pb-3 shrink-0" onClick={e => e.stopPropagation()}>
+            <div className="sully-safe-overlay-top relative z-50 flex items-center justify-between px-4 pt-12 pb-3 shrink-0" onClick={e => e.stopPropagation()}>
                 <button onClick={() => setShowExitModal(true)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="rgba(255,255,255,0.6)" width={16} height={16}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />

@@ -1,15 +1,20 @@
-import { AppearancePreset,OSTheme } from '../types';
+import { AppearancePreset,ChatTheme,OSTheme } from '../types';
 import { loadJSZip } from './lazyThirdParty';
 
 export const APPEARANCE_PRESET_ASSET_PREFIX = 'appearance_preset_';
 export const APPEARANCE_PRESET_FILE_TYPE = 'sully_appearance_preset';
 export const APPEARANCE_PRESET_VERSION = 1;
+export const APPEARANCE_FONT_SCALE_DEFAULT = 1;
+export const APPEARANCE_FONT_SCALE_MIN = 0.9;
+export const APPEARANCE_FONT_SCALE_MAX = 1.2;
+export const APPEARANCE_SYSTEM_TEXT_COLOR_DEFAULT = '#334155';
 
 const WIDGET_ASSET_PREFIX = 'widget_';
 const DECORATION_ASSET_PREFIX = 'deco_';
 const ICON_ASSET_PREFIX = 'icon_';
 const INPUT_EFFECT_ASSET_ID = 'input_effect_asset';
-const ALLOWED_WIDGET_SLOTS = new Set(['tl', 'tr', 'wide']);
+const ALLOWED_WIDGET_SLOTS = new Set(['tl', 'tr', 'wide', 'dsq']);
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 type AssetRecord = { id: string; data: string };
 
@@ -17,6 +22,17 @@ export interface AppearanceAssetStore {
     getAllAssets: () => Promise<AssetRecord[]>;
     saveAsset: (id: string, data: string) => Promise<void>;
     deleteAsset: (id: string) => Promise<void>;
+}
+
+export function sanitizeAppearanceFontScale(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+    return Math.min(Math.max(value, APPEARANCE_FONT_SCALE_MIN), APPEARANCE_FONT_SCALE_MAX);
+}
+
+export function sanitizeAppearanceTextColor(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const color = value.trim();
+    return HEX_COLOR_RE.test(color) ? color : undefined;
 }
 
 export function sanitizeAppearanceTheme(theme: OSTheme): OSTheme {
@@ -29,6 +45,8 @@ export function sanitizeAppearanceTheme(theme: OSTheme): OSTheme {
     next.darkMode = next.darkMode === true;
     if (next.contentColor !== undefined && typeof next.contentColor !== 'string') next.contentColor = undefined;
     if (next.customFont !== undefined && typeof next.customFont !== 'string') next.customFont = undefined;
+    if (next.fontScale !== undefined) next.fontScale = sanitizeAppearanceFontScale(next.fontScale);
+    if (next.systemTextColor !== undefined) next.systemTextColor = sanitizeAppearanceTextColor(next.systemTextColor);
     if (next.inputEffectEnabled !== undefined && typeof next.inputEffectEnabled !== 'boolean') next.inputEffectEnabled = undefined;
     if (next.inputEffectAsset !== undefined && typeof next.inputEffectAsset !== 'string') next.inputEffectAsset = undefined;
     if (next.inputEffectScale !== undefined) {
@@ -121,13 +139,21 @@ export function stripAppearanceThemeForLocalStorage(theme: OSTheme): OSTheme {
     return lsTheme;
 }
 
-export function createAppearancePreset(name: string, theme: OSTheme, customIcons: Record<string, string>): AppearancePreset {
+export function createAppearancePreset(
+    name: string,
+    theme: OSTheme,
+    customIcons: Record<string, string>,
+    customThemes: ChatTheme[] = [],
+): AppearancePreset {
+    const chatThemes = normalizeAppearanceChatThemes(customThemes);
+
     return {
         id: `ap_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         name,
         createdAt: Date.now(),
         theme: sanitizeAppearanceTheme(theme),
         customIcons: Object.keys(customIcons).length > 0 ? { ...customIcons } : undefined,
+        chatThemes,
     };
 }
 
@@ -179,6 +205,8 @@ export async function importAppearancePresetFromFile(file: File): Promise<Appear
         createdAt: Date.now(),
         theme: raw.theme,
         customIcons: raw.customIcons,
+        chatThemes: raw.chatThemes,
+        chatLayout: raw.chatLayout,
     });
 }
 
@@ -250,13 +278,48 @@ function normalizeAppearancePreset(raw: any): AppearancePreset {
         }
     }
 
+    const chatThemes = normalizeAppearanceChatThemes(raw.chatThemes);
+    const chatLayout = normalizeAppearanceCompatRecord(raw.chatLayout);
+
     return {
         id: typeof raw.id === 'string' && raw.id ? raw.id : `ap_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : '未命名预设',
         createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
         theme: sanitizeAppearanceTheme(raw.theme as OSTheme),
         customIcons: Object.keys(customIcons).length > 0 ? customIcons : undefined,
+        chatThemes,
+        chatLayout,
     };
+}
+
+function normalizeAppearanceChatThemes(value: unknown): ChatTheme[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+
+    const themes: ChatTheme[] = [];
+    for (const item of value) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+
+        const theme = item as Partial<ChatTheme>;
+        const id = typeof theme.id === 'string' ? theme.id.trim() : '';
+        const name = typeof theme.name === 'string' ? theme.name.trim() : '';
+        if (!id || !name) continue;
+        if (theme.type !== 'preset' && theme.type !== 'custom') continue;
+        if (!theme.user || typeof theme.user !== 'object' || Array.isArray(theme.user)) continue;
+        if (!theme.ai || typeof theme.ai !== 'object' || Array.isArray(theme.ai)) continue;
+
+        themes.push({
+            ...(theme as ChatTheme),
+            id,
+            name,
+        });
+    }
+
+    return themes.length > 0 ? themes : undefined;
+}
+
+function normalizeAppearanceCompatRecord(value: unknown): Record<string, unknown> | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    return { ...(value as Record<string, unknown>) };
 }
 
 async function readAppearancePresetPayload(file: File): Promise<any> {

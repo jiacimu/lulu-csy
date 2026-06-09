@@ -94,7 +94,7 @@ const HotSearchApp: React.FC = () => {
     return (
         <div className="h-full w-full flex flex-col font-sans animate-fade-in relative overflow-hidden bg-white absolute inset-0 text-black pb-[env(safe-area-inset-bottom)]">
             {/* Header - Weibo Orange Gradient */}
-            <div className="flex-none bg-gradient-to-tr from-[#fe8c00] via-[#f83600] to-[#fe8c00] pt-12 shadow-sm z-20 sticky top-0">
+            <div className="sully-safe-overlay-top flex-none bg-gradient-to-tr from-[#fe8c00] via-[#f83600] to-[#fe8c00] pt-12 shadow-sm z-20 sticky top-0">
                 <div className="flex items-center justify-between pb-4 px-3">
                     <button
                         onClick={closeApp}

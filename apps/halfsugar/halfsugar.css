@@ -55,6 +55,7 @@
 /* ── Base Container ── */
 .hs-app {
     font-family: -apple-system, 'SF Pro Display', 'SF Pro Text', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+    --hs-safe-top: var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem));
     background: var(--hs-bg);
     color: var(--hs-text);
     -webkit-font-smoothing: antialiased;
@@ -95,8 +96,8 @@
 
 /* ── Header — iOS Navigation Bar ── */
 .hs-header {
-    min-height: 56px;
-    padding: 12px 20px;
+    min-height: calc(var(--hs-safe-top) + 56px);
+    padding: var(--hs-safe-top) 20px 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;

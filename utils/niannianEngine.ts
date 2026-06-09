@@ -185,11 +185,8 @@ export function createInitialNianNianStatus(world: NianNianWorldBible): NianNian
 export function createFallbackInteractionStep(now = Date.now()): NianNianInteractionStep {
     return {
         id: createNianNianId('nn_step'),
-        sceneText: 'TODO(人工)：天意事件落地文本待生成。',
-        options: [
-            { id: 'todo-option-1', label: 'TODO(人工)：节点选项一' },
-            { id: 'todo-option-2', label: 'TODO(人工)：节点选项二' },
-        ],
+        sceneText: '',
+        options: [],
         allowFreeInput: true,
         createdAt: now,
         source: 'fallback',
@@ -198,25 +195,37 @@ export function createFallbackInteractionStep(now = Date.now()): NianNianInterac
 
 function createOpeningInteractionStep(world: NianNianWorldBible, now = Date.now()): NianNianInteractionStep {
     const openingStep = world.openingStep;
-    if (!openingStep?.sceneText?.trim()) {
-        return createFallbackInteractionStep(now);
+    if (openingStep?.sceneText?.trim()) {
+        return {
+            id: createNianNianId('nn_opening_step'),
+            sceneText: openingStep.sceneText.trim(),
+            options: (openingStep.options || [])
+                .filter(option => option && option.id && option.label)
+                .map(option => ({
+                    id: option.id,
+                    label: option.label,
+                    hint: option.hint,
+                    directorHint: option.directorHint,
+                })),
+            allowFreeInput: openingStep.allowFreeInput ?? true,
+            createdAt: now,
+            source: 'manual',
+        };
     }
 
-    return {
-        id: createNianNianId('nn_opening_step'),
-        sceneText: openingStep.sceneText.trim(),
-        options: (openingStep.options || [])
-            .filter(option => option && option.id && option.label)
-            .map(option => ({
-                id: option.id,
-                label: option.label,
-                hint: option.hint,
-                directorHint: option.directorHint,
-            })),
-        allowFreeInput: openingStep.allowFreeInput ?? true,
-        createdAt: now,
-        source: 'manual',
-    };
+    const opening = world.opening?.trim();
+    if (opening) {
+        return {
+            id: createNianNianId('nn_opening_step'),
+            sceneText: opening,
+            options: [],
+            allowFreeInput: true,
+            createdAt: now,
+            source: 'manual',
+        };
+    }
+
+    return createFallbackInteractionStep(now);
 }
 
 export function createNianNianSession(input: {
@@ -1069,7 +1078,7 @@ function buildStructuredContext(session: NianNianSession, extra: Record<string, 
         formatRawBufferForPrompt(session),
         '',
         '【本回合场景+玩家输入】',
-        `当前旁白: ${session.currentStep.sceneText || session.world.opening || '（暂无）'}`,
+        `当前旁白: ${session.currentStep.sceneText || session.world.opening || '（未指定；请根据本局题材、基调、角色与玩家输入自然起笔）'}`,
         userInput ? `玩家输入:\n${userInput}` : '玩家输入: （本次未提供）',
         selectedOption?.directorHint ? `<director_note>${selectedOption.directorHint}</director_note>` : '',
         latestAssistant ? `TA刚才的反应:\n${latestAssistant.content}` : 'TA刚才的反应: （暂无）',

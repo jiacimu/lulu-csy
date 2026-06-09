@@ -19,7 +19,7 @@ describe('StatusBar', () => {
     } as any);
   });
 
-  it('renders below the top safe area', () => {
+  it('renders as an overlay below the top safe area without reserving layout height', () => {
     render(
       <VirtualTimeProvider>
         <StatusBar />
@@ -28,7 +28,8 @@ describe('StatusBar', () => {
 
     const statusBar = screen.getByTestId('system-status-bar');
 
-    expect(statusBar.style.paddingTop).toBe('calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 8px)');
-    expect(statusBar.style.minHeight).toBe('calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 2rem)');
+    expect(statusBar.style.paddingTop).toBe('var(--system-status-top, 8px)');
+    expect(statusBar.style.height).toBe('0px');
+    expect(statusBar.style.minHeight).toBe('');
   });
 });

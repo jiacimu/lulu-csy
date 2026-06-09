@@ -267,7 +267,9 @@ describe('ChatParser', () => {
 
         expect(ChatParser.sanitize('引用回复上下文：这条消息正在回复初时峙的消息「你刚刚叫我什么？」。本条消息正文：我的错，一时嘴快。')).toBe('我的错，一时嘴快。');
         expect(ChatParser.sanitize('这条消息正在回复初时峙的消息「你刚刚叫我什么？」。本条消息正文：我的错。')).toBe('我的错。');
+        expect(ChatParser.sanitize('引用回复上下文：\n[用户引用了你之前说的「你刚刚叫我什么？」，并针对这句话回复 ↓]\n本条消息正文：我的错。')).toBe('我的错。');
         expect(ChatParser.hasDisplayContent('引用回复上下文：这条消息正在回复初时峙的消息「你刚刚叫我什么？」。本条消息正文：')).toBe(false);
+        expect(ChatParser.hasDisplayContent('引用回复上下文：\n[用户引用了你之前说的「你刚刚叫我什么？」，并针对这句话回复 ↓]\n本条消息正文：')).toBe(false);
     });
 
     it('keeps chat control markers while normalising escaped formatting', () => {

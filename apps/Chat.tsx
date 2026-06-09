@@ -4984,7 +4984,7 @@ const Chat: React.FC = () => {
             />
 
             {!selectionMode && todayScheduleFeatureEnabled && !isTodayScheduleEntryHidden && (
-                <div className="pointer-events-none absolute right-3 top-[calc(6rem+0.75rem)] z-20 flex justify-end">
+                <div className="pointer-events-none absolute right-3 top-[calc(var(--sully-chat-header-height,6rem)+0.75rem)] z-20 flex justify-end">
                     <div className="font-schedule-serif pointer-events-auto inline-flex max-w-[82vw] items-center gap-1 overflow-hidden rounded-full border border-[#eadfd2]/80 bg-[#fffaf2]/80 shadow-[0_10px_28px_rgba(80,62,44,0.08)] backdrop-blur-md">
                         <button
                             type="button"
@@ -5013,7 +5013,7 @@ const Chat: React.FC = () => {
             )}
 
             {!selectionMode && todayScheduleFeatureEnabled && isTodayScheduleEntryHidden && (
-                <div className="pointer-events-none absolute right-3 top-[calc(6rem+0.75rem)] z-20 flex justify-end">
+                <div className="pointer-events-none absolute right-3 top-[calc(var(--sully-chat-header-height,6rem)+0.75rem)] z-20 flex justify-end">
                     <button
                         type="button"
                         onClick={() => {

@@ -29,7 +29,7 @@ export const GothicHeader: React.FC<{
     /** 标题旁的小装饰图标 URL */
     decorIcon?: string;
 }> = ({ title, onBack, rightAction, decorIcon }) => (
-    <div className="pt-12 pb-3 px-5 flex items-center justify-between shrink-0 z-30 relative">
+    <div className="sully-safe-overlay-top pt-12 pb-3 px-5 flex items-center justify-between shrink-0 z-30 relative">
         {/* 左：返回按钮 */}
         <button
             onClick={onBack}

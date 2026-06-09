@@ -577,7 +577,7 @@ const ImageGenerationSettings: React.FC = () => {
                                 <input
                                     value={localConfig.openaiCompatible.model}
                                     onChange={e => updateOpenAICompatible('model', e.target.value)}
-                                    placeholder="gpt-image-2"
+                                    placeholder="openai/gpt-image-2"
                                     className="min-w-0 flex-1 bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono"
                                 />
                                 <button

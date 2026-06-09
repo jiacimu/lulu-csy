@@ -108,4 +108,72 @@ describe('date request context', () => {
         expect(context.map(item => item.sourceMessage.id)).toEqual([10, 12]);
         expect(context.map(item => item.content)).not.toContain('已经被总结压缩的旧原文');
     });
+
+    it('formats hidden Date photos as text summaries without leaking image data', () => {
+        const currentOpening = msg({
+            id: 20,
+            role: 'assistant',
+            content: '当前见面开场',
+            metadata: { source: 'date', isOpening: true },
+        });
+        const datePhoto = msg({
+            id: 21,
+            role: 'assistant',
+            type: 'image',
+            content: 'data:image/png;base64,very-large-original',
+            metadata: {
+                source: 'date_photo',
+                hiddenFromUser: true,
+                isDatePhoto: true,
+                sessionStartMsgId: 20,
+                caption: '给你看这张。',
+                visualSummary: '雨夜便利店门口，两个人共撑一把伞。',
+                photoMeta: {
+                    continuity_summary: '他们在雨夜靠得很近，伞沿滴水。',
+                },
+            },
+        });
+
+        const context = buildDateRequestContextMessages({
+            allMessages: [currentOpening, datePhoto],
+            currentSessionMessages: [currentOpening, datePhoto],
+            contextLimit: 500,
+        });
+
+        expect(context.map(item => item.sourceMessage.id)).toEqual([20, 21]);
+        expect(context[1]?.content).toContain('[见面照片]');
+        expect(context[1]?.content).toContain('雨夜便利店门口');
+        expect(context[1]?.content).not.toContain('data:image');
+    });
+
+    it('includes hidden Date photo failures as text context', () => {
+        const currentOpening = msg({
+            id: 30,
+            role: 'assistant',
+            content: '当前见面开场',
+            metadata: { source: 'date', isOpening: true },
+        });
+        const failedPhoto = msg({
+            id: 31,
+            role: 'system',
+            type: 'system',
+            content: '[见面照片发送失败]\n刚才尝试生成一张见面照片，但图片没有成功送达。',
+            metadata: {
+                source: 'date_photo_delivery_failed',
+                hiddenFromUser: true,
+                sessionStartMsgId: 30,
+                errorMessage: 'provider timeout',
+            },
+        });
+
+        const context = buildDateRequestContextMessages({
+            allMessages: [currentOpening, failedPhoto],
+            currentSessionMessages: [currentOpening, failedPhoto],
+            contextLimit: 500,
+        });
+
+        expect(context.map(item => item.sourceMessage.id)).toEqual([30, 31]);
+        expect(context[1]?.content).toContain('[见面照片失败]');
+        expect(context[1]?.content).toContain('provider timeout');
+    });
 });

@@ -1,6 +1,6 @@
 .dynamic-island {
     position: absolute;
-    top: max(8px, calc(var(--safe-top, env(safe-area-inset-top)) + 2px));
+    top: var(--system-status-top, 8px);
     left: 0;
     right: 0;
     margin-left: auto;

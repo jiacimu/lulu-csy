@@ -34,6 +34,8 @@ const theme: OSTheme = {
     wallpaper: 'linear-gradient(135deg, #fff, #eee)',
     darkMode: false,
     contentColor: '#ffffff',
+    fontScale: 1,
+    systemTextColor: '#334155',
     launcherWidgets: {},
     desktopDecorations: [],
 };
@@ -126,5 +128,28 @@ describe('Appearance presets UI', () => {
 
         fireEvent.click(screen.getByText('玻璃底'));
         expect(updateTheme).toHaveBeenCalledWith({ customIconFrame: true });
+    });
+
+    it('updates global font scale and system text color controls', () => {
+        const updateTheme = vi.fn();
+        const context = buildContext({ updateTheme });
+        mockedUseOS.mockReturnValue(context as any);
+
+        const { container } = render(<Appearance />);
+
+        fireEvent.click(container.querySelector('button[aria-label="字号 大"]') as HTMLButtonElement);
+        expect(updateTheme).toHaveBeenCalledWith({ fontScale: 1.08 });
+
+        fireEvent.change(container.querySelector('input[aria-label="全局字号微调"]') as HTMLInputElement, { target: { value: '1.12' } });
+        expect(updateTheme).toHaveBeenCalledWith({ fontScale: 1.12 });
+
+        fireEvent.click(container.querySelector('button[aria-label="系统文字颜色 墨色"]') as HTMLButtonElement);
+        expect(updateTheme).toHaveBeenCalledWith({ systemTextColor: '#111827' });
+
+        fireEvent.change(container.querySelector('input[aria-label="自定义系统文字颜色"]') as HTMLInputElement, { target: { value: '#475569' } });
+        expect(updateTheme).toHaveBeenCalledWith({ systemTextColor: '#475569' });
+
+        fireEvent.click(screen.getByText('重置文字颜色'));
+        expect(updateTheme).toHaveBeenCalledWith({ systemTextColor: '#334155' });
     });
 });

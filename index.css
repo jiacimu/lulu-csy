@@ -4817,6 +4817,8 @@
   --standalone-safe-area-bottom: 0px;
   /* Default fallback */
   --app-font: 'Quicksand', sans-serif;
+  --app-font-scale: 1;
+  --app-system-text: #334155;
 
   /* Card Design Tokens — overridable per theme */
   --card-bg: #ffffff;
@@ -4838,15 +4840,17 @@
 
   /* Smart Safe Area Variables */
   --hardware-safe-top: env(safe-area-inset-top, 0px);
+  --hardware-safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--standalone-safe-area-bottom, 0px));
+  --system-status-top: 8px;
 }
 
-/* When the app is in native HTML5 Fullscreen mode, ignore safe areas 
-   since the notch is handled natively or viewport is adjusted */
+/* In fullscreen/PWA/native shells, keep the hardware safe areas. Some Android
+   devices expose camera-island/notch insets even when the webview is edge-to-edge. */
 :fullscreen {
-  --safe-top: 0px !important;
-  --safe-bottom: 0px !important;
+  --safe-top: var(--hardware-safe-top, env(safe-area-inset-top, 0px)) !important;
+  --safe-bottom: var(--hardware-safe-bottom, env(safe-area-inset-bottom, 0px)) !important;
 }
 
 html,
@@ -4873,11 +4877,50 @@ body {
   /* iOS Fix */
   width: 100vw;
   font-family: var(--app-font);
+  color: var(--app-system-text);
+}
+
+.sully-system-text-scope {
+  color: var(--app-system-text);
+}
+
+.sully-system-text-scope :where(.text-slate-950, .text-slate-900, .text-slate-800, .text-slate-700) {
+  color: var(--app-system-text);
+}
+
+.sully-system-text-scope :where(.text-slate-600, .text-slate-500) {
+  color: color-mix(in oklab, var(--app-system-text) 72%, white);
+}
+
+.sully-system-text-scope :where(.text-slate-400, .text-slate-300) {
+  color: color-mix(in oklab, var(--app-system-text) 48%, white);
 }
 
 body.ios-standalone {
-  overscroll-behavior-y: auto;
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: auto;
+  left: 0;
+  overflow: hidden;
+  overscroll-behavior-y: none;
   overscroll-behavior-x: none;
+  width: 100%;
+  height: var(--app-height, 100dvh);
+  min-height: var(--app-height, 100dvh);
+}
+
+html.ios-standalone,
+html.ios-standalone #root {
+  overflow: hidden;
+  height: var(--app-height, 100dvh);
+  min-height: var(--app-height, 100dvh);
+}
+
+html.ios-standalone,
+html.ios-standalone body,
+html.ios-standalone #root {
+  background-color: #0f1115;
 }
 
 /* Global scroll behavior fix */
@@ -4955,6 +4998,54 @@ select:focus {
 /* Utility for Safe Area */
 .pb-safe {
   padding-bottom: var(--safe-bottom, env(safe-area-inset-bottom));
+}
+
+.sully-active-app-container > * {
+  box-sizing: border-box;
+  min-height: 100%;
+}
+
+.sully-safe-topbar,
+.sully-safe-topbar-compact,
+.sully-safe-topbar-spacious,
+.sully-safe-overlay-top,
+.sully-safe-floating-top {
+  --sully-resolved-app-top-inset: var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem));
+  box-sizing: border-box;
+}
+
+.sully-safe-topbar {
+  min-height: calc(var(--sully-resolved-app-top-inset) + 3.5rem);
+  padding-top: var(--sully-resolved-app-top-inset);
+}
+
+.sully-safe-topbar-compact {
+  min-height: calc(var(--sully-resolved-app-top-inset) + 2.75rem);
+  padding-top: var(--sully-resolved-app-top-inset);
+}
+
+.sully-safe-topbar-spacious {
+  min-height: calc(var(--sully-resolved-app-top-inset) + 4.75rem);
+  padding-top: var(--sully-resolved-app-top-inset);
+}
+
+.sully-safe-overlay-top {
+  padding-top: var(--sully-resolved-app-top-inset);
+}
+
+.sully-safe-floating-top {
+  padding-top: calc(var(--sully-resolved-app-top-inset) + 0.75rem);
+}
+
+.sully-chat-container {
+  --sully-chat-status-space: var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem));
+  --sully-chat-header-height: max(6rem, calc(var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem)) + 4rem));
+  --sully-chat-header-padding-top: max(2.5rem, var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem)));
+}
+
+.sully-chat-header {
+  min-height: var(--sully-chat-header-height);
+  padding-top: var(--sully-chat-header-padding-top);
 }
 
 .netease-profile-page {
