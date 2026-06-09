@@ -88,7 +88,7 @@ describe('iosStandalone viewport handling', () => {
     setIOSNavigator();
   });
 
-  it('fills the iOS standalone home indicator area instead of leaving browser background visible', async () => {
+  it('keeps iOS standalone app height inside the visible viewport while exposing safe area vars', async () => {
     setStandaloneDisplayMode(() => true);
     setViewport({ innerHeight: 812, visualHeight: 812, clientHeight: 812 });
     setSafeAreaInsets(47, 34);
@@ -98,7 +98,7 @@ describe('iosStandalone viewport handling', () => {
 
     expect(document.documentElement.classList.contains('ios-standalone')).toBe(true);
     expect(document.body.classList.contains('ios-standalone')).toBe(true);
-    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('846px');
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('812px');
     expect(document.documentElement.style.getPropertyValue('--standalone-safe-area-bottom')).toBe('34px');
     expect(document.documentElement.style.getPropertyValue('--safe-bottom')).toBe('34px');
   });
@@ -119,7 +119,7 @@ describe('iosStandalone viewport handling', () => {
     window.dispatchEvent(new Event('pageshow'));
 
     expect(document.documentElement.classList.contains('ios-standalone')).toBe(true);
-    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('846px');
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('812px');
   });
 
   it('does not shrink the full app canvas while the iOS keyboard changes visualViewport height', async () => {
@@ -129,12 +129,31 @@ describe('iosStandalone viewport handling', () => {
 
     const { installIOSStandaloneWorkaround } = await loadIOSStandaloneModule();
     installIOSStandaloneWorkaround();
-    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('846px');
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('812px');
 
     setViewport({ innerHeight: 812, visualHeight: 480, clientHeight: 812 });
     window.dispatchEvent(new Event('resize'));
 
     expect(document.documentElement.style.getPropertyValue('--keyboard-inset')).toBe('332px');
-    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('846px');
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('812px');
+  });
+
+  it('tracks the iOS keyboard state for regular browser text inputs', async () => {
+    setStandaloneDisplayMode(() => false);
+    setViewport({ innerHeight: 812, visualHeight: 812, clientHeight: 812 });
+    setSafeAreaInsets(47, 34);
+
+    const { installIOSStandaloneWorkaround } = await loadIOSStandaloneModule();
+    installIOSStandaloneWorkaround();
+    expect(document.body.classList.contains('ios-keyboard-open')).toBe(false);
+
+    setViewport({ innerHeight: 812, visualHeight: 500, clientHeight: 812 });
+    const textarea = document.createElement('textarea');
+    document.body.appendChild(textarea);
+    textarea.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+
+    expect(document.body.classList.contains('ios-keyboard-open')).toBe(true);
+    expect(document.documentElement.style.getPropertyValue('--keyboard-inset')).toBe('312px');
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('812px');
   });
 });

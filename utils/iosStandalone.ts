@@ -97,9 +97,7 @@ function setViewportVars(): void {
   const obscuredHeight = Math.max(0, innerHeight - viewportHeight - viewportOffsetTop);
   const keyboardInset = obscuredHeight > 120 ? obscuredHeight : 0;
   const nextViewportHeight = Math.max(innerHeight, layoutViewportHeight, viewportHeight + viewportOffsetTop);
-  const nextAppHeight = shouldStabilizeHeight
-    ? nextViewportHeight + standaloneBottomSafeInset
-    : nextViewportHeight;
+  const nextAppHeight = nextViewportHeight;
 
   if (shouldStabilizeHeight) {
     if (!keyboardInset || !stableStandaloneHeight) {
@@ -139,7 +137,7 @@ export function installIOSStandaloneWorkaround(): void {
   };
 
   const handleFocusIn = (event: FocusEvent) => {
-    if (!isIOSStandaloneWebApp()) return;
+    if (!isIOSDevice()) return;
     if (!isTextEntryElement(event.target)) return;
     document.body?.classList.add('ios-keyboard-open');
     setViewportVars();
@@ -159,7 +157,7 @@ export function installIOSStandaloneWorkaround(): void {
 
   const handleFocusOut = () => {
     window.setTimeout(() => {
-      if (!isIOSStandaloneWebApp() || !isTextEntryElement(document.activeElement)) {
+      if (!isIOSDevice() || !isTextEntryElement(document.activeElement)) {
         document.body?.classList.remove('ios-keyboard-open');
       }
       setViewportVars();

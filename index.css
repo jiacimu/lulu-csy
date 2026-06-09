@@ -5041,11 +5041,27 @@ select:focus {
   --sully-chat-status-space: var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem));
   --sully-chat-header-height: max(6rem, calc(var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem)) + 4rem));
   --sully-chat-header-padding-top: max(2.5rem, var(--active-app-top-inset, max(var(--hardware-safe-top, env(safe-area-inset-top, 0px)), 2.75rem)));
+  --sully-chat-keyboard-offset: 0px;
+}
+
+body.ios-keyboard-open .sully-chat-container {
+  --sully-chat-keyboard-offset: var(--keyboard-inset, 0px);
 }
 
 .sully-chat-header {
   min-height: var(--sully-chat-header-height);
   padding-top: var(--sully-chat-header-padding-top);
+}
+
+.sully-chat-messages {
+  padding-bottom: calc(1.5rem + var(--sully-chat-keyboard-offset, 0px));
+  scroll-padding-bottom: calc(1.5rem + var(--sully-chat-keyboard-offset, 0px));
+}
+
+.sully-chat-dock {
+  transform: translate3d(0, calc(-1 * var(--sully-chat-keyboard-offset, 0px)), 0);
+  transition: transform 180ms ease-out;
+  will-change: transform;
 }
 
 .netease-profile-page {

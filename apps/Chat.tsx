@@ -5041,7 +5041,7 @@ const Chat: React.FC = () => {
                 </React.Suspense>
             )}
 
-            <div ref={scrollRef} className="flex-1 overflow-y-auto pt-6 pb-6 no-scrollbar" style={{ backgroundImage: activeTheme.type === 'custom' && activeTheme.user.backgroundImage ? 'none' : undefined }}>
+            <div ref={scrollRef} className="sully-chat-messages flex-1 overflow-y-auto pt-6 pb-6 no-scrollbar" style={{ backgroundImage: activeTheme.type === 'custom' && activeTheme.user.backgroundImage ? 'none' : undefined }}>
                 {hasMoreHistory && (
                     <div className="flex justify-center mb-6">
                         <button onClick={async () => {
@@ -5173,7 +5173,7 @@ const Chat: React.FC = () => {
                 )}
             </div>
 
-            <div className="relative z-40">
+            <div className="sully-chat-dock relative z-40">
                 {pendingUserActionDraft && (
                     <div className="border-t border-white/70 bg-white/[0.82] px-3 py-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur-md">
                         <div className="mx-auto flex max-w-2xl flex-col gap-2">
