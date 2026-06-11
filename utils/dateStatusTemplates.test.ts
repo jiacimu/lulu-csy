@@ -62,7 +62,7 @@ const createMessage = (overrides: Partial<Message> = {}): Message => ({
 
 describe('dateStatusTemplates', () => {
     it('uses the default built-in template when nothing is selected', () => {
-        const template = resolveDateStatusTemplate(createCharacter());
+        const template = resolveDateStatusTemplate(createCharacter())!;
 
         expect(template.id).toBe(DEFAULT_DATE_STATUS_TEMPLATE_ID);
         expect(template.name).toBe('此幕');
@@ -78,7 +78,7 @@ describe('dateStatusTemplates', () => {
     });
 
     it('creates a combined template from selected built-in modules', () => {
-        const template = createDateStatusTemplateFromModuleIds(['scene_progress', 'player_condition']);
+        const template = createDateStatusTemplateFromModuleIds(['scene_progress', 'player_condition'])!;
 
         expect(template?.name).toBe('此幕 + 此身');
         expect(template?.fields?.some(field => field.name === '此幕-当前场景')).toBe(true);
@@ -104,7 +104,7 @@ describe('dateStatusTemplates', () => {
     });
 
     it('builds a main API inline instruction for status generation', () => {
-        const template = resolveDateStatusTemplate(createCharacter());
+        const template = resolveDateStatusTemplate(createCharacter())!;
         const instruction = buildDateStatusInlineInstruction(template);
 
         expect(instruction).toContain('先照常输出线下剧情正文');
@@ -117,20 +117,24 @@ describe('dateStatusTemplates', () => {
     it('keeps inactive built-in modules out of the main API inline instruction', () => {
         const template = resolveDateStatusTemplate(createCharacter({
             dateStatusModuleIds: ['scene_progress'],
-        }));
+        }))!;
         const instruction = buildDateStatusInlineInstruction(template);
 
         expect(instruction).toContain('此幕-当前场景');
         expect(instruction).toContain('此幕-场景目标');
+        expect(instruction).toContain('**【此幕】** 场景推进');
         expect(instruction).not.toContain('命途-当前弧线');
         expect(instruction).not.toContain('怦然-心动');
         expect(instruction).not.toContain('执笔-当前基调');
+        expect(instruction).not.toContain('skin=.');
+        expect(instruction).not.toContain('visibility=');
+        expect(instruction).not.toContain('id=scene_progress');
     });
 
     it('does not duplicate enabled field lists when a template already embeds its field protocol', () => {
         const template = resolveDateStatusTemplate(createCharacter({
             dateStatusModuleIds: ['clue_foreshadow', 'romance_affection'],
-        }));
+        }))!;
         const instruction = buildDateStatusInlineInstruction(template);
         const protocolMatches = instruction.match(/字段协议：/g) || [];
 
@@ -190,7 +194,7 @@ describe('dateStatusTemplates', () => {
     });
 
     it('renders built-in status cards with the v2 skin structure', () => {
-        const template = resolveDateStatusTemplate(createCharacter());
+        const template = resolveDateStatusTemplate(createCharacter())!;
 
         expect(template.htmlBody).toContain('class="date-registry__module play"');
         expect(template.htmlBody).toContain('<details class="bk">');
@@ -203,7 +207,7 @@ describe('dateStatusTemplates', () => {
     });
 
     it('extracts a status card from main API output and strips it from content', () => {
-        const template = resolveDateStatusTemplate(createCharacter());
+        const template = resolveDateStatusTemplate(createCharacter())!;
         const statusLines = (template.fields || []).map(field => (
             field.type === 'list'
                 ? `${field.name}:\n  - ${field.name}值1\n  - ${field.name}值2`
@@ -235,7 +239,7 @@ describe('dateStatusTemplates', () => {
     });
 
     it('rebuilds editable status cards from raw field text', () => {
-        const template = resolveDateStatusTemplate(createCharacter());
+        const template = resolveDateStatusTemplate(createCharacter())!;
         const rawStatus = '此幕-当前场景: 雨窗边\n此幕-场景目标: 慢慢靠近';
 
         const cardData = createDateStatusCardDataFromRaw(rawStatus, template);
@@ -246,7 +250,7 @@ describe('dateStatusTemplates', () => {
     });
 
     it('keeps the old field prefix parseable while rendering the new v2 prefix', () => {
-        const template = resolveDateStatusTemplate(createCharacter());
+        const template = resolveDateStatusTemplate(createCharacter())!;
         const rawStatus = '场景推进栏-当前场景: 雨窗边\n场景推进栏-场景目标: 慢慢靠近';
 
         const cardData = createDateStatusCardDataFromRaw(rawStatus, template);
@@ -258,7 +262,7 @@ describe('dateStatusTemplates', () => {
     });
 
     it('renders all ten v2 cards, folded kernels, flip card scripts, and numeric derived values', () => {
-        const template = createDateStatusTemplateFromModuleIds(DATE_STATUS_MODULE_REGISTRY.map(module => module.id));
+        const template = createDateStatusTemplateFromModuleIds(DATE_STATUS_MODULE_REGISTRY.map(module => module.id))!;
         expect(template).toBeTruthy();
 
         const statusLines = (template?.fields || []).map(field => {
@@ -297,7 +301,7 @@ describe('dateStatusTemplates', () => {
             'romance_affection',
             'event_trigger',
             'narrative_control',
-        ]);
+        ])!;
         const sample = `<status>
 【命途】
 命途-当前弧线: 查纵火真相 × 对嫌疑人动心
@@ -375,7 +379,7 @@ describe('dateStatusTemplates', () => {
         const template = resolveDateStatusTemplate(createCharacter({
             customStatusTemplates: [customTemplate],
             activeCustomTemplateId: customTemplate.id,
-        }));
+        }))!;
 
         expect(template.id).toBe(DEFAULT_DATE_STATUS_TEMPLATE_ID);
         expect(template).not.toBe(customTemplate);
@@ -386,7 +390,7 @@ describe('dateStatusTemplates', () => {
             customStatusTemplates: [customTemplate],
             activeCustomTemplateId: customTemplate.id,
             dateStatusModuleIds: ['scene_progress', 'player_condition'],
-        }));
+        }))!;
 
         expect(template?.name).toBe('此幕 + 此身');
         expect(template?.fields?.some(field => field.name === '此身-身份')).toBe(true);
@@ -395,7 +399,7 @@ describe('dateStatusTemplates', () => {
     it('falls back to the default when the selected workshop template was removed', () => {
         const template = resolveDateStatusTemplate(createCharacter({
             dateStatusTemplateId: 'missing-template',
-        }));
+        }))!;
 
         expect(template.id).toBe(DEFAULT_DATE_STATUS_TEMPLATE_ID);
     });
