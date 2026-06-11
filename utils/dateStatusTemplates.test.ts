@@ -107,9 +107,9 @@ describe('dateStatusTemplates', () => {
         const template = resolveDateStatusTemplate(createCharacter());
         const instruction = buildDateStatusInlineInstruction(template);
 
-        expect(instruction).toContain('你仍然要先正常输出线下剧情正文');
-        expect(instruction).toContain('可以参考【当前线下状态快照】');
-        expect(instruction).toContain('不要原样复制旧字段');
+        expect(instruction).toContain('先照常输出线下剧情正文');
+        expect(instruction).toContain('状态全部取材于本轮新互动与剧情上下文');
+        expect(instruction).toContain('不要照搬上一轮快照的旧字段、旧数值');
         expect(instruction).toContain('<status>');
         expect(instruction).toContain(template.fields?.[0].name);
     });
@@ -181,7 +181,7 @@ describe('dateStatusTemplates', () => {
         ]);
 
         expect(block).toContain('### 【当前线下状态快照】');
-        expect(block).toContain('不是用户输入，不是角色台词');
+        expect(block).toContain('不是用户输入、不是角色台词');
         expect(block).toContain('哪些禁忌写法需要遵守');
         expect(block).toContain('雨夜 · 窗边餐桌');
         expect(block).not.toContain('旧场景');
