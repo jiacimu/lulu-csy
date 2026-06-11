@@ -383,7 +383,7 @@ describe('iosStandalone viewport handling', () => {
     expect(document.documentElement.scrollTop).toBe(0);
   });
 
-  it('repairs stale restored viewport values on first interaction', async () => {
+  it('does not write stale smaller standalone restore heights before first interaction', async () => {
     setViewport({ innerHeight: 844, visualHeight: 844, clientHeight: 844 });
     setSafeAreaInsets(47, 34);
 
@@ -393,13 +393,30 @@ describe('iosStandalone viewport handling', () => {
     setViewport({ innerHeight: 780, visualHeight: 780, clientHeight: 780 });
     window.dispatchEvent(new Event('pageshow'));
     await vi.advanceTimersByTimeAsync(1300);
-    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('780px');
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('844px');
 
     setViewport({ innerHeight: 844, visualHeight: 844, clientHeight: 844 });
     dispatchFirstTouch();
 
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('844px');
     expect(document.documentElement.style.getPropertyValue('--visual-viewport-height')).toBe('844px');
+  });
+
+  it('does not apply the standalone restore height guard in regular browser mode', async () => {
+    setDisplayModes({ standalone: false });
+    setViewport({ innerHeight: 844, visualHeight: 844, clientHeight: 844 });
+    setSafeAreaInsets(47, 34);
+
+    const { installIOSStandaloneWorkaround } = await loadIOSStandaloneModule();
+    installIOSStandaloneWorkaround();
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('844px');
+
+    setViewport({ innerHeight: 780, visualHeight: 780, clientHeight: 780 });
+    window.dispatchEvent(new Event('pageshow'));
+    await vi.advanceTimersByTimeAsync(1300);
+
+    expect(document.documentElement.classList.contains('ios-standalone')).toBe(false);
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('780px');
   });
 
   it('clamps impossible standalone heights to the device long edge', async () => {

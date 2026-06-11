@@ -3,6 +3,7 @@ let stableStandaloneHeight = 0;
 let stableCandidate = 0;
 let stableCandidateAt = 0;
 let stableCandidateCount = 0;
+let lastStandaloneAppHeight = 0;
 let hasActiveTextEntry = false;
 let lastStandaloneState: boolean | null = null;
 let lastRestoreAt = Number.NEGATIVE_INFINITY;
@@ -266,17 +267,29 @@ function setViewportVars(): void {
     }
   } else {
     stableStandaloneHeight = 0;
+    lastStandaloneAppHeight = 0;
     resetStableCandidate();
   }
 
+  const standaloneAppHeight = stableStandaloneHeight || (isKeyboardOpen ? stableCandidate : 0) || layoutAppHeight;
+  const untrustedRestore = shouldStabilizeHeight && hasRestoreAnchor() && !viewportTrusted && !hasInteractionSinceRestore();
+  const guardedStandaloneAppHeight = untrustedRestore
+    && lastStandaloneAppHeight > 0
+    && standaloneAppHeight > 0
+    && standaloneAppHeight < lastStandaloneAppHeight
+    ? lastStandaloneAppHeight
+    : standaloneAppHeight;
   const appHeight = shouldStabilizeHeight
-    ? (stableStandaloneHeight || (isKeyboardOpen ? stableCandidate : 0) || layoutAppHeight)
+    ? guardedStandaloneAppHeight
     : layoutAppHeight;
 
   toggleClass(document.documentElement, 'keyboard-open', isKeyboardOpen);
   toggleClass(document.body, 'keyboard-open', isKeyboardOpen);
   toggleClass(document.body, 'ios-keyboard-open', isKeyboardOpen);
   setRootStyleProperty('--app-height', `${appHeight}px`);
+  if (shouldStabilizeHeight && appHeight > 0) {
+    lastStandaloneAppHeight = appHeight;
+  }
   setRootStyleProperty('--visual-viewport-height', `${viewportHeight}px`);
   setRootStyleProperty('--keyboard-inset', `${keyboardInset}px`);
   setRootStyleProperty('--standalone-safe-area-bottom', `${standaloneBottomSafeInset}px`);
@@ -372,6 +385,7 @@ export function installIOSStandaloneWorkaround(): void {
 
   const handleOrientationChange = () => {
     stableStandaloneHeight = 0;
+    lastStandaloneAppHeight = 0;
     resetStableCandidate();
     invalidateSafeAreaCache();
     scheduleSettle({ includeImmediate: false });
