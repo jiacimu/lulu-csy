@@ -55,7 +55,18 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
     const startYRef = useRef(0);
     const isRecordingRef = useRef(false);
     const isOverCancelRef = useRef(false);
+    const startInFlightRef = useRef(false);
+    const pendingFinishRef = useRef<boolean | null>(null);
     const stopGestureTrackingRef = useRef<(() => void) | null>(null);
+    const onVoiceMessageRef = useRef(onVoiceMessage);
+    const onStartRecordingRef = useRef(onStartRecording);
+    const onStopRecordingRef = useRef(onStopRecording);
+    const onCancelRecordingRef = useRef(onCancelRecording);
+
+    onVoiceMessageRef.current = onVoiceMessage;
+    onStartRecordingRef.current = onStartRecording;
+    onStopRecordingRef.current = onStopRecording;
+    onCancelRecordingRef.current = onCancelRecording;
 
     const formatDuration = (s: number) => {
         const min = Math.floor(s / 60);
@@ -84,21 +95,30 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
 
     const finishRecording = useCallback(async (forceCancel = false) => {
         if (!isRecordingRef.current) return;
-        isRecordingRef.current = false;
         stopGestureTracking();
+        const shouldCancel = forceCancel || isOverCancelRef.current;
 
-        if (forceCancel || isOverCancelRef.current) {
-            onCancelRecording();
+        if (startInFlightRef.current) {
+            pendingFinishRef.current = shouldCancel;
+            setCancelState(shouldCancel);
+            return;
+        }
+
+        isRecordingRef.current = false;
+        pendingFinishRef.current = null;
+
+        if (shouldCancel) {
+            onCancelRecordingRef.current();
             setCancelState(false);
             return;
         }
 
-        const result = await onStopRecording();
+        const result = await onStopRecordingRef.current();
         if (result && result.blob.size > 0) {
-            onVoiceMessage(result.blob, Math.max(1, result.duration));
+            onVoiceMessageRef.current(result.blob, Math.max(1, result.duration));
         }
         setCancelState(false);
-    }, [onCancelRecording, onStopRecording, onVoiceMessage, setCancelState, stopGestureTracking]);
+    }, [setCancelState, stopGestureTracking]);
 
     const startGestureTracking = useCallback(() => {
         if (typeof document === 'undefined') return;
@@ -160,18 +180,31 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
 
         // 同步标记开始，异步启动录音（不阻塞触摸事件）
         isRecordingRef.current = true;
-        onStartRecording().then(ok => {
+        startInFlightRef.current = true;
+        pendingFinishRef.current = null;
+        onStartRecordingRef.current().then(ok => {
+            startInFlightRef.current = false;
             if (!ok) {
                 isRecordingRef.current = false;
+                pendingFinishRef.current = null;
                 stopGestureTracking();
                 setCancelState(false);
+                return;
+            }
+
+            const queuedFinish = pendingFinishRef.current;
+            if (queuedFinish !== null) {
+                pendingFinishRef.current = null;
+                void finishRecording(queuedFinish);
             }
         }).catch(() => {
             isRecordingRef.current = false;
+            startInFlightRef.current = false;
+            pendingFinishRef.current = null;
             stopGestureTracking();
             setCancelState(false);
         });
-    }, [disabled, recorderState, onStartRecording, setCancelState, startGestureTracking, stopGestureTracking]);
+    }, [disabled, recorderState, finishRecording, setCancelState, startGestureTracking, stopGestureTracking]);
 
     const handlePointerMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
         if (!isRecordingRef.current) return;

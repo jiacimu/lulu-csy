@@ -20,6 +20,16 @@ function dispatchTouch(target: EventTarget, type: string, points: Touch[]) {
     target.dispatchEvent(event);
 }
 
+function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+    return { promise, resolve, reject };
+}
+
 function renderButton(overrides: Partial<ComponentProps<typeof VoiceRecordButton>> = {}) {
     const props: ComponentProps<typeof VoiceRecordButton> = {
         onVoiceMessage: vi.fn(),
@@ -49,7 +59,7 @@ describe('VoiceRecordButton', () => {
         dispatchTouch(document, 'touchend', [touchPoint(540)]);
 
         expect(props.onStartRecording).toHaveBeenCalledTimes(1);
-        expect(props.onCancelRecording).toHaveBeenCalledTimes(1);
+        await waitFor(() => expect(props.onCancelRecording).toHaveBeenCalledTimes(1));
         expect(props.onStopRecording).not.toHaveBeenCalled();
         expect(props.onVoiceMessage).not.toHaveBeenCalled();
     });
@@ -63,6 +73,23 @@ describe('VoiceRecordButton', () => {
         dispatchTouch(document, 'touchend', [touchPoint(590)]);
 
         expect(props.onCancelRecording).not.toHaveBeenCalled();
+        await waitFor(() => expect(props.onStopRecording).toHaveBeenCalledTimes(1));
+        expect(props.onVoiceMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('queues release until recording startup resolves', async () => {
+        const started = deferred<boolean>();
+        const { props } = renderButton({
+            onStartRecording: vi.fn(() => started.promise),
+        });
+        const button = screen.getByLabelText('按住说话');
+
+        dispatchTouch(button, 'touchstart', [touchPoint(620)]);
+        dispatchTouch(document, 'touchend', [touchPoint(620)]);
+
+        expect(props.onStopRecording).not.toHaveBeenCalled();
+        started.resolve(true);
+
         await waitFor(() => expect(props.onStopRecording).toHaveBeenCalledTimes(1));
         expect(props.onVoiceMessage).toHaveBeenCalledTimes(1);
     });

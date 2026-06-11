@@ -352,18 +352,22 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
 
     const stopRecording = useCallback((): Promise<{ blob: Blob; duration: number } | null> => {
         return new Promise((resolve) => {
-            if (!mediaRecorderRef.current || state !== 'recording') {
+            const recorder = mediaRecorderRef.current;
+            if (!recorder || recorder.state !== 'recording') {
                 resolve(null);
                 return;
             }
 
             resolveRef.current = resolve;
 
-            if (mediaRecorderRef.current.state === 'recording') {
-                mediaRecorderRef.current.stop();
+            try {
+                recorder.stop();
+            } catch {
+                resolveRef.current = null;
+                resolve(null);
             }
         });
-    }, [state]);
+    }, []);
 
     const cancelRecording = useCallback(() => {
         cancelledRef.current = true;

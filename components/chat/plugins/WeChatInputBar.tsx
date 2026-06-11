@@ -93,7 +93,25 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
     const gestureZoneRef = useRef<GestureZone>('send');
     const startYRef = useRef(0);
     const isRecordingRef = useRef(false);
+    const startInFlightRef = useRef(false);
+    const pendingFinishZoneRef = useRef<GestureZone | null>(null);
+    const stopGestureTrackingRef = useRef<(() => void) | null>(null);
+    const onVoiceMessageRef = useRef(onVoiceMessage);
+    const onStartRecordingRef = useRef(onStartRecording);
+    const onStopRecordingRef = useRef(onStopRecording);
+    const onCancelRecordingRef = useRef(onCancelRecording);
+    const sttConfigRef = useRef(sttConfig);
+    const addToastRef = useRef(addToast);
+    const setInputRef = useRef(setInput);
     const [isConverting, setIsConverting] = useState(false);
+
+    onVoiceMessageRef.current = onVoiceMessage;
+    onStartRecordingRef.current = onStartRecording;
+    onStopRecordingRef.current = onStopRecording;
+    onCancelRecordingRef.current = onCancelRecording;
+    sttConfigRef.current = sttConfig;
+    addToastRef.current = addToast;
+    setInputRef.current = setInput;
 
     const isRecording = voiceRecorderState === 'recording';
 
@@ -111,75 +129,151 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
         gestureZoneRef.current = zone;
     }, []);
 
+    const stopGestureTracking = useCallback(() => {
+        stopGestureTrackingRef.current?.();
+        stopGestureTrackingRef.current = null;
+    }, []);
+
+    useEffect(() => stopGestureTracking, [stopGestureTracking]);
+
     // ===== Pointer handlers =====
-    const handlePointerDown = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-        if (!onStartRecording || voiceRecorderState !== 'idle') return;
-        e.preventDefault();
-        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-        startYRef.current = clientY;
-        updateZone('send');
-        isRecordingRef.current = true;
-        onStartRecording().then(ok => {
-            if (!ok) isRecordingRef.current = false;
-        }).catch(() => { isRecordingRef.current = false; });
-    }, [voiceRecorderState, onStartRecording, updateZone]);
-
-    const handlePointerUpAction = useCallback(async () => {
+    const finishGesture = useCallback(async (forceZone?: GestureZone) => {
         if (!isRecordingRef.current) return;
+        stopGestureTracking();
+        const zone = forceZone ?? gestureZoneRef.current;
+
+        if (startInFlightRef.current) {
+            pendingFinishZoneRef.current = zone;
+            updateZone(zone);
+            return;
+        }
+
         isRecordingRef.current = false;
-        const zone = gestureZoneRef.current;
+        pendingFinishZoneRef.current = null;
         updateZone('send');
 
-        if (zone === 'cancel') { onCancelRecording?.(); return; }
+        if (zone === 'cancel') {
+            onCancelRecordingRef.current?.();
+            return;
+        }
 
-        const result = await onStopRecording?.();
+        const result = await onStopRecordingRef.current?.();
         if (!result || result.blob.size === 0) return;
 
         if (zone === 'convert') {
             setIsConverting(true);
             try {
-                const sttResult = await CloudStt.transcribe(result.blob, sttConfig, 15000);
+                const sttResult = await CloudStt.transcribe(result.blob, sttConfigRef.current, 15000);
                 if (sttResult.text.trim()) {
-                    setInput(sttResult.text.trim());
+                    setInputRef.current(sttResult.text.trim());
                     setIsVoiceMode(false);
-                    addToast('语音已转为文字', 'success');
+                    addToastRef.current('语音已转为文字', 'success');
                 } else {
-                    addToast('未识别到有效语音', 'info');
+                    addToastRef.current('未识别到有效语音', 'info');
                 }
             } catch (err: any) {
                 const reason = err?.message || String(err);
                 console.error('[WeChatInputBar] STT failed:', reason, err);
-                addToast(`语音转文字失败: ${reason.slice(0, 120)}`, 'error');
-                onVoiceMessage?.(result.blob, Math.max(1, result.duration));
+                addToastRef.current(`语音转文字失败: ${reason.slice(0, 120)}`, 'error');
+                onVoiceMessageRef.current?.(result.blob, Math.max(1, result.duration));
             } finally { setIsConverting(false); }
         } else {
-            onVoiceMessage?.(result.blob, Math.max(1, result.duration));
+            onVoiceMessageRef.current?.(result.blob, Math.max(1, result.duration));
         }
-    }, [onCancelRecording, onStopRecording, onVoiceMessage, sttConfig, setInput, addToast, updateZone]);
+    }, [stopGestureTracking, updateZone]);
 
-    // ===== Document-level listeners for gesture tracking =====
-    useEffect(() => {
-        if (!isRecording) return;
+    const startGestureTracking = useCallback(() => {
+        if (typeof document === 'undefined') return;
+        stopGestureTracking();
+
+        const pickTouch = (e: TouchEvent) => e.touches[0] ?? e.changedTouches[0];
         const onTouchMove = (e: TouchEvent) => {
-            const t = e.touches[0];
+            const t = pickTouch(e);
+            if (!t) return;
+            e.preventDefault();
+            updateZone(resolveZone(t.clientX, t.clientY));
+        };
+        const onTouchEnd = (e: TouchEvent) => {
+            const t = pickTouch(e);
             if (t) updateZone(resolveZone(t.clientX, t.clientY));
+            e.preventDefault();
+            void finishGesture();
         };
         const onMouseMove = (e: MouseEvent) => {
             updateZone(resolveZone(e.clientX, e.clientY));
         };
-        const onEnd = () => handlePointerUpAction();
-
-        document.addEventListener('touchmove', onTouchMove, { passive: true });
-        document.addEventListener('touchend', onEnd);
-        document.addEventListener('mouseup', onEnd);
-        document.addEventListener('mousemove', onMouseMove);
-        return () => {
-            document.removeEventListener('touchmove', onTouchMove);
-            document.removeEventListener('touchend', onEnd);
-            document.removeEventListener('mouseup', onEnd);
-            document.removeEventListener('mousemove', onMouseMove);
+        const onMouseUp = () => {
+            void finishGesture();
         };
-    }, [isRecording, resolveZone, updateZone, handlePointerUpAction]);
+        const onCancel = () => {
+            void finishGesture('cancel');
+        };
+
+        document.addEventListener('touchmove', onTouchMove, { passive: false });
+        document.addEventListener('touchend', onTouchEnd, { passive: false });
+        document.addEventListener('touchcancel', onCancel);
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        window.addEventListener('blur', onCancel);
+
+        stopGestureTrackingRef.current = () => {
+            document.removeEventListener('touchmove', onTouchMove);
+            document.removeEventListener('touchend', onTouchEnd);
+            document.removeEventListener('touchcancel', onCancel);
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            window.removeEventListener('blur', onCancel);
+        };
+    }, [finishGesture, resolveZone, stopGestureTracking, updateZone]);
+
+    const handlePointerDown = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+        if (!onStartRecordingRef.current || voiceRecorderState !== 'idle') return;
+        e.preventDefault();
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        startYRef.current = clientY;
+        updateZone('send');
+        startGestureTracking();
+        isRecordingRef.current = true;
+        startInFlightRef.current = true;
+        pendingFinishZoneRef.current = null;
+        onStartRecordingRef.current().then(ok => {
+            startInFlightRef.current = false;
+            if (!ok) {
+                isRecordingRef.current = false;
+                pendingFinishZoneRef.current = null;
+                stopGestureTracking();
+                updateZone('send');
+                return;
+            }
+
+            const queuedZone = pendingFinishZoneRef.current;
+            if (queuedZone !== null) {
+                pendingFinishZoneRef.current = null;
+                void finishGesture(queuedZone);
+            }
+        }).catch(() => {
+            isRecordingRef.current = false;
+            startInFlightRef.current = false;
+            pendingFinishZoneRef.current = null;
+            stopGestureTracking();
+            updateZone('send');
+        });
+    }, [finishGesture, startGestureTracking, stopGestureTracking, updateZone, voiceRecorderState]);
+
+    const handlePointerMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+        if (!isRecordingRef.current) return;
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        updateZone(resolveZone(clientX, clientY));
+    }, [resolveZone, updateZone]);
+
+    const handlePointerUpAction = useCallback(() => {
+        void finishGesture();
+    }, [finishGesture]);
+
+    const handlePointerCancel = useCallback(() => {
+        void finishGesture('cancel');
+    }, [finishGesture]);
 
     // ===== 3D perspective effect on message list (not header) =====
     useEffect(() => {
@@ -435,6 +529,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
             <button
                 onClick={handleToggleVoiceMode}
                 disabled={isVoiceProcessing || isConverting}
+                aria-label={isVoiceMode ? '切换到文字输入' : '切换到语音输入'}
                 style={{
                     width: '36px', height: '36px', display: 'flex',
                     alignItems: 'center', justifyContent: 'center',
@@ -468,8 +563,15 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
                         WebkitUserSelect: 'none',
                     }}
                     onTouchStart={handlePointerDown}
+                    onTouchMove={handlePointerMove}
+                    onTouchEnd={handlePointerUpAction}
+                    onTouchCancel={handlePointerCancel}
                     onMouseDown={handlePointerDown}
+                    onMouseMove={handlePointerMove}
+                    onMouseUp={handlePointerUpAction}
                     onContextMenu={(e) => e.preventDefault()}
+                    role="button"
+                    aria-label="按住说话"
                 >
                     <span style={{ fontSize: '16px', fontWeight: 500, color: '#333', letterSpacing: '2px' }}>
                         按住 说话
@@ -503,7 +605,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
                 </div>
             )}
 
-            <button onClick={() => handleOpenPanel('emojis')} style={{
+            <button onClick={() => handleOpenPanel('emojis')} aria-label="打开表情面板" style={{
                 width: '36px', height: '36px', display: 'flex',
                 alignItems: 'center', justifyContent: 'center',
                 background: 'transparent', border: 'none',
@@ -513,7 +615,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
             </button>
 
             {input.trim() && !isVoiceMode ? (
-                <button onClick={onSend} style={{
+                <button onClick={onSend} aria-label="发送" style={{
                     height: '36px', flexShrink: 0, padding: '0 14px',
                     background: '#07c160', borderRadius: '5px',
                     color: '#fff', fontSize: '15px', fontWeight: 500,
@@ -521,7 +623,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>发送</button>
             ) : (
-                <button onClick={() => handleOpenPanel('actions')} style={{
+                <button onClick={() => handleOpenPanel('actions')} aria-label="打开更多操作" style={{
                     width: '36px', height: '36px', display: 'flex',
                     alignItems: 'center', justifyContent: 'center',
                     background: 'transparent', border: 'none',
