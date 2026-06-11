@@ -4904,7 +4904,7 @@
   --primary-sat: 25%;
   --primary-lightness: 65%;
   --safe-area-bottom: env(safe-area-inset-bottom);
-  --app-height: 100lvh;
+  --app-height: 100dvh;
   --keyboard-inset: 0px;
   --standalone-safe-area-bottom: 0px;
   /* Default fallback */
@@ -4951,24 +4951,34 @@ html,
 body,
 #root {
   width: 100%;
-  height: var(--app-height, 100lvh);
-  min-height: var(--app-height, 100lvh);
+  min-height: 100%;
   background-color: var(--app-shell-background, #0f1115);
 }
 
+html {
+  background: var(--app-shell-background, #0f1115);
+  overscroll-behavior: none;
+}
+
 body {
-  background-color: var(--app-shell-background, #0f1115);
   margin: 0;
+  padding: 0;
+  background: var(--app-shell-background, #0f1115);
   /* Prevent text selection to feel like an app */
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-  height: var(--app-height, 100lvh);
-  min-height: var(--app-height, 100lvh);
   /* iOS Fix */
   width: 100vw;
   font-family: var(--app-font);
   color: var(--app-system-text);
+}
+
+#root,
+.sully-app-root {
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+  min-height: 100dvh;
 }
 
 .sully-system-text-scope {
@@ -4991,21 +5001,22 @@ body.ios-standalone {
   position: fixed;
   top: 0;
   right: 0;
-  bottom: auto;
+  bottom: 0;
   left: 0;
   overflow: hidden;
-  overscroll-behavior-y: none;
-  overscroll-behavior-x: none;
+  overscroll-behavior: none;
   width: 100%;
-  height: var(--app-height, 100dvh);
-  min-height: var(--app-height, 100dvh);
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+  min-height: 100dvh;
 }
 
 html.ios-standalone,
 html.ios-standalone #root {
   overflow: hidden;
-  height: var(--app-height, 100dvh);
-  min-height: var(--app-height, 100dvh);
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+  min-height: 100dvh;
 }
 
 html.ios-standalone,

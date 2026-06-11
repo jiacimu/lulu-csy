@@ -383,6 +383,22 @@ describe('iosStandalone viewport handling', () => {
     expect(document.documentElement.scrollTop).toBe(0);
   });
 
+  it('forces one scroll reset after an iOS text input blur even without existing document scroll', async () => {
+    setViewport({ innerHeight: 812, visualHeight: 500, clientHeight: 812 });
+    setSafeAreaInsets(47, 34);
+
+    const { installIOSStandaloneWorkaround } = await loadIOSStandaloneModule();
+    installIOSStandaloneWorkaround();
+    const textarea = focusTextArea();
+
+    vi.mocked(window.scrollTo).mockClear();
+    textarea.blur();
+    await vi.advanceTimersByTimeAsync(180);
+
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
+    expect(document.documentElement.style.getPropertyValue('--keyboard-inset')).toBe('0px');
+  });
+
   it('does not write stale smaller standalone restore heights before first interaction', async () => {
     setViewport({ innerHeight: 844, visualHeight: 844, clientHeight: 844 });
     setSafeAreaInsets(47, 34);

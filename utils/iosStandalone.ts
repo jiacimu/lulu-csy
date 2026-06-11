@@ -217,7 +217,7 @@ function findScrollableAncestor(target: HTMLElement): HTMLElement | null {
   return null;
 }
 
-function resetStrayScroll(): void {
+function resetStrayScroll(options: { force?: boolean } = {}): void {
   if (!isIOSDevice()) return;
 
   const visualViewport = window.visualViewport;
@@ -226,7 +226,7 @@ function resetStrayScroll(): void {
 
   const scrollingElement = document.scrollingElement || document.documentElement;
   const hasStrayScroll = (window.scrollY || 0) > 0 || (scrollingElement.scrollTop || 0) > 0;
-  if (!hasStrayScroll) return;
+  if (!options.force && !hasStrayScroll) return;
 
   try {
     window.scrollTo(0, 0);
@@ -425,7 +425,7 @@ export function installIOSStandaloneWorkaround(): void {
 
       if (!isDocumentHidden()) {
         setViewportVars();
-        resetStrayScroll();
+        resetStrayScroll({ force: true });
       }
     }, 180);
   };

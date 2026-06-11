@@ -101,8 +101,7 @@ const SullyOSApp: React.FC = () => {
 
   return (
     <div
-      className={`${useAbsoluteShell ? 'fixed inset-0 h-full' : 'relative'} w-full bg-black overflow-hidden`}
-      style={{ height: 'var(--app-height, 100lvh)', minHeight: 'var(--app-height, 100lvh)' }}
+      className={`${useAbsoluteShell ? 'fixed inset-0' : 'relative'} sully-app-root w-full bg-black overflow-hidden`}
     >
       <div
         className={`${useAbsoluteShell ? 'absolute' : 'fixed'} inset-0 w-full h-full z-0 bg-black`}
