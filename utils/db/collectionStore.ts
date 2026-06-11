@@ -1,4 +1,5 @@
 import type { CollectionBook, CollectionBookInput, CollectionSourceQuery } from '../../types';
+import { normalizeCollectionCustomTitle } from '../collectionBooks';
 import { openDB, STORE_COLLECTION_BOOKS } from './core';
 
 const createCollectionBookId = (): string => {
@@ -87,10 +88,13 @@ export const saveCollectionBook = async (input: CollectionBookInput): Promise<Co
     if (duplicate) return duplicate;
 
     const now = Date.now();
+    const normalizedCustomTitle = normalizeCollectionCustomTitle(input.customTitle);
     const record: CollectionBook = {
         ...input,
         id: input.id || createCollectionBookId(),
         title: input.title.trim() || (input.kind === 'heart_talk' ? '未命名谈心' : '未命名番外'),
+        customTitle: normalizedCustomTitle,
+        customTitleUpdatedAt: normalizedCustomTitle ? input.customTitleUpdatedAt || now : undefined,
         body: normalizeBodyForDedup(input.body),
         tags: Array.isArray(input.tags) ? input.tags.filter(Boolean) : [],
         createdAt: input.createdAt || now,
@@ -102,6 +106,30 @@ export const saveCollectionBook = async (input: CollectionBookInput): Promise<Co
     return new Promise((resolve, reject) => {
         opened.store.put(record);
         opened.tx.oncomplete = () => resolve(record);
+        opened.tx.onerror = () => reject(opened.tx.error);
+    });
+};
+
+export const updateCollectionBookTitle = async (id: string, customTitle?: string): Promise<CollectionBook | null> => {
+    const existing = await getCollectionBookById(id);
+    if (!existing) return null;
+
+    const normalizedTitle = normalizeCollectionCustomTitle(customTitle);
+    const next: CollectionBook = {
+        ...existing,
+        customTitle: normalizedTitle,
+        customTitleUpdatedAt: normalizedTitle ? Date.now() : undefined,
+    };
+    if (!normalizedTitle) {
+        delete next.customTitle;
+        delete next.customTitleUpdatedAt;
+    }
+
+    const opened = await getStore('readwrite');
+    if (!opened) return next;
+    return new Promise((resolve, reject) => {
+        opened.store.put(next);
+        opened.tx.oncomplete = () => resolve(next);
         opened.tx.onerror = () => reject(opened.tx.error);
     });
 };

@@ -54,24 +54,93 @@ const getTimeOfDay = (hour: number): string => {
     return '凌晨'; // 0-5
 };
 
-// ─── Event Queue (localStorage persistence) ─────────────────
+// ─── Event Queue (bounded localStorage cache) ───────────────
 
-const EVENTS_STORAGE_KEY = 'temporal_pending_events';
+export const TEMPORAL_EVENTS_STORAGE_KEY = 'temporal_pending_events';
+export const TEMPORAL_EVENT_EXPIRY_BUFFER_MS = 30 * 60 * 1000;
+export const TEMPORAL_EVENT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+export const TEMPORAL_MAX_EVENTS_TOTAL = 80;
+export const TEMPORAL_MAX_EVENTS_PER_CHAR = 12;
+const TEMPORAL_QUOTA_RETRY_EVENT_COUNT = 24;
 
-/** 读取所有待处理事件 */
-const loadAllEvents = (): PendingEvent[] => {
+function isQuotaExceededError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const name = 'name' in error ? String((error as { name?: unknown }).name) : '';
+    return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED';
+}
+
+function isPendingEventLike(value: unknown): value is PendingEvent {
+    if (!value || typeof value !== 'object') return false;
+    const event = value as Partial<PendingEvent>;
+    return typeof event.id === 'string'
+        && typeof event.charId === 'string'
+        && typeof event.event === 'string'
+        && typeof event.estimatedMinutes === 'number'
+        && ['high', 'medium', 'low'].includes(String(event.confidence))
+        && typeof event.createdAt === 'number'
+        && typeof event.dueAt === 'number';
+}
+
+function pruneAndLimitEvents(events: PendingEvent[], now = Date.now()): PendingEvent[] {
+    const seen = new Set<string>();
+    const perCharCounts = new Map<string, number>();
+
+    const newestFirst = events
+        .filter(isPendingEventLike)
+        .filter(event => Number.isFinite(event.createdAt) && Number.isFinite(event.dueAt))
+        .filter(event => event.dueAt - now > -TEMPORAL_EVENT_EXPIRY_BUFFER_MS)
+        .filter(event => now - event.createdAt < TEMPORAL_EVENT_MAX_AGE_MS)
+        .sort((a, b) => b.createdAt - a.createdAt);
+
+    const limited: PendingEvent[] = [];
+    for (const event of newestFirst) {
+        if (seen.has(event.id)) continue;
+        seen.add(event.id);
+
+        const count = perCharCounts.get(event.charId) || 0;
+        if (count >= TEMPORAL_MAX_EVENTS_PER_CHAR) continue;
+        perCharCounts.set(event.charId, count + 1);
+
+        limited.push(event);
+        if (limited.length >= TEMPORAL_MAX_EVENTS_TOTAL) break;
+    }
+
+    return limited.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** 读取本地原始事件，供清理流程判断是否需要写回 */
+const readStoredEvents = (): PendingEvent[] => {
     try {
-        const raw = localStorage.getItem(EVENTS_STORAGE_KEY);
-        return raw ? JSON.parse(raw) : [];
+        const raw = localStorage.getItem(TEMPORAL_EVENTS_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed.filter(isPendingEventLike) : [];
     } catch { return []; }
 };
 
+/** 读取所有待处理事件 */
+const loadAllEvents = (): PendingEvent[] => pruneAndLimitEvents(readStoredEvents());
+
 /** 保存所有事件 */
 const saveAllEvents = (events: PendingEvent[]): void => {
+    const normalized = pruneAndLimitEvents(events);
     try {
-        localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(events));
+        localStorage.setItem(TEMPORAL_EVENTS_STORAGE_KEY, JSON.stringify(normalized));
     } catch (e) {
-        console.error('⏰ [Temporal] Failed to save events:', e);
+        if (!isQuotaExceededError(e)) {
+            console.error('⏰ [Temporal] Failed to save events:', e);
+            return;
+        }
+
+        try {
+            const compacted = normalized.slice(-TEMPORAL_QUOTA_RETRY_EVENT_COUNT);
+            localStorage.setItem(TEMPORAL_EVENTS_STORAGE_KEY, JSON.stringify(compacted));
+            console.warn(`⏰ [Temporal] Event cache hit storage quota; compacted to ${compacted.length} recent events.`);
+        } catch (retryError) {
+            try {
+                localStorage.removeItem(TEMPORAL_EVENTS_STORAGE_KEY);
+            } catch { /* ignore */ }
+            console.warn('⏰ [Temporal] Event cache exceeded storage quota and was cleared.', retryError);
+        }
     }
 };
 
@@ -82,24 +151,20 @@ export const getPendingEvents = (charId: string): PendingEvent[] => {
 
 /** 添加一个待处理事件 */
 export const addPendingEvent = (event: PendingEvent): void => {
-    const all = loadAllEvents();
-    all.push(event);
+    const all = pruneAndLimitEvents([...loadAllEvents(), event]);
     saveAllEvents(all);
     console.log(`⏰ [Temporal] Added event: "${event.event}" (due in ${event.estimatedMinutes}min, confidence=${event.confidence})`);
 };
 
-/** 清理已过期超过 30 分钟的事件 */
-export const cleanupExpiredEvents = (charId: string): void => {
-    const now = Date.now();
-    const EXPIRY_BUFFER = 30 * 60 * 1000; // 过期后再保留 30 分钟
-    const all = loadAllEvents();
-    const cleaned = all.filter(e => {
-        if (e.charId !== charId) return true; // 保留其他角色的事件
-        return (now - e.dueAt) < EXPIRY_BUFFER; // 保留未严重过期的
-    });
-    if (cleaned.length !== all.length) {
+/** 清理已过期超过 30 分钟的事件，并强制保持缓存上限 */
+export const cleanupExpiredEvents = (charId?: string): void => {
+    const all = readStoredEvents();
+    const cleaned = pruneAndLimitEvents(all);
+    const changed = cleaned.length !== all.length || cleaned.some((event, index) => event.id !== all[index]?.id);
+    if (changed) {
         saveAllEvents(cleaned);
-        console.log(`⏰ [Temporal] Cleaned ${all.length - cleaned.length} expired events for ${charId}`);
+        const scope = charId ? ` while building context for ${charId}` : '';
+        console.log(`⏰ [Temporal] Cleaned ${all.length - cleaned.length} expired or excess events${scope}`);
     }
 };
 

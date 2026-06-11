@@ -3,7 +3,7 @@
 
 import React,{ useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState } from 'react';
 import ReactDOM from 'react-dom';
-import { ArrowSquareOut, ArrowsOutSimple, BookmarkSimple, DownloadSimple, DeviceMobileCamera, Fire, PlayCircle, Sparkle, X } from '@phosphor-icons/react';
+import { ArrowSquareOut, ArrowsOutSimple, BookmarkSimple, DownloadSimple, DeviceMobileCamera, Fire, PlayCircle, Sparkle, UploadSimple, X } from '@phosphor-icons/react';
 import { Message,ChatTheme } from '../../types';
 import { StatusCardData } from '../../types/statusCard';
 import { haptic } from '../../utils/haptics';
@@ -14,8 +14,11 @@ import { parseBilingual } from '../../utils/chatParser';
 import { getImageMessageDisplayUrl,resolveOriginalImageUrl } from '../../utils/generatedImageStorage';
 import {
     deleteAfterglowCustomMotif,
+    exportAfterglowMotifsToJson,
     loadAfterglowCustomMotifs,
+    mergeAfterglowMotifsImport,
     parseAfterglowMotifInput,
+    parseAfterglowMotifsImportFile,
     saveAfterglowCustomMotifsFromText,
     sanitizeAfterglowMotif,
     type AfterglowCustomMotif,
@@ -663,6 +666,7 @@ const MessageItem = React.memo(({
     const [afterglowMotifDraft, setAfterglowMotifDraft] = useState('');
     const [saveMotifToPool, setSaveMotifToPool] = useState(false);
     const [customAfterglowMotifs, setCustomAfterglowMotifs] = useState<AfterglowCustomMotif[]>([]);
+    const motifFileInputRef = useRef<HTMLInputElement | null>(null);
     const [imagePreview, setImagePreview] = useState<ImagePreviewState | null>(null);
     const imagePreviewRequestRef = useRef(0);
 
@@ -800,14 +804,54 @@ const MessageItem = React.memo(({
     };
 
     const handleAddMotifsToPool = () => {
-        if (parseAfterglowMotifInput(afterglowMotifDraft).length === 0) return;
+        const additions = parseAfterglowMotifInput(afterglowMotifDraft);
+        if (additions.length === 0) return;
         const next = saveAfterglowCustomMotifsFromText(afterglowMotifDraft);
         setCustomAfterglowMotifs(next);
+        setAfterglowMotifDraft('');
         setSaveMotifToPool(false);
     };
 
     const handleDeleteCustomMotif = (id: string) => {
         setCustomAfterglowMotifs(deleteAfterglowCustomMotif(id));
+    };
+
+    const handleExportMotifs = () => {
+        const jsonStr = exportAfterglowMotifsToJson(customAfterglowMotifs);
+        const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = 'afterglow-motifs.json';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+    };
+
+    const handleImportMotifs = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.currentTarget.files?.[0];
+        event.currentTarget.value = '';
+        if (!file) return;
+
+        try {
+            const raw = await file.text();
+            const { motifs: importedMotifs, error } = parseAfterglowMotifsImportFile(raw);
+            if (error) {
+                window.alert(`导入失败：${error}`);
+                return;
+            }
+            const next = mergeAfterglowMotifsImport(importedMotifs);
+            const addedCount = next.length - customAfterglowMotifs.length;
+            setCustomAfterglowMotifs(next);
+            if (addedCount > 0) {
+                window.alert(`已导入 ${addedCount} 个新梗，随机池共 ${next.length} 条`);
+            } else {
+                window.alert('导入成功，所有梗已存在于随机池中，无新增');
+            }
+        } catch {
+            window.alert('导入失败：文件读取异常');
+        }
     };
 
     const handleGenerateRandomAfterglow = () => {
@@ -1357,7 +1401,7 @@ const MessageItem = React.memo(({
                                         value={afterglowMotifDraft}
                                         onChange={(event) => setAfterglowMotifDraft(event.target.value)}
                                         rows={4}
-                                        maxLength={600}
+                                        maxLength={2000}
                                         className="w-full resize-none rounded-xl border border-[#e3d1bb] bg-white/80 p-3 text-[13px] leading-6 text-[#4b3324] outline-none transition focus:border-[#b77b45] focus:ring-2 focus:ring-[#f0d2ad]"
                                         placeholder={isAfterglowHeartTalkMode ? '把想跟 ta 聊的话写在这里' : '例如：雨夜误会、他听见你梦话、一封没寄出的信'}
                                     />
@@ -1421,8 +1465,31 @@ const MessageItem = React.memo(({
                                     {!isAfterglowHeartTalkMode && (
                                         <div className="rounded-xl border border-[#eadcc8] bg-white/55 p-3">
                                             <div className="mb-2 flex items-center justify-between text-[11px] font-bold tracking-[0.12em] text-[#9c7148]">
-                                                <span>随机池</span>
-                                                <span>{customAfterglowMotifs.length}</span>
+                                                <div className="flex items-center gap-2">
+                                                    <span>随机池</span>
+                                                    <span>{customAfterglowMotifs.length}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        type="button"
+                                                        className="flex h-6 w-6 items-center justify-center rounded-md text-[#b08860] transition hover:bg-[#eadcc8] hover:text-[#6a3f1f]"
+                                                        aria-label="导出随机池"
+                                                        title="导出随机池"
+                                                        disabled={customAfterglowMotifs.length === 0}
+                                                        onClick={handleExportMotifs}
+                                                    >
+                                                        <DownloadSimple className="h-3.5 w-3.5" weight="bold" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className="flex h-6 w-6 items-center justify-center rounded-md text-[#b08860] transition hover:bg-[#eadcc8] hover:text-[#6a3f1f]"
+                                                        aria-label="导入随机池"
+                                                        title="导入随机池"
+                                                        onClick={() => motifFileInputRef.current?.click()}
+                                                    >
+                                                        <UploadSimple className="h-3.5 w-3.5" weight="bold" />
+                                                    </button>
+                                                </div>
                                             </div>
                                             {customAfterglowMotifs.length > 0 ? (
                                                 <div className="max-h-36 space-y-1.5 overflow-y-auto pr-1">
@@ -1441,17 +1508,24 @@ const MessageItem = React.memo(({
                                                     ))}
                                                 </div>
                                             ) : (
-                                                <div className="rounded-lg border border-dashed border-[#e4cfb7] px-3 py-4 text-center text-[12px] text-[#b08b67]">
-                                                    暂无自定义梗
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
+                                                    <div className="rounded-lg border border-dashed border-[#e4cfb7] px-3 py-4 text-center text-[12px] text-[#b08b67]">
+                                                        暂无自定义梗
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <input
+                                        ref={motifFileInputRef}
+                                        type="file"
+                                        accept=".json"
+                                        className="hidden"
+                                        onChange={handleImportMotifs}
+                                    />
                                 </div>
-                            </div>
-                        </div>,
-                        document.body
-                    )}
+                            </div>,
+                            document.body
+                        )}
                 </div>
 
                 {/* Avatar for User */}

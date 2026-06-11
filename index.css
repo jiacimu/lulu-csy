@@ -36,6 +36,15 @@
   font-display: swap;
 }
 
+/* --- Cursive English Font (Heart Talk Card) --- */
+@font-face {
+  font-family: 'Dancing Script';
+  src: url('/fonts/dancing-script.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 @font-face {
   font-family: 'HuiwenSplashPoem';
   src: url('/fonts/huiwen-splash-poem.woff2') format('woff2');
@@ -4901,6 +4910,7 @@
   /* Default fallback */
   --app-font: 'Quicksand', sans-serif;
   --app-font-scale: 1;
+  --app-shell-background: #0f1115;
   --app-system-text: #334155;
 
   /* Card Design Tokens — overridable per theme */
@@ -4943,15 +4953,12 @@ body,
   width: 100%;
   height: var(--app-height, 100lvh);
   min-height: var(--app-height, 100lvh);
-  background-color: #0f1115;
+  background-color: var(--app-shell-background, #0f1115);
 }
 
 body {
-  background-color: #0f1115;
+  background-color: var(--app-shell-background, #0f1115);
   margin: 0;
-  overflow: hidden;
-  /* Critical: Prevent browser back/forward swipe navigation AND vertical rubber-banding */
-  overscroll-behavior: none;
   /* Prevent text selection to feel like an app */
   user-select: none;
   -webkit-user-select: none;
@@ -5004,7 +5011,7 @@ html.ios-standalone #root {
 html.ios-standalone,
 html.ios-standalone body,
 html.ios-standalone #root {
-  background-color: #0f1115;
+  background-color: var(--app-shell-background, #0f1115);
 }
 
 /* Global scroll behavior fix */

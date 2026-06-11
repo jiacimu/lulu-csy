@@ -118,7 +118,7 @@
     background: #f5f5f5 !important;
     border-top: 1px solid #e2e2e2 !important;
     padding-top: 0 !important;
-    padding-bottom: var(--effective-safe-bottom, 0px) !important;
+    padding-bottom: var(--effective-safe-bottom, var(--safe-bottom, env(safe-area-inset-bottom, 0px))) !important;
 }
 
 /* Reduce WeChat bottom bar inner wrapper height */

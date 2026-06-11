@@ -6,6 +6,8 @@ const TITLE_FALLBACK: Record<CollectionBookKind, string> = {
     heart_talk: '未命名谈心',
 };
 
+const CUSTOM_TITLE_MAX_LENGTH = 32;
+
 export function formatCollectionKindLabel(kind: CollectionBookKind): string {
     return kind === 'heart_talk' ? '谈心' : '番外篇';
 }
@@ -15,7 +17,46 @@ export function inferCollectionBookKind(cardData: StatusCardData): CollectionBoo
     return mode === 'hearttalk' || mode === 'heart_talk' ? 'heart_talk' : 'afterglow';
 }
 
-export function extractCollectionTitle(cardData: StatusCardData, kind: CollectionBookKind = inferCollectionBookKind(cardData)): string {
+export function normalizeCollectionCustomTitle(value?: string): string | undefined {
+    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    return normalized ? normalized.slice(0, CUSTOM_TITLE_MAX_LENGTH) : undefined;
+}
+
+function isValidTimestamp(timestamp?: number): timestamp is number {
+    return typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp > 0;
+}
+
+function formatDatePart(timestamp?: number): string {
+    if (!isValidTimestamp(timestamp)) return '';
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return '';
+    const now = new Date();
+    const monthDay = `${date.getMonth() + 1}月${date.getDate()}日`;
+    return date.getFullYear() === now.getFullYear() ? monthDay : `${date.getFullYear()}年${monthDay}`;
+}
+
+export function formatCollectionMinuteTitle(timestamp?: number): string {
+    if (!isValidTimestamp(timestamp)) return TITLE_FALLBACK.heart_talk;
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return TITLE_FALLBACK.heart_talk;
+    const time = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    const datePart = formatDatePart(timestamp);
+    return datePart ? `${datePart} ${time}` : time;
+}
+
+export function buildCollectionDefaultTitle(kind: CollectionBookKind, timestamp?: number): string {
+    if (kind === 'heart_talk') return formatCollectionMinuteTitle(timestamp);
+    const datePart = formatDatePart(timestamp);
+    return datePart ? `${datePart}的番外` : TITLE_FALLBACK.afterglow;
+}
+
+export function extractCollectionTitle(
+    cardData: StatusCardData,
+    kind: CollectionBookKind = inferCollectionBookKind(cardData),
+    timestamp?: number,
+): string {
+    if (kind === 'heart_talk') return buildCollectionDefaultTitle(kind, timestamp);
+
     const explicitTitle = String(cardData.title || '').trim();
     if (explicitTitle && explicitTitle !== '番外篇') return explicitTitle.slice(0, 40);
 
@@ -23,11 +64,20 @@ export function extractCollectionTitle(cardData: StatusCardData, kind: Collectio
     const bookTitle = body.match(/《\s*([^《》\n]{1,40})\s*》/)?.[1]?.trim();
     if (bookTitle) return bookTitle;
 
-    const firstTextLine = body
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .find(line => line && !/^[-━=]+$/.test(line) && !/^🎭/.test(line));
-    return (firstTextLine || TITLE_FALLBACK[kind]).slice(0, 40);
+    return buildCollectionDefaultTitle(kind, timestamp);
+}
+
+export function getCollectionDisplayTitle(book: CollectionBook): string {
+    const customTitle = normalizeCollectionCustomTitle(book.customTitle);
+    if (customTitle) return customTitle;
+
+    const timestamp = book.sourceMessageTimestamp || book.collectedAt || book.createdAt;
+    if (book.kind === 'heart_talk') return buildCollectionDefaultTitle(book.kind, timestamp);
+
+    const title = String(book.title || '').trim();
+    return title && title !== TITLE_FALLBACK.afterglow
+        ? title.slice(0, 40)
+        : buildCollectionDefaultTitle(book.kind, timestamp);
 }
 
 export function buildCollectionExcerpt(value: string, maxLength = 92): string {
@@ -74,14 +124,15 @@ export function buildCollectionBookInput(
     sourceMessage?: Message,
 ): CollectionBookInput {
     const kind = inferCollectionBookKind(cardData);
+    const timestamp = sourceMessage?.timestamp;
     return {
         charId,
         kind,
-        title: extractCollectionTitle(cardData, kind),
+        title: extractCollectionTitle(cardData, kind, timestamp),
         body: String(cardData.body || '').trim(),
         cardData,
         sourceMessageId: sourceMessage?.id,
-        sourceMessageTimestamp: sourceMessage?.timestamp,
+        sourceMessageTimestamp: timestamp,
         sourceReplyExcerpt: sourceMessage ? buildCollectionExcerpt(sourceMessage.content, 120) : undefined,
         tags: extractCollectionTags(cardData),
         cover: cardData.meta?.afterglowCover,
@@ -99,7 +150,7 @@ export function buildCollectionForwardPayload(
         charAvatar: options.charAvatar,
         targetCharId: options.targetCharId,
         kind: book.kind,
-        title: book.title,
+        title: getCollectionDisplayTitle(book),
         body: book.body,
         excerpt: buildCollectionExcerpt(book.body, 120),
         tags: book.tags,

@@ -116,6 +116,11 @@ const DataSettings: React.FC = () => {
                     <input type="file" ref={importInputRef} className="hidden" accept=".zip" onChange={handleImport} />
                 </div>
 
+                <div className="mb-4 rounded-2xl border border-amber-100 bg-amber-50/80 px-3 py-3 text-[10px] leading-relaxed text-amber-700">
+                    <div className="mb-1 text-[11px] font-bold text-amber-800">浏览器搬家提醒</div>
+                    若涉及到浏览器搬家，请先到<b>认知网络——漫游备份</b>中，复制自己的通行印记，将原浏览器的码填写到新浏览器，不然即使导入备份也看不到聊天记录和记忆。
+                </div>
+
                 <p className="text-[10px] text-slate-400 px-1 mb-4 leading-relaxed">
                     • <b>整合导出</b>: 一次性导出所有数据（文字+媒体），适合设备性能充足的用户。<br />
                     • <b>纯文字备份</b>: 包含所有聊天记录、角色设定、剧情数据。所有图片会被移除（减小体积）。<br />

@@ -126,7 +126,6 @@ const HIDDEN_LAUNCHER_APPS = new Set<AppID>([
   AppID.Theater,
   AppID.LoveShow,
   AppID.NianNian,
-  AppID.CollectionHall,
 ]);
 
 export const INSTALLED_APPS: AppConfig[] = APP_CONFIGS.filter(app => !HIDDEN_LAUNCHER_APPS.has(app.id));

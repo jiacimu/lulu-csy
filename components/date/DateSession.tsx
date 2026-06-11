@@ -143,6 +143,29 @@ const resolveDateBackground = (state: DateState | undefined, char: CharacterProf
     return state.bgImage || char.dateBackground || '';
 };
 
+const DATE_REQUEST_DEBUG_UI_KEY = 'dateRequestDebugVisible';
+
+const readDateRequestDebugUiEnabled = () => {
+    if (typeof window === 'undefined') return false;
+    try {
+        const stored = localStorage.getItem(DATE_REQUEST_DEBUG_UI_KEY);
+        if (stored !== null) return stored === 'true';
+    } catch { /* noop */ }
+    return import.meta.env.DEV;
+};
+
+const setDateRequestDebugUiEnabled = (enabled: boolean) => {
+    if (typeof window === 'undefined') return;
+    try {
+        localStorage.setItem(DATE_REQUEST_DEBUG_UI_KEY, String(enabled));
+    } catch { /* noop */ }
+};
+
+const EMPTY_DATE_REQUEST_DEBUG_SNAPSHOTS: DateRequestDebugSnapshot[] = [];
+
+const formatDateRequestDebugSnapshot = (snapshot: DateRequestDebugSnapshot) =>
+    snapshot.messages.map((m, i) => `=== message[${i}] (role: ${m.role}) ===\n${m.content}`).join('\n\n');
+
 /**
  * Parse dialogue text into DialogueItem[]. Supports:
  * 1. Plain lines with [emotion] tags
@@ -348,7 +371,8 @@ const DateSession: React.FC<DateSessionProps> = ({
     onRenameSavedVibe,
     onDeleteSavedVibe,
     onClearSavedVibeCache,
-    onMarkDatePhotosSeen}) => {
+    onMarkDatePhotosSeen,
+    requestDebugSnapshots}) => {
     const { addToast, registerBackHandler } = useOS();
     const textScale = Math.min(Math.max(fontScale ?? 1, 0.85), 1.3);
     const scaledFont = (basePx: number) => `${Math.round(basePx * textScale * 10) / 10}px`;
@@ -372,6 +396,8 @@ const DateSession: React.FC<DateSessionProps> = ({
     const [isTyping, setIsTyping] = useState(false); // Waiting for API
     const [showExitModal, setShowExitModal] = useState(false);
     const [showRequestDebug, setShowRequestDebug] = useState(false);
+    const [requestDebugUiEnabled, setRequestDebugUiEnabled] = useState(readDateRequestDebugUiEnabled);
+    const [activeRequestDebugId, setActiveRequestDebugId] = useState<string | null>(null);
     
     // Inner Whispers State (内心低语)
     const [activeWhispers, setActiveWhispers] = useState<InnerWhisper[]>([]);
@@ -403,6 +429,14 @@ const DateSession: React.FC<DateSessionProps> = ({
     const novelScrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const isResumedRef = useRef(false);
+    const requestDebugList = requestDebugSnapshots ?? EMPTY_DATE_REQUEST_DEBUG_SNAPSHOTS;
+    const activeRequestDebugSnapshot = React.useMemo(() => {
+        if (requestDebugList.length === 0) return null;
+        return requestDebugList.find(snapshot => snapshot.id === activeRequestDebugId) || requestDebugList[0];
+    }, [requestDebugList, activeRequestDebugId]);
+    const activeRequestDebugText = React.useMemo(() => (
+        activeRequestDebugSnapshot ? formatDateRequestDebugSnapshot(activeRequestDebugSnapshot) : ''
+    ), [activeRequestDebugSnapshot]);
     const photoButtonVisible = manualPhotoEnabled || manualPhotoGenerating || photoMessages.length > 0;
     const realPhotoStylePresets = photoStylePresets.filter(style => style.id !== 'no-style');
     const effectiveManualPhotoStyleId = photoStylePresets.some(style => style.id === manualPhotoStyleId)
@@ -473,6 +507,17 @@ const DateSession: React.FC<DateSessionProps> = ({
         setUserNaiAppearanceNegativeDraft(userProfile.naiAppearanceNegativeTags || '');
         setUserAppearancePromptDraft(userProfile.photoAppearancePrompt || '');
     }, [userProfile.naiAppearanceTags, userProfile.naiAppearanceNegativeTags, userProfile.photoAppearancePrompt]);
+
+    useEffect(() => {
+        if (!showRequestDebug) return;
+        if (requestDebugList.length === 0) {
+            setActiveRequestDebugId(null);
+            return;
+        }
+        if (!activeRequestDebugId || !requestDebugList.some(snapshot => snapshot.id === activeRequestDebugId)) {
+            setActiveRequestDebugId(requestDebugList[0].id);
+        }
+    }, [showRequestDebug, requestDebugList, activeRequestDebugId]);
 
     // Back Handler
     useEffect(() => {
@@ -947,6 +992,8 @@ const DateSession: React.FC<DateSessionProps> = ({
                 onToggleTranslation={onToggleTranslation}
                 onSetTranslateSourceLang={onSetTranslateSourceLang}
                 onSetTranslateTargetLang={onSetTranslateTargetLang}
+                requestDebugCount={requestDebugUiEnabled ? requestDebugList.length : 0}
+                onOpenRequestDebug={requestDebugUiEnabled ? () => setShowRequestDebug(true) : undefined}
             />
 
             {showPhotoPanel && (
@@ -1352,6 +1399,139 @@ const DateSession: React.FC<DateSessionProps> = ({
                     />
                 </div>
             </Modal>
+
+            {showRequestDebug && requestDebugUiEnabled && (
+                <div
+                    className="fixed inset-0 z-[110] flex items-end justify-center p-3 sm:items-center sm:p-6"
+                    style={{
+                        paddingTop: 'max(0.75rem, calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 0.5rem))',
+                        paddingBottom: 'max(0.75rem, calc(var(--safe-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem))',
+                    }}
+                >
+                    <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={() => setShowRequestDebug(false)} />
+                    <section
+                        className="relative flex w-full max-w-5xl flex-col overflow-hidden rounded-[1.5rem] border border-white/15 bg-slate-950/95 text-slate-100 shadow-2xl"
+                        style={{
+                            height: 'min(82dvh, calc(var(--visual-viewport-height, 100dvh) - var(--safe-top, env(safe-area-inset-top, 0px)) - var(--safe-bottom, env(safe-area-inset-bottom, 0px)) - 1.5rem))',
+                        }}
+                    >
+                        <div className="flex shrink-0 flex-col gap-3 border-b border-white/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                    <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                                    <h3 className="truncate text-sm font-bold text-white sm:text-base">发送给模型的上下文</h3>
+                                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-slate-300">{requestDebugList.length} 条</span>
+                                </div>
+                                {activeRequestDebugSnapshot && (
+                                    <div className="mt-1 truncate text-[11px] text-slate-400">
+                                        {activeRequestDebugSnapshot.model || 'unknown model'} · {new Date(activeRequestDebugSnapshot.updatedAt).toLocaleString()}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (!activeRequestDebugText) return;
+                                        navigator.clipboard.writeText(activeRequestDebugText).then(() => addToast('已复制', 'success')).catch(() => addToast('复制失败', 'error'));
+                                    }}
+                                    disabled={!activeRequestDebugText}
+                                    className="rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-bold text-slate-100 transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                    复制当前
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setDateRequestDebugUiEnabled(false);
+                                        setRequestDebugUiEnabled(false);
+                                        setShowRequestDebug(false);
+                                        addToast('已隐藏调试入口', 'success');
+                                    }}
+                                    className="rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-bold text-slate-100 transition-colors hover:bg-white/15"
+                                >
+                                    隐藏入口
+                                </button>
+                                <button
+                                    type="button"
+                                    aria-label="关闭请求详情"
+                                    onClick={() => setShowRequestDebug(false)}
+                                    className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-base font-bold text-slate-100 transition-colors hover:bg-white/15"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="grid min-h-0 flex-1 grid-rows-[minmax(9rem,32%)_1fr] sm:grid-cols-[17rem_minmax(0,1fr)] sm:grid-rows-1">
+                            <aside className="min-h-0 overflow-y-auto border-b border-white/10 bg-white/[0.03] p-3 sm:border-b-0 sm:border-r sm:border-white/10">
+                                {requestDebugList.length === 0 ? (
+                                    <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-white/15 px-4 text-center text-xs text-slate-400">
+                                        暂无记录，发送消息后会出现。
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col gap-2">
+                                        {requestDebugList.map((snapshot) => {
+                                            const selected = activeRequestDebugSnapshot?.id === snapshot.id;
+                                            const messageChars = snapshot.messages.reduce((total, message) => total + (message.content?.length || 0), 0);
+                                            return (
+                                                <button
+                                                    key={snapshot.id}
+                                                    type="button"
+                                                    onClick={() => setActiveRequestDebugId(snapshot.id)}
+                                                    className={`w-full rounded-2xl border px-3 py-2 text-left transition-colors ${selected ? 'border-emerald-300/50 bg-emerald-400/15' : 'border-white/10 bg-white/[0.04] hover:bg-white/[0.08]'}`}
+                                                >
+                                                    <div className="flex min-w-0 items-center gap-2">
+                                                        <span className={`h-2 w-2 shrink-0 rounded-full ${snapshot.source === 'send' ? 'bg-emerald-400' : snapshot.source === 'reroll' ? 'bg-amber-400' : snapshot.source === 'peek' ? 'bg-sky-400' : 'bg-purple-400'}`} />
+                                                        <span className="truncate text-xs font-bold text-slate-100">{snapshot.label}</span>
+                                                    </div>
+                                                    <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-400">
+                                                        <span className="truncate">{snapshot.model || snapshot.source}</span>
+                                                        <span className="shrink-0">{new Date(snapshot.updatedAt).toLocaleTimeString()}</span>
+                                                    </div>
+                                                    <div className="mt-1 text-[10px] text-slate-500">
+                                                        {snapshot.messages.length} messages · {messageChars.toLocaleString()} chars
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </aside>
+
+                            <main className="flex min-h-0 flex-col bg-slate-950">
+                                {activeRequestDebugSnapshot ? (
+                                    <>
+                                        <div className="grid shrink-0 grid-cols-2 gap-2 border-b border-white/10 p-3 text-[10px] text-slate-400 sm:grid-cols-4">
+                                            <div className="rounded-xl bg-white/[0.04] px-3 py-2">
+                                                <div className="font-bold text-slate-500">Source</div>
+                                                <div className="mt-1 truncate text-slate-200">{activeRequestDebugSnapshot.source}</div>
+                                            </div>
+                                            <div className="rounded-xl bg-white/[0.04] px-3 py-2">
+                                                <div className="font-bold text-slate-500">Model</div>
+                                                <div className="mt-1 truncate text-slate-200">{activeRequestDebugSnapshot.model || '--'}</div>
+                                            </div>
+                                            <div className="rounded-xl bg-white/[0.04] px-3 py-2">
+                                                <div className="font-bold text-slate-500">Temp</div>
+                                                <div className="mt-1 truncate text-slate-200">{activeRequestDebugSnapshot.temperature ?? '--'}</div>
+                                            </div>
+                                            <div className="rounded-xl bg-white/[0.04] px-3 py-2">
+                                                <div className="font-bold text-slate-500">Max tokens</div>
+                                                <div className="mt-1 truncate text-slate-200">{activeRequestDebugSnapshot.maxTokens ?? '--'}</div>
+                                            </div>
+                                        </div>
+                                        <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-[11px] leading-relaxed text-slate-200 selection:bg-emerald-300/30 sm:text-xs">{activeRequestDebugText}</pre>
+                                    </>
+                                ) : (
+                                    <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-slate-400">
+                                        选择一条记录查看完整上下文。
+                                    </div>
+                                )}
+                            </main>
+                        </div>
+                    </section>
+                </div>
+            )}
 
             {/* Exit Modal */}
             <Modal isOpen={showExitModal} title="离开见面?" onClose={() => setShowExitModal(false)} footer={

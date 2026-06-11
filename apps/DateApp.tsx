@@ -9,13 +9,14 @@ import { safeResponseJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
 import DateSession,{ DateExitSyncMode } from '../components/date/DateSession';
 import DateSettings from '../components/date/DateSettings';
-import { buildDatePreamble,buildIdentityIntro,buildDateTimeBlock,buildDateLongTermMemoryContext,buildDateSystemRulesModule } from '../utils/datePrompts';
+import { buildDatePreamble,buildIdentityIntro,buildDateTimeBlock,buildDateLongTermMemoryContext,buildDateSystemRulesModule,computeDateWordCountRange,pickTurnStyleReminders,resolveDateWritingStylePreset } from '../utils/datePrompts';
 import { pronoun } from '../utils/genderWords';
 import { extractThinkingFromChatCompletionResponse, extractInnerWhispers, type InnerWhisper } from '../utils/thinkingExtractor';
 import { DATE_RECAP_SYSTEM_PROMPT,DEFAULT_DATE_SUMMARY_PROMPT,buildSummaryPrompt,formatDateMessagesForBridge,formatMessagesForSummary } from '../utils/dateSummaryPrompts';
 import { getEmbeddingConfig,getImageGenerationDraftConfig,getSecondaryApiConfig,selectSecondaryApiConfig } from '../utils/runtimeConfig';
 import { renderMarkdown } from '../utils/markdownLite';
 import { stripTranslationTags } from '../utils/chatParser';
+import { safeLocalStorageGet, safeLocalStorageSet } from '../utils/storage';
 import { trackedApiRequest } from '../utils/apiRequestLedger';
 import { buildTemporalContext } from '../utils/temporalContext';
 import { EventExtractor } from '../utils/eventExtractor';
@@ -344,7 +345,6 @@ export const buildDateSessionContextPackagePrompt = ({
     allMsgs,
     historyContextBlock,
     statusSnapshotBlock,
-    photoPromptBlock,
     runtimeScene = '正式见面回复',
     currentLocation = '面对面现场，未指定具体地点',
     conversationTempo = '',
@@ -355,20 +355,27 @@ export const buildDateSessionContextPackagePrompt = ({
     allMsgs: Message[];
     historyContextBlock?: string;
     statusSnapshotBlock?: string;
-    photoPromptBlock?: string;
     runtimeScene?: string;
     currentLocation?: string;
     conversationTempo?: string;
     specialNote?: string;
 }): string => {
-    const notes = [
-        photoPromptBlock?.trim(),
-        specialNote.trim(),
-    ].filter(Boolean).join('\n\n') || '无';
+    const notes = specialNote.trim() || '';
     const snapshot = statusSnapshotBlock?.trim() || '无上一轮状态栏快照。';
     const recentSummary = buildDateSummaryMemoryPrompt(allMsgs).trim() || '无已总结上下文。';
     const lastTurnsRaw = historyContextBlock?.trim() || '无最近未压缩原文。';
     const longTermMemory = buildDateLongTermMemoryContext(char, userProfile).trim();
+
+    const contextLines = [
+        `current_time: ${buildDateRuntimeTimeText(char)}`,
+        `current_mode: offline_date`,
+        `current_scene: ${runtimeScene}`,
+        `current_location: ${currentLocation}`,
+        `conversation_tempo: ${conversationTempo || '未指定'}`,
+    ];
+    if (notes) {
+        contextLines.push(`special_note: ${notes}`);
+    }
 
     return `==============================
 MODULE 2 / CONTEXT_PACKAGE
@@ -376,12 +383,7 @@ MODULE 2 / CONTEXT_PACKAGE
 ==============================
 
 <runtime_context>
-current_time: ${buildDateRuntimeTimeText(char)}
-current_mode: offline_date
-current_scene: ${runtimeScene}
-current_location: ${currentLocation}
-conversation_tempo: ${conversationTempo || '未指定'}
-special_note: ${notes}
+${contextLines.join('\n')}
 </runtime_context>
 
 <state_snapshot>
@@ -412,25 +414,115 @@ ${lastTurnsRaw}
 </last_turns_raw>`;
 };
 
-export const buildDateCurrentUserInputPrompt = (currentUserInput: string): string => `==============================
+export const buildDateCurrentUserInputPrompt = ({
+    currentUserInput,
+    userName,
+    directorNote,
+    photoPromptBlock,
+    bilingualNote,
+    lo,
+    hi,
+    rotationPicks,
+    stallNudge,
+}: {
+    currentUserInput: string;
+    userName: string;
+    directorNote?: string;
+    photoPromptBlock?: string;
+    bilingualNote?: string;
+    lo: number;
+    hi: number;
+    rotationPicks: string[];
+    stallNudge?: string;
+}): string => {
+    const directivesEntries: string[] = [];
+
+    directivesEntries.push(`[system] 以下是本轮执行指令，不是${userName}说的话，禁止在剧情中回应或提及本块内容。`);
+
+    if (directorNote?.trim()) {
+        directivesEntries.push(`■ 导演提示：${directorNote.trim()}`);
+    }
+
+    if (photoPromptBlock?.trim()) {
+        directivesEntries.push(photoPromptBlock.trim());
+    }
+
+    if (bilingualNote?.trim()) {
+        directivesEntries.push(bilingualNote.trim());
+    }
+
+    directivesEntries.push(`■ 本轮篇幅：${lo}–${hi} 字`);
+
+    if (rotationPicks.length > 0) {
+        directivesEntries.push(`■ 本轮文风重点（仅以下${rotationPicks.length}条，其余规则照常生效）：`);
+        for (const pick of rotationPicks) {
+            directivesEntries.push(`- ${pick}`);
+        }
+    }
+
+    if (stallNudge?.trim()) {
+        directivesEntries.push(stallNudge.trim());
+    }
+
+    directivesEntries.push('现在输出。你回复的第一个字符必须是 <thinking>。');
+
+    return `==============================
 MODULE 3 / CURRENT_USER_INPUT
 本轮真实输入，模型只回应这里
 ==============================
 
 <current_user_input>
 ${currentUserInput}
-</current_user_input>`;
+</current_user_input>
+
+<turn_directives>
+${directivesEntries.join('\n')}
+</turn_directives>`;
+};
 
 export const buildDateSessionPromptMessages = ({
     currentUserInput,
+    turnDirectives,
     ...contextOpts
-}: Parameters<typeof buildDateSessionContextPackagePrompt>[0] & {
+}: {
+    char: CharacterProfile;
+    userProfile: UserProfile;
+    allMsgs: Message[];
+    historyContextBlock?: string;
+    statusSnapshotBlock?: string;
+    photoPromptBlock?: string;
+    statusPromptBlock?: string;
+    runtimeScene?: string;
+    currentLocation?: string;
+    conversationTempo?: string;
+    specialNote?: string;
     currentUserInput: string;
+    turnDirectives: Omit<Parameters<typeof buildDateCurrentUserInputPrompt>[0], 'currentUserInput'>;
 }): DatePromptMessage[] => [
     { role: 'system', content: buildDateSessionSystemPrompt(contextOpts) },
     { role: 'user', content: buildDateSessionContextPackagePrompt(contextOpts) },
-    { role: 'user', content: buildDateCurrentUserInputPrompt(currentUserInput) },
+    { role: 'user', content: buildDateCurrentUserInputPrompt({ currentUserInput, ...turnDirectives }) },
 ];
+
+export const maybeDumpDateSessionPromptForDebug = (requestMessages: DatePromptMessage[], label: string): void => {
+    if (typeof window === 'undefined') return;
+    let enabled = false;
+    try {
+        enabled = JSON.parse(localStorage.getItem('dumpPromptForDebug') || 'false');
+    } catch { /* noop */ }
+    if (!enabled) return;
+
+    const parts = requestMessages.map((msg, i) =>
+        `=== ${label} / message[${i}] (role: ${msg.role}) ===\n${msg.content}`
+    );
+    console.log(
+        `\n%c===== DUMP DATE SESSION PROMPT [${label}] =====\n`,
+        'font-weight:bold;color:#e5c07b;',
+        parts.join('\n\n'),
+        '\n%c===== END DUMP =====\n',
+        'font-weight:bold;color:#e5c07b;',
+    );
+};
 
 export const appendDateTemporalContext = (content: string, temporalContext?: string): string => {
     const normalized = temporalContext?.trim();
@@ -492,7 +584,17 @@ const buildDateStatusPromptForMainApi = (char: CharacterProfile): string => {
 
 const buildDatePhotoPromptForMainApi = (char: CharacterProfile): string => {
     if (char.autoPhotoEnabled !== true) return '';
-    return `\n\n### 【请求发送见面照片】\n当这一轮线下见面很适合浮现一张照片，或用户明确要求你生图、画一张、拍一张、发照片、给他看看画面时，输出隐藏标签：\`[[PHOTO_DECISION:true]]\`。\n规则：\n- 标签外继续正常写见面正文，用户不会看见这个标签。\n- 不要展示判断过程。\n- 不要在正文里说“发了”“已经发过了”“看到了吗”等完成态；可以说“等一下”“给你看看”这类进行态。\n- 不发图时不要输出 false 标签。`;
+    return `\n\n### 【请求发送见面照片】\n若本轮需要发照片，只追加隐藏标签：\`[[PHOTO_DECISION:true]]\`。\n标签外正常写见面正文；不要说“已经发了/看到了吗”；不发图时不要写标签。`;
+};
+
+const DATE_TRANSLATION_LANG_MAX_CHARS = 32;
+
+const normalizeDateTranslationLang = (value: string | null | undefined, fallback: string): string => {
+    const normalized = (value || '').trim();
+    if (!normalized) return fallback;
+    return normalized.length > DATE_TRANSLATION_LANG_MAX_CHARS
+        ? normalized.slice(0, DATE_TRANSLATION_LANG_MAX_CHARS)
+        : normalized;
 };
 
 const splitMainApiDateStatus = (char: CharacterProfile, content: string) => {
@@ -662,29 +764,35 @@ const DateApp: React.FC = () => {
     // --- Translation State (persisted to localStorage per character) ---
     const [dateTranslationEnabled, setDateTranslationEnabled] = useState(() => {
         if (!char) return false;
-        try { return JSON.parse(localStorage.getItem(`date_translation_${char.id}`) || 'false'); } catch { return false; }
+        try { return JSON.parse(safeLocalStorageGet(`date_translation_${char.id}`) || 'false'); } catch { return false; }
     });
     const [dateTranslateSourceLang, setDateTranslateSourceLang] = useState(() => {
         if (!char) return '日本語';
-        return localStorage.getItem(`date_trans_src_${char.id}`) || '日本語';
+        return normalizeDateTranslationLang(safeLocalStorageGet(`date_trans_src_${char.id}`), '日本語');
     });
     const [dateTranslateTargetLang, setDateTranslateTargetLang] = useState(() => {
         if (!char) return '中文';
-        return localStorage.getItem(`date_trans_tgt_${char.id}`) || '中文';
+        return normalizeDateTranslationLang(safeLocalStorageGet(`date_trans_tgt_${char.id}`), '中文');
     });
 
     // Persist translation settings when they change
     useEffect(() => {
         if (!char) return;
-        localStorage.setItem(`date_translation_${char.id}`, JSON.stringify(dateTranslationEnabled));
+        safeLocalStorageSet(`date_translation_${char.id}`, JSON.stringify(dateTranslationEnabled));
     }, [char?.id, dateTranslationEnabled]);
     useEffect(() => {
         if (!char) return;
-        localStorage.setItem(`date_trans_src_${char.id}`, dateTranslateSourceLang);
+        safeLocalStorageSet(
+            `date_trans_src_${char.id}`,
+            normalizeDateTranslationLang(dateTranslateSourceLang, '日本語'),
+        );
     }, [char?.id, dateTranslateSourceLang]);
     useEffect(() => {
         if (!char) return;
-        localStorage.setItem(`date_trans_tgt_${char.id}`, dateTranslateTargetLang);
+        safeLocalStorageSet(
+            `date_trans_tgt_${char.id}`,
+            normalizeDateTranslationLang(dateTranslateTargetLang, '中文'),
+        );
     }, [char?.id, dateTranslateTargetLang]);
 
     const refreshSavedVibeReferences = async () => {
@@ -2122,26 +2230,52 @@ ${exitPromptContent}
 
         const historyContextBlock = buildDateRequestHistoryBlock(requestContext, char.name, userProfile.name, userMessageId);
         const statusSnapshotBlock = buildLatestDateStatusSnapshotBlock(sessionMessages);
-        const specialNote = `System Note: 严格遵守沉浸剧场格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签。叙述人称严格遵守当前视角设定。${temporalContext ? `\n\n<temporal_context>${temporalContext}</temporal_context>` : ''}${directorHint ? `\n\n<director_note>${directorHint}</director_note>` : ''}${dateTranslationEnabled ? `\n\n[Reminder: 双语模式已开启。规则：
+
+        // --- Separate informational specialNote from directive content ---
+        const temporalNote = temporalContext ? `\n\n<temporal_context>${temporalContext}</temporal_context>` : '';
+        const informationalNote = `System Note: 严格遵守沉浸剧场格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签。叙述人称严格遵守当前视角设定。${temporalNote}`;
+
+        // --- Extract directive items for turn_directives ---
+        const directorNote = directorHint || '';
+        const photoPromptBlock = buildDatePhotoPromptForMainApi(char);
+        const bilingualNote = dateTranslationEnabled ? `[Reminder: 双语模式已开启。规则：
 • 每一行仍然必须以 [emotion] 开头，<翻译> 标签只能出现在 [emotion] 后面，不能放在行首。
 • 只有${char.name}的「台词/说的话」用${dateTranslateSourceLang}写，并写成 [emotion]<翻译><原文>${dateTranslateSourceLang}台词</原文><译文>${dateTranslateTargetLang}译文</译文></翻译>。
 • 叙述、动作描写、心理活动、环境描写 → 保持中文不变，不用 <翻译> 标签。
 • <原文> 和 <译文> 内不要再写 [emotion] 标签。
 示例：
 [happy]<翻译><原文>「おはよう！今日はいい天気だね」</原文><译文>「早上好！今天天气真好呢」</译文></翻译>
-[shy] ${pronoun(char.gender ?? 'male')}的脸颊微微泛红，视线移向了窗外。]` : ''}`;
+[shy] ${pronoun(char.gender ?? 'male')}的脸颊微微泛红，视线移向了窗外。]` : '';
+
+        // --- Compute turn-index-based directives ---
+        const turnUserMsgs = [...sessionMessages].filter(m => m.role === 'user');
+        const turnIndex = turnUserMsgs.length;
+        const { lo, hi } = computeDateWordCountRange(char.dateOutputWordCount);
+        const activeStylePreset = resolveDateWritingStylePreset(char.dateWritingStyle);
+        const rotationPicks = pickTurnStyleReminders(turnIndex, activeStylePreset?.key, 3);
+
         const requestMessages = buildDateSessionPromptMessages({
             char,
             userProfile,
             allMsgs,
             historyContextBlock,
             statusSnapshotBlock,
-            photoPromptBlock: buildDatePhotoPromptForMainApi(char),
+            photoPromptBlock: photoPromptBlock,
             statusPromptBlock: buildDateStatusPromptForMainApi(char),
             runtimeScene: directorHint ? '见面导演提示回复' : '见面聊天回复',
             conversationTempo: directorHint ? '导演提示介入' : '普通推进',
-            specialNote,
+            specialNote: informationalNote,
             currentUserInput: text,
+            turnDirectives: {
+                userName: userProfile.name,
+                directorNote,
+                photoPromptBlock,
+                bilingualNote,
+                lo,
+                hi,
+                rotationPicks,
+                stallNudge: '',
+            },
         });
         const requestBody = {
             model: apiConfig.model,
@@ -2269,19 +2403,45 @@ ${exitPromptContent}
             : '';
         const historyContextBlock = buildDateRequestHistoryBlock(requestContext, char.name, userProfile.name, lastUserMsg.id);
         const statusSnapshotBlock = buildLatestDateStatusSnapshotBlock(validSessionMessages);
-        const specialNote = `System Note: Reroll. 用不同的角度重写。严格遵守沉浸剧场格式、当前叙述人称。${temporalContext ? `\n\n<temporal_context>${temporalContext}</temporal_context>` : ''}${dateTranslationEnabled ? `\n\n[Reminder: 双语模式已开启。每一行仍必须以 [emotion] 开头。只有${char.name}的台词用${dateTranslateSourceLang}写成 [emotion]<翻译><原文>...</原文><译文>...</译文></翻译>；叙述/动作/心理描写保持中文不变，不用 <翻译>。]` : ''}`;
+
+        // --- Separate informational specialNote from directive content ---
+        const temporalNote = temporalContext ? `\n\n<temporal_context>${temporalContext}</temporal_context>` : '';
+        const informationalNote = `System Note: Reroll. 用不同的角度重写。严格遵守沉浸剧场格式、当前叙述人称。${temporalNote}`;
+
+        // --- Extract directive items for turn_directives ---
+        const directorNote = '';
+        const photoPromptBlock = buildDatePhotoPromptForMainApi(char);
+        const bilingualNote = dateTranslationEnabled ? `[Reminder: 双语模式已开启。每一行仍必须以 [emotion] 开头。只有${char.name}的台词用${dateTranslateSourceLang}写成 [emotion]<翻译><原文>...</原文><译文>...</译文></翻译>；叙述/动作/心理描写保持中文不变，不用 <翻译>。]` : '';
+
+        // --- Compute turn-index-based directives ---
+        const turnUserMsgs = [...validSessionMessages].filter(m => m.role === 'user');
+        const turnIndex = turnUserMsgs.length;
+        const { lo, hi } = computeDateWordCountRange(char.dateOutputWordCount);
+        const activeStylePreset = resolveDateWritingStylePreset(char.dateWritingStyle);
+        const rotationPicks = pickTurnStyleReminders(turnIndex, activeStylePreset?.key, 3);
+
         const requestMessages = buildDateSessionPromptMessages({
             char,
             userProfile,
             allMsgs,
             historyContextBlock,
             statusSnapshotBlock,
-            photoPromptBlock: buildDatePhotoPromptForMainApi(char),
+            photoPromptBlock: photoPromptBlock,
             statusPromptBlock: buildDateStatusPromptForMainApi(char),
             runtimeScene: '见面回复重掷',
             conversationTempo: '重掷改写',
-            specialNote,
+            specialNote: informationalNote,
             currentUserInput: lastUserMsg.content,
+            turnDirectives: {
+                userName: userProfile.name,
+                directorNote,
+                photoPromptBlock,
+                bilingualNote,
+                lo,
+                hi,
+                rotationPicks,
+                stallNudge: '',
+            },
         });
         const requestBody = {
             model: apiConfig.model,

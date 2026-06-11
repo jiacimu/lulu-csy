@@ -5411,7 +5411,7 @@ const Chat: React.FC = () => {
 
             {userActionChoices && (
                 <div
-                    className="fixed inset-0 z-[95] flex items-end bg-slate-950/25 px-2 pb-[calc(var(--safe-bottom)+8px)] backdrop-blur-[2px] sm:items-center sm:justify-center sm:p-4"
+                    className="fixed inset-0 z-[95] flex items-end bg-slate-950/25 px-2 pb-[calc(var(--safe-bottom,env(safe-area-inset-bottom,0px))+8px)] backdrop-blur-[2px] sm:items-center sm:justify-center sm:p-4"
                     onClick={closeUserActionSelector}
                 >
                     <div
@@ -5483,8 +5483,8 @@ const Chat: React.FC = () => {
             )}
 
             {todayScheduleFeatureEnabled && isTodayScheduleOpen && (
-                <div className="fixed inset-0 z-[96] flex items-end justify-center bg-[#211918]/35 px-0 pb-[calc(var(--safe-bottom)+8px)] pt-[calc(var(--safe-top)+12px)] backdrop-blur-sm sm:items-center sm:p-4">
-                    <div className="font-schedule-serif flex max-h-[calc(100dvh-var(--safe-top)-var(--safe-bottom)-20px)] w-full max-w-xl flex-col overflow-hidden rounded-t-[28px] border border-[#f0e7dc] bg-[#fbf7ef] shadow-[0_24px_80px_rgba(42,28,22,0.24)] sm:max-h-[86vh] sm:rounded-[28px]">
+                <div className="fixed inset-0 z-[96] flex items-end justify-center bg-[#211918]/35 px-0 pb-[calc(var(--safe-bottom,env(safe-area-inset-bottom,0px))+8px)] pt-[calc(var(--safe-top,env(safe-area-inset-top,0px))+12px)] backdrop-blur-sm sm:items-center sm:p-4">
+                    <div className="font-schedule-serif flex max-h-[calc(100dvh-var(--safe-top,env(safe-area-inset-top,0px))-var(--safe-bottom,env(safe-area-inset-bottom,0px))-20px)] w-full max-w-xl flex-col overflow-hidden rounded-t-[28px] border border-[#f0e7dc] bg-[#fbf7ef] shadow-[0_24px_80px_rgba(42,28,22,0.24)] sm:max-h-[86vh] sm:rounded-[28px]">
                         <div className="flex shrink-0 items-start justify-between border-b border-[#eadfd2] bg-[#fffbf5]/70 px-5 py-4">
                             <div>
                                 <div className="font-sans text-[10px] font-semibold tracking-[0.3em] text-[#c98b84]">TODAY</div>
@@ -5503,7 +5503,7 @@ const Chat: React.FC = () => {
                             </button>
                         </div>
 
-                        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 pb-[calc(1.5rem+var(--safe-bottom))] no-scrollbar overscroll-contain">
+                        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 pb-[calc(1.5rem+var(--safe-bottom,env(safe-area-inset-bottom,0px)))] no-scrollbar overscroll-contain">
                             <div className="mb-4 flex flex-wrap items-center gap-2">
                                 <button
                                     type="button"

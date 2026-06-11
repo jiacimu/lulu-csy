@@ -71,6 +71,41 @@ const makeIssueNumber = (value: string): string => {
     return String((seed % 89) + 11).padStart(2, '0');
 };
 
+const getInitial = (value?: string): string => {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed.slice(0, 1).toUpperCase() : '心';
+};
+
+const Waveform: React.FC = () => {
+    const bars = [10, 18, 13, 24, 16, 28, 15, 21, 12, 18, 11];
+
+    return (
+        <div className="flex min-w-0 flex-1 items-center gap-1.5" aria-hidden="true">
+            <div className="h-px flex-1 bg-[#d59aae]" />
+            <div className="flex items-center gap-0.5">
+                {bars.slice(0, 5).map((height, index) => (
+                    <span
+                        key={`left-${index}`}
+                        className="block w-[2px] rounded-full bg-[#ba5f78]"
+                        style={{ height }}
+                    />
+                ))}
+            </div>
+            <span className="px-1 text-[13px] font-black leading-none text-[#b04c68]">♡</span>
+            <div className="flex items-center gap-0.5">
+                {bars.slice(5).map((height, index) => (
+                    <span
+                        key={`right-${index}`}
+                        className="block w-[2px] rounded-full bg-[#4d8c8a]"
+                        style={{ height }}
+                    />
+                ))}
+            </div>
+            <div className="h-px flex-1 bg-[#a9ccca]" />
+        </div>
+    );
+};
+
 const CollectionForwardCard: React.FC<CollectionForwardCardProps> = ({ data, commonLayout, selectionMode }) => {
     const kindLabel = formatCollectionKindLabel(data.kind);
     const palette = useMemo(() => MAGAZINE_PALETTES[makePaletteIndex(data.bookId || data.title)], [data.bookId, data.title]);
@@ -91,6 +126,73 @@ const CollectionForwardCard: React.FC<CollectionForwardCardProps> = ({ data, com
     useEffect(() => {
         setAvatarFailed(false);
     }, [charAvatar]);
+
+    if (data.kind === 'heart_talk') {
+        const showAvatar = Boolean(charAvatar && !avatarFailed);
+
+        return (
+            commonLayout(
+                <article
+                    className={`relative w-64 overflow-hidden rounded-[14px] border px-4 py-4 shadow-[0_18px_42px_-30px_rgba(109,48,70,0.62)] transition-transform ${selectionMode ? '' : 'active:scale-[0.99]'}`}
+                    style={{
+                        background: 'linear-gradient(145deg, #fffafb 0%, #f7eded 48%, #eef8f6 100%)',
+                        borderColor: 'rgba(176,76,104,0.24)',
+                        color: '#2b2428',
+                    }}
+                    aria-label="谈心典藏馆转递卡片"
+                >
+                    <div
+                        className="pointer-events-none absolute inset-x-4 top-0 h-px"
+                        style={{ background: 'linear-gradient(90deg, transparent, rgba(176,76,104,0.48), rgba(77,140,138,0.34), transparent)' }}
+                    />
+
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <div className="text-[15px] font-black leading-none tracking-[0.22em] text-[#7f3148]">
+                                HEART TALK
+                            </div>
+                            <div className="mt-2 truncate text-[10px] font-semibold tracking-[0.08em] text-[#7c6670]">
+                                来自 {data.charName || '角色'} 的谈心记录
+                            </div>
+                        </div>
+                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[#e7bec9] text-[10px] font-black text-[#b04c68]">
+                            ♡
+                        </div>
+                    </div>
+
+                    <div className="mt-5 flex items-center gap-3">
+                        <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full border border-white bg-[#d9eee9] shadow-[0_8px_18px_-12px_rgba(43,36,40,0.78)]">
+                            {showAvatar ? (
+                                <img
+                                    src={charAvatar}
+                                    alt=""
+                                    className="h-full w-full object-cover"
+                                    loading="lazy"
+                                    decoding="async"
+                                    onError={() => setAvatarFailed(true)}
+                                />
+                            ) : (
+                                <div
+                                    className="flex h-full w-full items-center justify-center text-lg font-black text-[#7f3148]"
+                                    style={{ background: 'linear-gradient(135deg, #f1d6dd, #d9eee9)' }}
+                                >
+                                    {getInitial(data.charName)}
+                                </div>
+                            )}
+                        </div>
+                        <Waveform />
+                    </div>
+
+                    <div
+                        className="mt-5 text-center text-[25px] leading-none text-[#8d3953]"
+                        style={{ fontFamily: "'Dancing Script', 'Pinyon Script', cursive" }}
+                    >
+                        Whispered to You
+                    </div>
+                </article>
+            )
+        );
+    }
 
     return (
         commonLayout(
@@ -125,7 +227,7 @@ const CollectionForwardCard: React.FC<CollectionForwardCardProps> = ({ data, com
                     </div>
 
                     <div
-                        className="relative mt-3 h-[112px] overflow-hidden rounded-[10px]"
+                        className="relative mt-3 aspect-square overflow-hidden rounded-[10px]"
                         style={{
                             background: `linear-gradient(135deg, ${palette.coverA} 0%, ${palette.coverB} 48%, ${palette.coverC} 100%)`,
                         }}

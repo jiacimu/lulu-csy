@@ -914,7 +914,7 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    padding: 4px 20px calc(112px + var(--safe-bottom, 0px));
+    padding: 4px 20px calc(112px + var(--safe-bottom, env(safe-area-inset-bottom, 0px)));
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;

@@ -894,7 +894,7 @@ export const SYSTEM_BACKUP_LOCAL_STORAGE_KEYS = [
     'os_tts_presets',
     'netease_music_cookie', 'music_recent_keywords', 'music_liked_songs',
     'music_profile_bg_setting', 'music_player_skin', 'music_player_glass',
-    'floating_lyrics_settings', 'temporal_pending_events',
+    'floating_lyrics_settings',
     'zhaixinglou_font_settings',
     'os_fullscreen_enabled', 'sullyos_performance_mode',
     'theater_custom_locations', 'theater_visit_counts', 'theater_bgm_enabled', 'theater_bgm_volume',

@@ -238,6 +238,7 @@ export const DB = {
     findCollectionBookBySource: collectionStore.findCollectionBookBySource,
     isCollectionSourceCollected: collectionStore.isCollectionSourceCollected,
     saveCollectionBook: collectionStore.saveCollectionBook,
+    updateCollectionBookTitle: collectionStore.updateCollectionBookTitle,
     deleteCollectionBook: collectionStore.deleteCollectionBook,
     deleteCollectionBookBySource: collectionStore.deleteCollectionBookBySource,
 };

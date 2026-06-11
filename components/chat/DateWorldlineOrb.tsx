@@ -147,7 +147,7 @@ const DateWorldlineOrb: React.FC<DateWorldlineOrbProps> = ({
             : '';
 
     return (
-        <div className="date-worldline-orb-shell pointer-events-none absolute bottom-[calc(var(--safe-bottom)+5.75rem)] right-4 z-[58] flex flex-col items-end gap-2">
+        <div className="date-worldline-orb-shell pointer-events-none absolute bottom-[calc(var(--safe-bottom,env(safe-area-inset-bottom,0px))+5.75rem)] right-4 z-[58] flex flex-col items-end gap-2">
             <style>{`
                 @keyframes date-worldline-orb-arrive {
                     0% { opacity: 0; transform: translate3d(120px, 48px, 0) scale(0.42); filter: blur(6px); }

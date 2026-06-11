@@ -690,6 +690,7 @@ const PhoneShell: React.FC = () => {
 
     [document.documentElement, document.body].forEach(element => {
       element.style.background = backgroundValue;
+      element.style.backgroundColor = 'var(--app-shell-background, #0f1115)';
       element.style.backgroundPosition = 'center';
       element.style.backgroundSize = 'cover';
       element.style.backgroundRepeat = 'no-repeat';

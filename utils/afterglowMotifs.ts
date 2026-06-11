@@ -1,4 +1,4 @@
-const AFTERGLOW_MOTIF_MAX_LENGTH = 280;
+const AFTERGLOW_MOTIF_MAX_LENGTH = 2000;
 const AFTERGLOW_CUSTOM_MOTIF_LIMIT = 80;
 
 export const AFTERGLOW_CUSTOM_MOTIFS_STORAGE_KEY = 'afterglow_custom_motifs_v1';
@@ -131,6 +131,106 @@ export function saveAfterglowCustomMotifsFromText(value: string): AfterglowCusto
 
 export function deleteAfterglowCustomMotif(id: string): AfterglowCustomMotif[] {
     const next = loadAfterglowCustomMotifs().filter(motif => motif.id !== id);
+    persistAfterglowCustomMotifs(next);
+    return next;
+}
+
+const AFTERGLOW_MOTIFS_EXPORT_VERSION = 1;
+
+export function exportAfterglowMotifsToJson(motifs: AfterglowCustomMotif[]): string {
+    return JSON.stringify(
+        {
+            version: AFTERGLOW_MOTIFS_EXPORT_VERSION,
+            exportedAt: new Date().toISOString(),
+            motifs: motifs.slice(0, AFTERGLOW_CUSTOM_MOTIF_LIMIT),
+        },
+        null,
+        2,
+    );
+}
+
+export function parseAfterglowMotifsImportFile(raw: string): {
+    motifs: AfterglowCustomMotif[];
+    error?: string;
+} {
+    try {
+        const parsed = JSON.parse(raw);
+
+        const rawMotifs: unknown[] = Array.isArray(parsed)
+            ? parsed
+            : Array.isArray(parsed?.motifs)
+                ? parsed.motifs
+                : [];
+
+        if (rawMotifs.length === 0) {
+            // Fall back: treat raw text as one motif per line
+            return parseTextMotifs(raw);
+        }
+
+        const seen = new Set<string>();
+        const imported: AfterglowCustomMotif[] = [];
+
+        for (const item of rawMotifs) {
+            let motif: AfterglowCustomMotif | null = null;
+            if (typeof item === 'string' && item.trim()) {
+                motif = normalizeAfterglowCustomMotif({ text: item });
+            } else {
+                motif = normalizeAfterglowCustomMotif(item);
+            }
+            if (!motif) continue;
+            if (seen.has(motif.text)) continue;
+            seen.add(motif.text);
+            imported.push(motif);
+            if (imported.length >= AFTERGLOW_CUSTOM_MOTIF_LIMIT) break;
+        }
+
+        if (imported.length === 0) {
+            return { motifs: [], error: '文件中没有识别到梗条目' };
+        }
+
+        return { motifs: imported };
+    } catch {
+        // Not valid JSON — try plain text (one motif per line)
+        return parseTextMotifs(raw);
+    }
+}
+
+function parseTextMotifs(raw: string): { motifs: AfterglowCustomMotif[]; error?: string } {
+    const lines = raw
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+
+    if (lines.length === 0) {
+        return { motifs: [], error: '文件中没有识别到梗条目' };
+    }
+
+    const seen = new Set<string>();
+    const imported: AfterglowCustomMotif[] = [];
+
+    for (const line of lines) {
+        const motif = normalizeAfterglowCustomMotif({ text: line });
+        if (!motif || seen.has(motif.text)) continue;
+        seen.add(motif.text);
+        imported.push(motif);
+        if (imported.length >= AFTERGLOW_CUSTOM_MOTIF_LIMIT) break;
+    }
+
+    return { motifs: imported };
+}
+
+export function mergeAfterglowMotifsImport(imported: AfterglowCustomMotif[]): AfterglowCustomMotif[] {
+    if (imported.length === 0) return loadAfterglowCustomMotifs();
+
+    const existing = loadAfterglowCustomMotifs();
+    const seen = new Set(existing.map(motif => motif.text));
+    const additions = imported.filter(motif => {
+        if (seen.has(motif.text)) return false;
+        seen.add(motif.text);
+        return true;
+    });
+
+    const next = [...existing, ...additions].slice(0, AFTERGLOW_CUSTOM_MOTIF_LIMIT);
     persistAfterglowCustomMotifs(next);
     return next;
 }

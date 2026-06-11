@@ -7,6 +7,8 @@ export interface CollectionBook {
     charId: string;
     kind: CollectionBookKind;
     title: string;
+    customTitle?: string;
+    customTitleUpdatedAt?: number;
     body: string;
     cardData: StatusCardData;
     sourceMessageId?: number;

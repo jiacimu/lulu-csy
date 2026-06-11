@@ -31,7 +31,7 @@
   z-index: 97;
   display: grid;
   place-items: center;
-  padding: calc(var(--safe-top) + 22px) 22px calc(var(--safe-bottom) + 22px);
+  padding: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 22px) 22px calc(var(--safe-bottom, env(safe-area-inset-bottom, 0px)) + 22px);
   background:
     radial-gradient(circle at 50% 44%, rgba(255, 249, 236, 0.32), transparent 34%),
     rgba(23, 20, 17, 0.34);
@@ -195,13 +195,13 @@
   justify-content: center;
   background: rgba(15, 19, 24, 0.48);
   backdrop-filter: blur(10px);
-  padding: calc(var(--safe-top) + 14px) 12px calc(var(--safe-bottom) + 12px);
+  padding: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 14px) 12px calc(var(--safe-bottom, env(safe-area-inset-bottom, 0px)) + 12px);
 }
 
 .yn-modal__sheet {
   display: flex;
   width: min(100%, 460px);
-  max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 28px);
+  max-height: calc(100dvh - var(--safe-top, env(safe-area-inset-top, 0px)) - var(--safe-bottom, env(safe-area-inset-bottom, 0px)) - 28px);
   flex-direction: column;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.18);

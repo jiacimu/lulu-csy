@@ -56,7 +56,7 @@ ${emojiContextStr}
     ];
 
     if (flags.autoVoice) {
-        sections.push(`**发送语音消息**（仅在语音消息开关开启时可用）
+        sections.push(`**发送语音消息**
 格式：\`【语音消息：你说的话】\`
 规则：
 - 必须用全角中文括号 \`【】\` 包裹，冒号用全角 \`：\`。
@@ -65,7 +65,7 @@ ${emojiContextStr}
     }
 
     if (flags.autoCall) {
-        sections.push(`**主动来电**（仅在主动来电开关开启时可用）
+        sections.push(`**主动来电**
 格式：\`[[CALL: mode]]\`
 mode 可选：\`daily\` / \`confide\` / \`truth\` / \`sleep\`
 规则：
@@ -75,7 +75,7 @@ mode 可选：\`daily\` / \`confide\` / \`truth\` / \`sleep\`
     }
 
     if (flags.autoShareSong) {
-        sections.push(`**分享歌曲**（仅在分享歌曲开关开启时可用）
+        sections.push(`**分享歌曲**
 格式：\`[[SHARE_SONG: 歌名 | 歌手名 | 歌曲ID]]\`
 规则：
 - 只在聊到音乐、情绪、回忆、陪伴或推荐相关话题时自然使用。
@@ -86,15 +86,9 @@ mode 可选：\`daily\` / \`confide\` / \`truth\` / \`sleep\`
     }
 
     if (flags.autoPhoto) {
-        sections.push(`**请求发送图片**（仅在主动发照片开关开启时可用）
-格式：\`[[PHOTO_DECISION:true]]\`
-规则：
-- 如果用户明确要求你生图、画一张、发照片、再发一次或给他看看画面，必须使用。
-- 当这一刻很适合发送照片、图片、随手拍或视觉画面时，也可以主动使用。
-- 标签外继续正常聊天，用户不会看见这个标签。
-- 不要展示判断过程。
-- 不要在正文里说“发了”“看到了吗”“我已经发过了”等完成态；可以说“等我一下”“给你看看”这类进行态。
-- 不发图时不要输出 false 标签。`);
+        sections.push(`**请求发送图片**
+若本轮需要发照片，只追加隐藏标签：\`[[PHOTO_DECISION:true]]\`。
+标签外正常聊天；不要说“已经发了/看到了吗”；不发图时不要写标签。`);
     }
 
     sections.push(`**回戳**
@@ -129,7 +123,7 @@ mode 可选：\`daily\` / \`confide\` / \`truth\` / \`sleep\`
     ].filter(Boolean);
 
     if (optionalActions.length > 0) {
-        sections.push(`**可选查询/记录动作**（仅对应功能开启时可用）
+        sections.push(`**可选查询/记录动作**
 ${optionalActions.join('\n')}`);
     }
 
@@ -145,7 +139,7 @@ ${optionalActions.join('\n')}`);
     }
 
     if (flags.xhsEnabled) {
-        sections.push(`**小红书动作**（仅小红书功能开启时可用）
+        sections.push(`**小红书动作**
 搜索：\`[[XHS_SEARCH: 搜索关键词]]\`
 浏览首页：\`[[XHS_BROWSE]]\`
 发笔记：\`[[XHS_POST: 标题 | 正文内容 | #标签1 #标签2]]\`
