@@ -5,7 +5,7 @@
  * 录音中显示脉冲动画和计时器，上滑时变为红色取消提示。
  */
 
-import React,{ useRef,useState,useCallback } from 'react';
+import React,{ useRef,useState,useCallback,useEffect } from 'react';
 import WaveformCanvas from './WaveformCanvas';
 
 interface VoiceRecordButtonProps {
@@ -54,6 +54,8 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
     const [isOverCancel, setIsOverCancel] = useState(false);
     const startYRef = useRef(0);
     const isRecordingRef = useRef(false);
+    const isOverCancelRef = useRef(false);
+    const stopGestureTrackingRef = useRef<(() => void) | null>(null);
 
     const formatDuration = (s: number) => {
         const min = Math.floor(s / 60);
@@ -63,6 +65,88 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
 
     // --- Touch / Mouse handlers for press-hold recording ---
 
+    const setCancelState = useCallback((next: boolean) => {
+        isOverCancelRef.current = next;
+        setIsOverCancel(prev => prev === next ? prev : next);
+    }, []);
+
+    const updateCancelState = useCallback((clientY: number) => {
+        const dy = startYRef.current - clientY; // positive = moved up
+        setCancelState(dy > CANCEL_THRESHOLD);
+    }, [setCancelState]);
+
+    const stopGestureTracking = useCallback(() => {
+        stopGestureTrackingRef.current?.();
+        stopGestureTrackingRef.current = null;
+    }, []);
+
+    useEffect(() => stopGestureTracking, [stopGestureTracking]);
+
+    const finishRecording = useCallback(async (forceCancel = false) => {
+        if (!isRecordingRef.current) return;
+        isRecordingRef.current = false;
+        stopGestureTracking();
+
+        if (forceCancel || isOverCancelRef.current) {
+            onCancelRecording();
+            setCancelState(false);
+            return;
+        }
+
+        const result = await onStopRecording();
+        if (result && result.blob.size > 0) {
+            onVoiceMessage(result.blob, Math.max(1, result.duration));
+        }
+        setCancelState(false);
+    }, [onCancelRecording, onStopRecording, onVoiceMessage, setCancelState, stopGestureTracking]);
+
+    const startGestureTracking = useCallback(() => {
+        if (typeof document === 'undefined') return;
+        stopGestureTracking();
+
+        const pickTouch = (e: TouchEvent) => e.touches[0] ?? e.changedTouches[0];
+        const onTouchMove = (e: TouchEvent) => {
+            const touch = pickTouch(e);
+            if (!touch) return;
+            e.preventDefault();
+            updateCancelState(touch.clientY);
+        };
+        const onTouchEnd = (e: TouchEvent) => {
+            const touch = pickTouch(e);
+            if (touch) updateCancelState(touch.clientY);
+            e.preventDefault();
+            void finishRecording();
+        };
+        const onTouchCancel = () => {
+            void finishRecording(true);
+        };
+        const onMouseMove = (e: MouseEvent) => {
+            updateCancelState(e.clientY);
+        };
+        const onMouseUp = () => {
+            void finishRecording();
+        };
+        const onWindowBlur = () => {
+            void finishRecording(true);
+        };
+
+        document.addEventListener('touchmove', onTouchMove, { passive: false });
+        document.addEventListener('touchend', onTouchEnd, { passive: false });
+        document.addEventListener('touchcancel', onTouchCancel);
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        window.addEventListener('blur', onWindowBlur);
+
+        stopGestureTrackingRef.current = () => {
+            document.removeEventListener('touchmove', onTouchMove);
+            document.removeEventListener('touchend', onTouchEnd);
+            document.removeEventListener('touchcancel', onTouchCancel);
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            window.removeEventListener('blur', onWindowBlur);
+        };
+    }, [finishRecording, stopGestureTracking, updateCancelState]);
+
     const handlePointerDown = useCallback((e: React.TouchEvent | React.MouseEvent) => {
         if (disabled || recorderState !== 'idle') return;
 
@@ -71,43 +155,38 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
 
         const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
         startYRef.current = clientY;
-        setIsOverCancel(false);
+        setCancelState(false);
+        startGestureTracking();
 
         // 同步标记开始，异步启动录音（不阻塞触摸事件）
         isRecordingRef.current = true;
         onStartRecording().then(ok => {
             if (!ok) {
                 isRecordingRef.current = false;
+                stopGestureTracking();
+                setCancelState(false);
             }
         }).catch(() => {
             isRecordingRef.current = false;
+            stopGestureTracking();
+            setCancelState(false);
         });
-    }, [disabled, recorderState, onStartRecording]);
+    }, [disabled, recorderState, onStartRecording, setCancelState, startGestureTracking, stopGestureTracking]);
 
     const handlePointerMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
         if (!isRecordingRef.current) return;
 
         const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-        const dy = startYRef.current - clientY; // positive = moved up
-        setIsOverCancel(dy > CANCEL_THRESHOLD);
-    }, []);
+        updateCancelState(clientY);
+    }, [updateCancelState]);
 
-    const handlePointerUp = useCallback(async () => {
-        if (!isRecordingRef.current) return;
-        isRecordingRef.current = false;
+    const handlePointerUp = useCallback(() => {
+        void finishRecording();
+    }, [finishRecording]);
 
-        if (isOverCancel) {
-            onCancelRecording();
-            setIsOverCancel(false);
-            return;
-        }
-
-        const result = await onStopRecording();
-        if (result && result.blob.size > 0) {
-            onVoiceMessage(result.blob, Math.max(1, result.duration));
-        }
-        setIsOverCancel(false);
-    }, [isOverCancel, onCancelRecording, onStopRecording, onVoiceMessage]);
+    const handlePointerCancel = useCallback(() => {
+        void finishRecording(true);
+    }, [finishRecording]);
 
     const isRecording = recorderState === 'recording';
     const showOverlay = isRecording;
@@ -119,10 +198,10 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
                 onTouchStart={handlePointerDown}
                 onTouchMove={handlePointerMove}
                 onTouchEnd={handlePointerUp}
+                onTouchCancel={handlePointerCancel}
                 onMouseDown={handlePointerDown}
                 onMouseMove={handlePointerMove}
                 onMouseUp={handlePointerUp}
-                onMouseLeave={() => { if (isRecordingRef.current) handlePointerUp(); }}
                 onContextMenu={(e) => e.preventDefault()}
                 disabled={disabled || isProcessing}
                 className={`w-11 h-11 shrink-0 rounded-full flex items-center justify-center transition-all select-none
@@ -134,6 +213,7 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
                     }`}
                 style={{ touchAction: 'none' }}
                 title={error || '按住说话'}
+                aria-label={error || '按住说话'}
             >
                 {isProcessing ? (
                     /* Spinner */
@@ -157,6 +237,7 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
                         className="absolute inset-0 pointer-events-auto"
                         onTouchMove={handlePointerMove}
                         onTouchEnd={handlePointerUp}
+                        onTouchCancel={handlePointerCancel}
                         onMouseMove={handlePointerMove}
                         onMouseUp={handlePointerUp}
                         style={{ touchAction: 'none' }}
