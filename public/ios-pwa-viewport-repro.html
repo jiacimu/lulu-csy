@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0, viewport-fit=cover">
+  <meta name="theme-color" content="#fdf6f0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PWA Viewport Repro">
+  <title>iOS PWA Viewport Repro</title>
+  <style>
+    :root {
+      color-scheme: light;
+      background: #fdf6f0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #fdf6f0;
+    }
+
+    body {
+      position: fixed;
+      inset: 0;
+    }
+
+    .page {
+      position: fixed;
+      inset: 0;
+      min-height: 100dvh;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.28)),
+        linear-gradient(145deg, #fdf6f0 0%, #fce8e6 34%, #f5e6f0 66%, #eee8f5 100%);
+      color: #27212b;
+      overflow: hidden;
+    }
+
+    .content {
+      box-sizing: border-box;
+      height: 100%;
+      padding: max(18px, calc(env(safe-area-inset-top, 0px) + 12px)) 18px calc(96px + env(safe-area-inset-bottom, 0px));
+      overflow: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    p,
+    pre {
+      margin: 0;
+    }
+
+    .note {
+      max-width: 38rem;
+      color: rgba(39, 33, 43, 0.72);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .input {
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 38rem;
+      margin-top: 18px;
+      border: 1px solid rgba(39, 33, 43, 0.14);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.78);
+      padding: 13px 14px;
+      color: #27212b;
+      font: inherit;
+      outline: none;
+    }
+
+    .panel {
+      max-width: 38rem;
+      margin-top: 18px;
+      border: 1px solid rgba(39, 33, 43, 0.12);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.58);
+      padding: 14px;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: rgba(39, 33, 43, 0.82);
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .dock {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      box-sizing: border-box;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 14px max(12px, env(safe-area-inset-bottom, 0px));
+      background: rgba(255, 255, 255, 0.82);
+      border-top: 1px solid rgba(39, 33, 43, 0.12);
+      box-shadow: 0 -12px 34px rgba(39, 33, 43, 0.12);
+      -webkit-backdrop-filter: blur(18px);
+      backdrop-filter: blur(18px);
+    }
+
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      background: #27212b;
+      color: #fff;
+      padding: 12px 15px;
+      font: 700 13px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    }
+
+    .dock span {
+      min-width: 0;
+      flex: 1;
+      color: rgba(39, 33, 43, 0.62);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+  </style>
+</head>
+<body>
+  <main class="page" id="page">
+    <section class="content">
+      <h1>iOS standalone PWA viewport repro</h1>
+      <p class="note">
+        Add this page to the Home Screen, open it as a standalone PWA, then compare the fixed bottom bar with the physical screen edge.
+        It is meant for Apple Feedback and Developer Forums thread 799216.
+      </p>
+      <input class="input" id="field" placeholder="Tap here to open and close the keyboard">
+      <section class="panel">
+        <pre id="metrics">collecting...</pre>
+      </section>
+    </section>
+    <footer class="dock">
+      <button id="focusButton" type="button">Focus input</button>
+      <button id="copyButton" type="button">Copy metrics</button>
+      <span>Fixed bottom bar with viewport-fit=cover.</span>
+    </footer>
+  </main>
+
+  <script>
+    const metricsEl = document.getElementById('metrics');
+    const inputEl = document.getElementById('field');
+    const pageEl = document.getElementById('page');
+
+    function isStandalone() {
+      return window.matchMedia('(display-mode: standalone)').matches
+        || window.navigator.standalone === true;
+    }
+
+    function readMetrics() {
+      const vv = window.visualViewport;
+      const rect = pageEl.getBoundingClientRect();
+      const lines = [
+        `standalone: ${isStandalone()}`,
+        `screen: ${screen.width}x${screen.height}`,
+        `inner: ${window.innerWidth}x${window.innerHeight}`,
+        `client: ${document.documentElement.clientWidth}x${document.documentElement.clientHeight}`,
+        `visualViewport: ${vv ? `${Math.round(vv.width)}x${Math.round(vv.height)}` : 'n/a'}`,
+        `offsetTop: ${vv ? Math.round(vv.offsetTop) : 'n/a'}`,
+        `screenGap: ${Math.round(screen.height - window.innerHeight)}`,
+        `layoutGap: ${Math.round(window.innerHeight - document.documentElement.clientHeight)}`,
+        `pageRect: top=${Math.round(rect.top)} height=${Math.round(rect.height)}`,
+        `scrollY: ${Math.round(window.scrollY || 0)}`,
+        `UA: ${navigator.userAgent}`,
+      ];
+      return lines.join('\n');
+    }
+
+    function renderMetrics() {
+      metricsEl.textContent = readMetrics();
+    }
+
+    document.getElementById('focusButton').addEventListener('click', () => inputEl.focus());
+    document.getElementById('copyButton').addEventListener('click', () => {
+      navigator.clipboard?.writeText(readMetrics()).catch(() => {});
+    });
+
+    renderMetrics();
+    setInterval(renderMetrics, 500);
+    window.addEventListener('resize', renderMetrics);
+    window.visualViewport?.addEventListener('resize', renderMetrics);
+    window.visualViewport?.addEventListener('scroll', renderMetrics);
+  </script>
+</body>
+</html>

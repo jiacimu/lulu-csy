@@ -1,7 +1,7 @@
 
 
 const DB_NAME = 'AetherOS_Data';
-const DB_VERSION = 48; // Bumped for Collection Hall books
+const DB_VERSION = 49; // Bumped for Collection Hall light walls
 
 export const STORE_CHARACTERS = 'characters';
 export const STORE_MESSAGES = 'messages';
@@ -39,6 +39,9 @@ export const STORE_YESTERDAY_NEWSPAPERS = 'yesterday_newspapers';
 export const STORE_VIBE_REFERENCES = 'vibe_references';
 export const STORE_NIANNIAN_SESSIONS = 'niannian_sessions';
 export const STORE_COLLECTION_BOOKS = 'collection_books';
+export const STORE_COLLECTION_WALLS = 'collection_walls';
+export const STORE_COLLECTION_WALL_ITEMS = 'collection_wall_items';
+export const STORE_COLLECTION_WALL_ASSETS = 'collection_wall_assets';
 
 export interface ScheduledMessage {
     id: string;
@@ -245,6 +248,8 @@ export const openDB = (): Promise<IDBDatabase> => {
                 const collectionStore = db.createObjectStore(STORE_COLLECTION_BOOKS, { keyPath: 'id' });
                 collectionStore.createIndex('charId', 'charId', { unique: false });
                 collectionStore.createIndex('charKindSourceMessage', ['charId', 'kind', 'sourceMessageId'], { unique: false });
+                collectionStore.createIndex('charKindContentHash', ['charId', 'kind', 'contentHash'], { unique: false });
+                collectionStore.createIndex('contentHash', 'contentHash', { unique: false });
                 collectionStore.createIndex('collectedAt', 'collectedAt', { unique: false });
             } else {
                 const collectionStore = (event.target as IDBOpenDBRequest).transaction?.objectStore(STORE_COLLECTION_BOOKS);
@@ -258,9 +263,82 @@ export const openDB = (): Promise<IDBDatabase> => {
                         collectionStore.createIndex('charKindSourceMessage', ['charId', 'kind', 'sourceMessageId'], { unique: false });
                     } catch (e) { console.log('Index already exists'); }
                 }
+                if (collectionStore && !collectionStore.indexNames.contains('charKindContentHash')) {
+                    try {
+                        collectionStore.createIndex('charKindContentHash', ['charId', 'kind', 'contentHash'], { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
+                if (collectionStore && !collectionStore.indexNames.contains('contentHash')) {
+                    try {
+                        collectionStore.createIndex('contentHash', 'contentHash', { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
                 if (collectionStore && !collectionStore.indexNames.contains('collectedAt')) {
                     try {
                         collectionStore.createIndex('collectedAt', 'collectedAt', { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
+            }
+            if (!db.objectStoreNames.contains(STORE_COLLECTION_WALLS)) {
+                const wallStore = db.createObjectStore(STORE_COLLECTION_WALLS, { keyPath: 'id' });
+                wallStore.createIndex('charId', 'charId', { unique: false });
+                wallStore.createIndex('charIdSortOrder', ['charId', 'sortOrder'], { unique: false });
+                wallStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+            } else {
+                const wallStore = (event.target as IDBOpenDBRequest).transaction?.objectStore(STORE_COLLECTION_WALLS);
+                if (wallStore && !wallStore.indexNames.contains('charId')) {
+                    try {
+                        wallStore.createIndex('charId', 'charId', { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
+                if (wallStore && !wallStore.indexNames.contains('charIdSortOrder')) {
+                    try {
+                        wallStore.createIndex('charIdSortOrder', ['charId', 'sortOrder'], { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
+                if (wallStore && !wallStore.indexNames.contains('updatedAt')) {
+                    try {
+                        wallStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
+            }
+            if (!db.objectStoreNames.contains(STORE_COLLECTION_WALL_ITEMS)) {
+                const itemStore = db.createObjectStore(STORE_COLLECTION_WALL_ITEMS, { keyPath: 'id' });
+                itemStore.createIndex('wallId', 'wallId', { unique: false });
+                itemStore.createIndex('bookId', 'bookId', { unique: false });
+                itemStore.createIndex('assetId', 'assetId', { unique: false });
+            } else {
+                const itemStore = (event.target as IDBOpenDBRequest).transaction?.objectStore(STORE_COLLECTION_WALL_ITEMS);
+                if (itemStore && !itemStore.indexNames.contains('wallId')) {
+                    try {
+                        itemStore.createIndex('wallId', 'wallId', { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
+                if (itemStore && !itemStore.indexNames.contains('bookId')) {
+                    try {
+                        itemStore.createIndex('bookId', 'bookId', { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
+                if (itemStore && !itemStore.indexNames.contains('assetId')) {
+                    try {
+                        itemStore.createIndex('assetId', 'assetId', { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
+            }
+            if (!db.objectStoreNames.contains(STORE_COLLECTION_WALL_ASSETS)) {
+                const assetStore = db.createObjectStore(STORE_COLLECTION_WALL_ASSETS, { keyPath: 'id' });
+                assetStore.createIndex('hash', 'hash', { unique: false });
+                assetStore.createIndex('createdAt', 'createdAt', { unique: false });
+            } else {
+                const assetStore = (event.target as IDBOpenDBRequest).transaction?.objectStore(STORE_COLLECTION_WALL_ASSETS);
+                if (assetStore && !assetStore.indexNames.contains('hash')) {
+                    try {
+                        assetStore.createIndex('hash', 'hash', { unique: false });
+                    } catch (e) { console.log('Index already exists'); }
+                }
+                if (assetStore && !assetStore.indexNames.contains('createdAt')) {
+                    try {
+                        assetStore.createIndex('createdAt', 'createdAt', { unique: false });
                     } catch (e) { console.log('Index already exists'); }
                 }
             }

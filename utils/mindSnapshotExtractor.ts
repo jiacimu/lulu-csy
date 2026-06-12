@@ -2503,10 +2503,15 @@ function extractHtmlFromResponse(content: string): string | null {
     return null;
 }
 
+type FreeformTextTier = '沉默卡' | '一句话卡' | '文字主体卡';
+
+const FREEFORM_TEXT_TIERS: FreeformTextTier[] = ['沉默卡', '一句话卡', '文字主体卡'];
+
 type FreeformShapeChoice = {
     line: string;
     candidates: string[];
     selectedShape?: string;
+    textTier?: FreeformTextTier;
 };
 
 const getFreeformRecentShapesStorageKey = (charId: string): string =>
@@ -2524,10 +2529,16 @@ function getFreeformLocalStorage(): Storage | null {
 function normalizeFreeformShapeName(value: string): string {
     return String(value || '')
         .replace(/[（(].*?[）)]/g, '')
-        .replace(/^[ABCabc][\s.。:：、)）-]+/, '')
+        .replace(/沉默卡|一句话卡|文字主体卡/g, '')
+        .replace(/^[ABCabc][\s.。:：、)）\-·・•]+/, '')
+        .replace(/[\s.。:：、)）\-·・•]+$/, '')
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 28);
+}
+
+function extractFreeformTextTier(value: string): FreeformTextTier | undefined {
+    return FREEFORM_TEXT_TIERS.find(tier => value.includes(tier));
 }
 
 function loadRecentFreeformShapes(charId: string): string[] {
@@ -2590,13 +2601,15 @@ function extractFreeformShapeChoice(content: string): FreeformShapeChoice | null
     if (!match) return null;
 
     const candidates = match[1]
-        .split(/\s*[\/|、,，]\s*/)
+        .split(/\s*[\/／|｜、,，]\s*/)
         .map(normalizeFreeformShapeName)
         .filter(Boolean);
-    const selectedRaw = normalizeFreeformShapeName(match[2]);
-    const letterMatch = selectedRaw.match(/^[ABCabc]$/);
+    const selectedSegment = String(match[2] || '').trim();
+    const textTier = extractFreeformTextTier(selectedSegment);
+    const letterMatch = selectedSegment.match(/^\s*([ABCabc])(?:\s|[.。:：、)）\-·・•]|(?=沉默卡|一句话卡|文字主体卡)|$)/);
+    const selectedRaw = normalizeFreeformShapeName(selectedSegment);
     const selectedFromLetter = letterMatch
-        ? candidates[letterMatch[0].toUpperCase().charCodeAt(0) - 65]
+        ? candidates[letterMatch[1].toUpperCase().charCodeAt(0) - 65]
         : undefined;
     const selectedShape = selectedFromLetter || selectedRaw;
     const isPlaceholderOnly = /^[ABCabc]$/.test(selectedShape || '') && candidates.every(item => /^[ABCabc]$/.test(item));
@@ -2605,6 +2618,7 @@ function extractFreeformShapeChoice(content: string): FreeformShapeChoice | null
         line,
         candidates,
         selectedShape: isPlaceholderOnly ? undefined : selectedShape,
+        textTier,
     };
 }
 
@@ -2648,32 +2662,46 @@ ${dynamicConstraints}
 1. **刚才的对话发生在什么场景？** 那个场景里天然存在什么纸片和屏幕？
    医院→缴费凭条、住院腕带；深夜→锁屏上堆叠的通知；做饭→沾了油渍的菜谱页；赶路→揉皱的登机牌、地铁卡余额不足的提示。
 2. **${charName}是谁？** ta的职业、习惯、所在地决定了ta身边有什么。外科医生和乐队主唱随手留下的东西完全不同。碎片必须是"ta此刻真的会经手的实物"。
-3. 前两步都推不出来时，才从**材质维度**发散：热敏纸小票 / 某个App的截图 / 衣服洗标 / 包装盒残片 / 票据存根 / 药板锡纸背面写的字 / 借阅卡……
+
+默认禁用：便利贴、手写信纸。
 
 **发散规则**：先想出 3 个候选形态，划掉其中最常规的一个，再从剩下两个里选更贴合当前情绪的那个。
 
-## 二、写文案（最重要）
+## 二、决定文字（先问"字落在哪"，再问"写什么"）
 
-卡片上的字要读起来像${charName}亲手写的/打的，而不是AI生成的。
+**落点原则**：卡片上的每一个字，必须出现在这个载体本身"合法有字"的位置——印刷字段、手写空位、备注栏、输入框、评论区、文件名、歌单名。载体上不存在的位置，不允许凭空浮一段话。内心独白不能直接印在播放器、天气卡或票据的版面上。
+
+**文字量分三档，由形态决定（不是每张卡都要写一段话）**：
+
+- **沉默卡（零自由文案）**：信息全部由载体自带字段表达。播放器 = 歌名 + 单曲循环角标"×3" + 时刻；未接来电 = 次数 + 凌晨的时间戳；外卖单 = 菜名 + "备注：不要香菜"。选哪首歌、停在几点、循环第几遍，本身就是写作。
+- **一句话卡**：载体恰好有一个合法的小空位——小票背面、快递备注栏等多种形式
+- **文字主体卡**：载体本来就是用来写字的（备忘、日记页、聊天记录、抄歌词的纸）。只有这一档适用下面的完整文案写法。
+
+**落点对照样本**：
+- 坏：音乐播放器上叠一段内心独白（真实锁屏不会印你的心里话）
+- 好：同样的情绪 → 单曲循环"×3" + 17:08 + 歌名本身；那句话实在想说，就挪进歌单简介或评论框的草稿里
+
+**文案写法（仅适用于一句话卡和文字主体卡）**：
 
 - 完全沿用${charName}的人设、语气、用词和标点习惯
 - 它是生活碎屑：随手的备忘、脱口而出的吐槽、写到一半搁下的句子
-- 用残缺句和流水账；琐事夹着琐事；允许涂改、缩写、被划掉的错字
+- 残缺句、流水账、琐事夹着琐事；允许涂改、缩写、被划掉的错字
 - 必须有具体细节：具体的东西、具体的数字、具体的时间，不要抒情空话
 
 对照样本（体会差别，不要照抄内容）：
 - 坏（AI味）："今天的晚霞很温柔，像极了某个人的笑。"
 - 好（碎片感）："葱 姜都没了 / 楼下超市21:30关门 来得及 / ——他上次说想吃的那个，周末吧"
 
-**关系感知**：从人设和对话推断${charName}与用户的关系，但用户只能间接出现——一个通讯录备注、第二只杯子、一条没舍得删的转发。把关系藏在第三件小事里，绝不直白表白。
+**关系感知（三档都适用）**：从人设和对话推断${charName}与用户的关系，但用户只能间接出现——一个通讯录备注、一首被单曲循环的歌、一条没发出去的草稿、第二只杯子。藏在细节里，绝不直白表白。
 
 ## 三、视觉还原
 
 **反默认（重要）**：
 
 - 禁止"标准卡片三件套"：整体居中 + 大圆角 + 柔和box-shadow。真实的碎片不长这样。
-- 每张卡片至少包含一处"不完美"：歪斜1~3度（transform: rotate）、咖啡渍（radial-gradient）、撕边（clip-path锯齿）、半透明胶带压角、一道折痕（linear-gradient暗线）、划掉重写的字。
+
 - 排版允许不对称、允许怪异的留白，文字可以顶到纸边。
+- 自由文案禁止覆盖载体的功能区（进度条、按钮、状态栏、图标）；放不下就删减文字，不准遮挡或压缩载体本身。
 - 数字类碎片（截图、通知）要带边角真实感：状态栏时间、电量、未读角标、输入框里打了一半的字。
 - 纹理全部用CSS伪造：横线纸用repeating-linear-gradient，热敏纸用极淡的颗粒渐变，屏幕加细微的顶部高光。
 
@@ -2686,7 +2714,7 @@ ${dynamicConstraints}
 
 - 输出一个完整的 HTML 文档，包含 <style> 和 <body>
 - body 背景必须透明（background: transparent）
-- 整体高度在 120px ~ 220px 之间，由形态决定；宽度 100%
+- 以手机竖屏展示为主，整体高度在 180px ~ 640px 之间，由形态决定；宽度 100%
 - 严禁 min-height，严禁 overflow: visible
 - 所有样式写在 <style> 标签或 style 属性里，禁止 class 引用外部框架
 - 不使用任何外部资源（外部字体URL、图片URL、CDN链接）
@@ -2696,7 +2724,7 @@ ${dynamicConstraints}
 
 ## 五、输出格式
 
-1. 第一行用普通文字写出候选与选择，固定格式：候选：A / B / C → 选B（理由不超过10字）
+1. 第一行用普通文字写出候选、选择和文字档位，固定格式：候选：A / B / C → 选B·沉默卡（理由不超过10字）。形态名用 2~6 字的通用名词；档位只能是这三个词之一：沉默卡 / 一句话卡 / 文字主体卡。
 2. 然后直接输出用 \`\`\`html 包裹的完整代码。
 3. 除以上两项外不输出任何东西。不要JSON，不要解释。`;
 
@@ -2794,6 +2822,7 @@ async function generateFreeformCard(
                 freeformChoiceLine: shapeChoice?.line,
                 freeformCandidates: shapeChoice?.candidates,
                 freeformShape: shapeChoice?.selectedShape,
+                freeformTextTier: shapeChoice?.textTier ?? null,
                 freeformDynamicConstraints: dynamicConstraints || undefined,
             },
             style: { mood: '' },

@@ -17,6 +17,7 @@ import * as newspaperStore from './newspaperStore';
 import * as vibeReferenceStore from './vibeReferenceStore';
 import * as niannianStore from './niannianStore';
 import * as collectionStore from './collectionStore';
+import * as collectionWallStore from './collectionWallStore';
 
 
 // Compose the same `DB` object shape as the original monolithic file
@@ -241,4 +242,20 @@ export const DB = {
     updateCollectionBookTitle: collectionStore.updateCollectionBookTitle,
     deleteCollectionBook: collectionStore.deleteCollectionBook,
     deleteCollectionBookBySource: collectionStore.deleteCollectionBookBySource,
+    getAllCollectionWalls: collectionWallStore.getAllCollectionWalls,
+    getCollectionWallsByCharId: collectionWallStore.getCollectionWallsByCharId,
+    getCollectionWallById: collectionWallStore.getCollectionWallById,
+    saveCollectionWall: collectionWallStore.saveCollectionWall,
+    deleteCollectionWall: collectionWallStore.deleteCollectionWall,
+    getOrCreateDefaultCollectionWall: collectionWallStore.getOrCreateDefaultCollectionWall,
+    getCollectionWallItemsByWallId: collectionWallStore.getCollectionWallItemsByWallId,
+    getCollectionWallItemsByBookId: collectionWallStore.getCollectionWallItemsByBookId,
+    saveCollectionWallItem: collectionWallStore.saveCollectionWallItem,
+    deleteCollectionWallItem: collectionWallStore.deleteCollectionWallItem,
+    deleteCollectionWallItemsByBookId: collectionWallStore.deleteCollectionWallItemsByBookId,
+    addCollectionBookToWall: collectionWallStore.addCollectionBookToWall,
+    addCollectionBookToDefaultWall: collectionWallStore.addCollectionBookToDefaultWall,
+    saveCollectionWallAsset: collectionWallStore.saveCollectionWallAsset,
+    getCollectionWallAssetById: collectionWallStore.getCollectionWallAssetById,
+    getCollectionWallAssetsByHash: collectionWallStore.getCollectionWallAssetsByHash,
 };

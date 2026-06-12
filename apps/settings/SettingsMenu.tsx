@@ -1,5 +1,6 @@
 
 import React,{ useMemo,useState } from 'react';
+import { createPortal } from 'react-dom';
 import { haptic } from '../../utils/haptics';
 import { requestSystemFullscreen,exitSystemFullscreen } from '../../utils/systemFullscreen';
 import { getRuntimeConfigSnapshot,inferEmbeddingEngineId } from '../../utils/runtimeConfig';
@@ -91,6 +92,18 @@ const PERFORMANCE_MODE_OPTIONS: Array<{ id: PerformanceModePreference; label: st
     { id: 'off', label: '关闭' },
 ];
 
+interface TouchTestPoint {
+    id: number;
+    x: number;
+    y: number;
+    clientY: number;
+    rootY: number | null;
+    rootBottomOffset: number | null;
+    bottomGap: number;
+}
+
+const MAX_TOUCH_TEST_POINTS = 12;
+
 // ─── Status reading from runtime snapshot (no context subscription!) ─────
 
 function readStatuses(): Record<string, string | undefined> {
@@ -153,6 +166,10 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
     const [viewportCalibrated, setViewportCalibrated] = useState(false);
     const [viewportDiagnostics, setViewportDiagnostics] = useState<ViewportDiagnosticsSnapshot>(() => getViewportDiagnosticsSnapshot());
     const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
+    const [touchTestOpen, setTouchTestOpen] = useState(false);
+    const [touchTestPoints, setTouchTestPoints] = useState<TouchTestPoint[]>([]);
+    const [lastTouchTestPoint, setLastTouchTestPoint] = useState<TouchTestPoint | null>(null);
+    const touchTestIdRef = React.useRef(0);
 
     React.useEffect(() => {
         const syncDiagnostics = () => setViewportDiagnostics(getViewportDiagnosticsSnapshot());
@@ -217,6 +234,39 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
         setViewportOffsetFollowEnabled(checked);
         setViewportDiagnostics(getViewportDiagnosticsSnapshot());
     };
+
+    const recordTouchTestPoint = (event: React.PointerEvent<HTMLDivElement>) => {
+        const root = document.querySelector('.sully-app-root') as HTMLElement | null;
+        const rect = root?.getBoundingClientRect();
+        const rootTop = rect && Number.isFinite(rect.top) ? rect.top : null;
+        const rootBottom = rect && Number.isFinite(rect.bottom) ? rect.bottom : null;
+        touchTestIdRef.current += 1;
+        const point: TouchTestPoint = {
+            id: touchTestIdRef.current,
+            x: Math.round(event.clientX),
+            y: Math.round(event.clientY),
+            clientY: Math.round(event.clientY),
+            rootY: rootTop === null ? null : Math.round(event.clientY - rootTop),
+            rootBottomOffset: rootBottom === null ? null : Math.round(rootBottom - window.innerHeight),
+            bottomGap: Math.round(window.innerHeight - event.clientY),
+        };
+
+        try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+        } catch { /* noop */ }
+
+        setLastTouchTestPoint(point);
+        setTouchTestPoints(prev => [point, ...prev].slice(0, MAX_TOUCH_TEST_POINTS));
+    };
+
+    const handleTouchTestPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (event.buttons !== 1) return;
+        recordTouchTestPoint(event);
+    };
+
+    const touchTestHost: HTMLElement | null = touchTestOpen && typeof document !== 'undefined'
+        ? ((document.querySelector('.sully-app-root') as HTMLElement | null) || document.body)
+        : null;
 
     const statusMap: Record<string, string | undefined> = {
         api: statuses.api,
@@ -316,25 +366,53 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
                         </div>
                         <div className="min-w-0">
                             <div className="text-sm font-semibold text-slate-700">诊断信息</div>
-                            <div className="text-[10px] text-slate-400 truncate">iOS 26.5 视口偏移回传</div>
+                            <div className="text-[10px] text-slate-400 truncate">iOS Version/26.x 视口对账回传</div>
                         </div>
                     </div>
-                    <button
-                        type="button"
-                        onClick={handleCopyDiagnostics}
-                        className="shrink-0 rounded-full bg-slate-900/85 px-3 py-1.5 text-[10px] font-bold text-white active:scale-95 transition-transform"
-                    >
-                        {diagnosticsCopied ? '已复制' : '复制'}
-                    </button>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setTouchTestPoints([]);
+                                setLastTouchTestPoint(null);
+                                setTouchTestOpen(true);
+                            }}
+                            className="rounded-full bg-rose-500 px-3 py-1.5 text-[10px] font-bold text-white active:scale-95 transition-transform"
+                        >
+                            触控测试
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleCopyDiagnostics}
+                            className="rounded-full bg-slate-900/85 px-3 py-1.5 text-[10px] font-bold text-white active:scale-95 transition-transform"
+                        >
+                            {diagnosticsCopied ? '已复制' : '复制'}
+                        </button>
+                    </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-xl bg-slate-100/70 p-3 font-mono text-[10px] text-slate-500">
+                    <div>build: {viewportDiagnostics.buildHash}</div>
+                    <div>mode: {viewportDiagnostics.runtimeMode}</div>
+                    <div>screen: {viewportDiagnostics.screenWidth}x{viewportDiagnostics.screenHeight}</div>
+                    <div>screenGap: {viewportDiagnostics.screenGap}</div>
+                    <div className="col-span-2 whitespace-normal break-words">verdict: {viewportDiagnostics.viewportVerdict}</div>
                     <div>offsetTop: {viewportDiagnostics.offsetTop ?? 'n/a'}</div>
                     <div>vv.height: {viewportDiagnostics.visualViewportHeight ?? 'n/a'}</div>
                     <div>innerHeight: {viewportDiagnostics.innerHeight}</div>
                     <div>clientHeight: {viewportDiagnostics.documentElementClientHeight}</div>
+                    <div>gap: {viewportDiagnostics.layoutViewportGap}</div>
+                    <div>scrollHeight: {viewportDiagnostics.documentElementScrollHeight}</div>
                     <div>scrollY: {viewportDiagnostics.scrollY}</div>
+                    <div>safeTop: {viewportDiagnostics.safeAreaInsetTop}px</div>
                     <div>safeBottom: {viewportDiagnostics.safeAreaInsetBottom}px</div>
+                    <div>root.top: {viewportDiagnostics.rootRectTop ?? 'n/a'}</div>
+                    <div>root.h: {viewportDiagnostics.rootRectHeight ?? 'n/a'}</div>
+                    <div>dvh: {viewportDiagnostics.cssDvhHeight ?? 'n/a'}</div>
+                    <div>lvh: {viewportDiagnostics.cssLvhHeight ?? 'n/a'}</div>
+                    <div>svh: {viewportDiagnostics.cssSvhHeight ?? 'n/a'}</div>
+                    <div>realVh: {viewportDiagnostics.realViewportHeight || 'unset'}</div>
+                    <div>Version: {viewportDiagnostics.browserVersion || 'n/a'}</div>
                     <div className="col-span-2 truncate">UA: {viewportDiagnostics.userAgent}</div>
                 </div>
 
@@ -369,6 +447,65 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
                     )}
                 </div>
             </div>
+
+            {touchTestOpen && touchTestHost && createPortal((
+                <div
+                    className="absolute left-0 top-0 z-[2147483600] w-full overflow-hidden bg-slate-950/90 text-white"
+                    style={{
+                        height: 'var(--real-vh, 100dvh)',
+                        touchAction: 'none',
+                    }}
+                    onPointerDown={recordTouchTestPoint}
+                    onPointerMove={handleTouchTestPointerMove}
+                >
+                    <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[size:32px_32px]" />
+                    <div
+                        className="absolute left-3 right-3 rounded-2xl border border-white/15 bg-black/45 p-3 shadow-2xl backdrop-blur-md"
+                        style={{ top: 'max(0.75rem, calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 0.5rem))' }}
+                        onPointerDown={event => event.stopPropagation()}
+                        onPointerMove={event => event.stopPropagation()}
+                    >
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <div className="text-sm font-bold">触控测试</div>
+                                <div className="mt-1 font-mono text-[10px] leading-relaxed text-white/65">
+                                    {lastTouchTestPoint ? (
+                                        <>
+                                            clientY: {lastTouchTestPoint.clientY} · rootY: {lastTouchTestPoint.rootY ?? 'n/a'} · bottomGap: {lastTouchTestPoint.bottomGap} · rootBottomOffset: {lastTouchTestPoint.rootBottomOffset ?? 'n/a'}
+                                        </>
+                                    ) : (
+                                        <>点按屏幕任意位置开始记录。</>
+                                    )}
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setTouchTestOpen(false)}
+                                className="shrink-0 rounded-full bg-white px-3 py-1.5 text-[10px] font-bold text-slate-950 active:scale-95"
+                            >
+                                关闭
+                            </button>
+                        </div>
+                    </div>
+
+                    {touchTestPoints.map(point => (
+                        <div
+                            key={point.id}
+                            className="pointer-events-none absolute"
+                            style={{
+                                left: point.x,
+                                top: point.y,
+                                transform: 'translate(-50%, -50%)',
+                            }}
+                        >
+                            <div className="h-5 w-5 rounded-full border-2 border-white bg-rose-500 shadow-[0_0_0_8px_rgba(244,63,94,0.22),0_8px_24px_rgba(0,0,0,0.35)]" />
+                            <div className="absolute left-1/2 top-6 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/70 px-2 py-1 font-mono text-[10px] text-white">
+                                clientY {point.clientY}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            ), touchTestHost)}
 
             {/* 流畅模式 */}
             <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-4 shadow-sm border border-white/50">

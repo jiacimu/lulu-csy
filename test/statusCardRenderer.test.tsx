@@ -135,11 +135,11 @@ describe('StatusCardRenderer', () => {
         reportFrameSize(frame, channel, 192, 792);
 
         await waitFor(() => {
-            expect(fitShell).toHaveStyle({ width: '100px' });
-            expect(fitShell).toHaveStyle({ height: '400px' });
+            expect(fitShell).toHaveStyle({ width: '111px' });
+            expect(fitShell).toHaveStyle({ height: '441px' });
             expect(frame).toHaveStyle({ width: '200px' });
             expect(frame).toHaveStyle({ height: '800px' });
-            expect(frame.style.transform).toBe('translate(-50%, -50%) scale(0.5)');
+            expect(frame.style.transform).toContain('scale(0.55');
         });
     });
 

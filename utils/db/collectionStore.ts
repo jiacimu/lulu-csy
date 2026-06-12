@@ -1,6 +1,6 @@
 import type { CollectionBook, CollectionBookInput, CollectionSourceQuery } from '../../types';
-import { normalizeCollectionCustomTitle } from '../collectionBooks';
-import { openDB, STORE_COLLECTION_BOOKS } from './core';
+import { buildCollectionDefaultTitle, normalizeCollectionCustomTitle } from '../collectionBooks';
+import { openDB, STORE_COLLECTION_BOOKS, STORE_COLLECTION_WALL_ITEMS } from './core';
 
 const createCollectionBookId = (): string => {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -57,17 +57,31 @@ export const findCollectionBookBySource = async (query: CollectionSourceQuery): 
     const db = await openDB();
     if (!db.objectStoreNames.contains(STORE_COLLECTION_BOOKS)) return null;
     const body = normalizeBodyForDedup(query.body);
+    const contentHash = query.contentHash || '';
     return new Promise((resolve, reject) => {
         const tx = db.transaction(STORE_COLLECTION_BOOKS, 'readonly');
         const store = tx.objectStore(STORE_COLLECTION_BOOKS);
-        const request = typeof query.sourceMessageId === 'number'
-            ? store.index('charKindSourceMessage').getAll([query.charId, query.kind, query.sourceMessageId])
-            : store.index('charId').getAll(query.charId);
+        const canQueryContentHash = query.kind === 'freeform'
+            && Boolean(contentHash)
+            && store.indexNames.contains('charKindContentHash');
+        const request = canQueryContentHash
+            ? store.index('charKindContentHash').getAll([query.charId, query.kind, contentHash])
+            : typeof query.sourceMessageId === 'number' && store.indexNames.contains('charKindSourceMessage')
+                ? store.index('charKindSourceMessage').getAll([query.charId, query.kind, query.sourceMessageId])
+                : store.index('charId').getAll(query.charId);
         request.onsuccess = () => {
             const matches = ((request.result || []) as CollectionBook[]).filter(book => (
                 book.kind === query.kind
-                && normalizeBodyForDedup(book.body) === body
-                && (typeof query.sourceMessageId !== 'number' || book.sourceMessageId === query.sourceMessageId)
+                && (
+                    query.kind === 'freeform' && query.contentHash
+                        ? book.contentHash === query.contentHash
+                        : normalizeBodyForDedup(book.body) === body
+                )
+                && (
+                    query.kind === 'freeform' && query.contentHash
+                        ? true
+                        : typeof query.sourceMessageId !== 'number' || book.sourceMessageId === query.sourceMessageId
+                )
             ));
             resolve(sortNewestFirst(matches)[0] || null);
         };
@@ -83,6 +97,7 @@ export const saveCollectionBook = async (input: CollectionBookInput): Promise<Co
         charId: input.charId,
         kind: input.kind,
         sourceMessageId: input.sourceMessageId,
+        contentHash: input.contentHash,
         body: input.body,
     });
     if (duplicate) return duplicate;
@@ -92,7 +107,7 @@ export const saveCollectionBook = async (input: CollectionBookInput): Promise<Co
     const record: CollectionBook = {
         ...input,
         id: input.id || createCollectionBookId(),
-        title: input.title.trim() || (input.kind === 'heart_talk' ? '未命名谈心' : '未命名番外'),
+        title: input.title.trim() || buildCollectionDefaultTitle(input.kind, input.sourceMessageTimestamp || input.collectedAt || input.createdAt),
         customTitle: normalizedCustomTitle,
         customTitleUpdatedAt: normalizedCustomTitle ? input.customTitleUpdatedAt || now : undefined,
         body: normalizeBodyForDedup(input.body),
@@ -135,12 +150,30 @@ export const updateCollectionBookTitle = async (id: string, customTitle?: string
 };
 
 export const deleteCollectionBook = async (id: string): Promise<void> => {
-    const opened = await getStore('readwrite');
-    if (!opened) return;
+    const db = await openDB();
+    if (!db.objectStoreNames.contains(STORE_COLLECTION_BOOKS)) return;
+    const stores = db.objectStoreNames.contains(STORE_COLLECTION_WALL_ITEMS)
+        ? [STORE_COLLECTION_BOOKS, STORE_COLLECTION_WALL_ITEMS]
+        : [STORE_COLLECTION_BOOKS];
     return new Promise((resolve, reject) => {
-        opened.store.delete(id);
-        opened.tx.oncomplete = () => resolve();
-        opened.tx.onerror = () => reject(opened.tx.error);
+        const tx = db.transaction(stores, 'readwrite');
+        tx.objectStore(STORE_COLLECTION_BOOKS).delete(id);
+
+        if (stores.includes(STORE_COLLECTION_WALL_ITEMS)) {
+            const itemStore = tx.objectStore(STORE_COLLECTION_WALL_ITEMS);
+            if (itemStore.indexNames.contains('bookId')) {
+                const cursorRequest = itemStore.index('bookId').openCursor(IDBKeyRange.only(id));
+                cursorRequest.onsuccess = () => {
+                    const cursor = cursorRequest.result;
+                    if (!cursor) return;
+                    cursor.delete();
+                    cursor.continue();
+                };
+            }
+        }
+
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
     });
 };
 

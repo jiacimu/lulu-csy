@@ -1,4 +1,4 @@
-import { CharacterProfile,FullBackupData,MemoryRecordAudio,SerializedMemoryRecordAudio,SerializedVoiceAudio } from '../../types';
+import { CharacterProfile,CollectionWallAsset,FullBackupData,MemoryRecordAudio,SerializedCollectionWallAsset,SerializedMemoryRecordAudio,SerializedVoiceAudio } from '../../types';
 import {
   openDB,STORE_CHARACTERS,STORE_MESSAGES,STORE_THEMES,STORE_EMOJIS,
   STORE_EMOJI_CATEGORIES,STORE_ASSETS,STORE_GALLERY,STORE_USER,
@@ -8,7 +8,7 @@ import {
   STORE_BANK_TX,STORE_BANK_DATA,STORE_XHS_ACTIVITIES,STORE_XHS_STOCK,
   STORE_VECTOR_MEMORIES,STORE_MEMORY_RECORDS,STORE_MEMORY_RECORD_AUDIO,
   STORE_SCHEDULED,STORE_LETTERS,STORE_VOICE_AUDIO,STORE_YESTERDAY_NEWSPAPERS,STORE_VIBE_REFERENCES,
-  STORE_NIANNIAN_SESSIONS,STORE_COLLECTION_BOOKS,
+  STORE_NIANNIAN_SESSIONS,STORE_COLLECTION_BOOKS,STORE_COLLECTION_WALLS,STORE_COLLECTION_WALL_ITEMS,STORE_COLLECTION_WALL_ASSETS,
   DB_NAME_CONST
 } from './core';
 
@@ -31,13 +31,37 @@ export const getRawStoreData = async (storeName: string): Promise<any[]> => {
     });
 };
 
+const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        const chunk = bytes.subarray(offset, offset + chunkSize);
+        binary += String.fromCharCode(...Array.from(chunk));
+    }
+    return btoa(binary);
+};
+
 const blobToDataUrl = async (blob: Blob): Promise<string> => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ''));
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(blob);
-    });
+    if (typeof FileReader !== 'undefined') {
+        try {
+            return await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(blob);
+            });
+        } catch {
+            // Cross-realm Blobs from fake-indexeddb can fail FileReader conversion.
+        }
+    }
+
+    if (typeof blob.arrayBuffer !== 'function') {
+        throw new TypeError('Unsupported Blob-like object');
+    }
+    const buffer = await blob.arrayBuffer();
+    const mime = blob.type || 'application/octet-stream';
+    return `data:${mime};base64,${arrayBufferToBase64(buffer)}`;
 };
 
 const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
@@ -71,6 +95,20 @@ const serializeVoiceAudio = async (items: VoiceAudioRecord[]): Promise<Serialize
     })));
 };
 
+const serializeCollectionWallAssets = async (items: CollectionWallAsset[]): Promise<SerializedCollectionWallAsset[]> => {
+    return Promise.all(items.map(async (item) => {
+        const { blob, ...rest } = item;
+        const fallbackDataUrl = typeof (item as any).dataUrl === 'string' ? (item as any).dataUrl : undefined;
+        const dataUrl = blob
+            ? await blobToDataUrl(blob).catch(() => fallbackDataUrl || '')
+            : fallbackDataUrl;
+        return {
+            ...rest,
+            dataUrl: dataUrl || undefined,
+        };
+    }));
+};
+
 const deserializeMemoryRecordAudio = async (items?: SerializedMemoryRecordAudio[]): Promise<MemoryRecordAudio[]> => {
     if (!Array.isArray(items)) return [];
 
@@ -97,6 +135,23 @@ const deserializeVoiceAudio = async (items?: SerializedVoiceAudio[]): Promise<Vo
             createdAt: item.createdAt,
             mimeType: item.mimeType || blob.type,
             blob,
+        });
+    }
+    return restored;
+};
+
+const deserializeCollectionWallAssets = async (items?: SerializedCollectionWallAsset[]): Promise<CollectionWallAsset[]> => {
+    if (!Array.isArray(items)) return [];
+
+    const restored: CollectionWallAsset[] = [];
+    for (const item of items) {
+        if (!item.dataUrl) continue;
+        const blob = await dataUrlToBlob(item.dataUrl);
+        restored.push({
+            ...item,
+            blob,
+            mime: item.mime || blob.type || 'application/octet-stream',
+            bytes: item.bytes || blob.size,
         });
     }
     return restored;
@@ -157,7 +212,7 @@ export const exportFullData = async (): Promise<Partial<FullBackupData>> => {
         });
     };
 
-    const [characters, messages, themes, emojis, emojiCategories, assets, galleryImages, userProfiles, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, journalStickers, socialPosts, courses, games, worldbooks, novels, bankTx, bankData, xhsActivities, xhsStockImages, vectorMemories, memoryRecords, memoryRecordAudioRaw, scheduledMessages, letters, voiceAudioRaw, yesterdayNewspapers, vibeReferences, nianNianSessions, collectionBooks] = await Promise.all([
+    const [characters, messages, themes, emojis, emojiCategories, assets, galleryImages, userProfiles, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, journalStickers, socialPosts, courses, games, worldbooks, novels, bankTx, bankData, xhsActivities, xhsStockImages, vectorMemories, memoryRecords, memoryRecordAudioRaw, scheduledMessages, letters, voiceAudioRaw, yesterdayNewspapers, vibeReferences, nianNianSessions, collectionBooks, collectionWalls, collectionWallItems, collectionWallAssetsRaw] = await Promise.all([
         getAllFromStore(STORE_CHARACTERS), getAllFromStore(STORE_MESSAGES),
         getAllFromStore(STORE_THEMES), getAllFromStore(STORE_EMOJIS),
         getAllFromStore(STORE_EMOJI_CATEGORIES), getAllFromStore(STORE_ASSETS),
@@ -176,10 +231,12 @@ export const exportFullData = async (): Promise<Partial<FullBackupData>> => {
         getAllFromStore(STORE_SCHEDULED), getAllFromStore(STORE_LETTERS),
         getAllFromStore(STORE_VOICE_AUDIO), getAllFromStore(STORE_YESTERDAY_NEWSPAPERS),
         getAllFromStore(STORE_VIBE_REFERENCES), getAllFromStore(STORE_NIANNIAN_SESSIONS),
-        getAllFromStore(STORE_COLLECTION_BOOKS),
+        getAllFromStore(STORE_COLLECTION_BOOKS), getAllFromStore(STORE_COLLECTION_WALLS),
+        getAllFromStore(STORE_COLLECTION_WALL_ITEMS), getAllFromStore(STORE_COLLECTION_WALL_ASSETS),
     ]);
     const memoryRecordAudio = await serializeMemoryRecordAudio(memoryRecordAudioRaw as MemoryRecordAudio[]);
     const voiceAudio = await serializeVoiceAudio(voiceAudioRaw as VoiceAudioRecord[]);
+    const collectionWallAssets = await serializeCollectionWallAssets(collectionWallAssetsRaw as CollectionWallAsset[]);
 
     const userProfile = userProfiles.length > 0 ? { name: userProfiles[0].name, avatar: userProfiles[0].avatar, bio: userProfiles[0].bio } : undefined;
     const mainState = bankData.find((d: any) => d.id === 'main_state');
@@ -199,6 +256,9 @@ export const exportFullData = async (): Promise<Partial<FullBackupData>> => {
         vibeReferences,
         nianNianSessions,
         collectionBooks,
+        collectionWalls,
+        collectionWallItems,
+        collectionWallAssets,
         scheduledMessages, letters
     };
 };
@@ -207,6 +267,7 @@ export const importFullData = async (data: FullBackupData): Promise<void> => {
     const db = await openDB();
     const importedMemoryRecordAudio = await deserializeMemoryRecordAudio(data.memoryRecordAudio);
     const importedVoiceAudio = await deserializeVoiceAudio(data.voiceAudio);
+    const importedCollectionWallAssets = await deserializeCollectionWallAssets(data.collectionWallAssets);
     hydrateMountedWorldbooksFromBackupLibrary(data);
 
     const availableStores = [
@@ -219,7 +280,8 @@ export const importFullData = async (data: FullBackupData): Promise<void> => {
         STORE_VECTOR_MEMORIES,
         STORE_MEMORY_RECORDS, STORE_MEMORY_RECORD_AUDIO,
         STORE_SCHEDULED, STORE_LETTERS, STORE_VOICE_AUDIO, STORE_YESTERDAY_NEWSPAPERS, STORE_VIBE_REFERENCES,
-        STORE_NIANNIAN_SESSIONS, STORE_COLLECTION_BOOKS
+        STORE_NIANNIAN_SESSIONS, STORE_COLLECTION_BOOKS, STORE_COLLECTION_WALLS, STORE_COLLECTION_WALL_ITEMS,
+        STORE_COLLECTION_WALL_ASSETS
     ].filter(name => db.objectStoreNames.contains(name));
 
     const tx = db.transaction(availableStores, 'readwrite');
@@ -353,6 +415,9 @@ export const importFullData = async (data: FullBackupData): Promise<void> => {
     if (Array.isArray(data.vibeReferences)) replaceStore(STORE_VIBE_REFERENCES, data.vibeReferences);
     if (Array.isArray(data.nianNianSessions)) replaceStore(STORE_NIANNIAN_SESSIONS, data.nianNianSessions);
     if (Array.isArray(data.collectionBooks)) replaceStore(STORE_COLLECTION_BOOKS, data.collectionBooks);
+    if (Array.isArray(data.collectionWalls)) replaceStore(STORE_COLLECTION_WALLS, data.collectionWalls);
+    if (Array.isArray(data.collectionWallItems)) replaceStore(STORE_COLLECTION_WALL_ITEMS, data.collectionWallItems);
+    if (Array.isArray(data.collectionWallAssets)) replaceStore(STORE_COLLECTION_WALL_ASSETS, importedCollectionWallAssets);
     if (data.scheduledMessages) clearAndAdd(STORE_SCHEDULED, data.scheduledMessages);
     if (data.letters) clearAndAdd(STORE_LETTERS, data.letters);
 

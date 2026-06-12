@@ -16,7 +16,7 @@ import { TtsConfig } from './tts';
 import { SttConfig } from './stt';
 import { ImageApiPreset, ImageGenerationConfig, PhotoStylePreset, SavedVibeReference } from './photo';
 import type { NianNianSession } from './niannian';
-import type { CollectionBook } from './collection';
+import type { CollectionBook, CollectionWall, CollectionWallItem, SerializedCollectionWallAsset } from './collection';
 
 export interface SerializedVoiceAudio {
     msgId: string | number;
@@ -120,6 +120,9 @@ export interface FullBackupData {
     vibeReferences?: SavedVibeReference[];
     nianNianSessions?: NianNianSession[];
     collectionBooks?: CollectionBook[];
+    collectionWalls?: CollectionWall[];
+    collectionWallItems?: CollectionWallItem[];
+    collectionWallAssets?: SerializedCollectionWallAsset[];
     musicAssets?: BackupMusicAssets;
     halfSugarData?: BackupExternalIndexedDbData;
 

@@ -71,6 +71,7 @@ interface ChatModalsProps {
     onConfirmEditMessage: () => void;
     onDeleteMessage: () => void;
     onCopyMessage: () => void;
+    onCollectImageToWall?: () => void;
     onDeleteEmoji: () => void;
     onDeleteSelectedEmojis: () => void;
     onDeleteCategory: () => void;
@@ -168,7 +169,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     onTransfer, onImportEmoji, onSaveSettings,
     onBgUpload, onRemoveBg, onClearHistory,
     onArchive, onCreatePrompt, onEditPrompt, onSavePrompt, onDeletePrompt,
-    onSetHistoryStart, onEnterSelectionMode, onReplyMessage, onCloseMessageOptions, onEditMessageStart, onConfirmEditMessage, onDeleteMessage, onCopyMessage, onDeleteEmoji, onDeleteSelectedEmojis, onDeleteCategory,
+    onSetHistoryStart, onEnterSelectionMode, onReplyMessage, onCloseMessageOptions, onEditMessageStart, onConfirmEditMessage, onDeleteMessage, onCopyMessage, onCollectImageToWall, onDeleteEmoji, onDeleteSelectedEmojis, onDeleteCategory,
     allCharacters = [], onSaveCategoryVisibility,
     translationEnabled, onToggleTranslation, translateSourceLang, translateTargetLang, onSetTranslateSourceLang, onSetTranslateLang,
     xhsEnabled, onToggleXhs,
@@ -1205,6 +1206,11 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                     {selectedMessage?.type === 'text' && (
                         <button onClick={onCopyMessage} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
                             复制文字
+                        </button>
+                    )}
+                    {selectedMessage?.type === 'image' && selectedMessage.role === 'assistant' && onCollectImageToWall && (
+                        <button onClick={onCollectImageToWall} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
+                            收藏到拾光墙
                         </button>
                     )}
                     {/* Voice: Read Aloud for text messages */}

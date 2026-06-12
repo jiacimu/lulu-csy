@@ -129,6 +129,7 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
 
     beforeEach(() => {
         vi.stubGlobal('fetch', vi.fn());
+        window.localStorage.clear();
         dbMocks.getAllCharacters.mockResolvedValue([{ ...baseCharacter }]);
         dbMocks.saveCharacter.mockResolvedValue(undefined);
     });
@@ -192,6 +193,37 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
         expect(body.messages[2].content).toContain('Secondary Task Instructions');
         expect(body.messages[2].content).toContain('角色刚刚的思考链');
         expect(body.messages[2].content).toContain('请基于上方主聊天完整上下文镜像执行本任务');
+    });
+
+    it('stores the freeform text tier from the v2.1 choice line', async () => {
+        const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+        const freeformHtml = '<!DOCTYPE html><html><head><style>body{margin:0;background:transparent;font-family:-apple-system,"Noto Sans SC","Helvetica Neue",sans-serif}.screen{height:160px;width:100%;background:#111;color:#fff}</style></head><body><div class="screen">22:15 未接来电 ×3</div></body></html>';
+        mockFetchContent([
+            '候选：登机牌 / 锁屏通知 / 药袋贴纸 → 选B·沉默卡（夜里通知）',
+            '```html',
+            freeformHtml,
+            '```',
+        ].join('\n'));
+
+        const result = await MindSnapshotExtractor.generateFreeformCard(
+            baseCharacter,
+            '记得，我会提前看材料。',
+            currentMsgs as any,
+            apiConfig,
+        );
+
+        const body = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body));
+        const promptText = JSON.stringify(body.messages);
+
+        expect(promptText).toContain('## 二、决定文字');
+        expect(promptText).toContain('自由文案禁止覆盖载体的功能区');
+        expect(promptText).toContain('整体高度在 180px ~ 640px');
+        expect(promptText).toContain('档位只能是这三个词之一');
+        expect(result?.meta?.freeformCandidates).toEqual(['登机牌', '锁屏通知', '药袋贴纸']);
+        expect(result?.meta?.freeformShape).toBe('锁屏通知');
+        expect(result?.meta?.freeformTextTier).toBe('沉默卡');
+
+        randomSpy.mockRestore();
     });
 
     it('generates afterglow cards with full max_tokens without persisting to character state', async () => {

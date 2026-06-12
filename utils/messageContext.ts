@@ -298,23 +298,24 @@ function formatChatForward(message: ContextMessage): string {
 function formatCollectionForward(message: ContextMessage): string {
     try {
         const payload = message.metadata?.collectionForward || JSON.parse(message.content || '{}');
-        const kind = payload.kind === 'heart_talk' ? 'heart_talk' : 'afterglow';
+        const kind = payload.kind === 'heart_talk' || payload.kind === 'freeform' ? payload.kind : 'afterglow';
         const title = formatScalar(payload.title || '未命名典藏');
         const charName = formatScalar(payload.charName || '这个角色');
         const body = formatScalar(payload.body || '').trim();
         const excerpt = formatScalar(payload.excerpt || payload.sourceReplyExcerpt || '').trim();
+        const unit = kind === 'afterglow' ? '一本' : '一份';
         const tags = Array.isArray(payload.tags) && payload.tags.length > 0
             ? `\n标签: ${payload.tags.map((tag: unknown) => formatScalar(tag).trim()).filter(Boolean).join('、')}`
             : '';
         return [
-            `[用户从典藏馆转递了一本${formatCollectionKindLabel(kind)}]`,
+            `[用户从典藏馆转递了${unit}${formatCollectionKindLabel(kind)}]`,
             `标题: ${title}`,
             `来源角色: ${charName}`,
             excerpt ? `摘录: ${excerpt}` : '',
             tags,
             '完整正文:',
             body || '[正文为空]',
-            '[请把这本典藏当作用户主动递给你看的内容。你可以自然回应、回忆、解释或续写，但不要声称自己看不到全文。]',
+            '[请把这份典藏当作用户主动递给你看的内容。你可以自然回应、回忆、解释或续写，但不要声称自己看不到全文。]',
         ].filter(Boolean).join('\n');
     } catch {
         return '[用户从典藏馆转递了一本收藏内容]';

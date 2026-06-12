@@ -33,7 +33,7 @@ const skeletonLoaders: Record<string, React.LazyExoticComponent<React.FC<{ data:
 const SAFE_COLOR_RE = /^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\)|[a-zA-Z]{3,20})$/;
 const SAFE_FONT_STYLES = new Set(['serif', 'sans', 'handwrite', 'mono']);
 const FREEFORM_VIEWPORT_PADDING_X_PX = 20;
-const FREEFORM_VIEWPORT_PADDING_Y_PX = 96;
+const FREEFORM_VIEWPORT_PADDING_Y_PX = 56;
 
 function getFreeformViewportLimits() {
     if (typeof window === 'undefined') {

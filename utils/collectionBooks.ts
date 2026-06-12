@@ -1,20 +1,24 @@
 import type { CollectionBook, CollectionBookInput, CollectionForwardPayload, CollectionBookKind, Message } from '../types';
 import type { StatusCardData } from '../types/statusCard';
+import { formatCollectionKindLabel } from './collectionKinds';
+import { fnv1aWithLength } from './fnv1a';
 
 const TITLE_FALLBACK: Record<CollectionBookKind, string> = {
     afterglow: '未命名番外',
     heart_talk: '未命名谈心',
+    freeform: '未命名碎片',
 };
 
 const CUSTOM_TITLE_MAX_LENGTH = 32;
 
-export function formatCollectionKindLabel(kind: CollectionBookKind): string {
-    return kind === 'heart_talk' ? '谈心' : '番外篇';
-}
+export { formatCollectionKindLabel };
 
 export function inferCollectionBookKind(cardData: StatusCardData): CollectionBookKind {
     const mode = String(cardData.meta?.afterglowMode || cardData.meta?.mode || '').toLowerCase();
-    return mode === 'hearttalk' || mode === 'heart_talk' ? 'heart_talk' : 'afterglow';
+    if (mode === 'hearttalk' || mode === 'heart_talk') return 'heart_talk';
+    if (mode === 'fanfic' || mode === 'afterglow' || cardData.meta?.afterglowCover || cardData.meta?.afterglowTags) return 'afterglow';
+    if (cardData.cardType === 'freeform' && typeof cardData.meta?.html === 'string') return 'freeform';
+    return 'afterglow';
 }
 
 export function normalizeCollectionCustomTitle(value?: string): string | undefined {
@@ -46,6 +50,10 @@ export function formatCollectionMinuteTitle(timestamp?: number): string {
 
 export function buildCollectionDefaultTitle(kind: CollectionBookKind, timestamp?: number): string {
     if (kind === 'heart_talk') return formatCollectionMinuteTitle(timestamp);
+    if (kind === 'freeform') {
+        const datePart = formatDatePart(timestamp);
+        return datePart ? `${datePart}的碎片` : TITLE_FALLBACK.freeform;
+    }
     const datePart = formatDatePart(timestamp);
     return datePart ? `${datePart}的番外` : TITLE_FALLBACK.afterglow;
 }
@@ -56,6 +64,13 @@ export function extractCollectionTitle(
     timestamp?: number,
 ): string {
     if (kind === 'heart_talk') return buildCollectionDefaultTitle(kind, timestamp);
+    if (kind === 'freeform') {
+        const shape = String(cardData.meta?.freeformShape || cardData.meta?.shape || '').trim();
+        if (shape) return shape.slice(0, 40);
+        const explicitTitle = String(cardData.title || '').trim();
+        if (explicitTitle && explicitTitle !== '自由创作') return explicitTitle.slice(0, 40);
+        return buildCollectionDefaultTitle(kind, timestamp);
+    }
 
     const explicitTitle = String(cardData.title || '').trim();
     if (explicitTitle && explicitTitle !== '番外篇') return explicitTitle.slice(0, 40);
@@ -73,6 +88,16 @@ export function getCollectionDisplayTitle(book: CollectionBook): string {
 
     const timestamp = book.sourceMessageTimestamp || book.collectedAt || book.createdAt;
     if (book.kind === 'heart_talk') return buildCollectionDefaultTitle(book.kind, timestamp);
+    if (book.kind === 'freeform') {
+        const metaName = normalizeCollectionCustomTitle(book.meta?.name);
+        if (metaName) return metaName;
+        const shape = String(book.meta?.shape || '').trim();
+        if (shape) return shape.slice(0, 40);
+        const title = String(book.title || '').trim();
+        return title && title !== TITLE_FALLBACK.freeform
+            ? title.slice(0, 40)
+            : buildCollectionDefaultTitle(book.kind, timestamp);
+    }
 
     const title = String(book.title || '').trim();
     return title && title !== TITLE_FALLBACK.afterglow
@@ -99,13 +124,16 @@ export function buildCollectionSourceKey(query: {
     charId: string;
     kind: CollectionBookKind;
     sourceMessageId?: number;
+    contentHash?: string;
     body: string;
 }): string {
     return [
         query.charId,
         query.kind,
-        typeof query.sourceMessageId === 'number' ? query.sourceMessageId : 'no-source',
-        hashCollectionBody(query.body),
+        query.kind === 'freeform' && query.contentHash
+            ? `hash:${query.contentHash}`
+            : typeof query.sourceMessageId === 'number' ? query.sourceMessageId : 'no-source',
+        query.kind === 'freeform' && query.contentHash ? 'freeform' : hashCollectionBody(query.body),
     ].join('::');
 }
 
@@ -136,6 +164,43 @@ export function buildCollectionBookInput(
         sourceReplyExcerpt: sourceMessage ? buildCollectionExcerpt(sourceMessage.content, 120) : undefined,
         tags: extractCollectionTags(cardData),
         cover: cardData.meta?.afterglowCover,
+    };
+}
+
+export function buildFreeformCollectionBookInput(
+    charId: string,
+    cardData: StatusCardData,
+    sourceMessage?: Message,
+): CollectionBookInput {
+    const html = String(cardData.meta?.html || '').trim();
+    const summary = String(cardData.body || '').trim();
+    const shape = String(cardData.meta?.freeformShape || cardData.meta?.shape || '').trim();
+    const candidates = Array.isArray(cardData.meta?.freeformCandidates)
+        ? cardData.meta.freeformCandidates.map((item: unknown) => String(item || '').trim()).filter(Boolean).slice(0, 8)
+        : undefined;
+    const timestamp = sourceMessage?.timestamp;
+    const contentHash = fnv1aWithLength(html || summary);
+    const meta = {
+        html,
+        shape: shape || undefined,
+        candidates,
+        summary: summary || undefined,
+        sourceMessageId: sourceMessage?.id ?? null,
+    };
+
+    return {
+        charId,
+        kind: 'freeform',
+        title: shape || buildCollectionDefaultTitle('freeform', timestamp),
+        body: summary || '视觉碎片',
+        cardData,
+        sourceMessageId: sourceMessage?.id,
+        sourceMessageTimestamp: timestamp,
+        sourceReplyExcerpt: sourceMessage ? buildCollectionExcerpt(sourceMessage.content, 120) : undefined,
+        tags: shape ? [shape] : [],
+        cover: undefined,
+        contentHash,
+        meta,
     };
 }
 

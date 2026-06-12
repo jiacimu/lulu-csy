@@ -181,7 +181,7 @@ describe('MessageItem status overlay', () => {
         expect(innerVoiceShell).not.toContainElement(screen.getByTestId('inner-voice-close-hint'));
     });
 
-    it('keeps freeform status card overlays centered in an explicit viewport-height shell', async () => {
+    it('keeps freeform status card overlays centered in a viewport-height shell that can grow', async () => {
         renderMessageItem({
             statusCardData: {
                 cardType: 'freeform',
@@ -199,7 +199,7 @@ describe('MessageItem status overlay', () => {
         expect(statusShell).toHaveClass('flex-col');
         expect(statusShell).toHaveClass('items-center');
         expect(statusShell).toHaveClass('justify-center');
-        expect(statusShell).toHaveStyle({ height: 'calc(100vh - 48px)' });
+        expect(statusShell).toHaveStyle({ minHeight: 'calc(100dvh - 48px)' });
     });
 
     it('triggers afterglow generation from the composer and opens the returned card', async () => {

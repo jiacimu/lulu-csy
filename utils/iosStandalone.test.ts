@@ -227,6 +227,26 @@ describe('iosStandalone viewport handling', () => {
     expect(document.documentElement.style.getPropertyValue('--safe-bottom')).toBe('34px');
   });
 
+  it('uses real viewport height when the iOS standalone layout viewport is shorter than the screen', async () => {
+    setScreenSize(402, 874);
+    setViewport({ innerHeight: 874, visualHeight: 874, clientHeight: 812 });
+    setSafeAreaInsets(62, 34);
+
+    const { installIOSStandaloneWorkaround } = await loadIOSStandaloneModule();
+    installIOSStandaloneWorkaround();
+
+    expect(document.documentElement.style.getPropertyValue('--real-vh')).toBe('874px');
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('874px');
+
+    await vi.advanceTimersByTimeAsync(1);
+    setViewport({ innerHeight: 874, visualHeight: 520, clientHeight: 812 });
+    dispatchVisualViewportEvent('resize');
+    focusTextArea();
+
+    expect(document.documentElement.style.getPropertyValue('--real-vh')).toBe('874px');
+    expect(document.documentElement.classList.contains('keyboard-open')).toBe(true);
+  });
+
   it('re-syncs when iOS display mode becomes standalone after initial install', async () => {
     let standalone = false;
     setDisplayModes({ standalone: () => standalone });

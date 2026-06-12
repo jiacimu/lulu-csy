@@ -219,7 +219,9 @@ const CollectionForwardCard: React.FC<CollectionForwardCardProps> = ({ data, com
                 <div className="px-4 pb-3 pt-4">
                     <div className="flex items-start justify-between gap-3">
                         <div>
-                            <div className="text-[10px] font-black tracking-[0.28em]" style={{ color: palette.accent }}>AFTERGLOW</div>
+                            <div className="text-[10px] font-black tracking-[0.28em]" style={{ color: palette.accent }}>
+                                {data.kind === 'freeform' ? 'VISUAL FRAGMENT' : 'AFTERGLOW'}
+                            </div>
                             <div className="mt-0.5 text-[9px] font-bold tracking-[0.18em]" style={{ color: palette.muted }}>
                                 {kindLabel}特辑 · 典藏馆转递
                             </div>

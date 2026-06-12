@@ -17,7 +17,7 @@ import { Capacitor } from '@capacitor/core';
 import { requestSystemFullscreen } from '../utils/systemFullscreen';
 import { IOS_STANDALONE_CHANGE_EVENT,isIOSStandaloneBrowserWebApp,isIOSStandaloneWebApp } from '../utils/iosStandalone';
 import { usePerformanceMode } from '../hooks/usePerformanceMode';
-import { prepareViewportForUnlock } from '../utils/viewportRepair';
+import { prepareViewportForUnlock,repairViewportAfterUnlockSettle } from '../utils/viewportRepair';
 
 // --- Lazy-loaded Apps (only downloaded when user opens them) ---
 const Settings = React.lazy(() => import('../apps/Settings'));
@@ -328,6 +328,7 @@ const LockScreen: React.FC<LockScreenProps> = ({
     requestSystemFullscreen();
     await prepareViewportForUnlock();
     onUnlock();
+    repairViewportAfterUnlockSettle().catch(() => { });
   };
 
   return (

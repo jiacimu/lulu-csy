@@ -1,6 +1,15 @@
 import type { StatusCardData } from './statusCard';
 
-export type CollectionBookKind = 'afterglow' | 'heart_talk';
+export type CollectionBookKind = 'afterglow' | 'heart_talk' | 'freeform';
+
+export interface CollectionBookMeta {
+    html?: string;
+    shape?: string;
+    candidates?: string[];
+    summary?: string;
+    name?: string;
+    sourceMessageId?: number | null;
+}
 
 export interface CollectionBook {
     id: string;
@@ -16,6 +25,8 @@ export interface CollectionBook {
     sourceReplyExcerpt?: string;
     tags: string[];
     cover?: unknown;
+    contentHash?: string;
+    meta?: CollectionBookMeta;
     createdAt: number;
     collectedAt: number;
 }
@@ -30,6 +41,7 @@ export interface CollectionSourceQuery {
     charId: string;
     kind: CollectionBookKind;
     sourceMessageId?: number;
+    contentHash?: string;
     body: string;
 }
 
@@ -53,3 +65,80 @@ export interface CollectionForwardPayload {
     sourceMessageTimestamp?: number;
     sourceReplyExcerpt?: string;
 }
+
+export type CollectionWallLayoutMode = 'flow' | 'free';
+export type CollectionWallBackgroundType = 'color' | 'preset' | 'asset';
+export type CollectionWallBackgroundFit = 'cover' | 'tile';
+
+export interface CollectionWallBackground {
+    type: CollectionWallBackgroundType;
+    value: string;
+    fit: CollectionWallBackgroundFit;
+    dim: number;
+}
+
+export interface CollectionWall {
+    id: string;
+    charId: string;
+    name: string;
+    isDefault: boolean;
+    layoutMode: CollectionWallLayoutMode;
+    background: CollectionWallBackground;
+    allowCharDecorate: boolean;
+    changeCountSinceVisit: number;
+    charLastVisitManifest?: string;
+    charLastVisitAt?: number;
+    hasUnseenCharItem: boolean;
+    sortOrder: number;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export type CollectionWallItemType = 'card' | 'image' | 'sticker' | 'text' | 'html';
+export type CollectionWallItemAuthor = 'user' | 'char';
+export type CollectionWallTextPreset = 'sticky_note' | 'big_plain' | 'typewriter' | 'handwriting' | 'char_note';
+
+export interface CollectionWallTextData {
+    content: string;
+    preset: CollectionWallTextPreset;
+    color?: string;
+    stroke?: boolean;
+}
+
+export interface CollectionWallItem {
+    id: string;
+    wallId: string;
+    type: CollectionWallItemType;
+    author: CollectionWallItemAuthor;
+    x: number | null;
+    y: number | null;
+    w: number;
+    h: number;
+    rotation: number;
+    z: number;
+    order: number;
+    bookId?: string;
+    assetId?: string;
+    text?: CollectionWallTextData;
+    name?: string;
+    createdAt: number;
+}
+
+export type CollectionWallAssetOrigin = 'upload' | 'chat_gen' | 'char';
+
+export interface CollectionWallAsset {
+    id: string;
+    blob: Blob;
+    mime: string;
+    width?: number;
+    height?: number;
+    bytes: number;
+    hash: string;
+    origin: CollectionWallAssetOrigin;
+    meta?: { prompt?: string; sourceMessageId?: number | string; name?: string };
+    createdAt: number;
+}
+
+export type SerializedCollectionWallAsset = Omit<CollectionWallAsset, 'blob'> & {
+    dataUrl?: string;
+};

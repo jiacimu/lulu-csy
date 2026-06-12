@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, PaperPlaneTilt, PencilSimple, Trash, X } from '@phosphor-icons/react';
 import { useOS } from '../context/OSContext';
-import { AppID, type CollectionBook, type GalleryImage } from '../types';
+import { AppID, type CollectionBook, type CollectionWall, type CollectionWallAsset, type CollectionWallItem, type GalleryImage } from '../types';
 import { DB } from '../utils/db';
 import {
     buildCollectionForwardPayload,
     formatCollectionKindLabel,
     getCollectionDisplayTitle,
 } from '../utils/collectionBooks';
+import { addCollectionWallPendingContext } from '../utils/collectionWallContext';
 import { getGalleryImageDisplayUrl } from '../utils/generatedImageStorage';
+const StatusCardRenderer = React.lazy(() => import('../components/chat/StatusCardRenderer'));
 
 /* ============================================================
    Tokens & CSS
@@ -131,6 +133,89 @@ const CSS = `
 .ar-dcard:active{transform:rotate(var(--rot,0deg)) translateY(-4px) scale(.99)}
 .ar-dcard:focus-visible{outline:2px solid var(--ar-accent);outline-offset:2px}
 .ar-dcard.pull{transform:translateY(-16px)}
+
+/* ---------- 拾光墙 · 文艺杂志碎片 ---------- */
+.ar-wall{position:relative;margin:19px 16px 28px;padding:18px 14px 16px;overflow:hidden;border-radius:10px;background:linear-gradient(135deg,rgba(244,235,220,.95),rgba(214,229,224,.92) 48%,rgba(237,213,217,.92));box-shadow:0 22px 54px -28px rgba(0,0,0,.78),inset 0 0 0 1px rgba(255,255,255,.42)}
+.ar-wall::before{content:'';position:absolute;inset:0;pointer-events:none;background-image:${NOISE};opacity:.045;mix-blend-mode:multiply}
+.ar-wall-top{position:relative;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;border-bottom:1px solid rgba(49,55,51,.14);padding-bottom:12px}
+.ar-wall-kicker{margin:0;font-size:9px;font-weight:900;letter-spacing:.32em;color:#58665f}
+.ar-wall-title{margin:4px 0 0;font-family:var(--ar-font-display);font-size:24px;line-height:1;font-weight:700;letter-spacing:.05em;color:#211f1b}
+.ar-wall-sub{margin:7px 0 0;font-size:11px;line-height:1.5;color:#6d6157}
+.ar-wall-count{flex:none;min-width:48px;text-align:right;font-family:var(--ar-font-display);font-size:32px;line-height:.9;font-weight:700;color:#9d3f52}
+.ar-wall-count span{display:block;margin-top:5px;font-family:var(--ar-font-ui);font-size:8px;font-weight:900;letter-spacing:.24em;color:#6b7069}
+.ar-wall-chips{position:relative;z-index:1;display:flex;gap:7px;overflow-x:auto;margin:13px -2px 0;padding:0 2px 3px;scrollbar-width:none}
+.ar-wall-chips::-webkit-scrollbar{display:none}
+.ar-wchip{flex:none;height:25px;border:1px solid rgba(49,55,51,.16);border-radius:999px;background:rgba(255,255,255,.36);padding:0 10px;font-size:10.5px;font-weight:800;color:#5b605a;cursor:pointer}
+.ar-wchip.on{border-color:rgba(157,63,82,.45);background:#2d2a25;color:#f8ead6}
+.ar-wall-grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:13px}
+.ar-frag{position:relative;min-height:152px;border:0;border-radius:4px;background:#fffaf1;color:#211f1b;text-align:left;overflow:hidden;cursor:pointer;box-shadow:0 13px 24px -20px rgba(30,25,20,.8),inset 0 0 0 1px rgba(50,45,38,.1);transform:rotate(var(--rot,0deg));transition:transform .18s ease,box-shadow .18s ease}
+.ar-frag:hover{transform:rotate(var(--rot,0deg)) translateY(-3px);box-shadow:0 18px 30px -22px rgba(30,25,20,.9),inset 0 0 0 1px rgba(50,45,38,.12)}
+.ar-frag:active{transform:rotate(var(--rot,0deg)) translateY(-1px) scale(.985)}
+.ar-frag.pull{transform:rotate(var(--rot,0deg)) translateY(-12px)}
+.ar-frag-cover{display:block;position:absolute;inset:0;background:linear-gradient(155deg,var(--frag-a),#fff7e7 42%,var(--frag-b));opacity:.95}
+.ar-frag-rule{position:absolute;left:11px;right:11px;top:13px;height:1px;background:rgba(45,42,37,.28)}
+.ar-frag-no{position:absolute;right:10px;top:18px;font-size:9px;font-weight:900;letter-spacing:.16em;color:rgba(35,32,28,.45)}
+.ar-frag-body{position:relative;z-index:1;display:flex;min-height:152px;flex-direction:column;padding:29px 11px 11px}
+.ar-frag-shape{margin:0;max-width:88%;font-family:var(--ar-font-display);font-size:18px;line-height:1.08;font-weight:700;color:#231f1c;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ar-frag-summary{margin:9px 0 0;font-size:10.5px;line-height:1.65;color:#5f5a50;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ar-frag-foot{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid rgba(45,42,37,.12);padding-top:8px;font-size:8.5px;font-weight:900;letter-spacing:.18em;color:#8a473f}
+.ar-frag-tape{position:absolute;left:14px;top:-5px;width:42px;height:15px;background:rgba(255,255,255,.5);box-shadow:0 1px 3px rgba(30,25,20,.12);transform:rotate(-5deg)}
+.ar-frag-pin{position:absolute;right:13px;bottom:13px;width:9px;height:9px;border-radius:999px;background:#2f7470;box-shadow:0 0 0 3px rgba(47,116,112,.12)}
+.ar-imgfrag{position:relative;min-height:152px;border:0;border-radius:3px;background:#f8f2e7;padding:8px 8px 31px;color:#211f1b;text-align:left;overflow:hidden;cursor:pointer;box-shadow:0 15px 27px -21px rgba(30,25,20,.86),inset 0 0 0 1px rgba(50,45,38,.1);transform:rotate(var(--rot,0deg));transition:transform .18s ease,box-shadow .18s ease}
+.ar-imgfrag:hover{transform:rotate(var(--rot,0deg)) translateY(-3px);box-shadow:0 20px 32px -22px rgba(30,25,20,.92),inset 0 0 0 1px rgba(50,45,38,.12)}
+.ar-imgfrag:active{transform:rotate(var(--rot,0deg)) translateY(-1px) scale(.985)}
+.ar-imgfrag::before{content:'';position:absolute;left:14px;top:-6px;width:46px;height:16px;background:rgba(255,255,255,.55);box-shadow:0 1px 4px rgba(30,25,20,.13);transform:rotate(-4deg);z-index:2}
+.ar-imgfrag-media{display:block;position:relative;width:100%;height:108px;overflow:hidden;background:linear-gradient(135deg,#ddd2c0,#f7efe1);box-shadow:inset 0 0 0 1px rgba(50,45,38,.12)}
+.ar-imgfrag-media img{display:block;width:100%;height:100%;object-fit:cover}
+.ar-imgfrag-media::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(140deg,rgba(255,255,255,.22),transparent 36%),radial-gradient(circle at 12% 18%,rgba(255,255,255,.26),transparent 30%);mix-blend-mode:screen}
+.ar-imgfrag-name{position:absolute;left:10px;right:10px;bottom:13px;font-family:var(--ar-font-display);font-size:13px;font-weight:700;line-height:1.15;color:#2d2925;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ar-imgfrag-tag{position:absolute;right:9px;top:100px;border:1px solid rgba(45,42,37,.16);background:rgba(248,242,231,.88);padding:2px 6px;font-size:7.5px;font-weight:900;letter-spacing:.16em;color:#8a473f}
+.ar-textfrag{position:relative;min-height:142px;border:0;border-radius:5px;background:#fff1a8;color:#2d2925;text-align:left;overflow:hidden;cursor:default;padding:20px 13px 12px;box-shadow:0 14px 24px -21px rgba(30,25,20,.82),inset 0 0 0 1px rgba(107,89,34,.14);transform:rotate(var(--rot,0deg))}
+.ar-textfrag.char{background:#fff5be}
+.ar-textfrag::before{content:'';position:absolute;left:0;right:0;top:0;height:18px;background:linear-gradient(180deg,rgba(255,255,255,.32),rgba(255,255,255,0))}
+.ar-textfrag-dot{position:absolute;left:12px;top:10px;width:9px;height:9px;border-radius:999px;background:#bf6c58;box-shadow:0 0 0 4px rgba(191,108,88,.12)}
+.ar-textfrag-body{display:block;font-family:'Kaiti SC',STKaiti,'楷体',cursive;font-size:15px;line-height:1.55;color:#3f3528;white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+.ar-textfrag-foot{position:absolute;left:13px;right:13px;bottom:10px;border-top:1px solid rgba(63,53,40,.12);padding-top:6px;font-size:8px;font-weight:900;letter-spacing:.18em;color:#8a6b26}
+.ar-frag-empty{position:relative;z-index:1;margin-top:12px;border:1px dashed rgba(49,55,51,.22);border-radius:8px;padding:18px;text-align:center;color:#6d6157;font-size:12px;line-height:1.8;background:rgba(255,255,255,.25)}
+.ar-freader{position:relative;width:min(94vw,560px);max-height:calc(100dvh - 42px);display:flex;flex-direction:column;align-items:center;gap:13px}
+.ar-freader-card{width:100%;max-height:calc(100dvh - 142px);display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:14px;background:rgba(11,10,9,.34);box-shadow:0 24px 60px -24px rgba(0,0,0,.82),inset 0 0 0 1px rgba(255,236,210,.1);padding:14px}
+.ar-freader-meta{width:100%;display:flex;align-items:flex-end;justify-content:space-between;gap:12px;color:var(--ar-t1)}
+.ar-freader-meta b{display:block;font-family:var(--ar-font-display);font-size:18px;line-height:1.2}
+.ar-freader-meta small{display:block;margin-top:4px;font-size:10px;letter-spacing:.14em;color:var(--ar-t3)}
+.ar-imgreader{position:relative;width:min(94vw,640px);max-height:calc(100dvh - 42px);display:flex;flex-direction:column;gap:13px}
+.ar-imgreader-frame{overflow:hidden;border-radius:16px;background:#090807;box-shadow:0 24px 60px -24px rgba(0,0,0,.82),inset 0 0 0 1px rgba(255,236,210,.1)}
+.ar-imgreader-frame img{display:block;width:100%;max-height:calc(100dvh - 188px);object-fit:contain}
+.ar-imgreader-prompt{margin:0;border-radius:13px;border:1px solid rgba(255,236,210,.1);background:rgba(12,10,8,.76);padding:11px 12px;font-size:12px;line-height:1.65;color:var(--ar-t2);white-space:pre-wrap}
+.ar-wall-actions{position:relative;z-index:1;display:flex;gap:8px;margin-top:13px}
+.ar-wall-act{height:30px;border-radius:999px;border:1px solid rgba(49,55,51,.18);background:rgba(255,255,255,.42);padding:0 12px;font-size:10.5px;font-weight:900;color:#423d36;cursor:pointer}
+.ar-wall-act:hover{border-color:rgba(157,63,82,.38);background:#fffaf2}
+.ar-editor{width:min(96vw,720px);max-height:calc(100dvh - 38px);display:flex;flex-direction:column;border-radius:22px;overflow:hidden;background:#17120e;color:var(--ar-t1);box-shadow:0 28px 80px -28px rgba(0,0,0,.9),inset 0 0 0 1px rgba(255,236,210,.08)}
+.ar-editor-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;border-bottom:1px solid var(--ar-line);padding:17px 18px 13px;background:linear-gradient(180deg,#241b14,#17120e)}
+.ar-editor-hd h3{margin:0;font-family:var(--ar-font-display);font-size:22px;letter-spacing:.06em}
+.ar-editor-hd p{margin:4px 0 0;font-size:11px;color:var(--ar-t3);letter-spacing:.08em}
+.ar-editor-body{overflow-y:auto;padding:15px 16px 16px}
+.ar-editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.ar-field{display:flex;flex-direction:column;gap:6px}
+.ar-field span{font-size:10px;font-weight:900;letter-spacing:.2em;color:var(--ar-t3)}
+.ar-field input,.ar-field textarea,.ar-field select{border:1px solid var(--ar-line);border-radius:12px;background:#100c09;color:var(--ar-t1);font:inherit;font-size:13px;outline:none;padding:10px 11px}
+.ar-field textarea{min-height:78px;resize:vertical}
+.ar-editor-row{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-top:12px}
+.ar-editor-chip{display:flex;align-items:center;gap:7px;border:1px solid var(--ar-line);border-radius:999px;background:#100c09;padding:8px 11px;font-size:12px;color:var(--ar-t2)}
+.ar-editor-chip input{accent-color:#c9a36a}
+.ar-editor-list{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.ar-editor-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--ar-line);border-radius:14px;background:rgba(255,236,210,.035);padding:10px 10px 10px 12px}
+.ar-editor-item b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--ar-t1)}
+.ar-editor-item small{display:block;margin-top:3px;font-size:10px;color:var(--ar-t3);letter-spacing:.08em}
+.ar-editor-mini{display:flex;gap:6px}
+.ar-editor-mini button,.ar-editor-tools button{border:1px solid var(--ar-line);border-radius:999px;background:#100c09;color:var(--ar-t2);height:29px;padding:0 10px;font-size:11px;font-weight:800;cursor:pointer}
+.ar-editor-mini button:hover,.ar-editor-tools button:hover{color:var(--ar-t1);border-color:rgba(201,163,106,.35)}
+.ar-editor-tools{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.ar-editor-canvas{position:relative;width:100%;aspect-ratio:750/620;min-height:420px;margin-top:14px;border-radius:18px;overflow:hidden;background:linear-gradient(135deg,#201811,#100c09);box-shadow:inset 0 0 0 1px var(--ar-line)}
+.ar-editor-freeitem{position:absolute;border:1px solid rgba(255,236,210,.16);border-radius:10px;background:rgba(255,236,210,.08);color:var(--ar-t1);padding:8px;font-size:11px;overflow:hidden;transform:rotate(var(--rot,0deg));cursor:pointer}
+.ar-editor-freeitem.on{border-color:rgba(201,163,106,.68);box-shadow:0 0 0 3px rgba(201,163,106,.14)}
+.ar-editor-ft{display:flex;gap:9px;border-top:1px solid var(--ar-line);padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 12px);background:#120e0a}
+.ar-editor-ft button{flex:1;height:40px;border-radius:999px;border:1px solid var(--ar-line);background:transparent;color:var(--ar-t2);font-size:13px;font-weight:800;cursor:pointer}
+.ar-editor-ft button.primary{border:0;background:linear-gradient(180deg,#d2ab6e,#a87f43);color:#241704}
 
 /* ---------- 阅读器 · 小电子书 ---------- */
 .ar-veil{position:fixed;inset:0;z-index:100;display:flex;justify-content:center;background:rgba(8,5,3,.66);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:ar-fade .2s ease}
@@ -588,6 +673,229 @@ const KeepsakeBox: React.FC<{ books: CollectionBook[]; pullingId: string | null;
     );
 };
 
+const FRAGMENT_PALETTES = [
+    ['#f3d2cf', '#d7e7df'],
+    ['#ead5a5', '#cdd9e5'],
+    ['#d9d0ee', '#f1dcc7'],
+    ['#cfe0d7', '#ecd0d7'],
+    ['#f1e2b7', '#d2d0c7'],
+] as const;
+
+const getFreeformSummary = (book: CollectionBook): string => {
+    const summary = String(book.meta?.summary || book.sourceReplyExcerpt || '').replace(/\s+/g, ' ').trim();
+    if (summary) return summary.slice(0, 92);
+    return stripHtml(book.cardData?.body || book.body || '').replace(/\s+/g, ' ').trim().slice(0, 92);
+};
+
+const getFreeformShape = (book: CollectionBook): string =>
+    String(book.meta?.shape || getCollectionDisplayTitle(book) || '视觉碎片').trim();
+
+type WallBookEntry = {
+    id: string;
+    type: 'book';
+    item?: CollectionWallItem;
+    book: CollectionBook;
+};
+
+type WallImageEntry = {
+    id: string;
+    type: 'image';
+    item: CollectionWallItem;
+    asset: CollectionWallAsset;
+};
+
+type WallTextEntry = {
+    id: string;
+    type: 'text';
+    item: CollectionWallItem;
+};
+
+type WallZoneEntry = WallBookEntry | WallImageEntry | WallTextEntry;
+
+const getAssetLabel = (asset: CollectionWallAsset, item?: CollectionWallItem): string => {
+    const fromItem = String(item?.name || '').trim();
+    const fromMeta = String(asset.meta?.name || '').trim();
+    const fromPrompt = String(asset.meta?.prompt || '').trim();
+    return (fromItem || fromMeta || fromPrompt || '聊天生成图').slice(0, 40);
+};
+
+const getTextLabel = (item: CollectionWallItem): string =>
+    String(item.text?.content || item.name || '一张便签').trim().slice(0, 60);
+
+const useAssetObjectUrl = (asset: CollectionWallAsset | null): string => {
+    const [url, setUrl] = useState('');
+
+    useEffect(() => {
+        if (!asset?.blob) {
+            setUrl('');
+            return;
+        }
+        const nextUrl = URL.createObjectURL(asset.blob);
+        setUrl(nextUrl);
+        return () => URL.revokeObjectURL(nextUrl);
+    }, [asset]);
+
+    return url;
+};
+
+const FreeformFragment: React.FC<{ book: CollectionBook; index: number; pulling: boolean; onPick: (book: CollectionBook) => void }> = ({ book, index, pulling, onPick }) => {
+    const title = getCollectionDisplayTitle(book);
+    const shape = getFreeformShape(book);
+    const summary = getFreeformSummary(book);
+    const palette = FRAGMENT_PALETTES[hashOf(book.id + title) % FRAGMENT_PALETTES.length];
+    const rot = ((hashOf(book.id) % 7) - 3) * 0.45;
+    return (
+        <button
+            type="button"
+            className={`ar-frag${pulling ? ' pull' : ''}`}
+            style={{
+                '--rot': `${rot}deg`,
+                '--frag-a': palette[0],
+                '--frag-b': palette[1],
+            } as React.CSSProperties}
+            title={title}
+            aria-label={`打开视觉碎片《${title}》`}
+            onClick={() => onPick(book)}
+        >
+            <span className="ar-frag-cover" />
+            <span className="ar-frag-tape" />
+            <span className="ar-frag-rule" />
+            <span className="ar-frag-no">NO.{String(index + 1).padStart(2, '0')}</span>
+            <span className="ar-frag-body">
+                <span className="ar-frag-shape">{shape}</span>
+                <span className="ar-frag-summary">{summary || '一枚尚未命名的生活碎片。'}</span>
+                <span className="ar-frag-foot">
+                    <span>{fmtDate(book.collectedAt).slice(5)}</span>
+                    <span>LIGHT WALL</span>
+                </span>
+            </span>
+            <span className="ar-frag-pin" />
+        </button>
+    );
+};
+
+const ImageFragment: React.FC<{ entry: WallImageEntry; index: number; onPick: (entry: WallImageEntry) => void }> = ({ entry, index, onPick }) => {
+    const url = useAssetObjectUrl(entry.asset);
+    const label = getAssetLabel(entry.asset, entry.item);
+    const rot = ((hashOf(entry.id) % 7) - 3) * 0.5;
+    return (
+        <button
+            type="button"
+            className="ar-imgfrag"
+            style={{ '--rot': `${rot}deg` } as React.CSSProperties}
+            title={label}
+            aria-label={`打开图片《${label}》`}
+            onClick={() => onPick(entry)}
+        >
+            <span className="ar-imgfrag-media">
+                {url && <img src={url} alt="" loading="lazy" />}
+            </span>
+            <span className="ar-imgfrag-tag">IMG {String(index + 1).padStart(2, '0')}</span>
+            <span className="ar-imgfrag-name">{label}</span>
+        </button>
+    );
+};
+
+const TextFragment: React.FC<{ entry: WallTextEntry }> = ({ entry }) => {
+    const rot = ((hashOf(entry.id) % 7) - 3) * 0.48;
+    const label = getTextLabel(entry.item);
+    return (
+        <article
+            className={`ar-textfrag${entry.item.author === 'char' ? ' char' : ''}`}
+            style={{ '--rot': `${rot}deg` } as React.CSSProperties}
+            aria-label={label}
+        >
+            <span className="ar-textfrag-dot" />
+            <span className="ar-textfrag-body">{label}</span>
+            <span className="ar-textfrag-foot">{entry.item.author === 'char' ? 'CHAR NOTE' : 'NOTE'}</span>
+        </article>
+    );
+};
+
+const LightWallZone: React.FC<{
+    wall: CollectionWall;
+    entries: WallZoneEntry[];
+    pullingId: string | null;
+    onPickBook: (book: CollectionBook) => void;
+    onPickImage: (entry: WallImageEntry) => void;
+    onEditWall?: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
+    onInviteChar?: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
+}> = ({ wall, entries, pullingId, onPickBook, onPickImage, onEditWall, onInviteChar }) => {
+    const [shapeFilter, setShapeFilter] = useState('');
+    const books = useMemo(() => entries
+        .filter((entry): entry is WallBookEntry => entry.type === 'book')
+        .map(entry => entry.book), [entries]);
+    const shapes = useMemo(() => (
+        Array.from(new Set(books.map(getFreeformShape).filter(Boolean))).slice(0, 10)
+    ), [books]);
+    const visibleEntries = shapeFilter
+        ? entries.filter(entry => entry.type === 'book' && getFreeformShape(entry.book) === shapeFilter)
+        : entries;
+
+    useEffect(() => {
+        if (shapeFilter && !shapes.includes(shapeFilter)) setShapeFilter('');
+    }, [shapeFilter, shapes]);
+
+    return (
+        <section className="ar-wall">
+            <div className="ar-wall-top">
+                <div>
+                    <p className="ar-wall-kicker">VISUAL FRAGMENTS</p>
+                    <h3 className="ar-wall-title">{wall.name}{wall.hasUnseenCharItem ? ' · TA 来过' : ''}</h3>
+                    <p className="ar-wall-sub">自由创作收进这里，像一组生活边角的私印杂志。</p>
+                </div>
+                <div className="ar-wall-count">{entries.length}<span>PIECES</span></div>
+            </div>
+            {onEditWall && !wall.id.startsWith('fallback-') && (
+                <div className="ar-wall-actions">
+                    <button type="button" className="ar-wall-act" onClick={() => onEditWall(wall, entries)}>装修</button>
+                    {onInviteChar && wall.allowCharDecorate && (
+                        <button type="button" className="ar-wall-act" onClick={() => onInviteChar(wall, entries)}>邀请 TA</button>
+                    )}
+                </div>
+            )}
+            {shapes.length > 1 && (
+                <div className="ar-wall-chips" aria-label="按形态筛选视觉碎片">
+                    <button type="button" className={`ar-wchip${!shapeFilter ? ' on' : ''}`} onClick={() => setShapeFilter('')}>全部</button>
+                    {shapes.map(shape => (
+                        <button
+                            type="button"
+                            key={shape}
+                            className={`ar-wchip${shapeFilter === shape ? ' on' : ''}`}
+                            onClick={() => setShapeFilter(shape)}
+                        >
+                            {shape}
+                        </button>
+                    ))}
+                </div>
+            )}
+            {visibleEntries.length > 0 ? (
+                <div className="ar-wall-grid">
+                    {visibleEntries.map((entry, index) => {
+                        if (entry.type === 'image') {
+                            return <ImageFragment key={entry.id} entry={entry} index={index} onPick={onPickImage} />;
+                        }
+                        if (entry.type === 'text') {
+                            return <TextFragment key={entry.id} entry={entry} />;
+                        }
+                        return (
+                            <FreeformFragment
+                                key={entry.id}
+                                book={entry.book}
+                                index={index}
+                                pulling={pullingId === entry.book.id}
+                                onPick={onPickBook}
+                            />
+                        );
+                    })}
+                </div>
+            ) : (
+                <div className="ar-frag-empty">这个形态下暂时还没有碎片。</div>
+            )}
+        </section>
+    );
+};
+
 const SkeletonCabinet: React.FC = () => {
     const hs = [122, 138, 112, 146, 128, 116, 134, 142];
     return (
@@ -645,6 +953,356 @@ const EbookReader: React.FC<{
     );
 };
 
+const FreeformReader: React.FC<{
+    book: CollectionBook;
+    char: { name: string } | undefined;
+    onClose: () => void;
+    onEdit: () => void;
+    onForward: () => void;
+    onDelete: () => void;
+}> = ({ book, char, onClose, onEdit, onForward, onDelete }) => {
+    const title = getCollectionDisplayTitle(book);
+    return (
+        <div className="ar-veil book" onClick={onClose}>
+            <div className="ar-freader" onClick={(e) => e.stopPropagation()}>
+                <div className="ar-freader-meta">
+                    <span>
+                        <b>{title}</b>
+                        <small>{formatCollectionKindLabel(book.kind)} · {char?.name || '已删除角色'} · {fmtDate(book.collectedAt)}</small>
+                    </span>
+                    <button type="button" className="ar-ebk-x" aria-label="合上" onClick={onClose}><X weight="bold" /></button>
+                </div>
+                <div className="ar-freader-card">
+                    <React.Suspense fallback={<div style={{ color: '#e9dcc6', padding: 40 }}>正在展开碎片...</div>}>
+                        <StatusCardRenderer data={book.cardData} />
+                    </React.Suspense>
+                </div>
+                <div className="ar-ebk-acts">
+                    <button type="button" className="ar-ract" onClick={onEdit}><PencilSimple weight="bold" />改标签</button>
+                    <button type="button" className="ar-ract danger" onClick={onDelete}><Trash weight="bold" />删除</button>
+                    <button type="button" className="ar-ract" onClick={onForward}><PaperPlaneTilt weight="bold" />转递</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const WallImageReader: React.FC<{
+    entry: WallImageEntry;
+    wallName: string;
+    onClose: () => void;
+}> = ({ entry, wallName, onClose }) => {
+    const url = useAssetObjectUrl(entry.asset);
+    const label = getAssetLabel(entry.asset, entry.item);
+    const prompt = String(entry.asset.meta?.prompt || '').trim();
+    return (
+        <div className="ar-veil book" onClick={onClose}>
+            <div className="ar-imgreader" onClick={(e) => e.stopPropagation()}>
+                <div className="ar-freader-meta">
+                    <span>
+                        <b>{label}</b>
+                        <small>图片素材 · {wallName} · {fmtDate(entry.asset.createdAt || entry.item.createdAt)}</small>
+                    </span>
+                    <button type="button" className="ar-ebk-x" aria-label="合上" onClick={onClose}><X weight="bold" /></button>
+                </div>
+                <div className="ar-imgreader-frame">
+                    {url && <img src={url} alt={label} />}
+                </div>
+                {prompt && <p className="ar-imgreader-prompt">{prompt}</p>}
+            </div>
+        </div>
+    );
+};
+
+const createLocalItemId = (): string => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return `wallitem-${crypto.randomUUID()}`;
+    }
+    return `wallitem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+};
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+const relabelItems = (items: CollectionWallItem[]): CollectionWallItem[] =>
+    items.map((item, index) => ({ ...item, order: index, z: item.z || index + 1 }));
+
+const autoArrangeWallItems = (items: CollectionWallItem[]): CollectionWallItem[] => {
+    const gutter = 18;
+    const colW = (750 - 32 - gutter) / 2;
+    const colX = [16, 16 + colW + gutter];
+    const colY = [24, 24];
+    return relabelItems(items).map((item, index) => {
+        const col = colY[0] <= colY[1] ? 0 : 1;
+        const baseW = item.type === 'card' ? 375 : item.type === 'image' ? 320 : 220;
+        const baseH = item.type === 'card' ? 220 : item.type === 'image' ? 240 : 150;
+        const scale = colW / baseW;
+        const h = Math.round(baseH * scale);
+        const next = {
+            ...item,
+            x: Math.round(colX[col]),
+            y: Math.round(colY[col]),
+            w: Math.round(colW),
+            h,
+            rotation: ((hashOf(item.id + index) % 7) - 3) * 0.35,
+            z: index + 1,
+        };
+        colY[col] += h + gutter;
+        return next;
+    });
+};
+
+const getEditorItemLabel = (item: CollectionWallItem, entryByItemId: Map<string, WallZoneEntry>): string => {
+    const entry = entryByItemId.get(item.id);
+    if (entry?.type === 'book') return getCollectionDisplayTitle(entry.book);
+    if (entry?.type === 'image') return getAssetLabel(entry.asset, item);
+    if (item.type === 'text') return getTextLabel(item);
+    return item.name || item.type;
+};
+
+const getEditorItemKind = (item: CollectionWallItem): string => {
+    if (item.type === 'card') return '视觉碎片';
+    if (item.type === 'image') return '图片素材';
+    if (item.type === 'text') return item.author === 'char' ? 'TA 的便签' : '文字便签';
+    if (item.type === 'html') return '自制 HTML';
+    return '贴纸';
+};
+
+const getWallEntryLabel = (entry: WallZoneEntry): string => {
+    if (entry.type === 'book') return getFreeformShape(entry.book) || getCollectionDisplayTitle(entry.book);
+    if (entry.type === 'image') return getAssetLabel(entry.asset, entry.item);
+    return getTextLabel(entry.item);
+};
+
+const WallEditor: React.FC<{
+    wall: CollectionWall;
+    entries: WallZoneEntry[];
+    onClose: () => void;
+    onSaved: () => void;
+    say: (message: string) => void;
+}> = ({ wall, entries, onClose, onSaved, say }) => {
+    const [draftWall, setDraftWall] = useState<CollectionWall>(wall);
+    const [draftItems, setDraftItems] = useState<CollectionWallItem[]>(() => relabelItems(entries.map(entry => entry.item).filter((item): item is CollectionWallItem => Boolean(item))));
+    const [textDraft, setTextDraft] = useState('');
+    const [selectedId, setSelectedId] = useState('');
+    const [saving, setSaving] = useState(false);
+    const entryByItemId = useMemo(() => new Map(entries.filter(entry => Boolean(entry.item)).map(entry => [entry.item!.id, entry])), [entries]);
+    const selectedItem = draftItems.find(item => item.id === selectedId) || null;
+
+    const updateWall = (patch: Partial<CollectionWall>) => {
+        setDraftWall(prev => ({ ...prev, ...patch }));
+    };
+
+    const patchItem = (id: string, patch: Partial<CollectionWallItem>) => {
+        setDraftItems(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
+    };
+
+    const moveItem = (id: string, delta: number) => {
+        setDraftItems(prev => {
+            const next = [...prev];
+            const index = next.findIndex(item => item.id === id);
+            const target = index + delta;
+            if (index < 0 || target < 0 || target >= next.length) return prev;
+            const [item] = next.splice(index, 1);
+            next.splice(target, 0, item);
+            return relabelItems(next);
+        });
+    };
+
+    const addTextItem = () => {
+        const content = textDraft.trim();
+        if (!content) {
+            say('先写一点便签内容');
+            return;
+        }
+        const now = Date.now();
+        setDraftItems(prev => relabelItems([
+            ...prev,
+            {
+                id: createLocalItemId(),
+                wallId: wall.id,
+                type: 'text',
+                author: 'user',
+                x: draftWall.layoutMode === 'free' ? null : null,
+                y: null,
+                w: 220,
+                h: 150,
+                rotation: 0,
+                z: prev.length + 1,
+                order: prev.length,
+                text: { content: content.slice(0, 120), preset: 'sticky_note' },
+                name: '文字便签',
+                createdAt: now,
+            },
+        ]));
+        setTextDraft('');
+    };
+
+    const deleteItem = (id: string) => {
+        setDraftItems(prev => relabelItems(prev.filter(item => item.id !== id)));
+        if (selectedId === id) setSelectedId('');
+    };
+
+    const arrange = () => {
+        setDraftWall(prev => ({ ...prev, layoutMode: 'free' }));
+        setDraftItems(prev => autoArrangeWallItems(prev));
+    };
+
+    const adjustSelected = (patch: Partial<CollectionWallItem>) => {
+        if (!selectedItem) return;
+        patchItem(selectedItem.id, patch);
+    };
+
+    const handleSave = async () => {
+        if (saving) return;
+        const name = draftWall.name.replace(/\s+/g, ' ').trim().slice(0, 12);
+        if (!name) {
+            say('先给墙留个名字');
+            return;
+        }
+        setSaving(true);
+        try {
+            const originalItemIds = new Set(entries.map(entry => entry.item?.id).filter((id): id is string => Boolean(id)));
+            const draftItemIds = new Set(draftItems.map(item => item.id));
+            const deletedIds = Array.from(originalItemIds).filter(id => !draftItemIds.has(id));
+            await DB.saveCollectionWall({
+                ...draftWall,
+                name,
+                background: {
+                    ...draftWall.background,
+                    dim: clamp(Number(draftWall.background.dim) || 0, 0, 0.6),
+                },
+                changeCountSinceVisit: (draftWall.changeCountSinceVisit || 0) + 1,
+            });
+            await Promise.all(deletedIds.map(id => DB.deleteCollectionWallItem(id)));
+            await Promise.all(relabelItems(draftItems).map(item => DB.saveCollectionWallItem({ ...item, wallId: wall.id })));
+            addCollectionWallPendingContext(wall.charId, `用户最近在「${name}」整理了拾光墙，墙上现在有 ${draftItems.length} 件内容。下次对话可自然提及，不要刻意。`);
+            say('拾光墙已保存');
+            onSaved();
+            onClose();
+        } catch (error) {
+            console.error('[CollectionHall] wall editor save failed:', error);
+            say('保存失败，稍后再试');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="ar-veil book over" onClick={onClose}>
+            <div className="ar-editor" onClick={(event) => event.stopPropagation()}>
+                <div className="ar-editor-hd">
+                    <div>
+                        <h3>装修拾光墙</h3>
+                        <p>{draftItems.length} 件内容 · {draftWall.layoutMode === 'free' ? '自由画布' : 'Flow 排列'}</p>
+                    </div>
+                    <button type="button" className="ar-ebk-x" aria-label="关闭" onClick={onClose}><X weight="bold" /></button>
+                </div>
+                <div className="ar-editor-body">
+                    <div className="ar-editor-grid">
+                        <label className="ar-field">
+                            <span>墙名</span>
+                            <input value={draftWall.name} maxLength={12} onChange={event => updateWall({ name: event.target.value.slice(0, 12) })} />
+                        </label>
+                        <label className="ar-field">
+                            <span>布局</span>
+                            <select value={draftWall.layoutMode} onChange={event => updateWall({ layoutMode: event.target.value as CollectionWall['layoutMode'] })}>
+                                <option value="flow">flow 排列</option>
+                                <option value="free">free 画布</option>
+                            </select>
+                        </label>
+                        <label className="ar-field">
+                            <span>背景色</span>
+                            <input type="color" value={draftWall.background.value || '#17120e'} onChange={event => updateWall({ background: { ...draftWall.background, type: 'color', value: event.target.value } })} />
+                        </label>
+                        <label className="ar-field">
+                            <span>压暗 {Math.round((draftWall.background.dim || 0) * 100)}%</span>
+                            <input type="range" min="0" max="0.6" step="0.05" value={draftWall.background.dim || 0} onChange={event => updateWall({ background: { ...draftWall.background, dim: Number(event.target.value) } })} />
+                        </label>
+                    </div>
+                    <div className="ar-editor-row">
+                        <label className="ar-editor-chip">
+                            <input type="checkbox" checked={draftWall.allowCharDecorate} onChange={event => updateWall({ allowCharDecorate: event.target.checked })} />
+                            允许 TA 布置
+                        </label>
+                        <button type="button" className="ar-wall-act" onClick={arrange}>一键整理</button>
+                    </div>
+                    <div className="ar-editor-grid" style={{ marginTop: 13 }}>
+                        <label className="ar-field" style={{ gridColumn: '1 / -1' }}>
+                            <span>新增文字便签</span>
+                            <textarea value={textDraft} maxLength={120} onChange={event => setTextDraft(event.target.value)} placeholder="写一张贴在墙上的小纸条..." />
+                        </label>
+                    </div>
+                    <div className="ar-editor-tools">
+                        <button type="button" onClick={addTextItem}>插入便签</button>
+                        <button type="button" onClick={() => setDraftItems(prev => relabelItems([...prev].sort((a, b) => (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0))))}>按位置转 flow</button>
+                    </div>
+
+                    {draftWall.layoutMode === 'free' ? (
+                        <>
+                            <div className="ar-editor-canvas" style={{ background: draftWall.background.type === 'color' ? draftWall.background.value : undefined }}>
+                                <div style={{ position: 'absolute', inset: 0, background: `rgba(0,0,0,${draftWall.background.dim || 0})`, pointerEvents: 'none' }} />
+                                {draftItems.map(item => {
+                                    const x = typeof item.x === 'number' ? item.x : 24 + (item.order % 2) * 250;
+                                    const y = typeof item.y === 'number' ? item.y : 24 + Math.floor(item.order / 2) * 180;
+                                    const w = item.w || 220;
+                                    const h = item.h || 150;
+                                    return (
+                                        <button
+                                            type="button"
+                                            key={item.id}
+                                            className={`ar-editor-freeitem${selectedId === item.id ? ' on' : ''}`}
+                                            style={{
+                                                left: `${(x / 750) * 100}%`,
+                                                top: `${(y / 620) * 100}%`,
+                                                width: `${(w / 750) * 100}%`,
+                                                height: `${(h / 620) * 100}%`,
+                                                '--rot': `${item.rotation || 0}deg`,
+                                            } as React.CSSProperties}
+                                            onClick={() => setSelectedId(item.id)}
+                                        >
+                                            {getEditorItemLabel(item, entryByItemId)}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {selectedItem && (
+                                <div className="ar-editor-tools">
+                                    <button type="button" onClick={() => adjustSelected({ x: clamp((selectedItem.x ?? 0) - 24, 0, 720) })}>左移</button>
+                                    <button type="button" onClick={() => adjustSelected({ x: clamp((selectedItem.x ?? 0) + 24, 0, 720) })}>右移</button>
+                                    <button type="button" onClick={() => adjustSelected({ y: clamp((selectedItem.y ?? 0) - 24, 0, 900) })}>上移</button>
+                                    <button type="button" onClick={() => adjustSelected({ y: clamp((selectedItem.y ?? 0) + 24, 0, 900) })}>下移</button>
+                                    <button type="button" onClick={() => adjustSelected({ rotation: clamp((selectedItem.rotation || 0) - 2, -18, 18) })}>逆旋</button>
+                                    <button type="button" onClick={() => adjustSelected({ rotation: clamp((selectedItem.rotation || 0) + 2, -18, 18) })}>顺旋</button>
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        <div className="ar-editor-list">
+                            {draftItems.map((item, index) => (
+                                <div key={item.id} className="ar-editor-item">
+                                    <span>
+                                        <b>{getEditorItemLabel(item, entryByItemId)}</b>
+                                        <small>{String(index + 1).padStart(2, '0')} · {getEditorItemKind(item)}</small>
+                                    </span>
+                                    <span className="ar-editor-mini">
+                                        <button type="button" onClick={() => moveItem(item.id, -1)}>上移</button>
+                                        <button type="button" onClick={() => moveItem(item.id, 1)}>下移</button>
+                                        {item.type !== 'card' && <button type="button" onClick={() => deleteItem(item.id)}>删除</button>}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                <div className="ar-editor-ft">
+                    <button type="button" onClick={onClose} disabled={saving}>取消</button>
+                    <button type="button" className="primary" onClick={handleSave} disabled={saving}>{saving ? '保存中...' : '完成'}</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const ForwardCoverPreview: React.FC<{
     book: CollectionBook;
     sourceChar?: HallCharacter;
@@ -685,10 +1343,15 @@ const ForwardCoverPreview: React.FC<{
 const CollectionHallApp: React.FC = () => {
     const { characters, openApp, closeApp } = useOS();
     const [books, setBooks] = useState<CollectionBook[]>([]);
+    const [walls, setWalls] = useState<CollectionWall[]>([]);
+    const [wallItems, setWallItems] = useState<CollectionWallItem[]>([]);
+    const [wallAssets, setWallAssets] = useState<CollectionWallAsset[]>([]);
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(0);
     const [drag, setDrag] = useState(0);
     const [selected, setSelected] = useState<CollectionBook | null>(null);
+    const [selectedImage, setSelectedImage] = useState<{ entry: WallImageEntry; wallName: string } | null>(null);
+    const [editingWall, setEditingWall] = useState<{ wall: CollectionWall; entries: WallZoneEntry[] } | null>(null);
     const [pullingId, setPullingId] = useState<string | null>(null);
     const [editing, setEditing] = useState<{ book: CollectionBook; draft: string } | null>(null);
     const [saving, setSaving] = useState(false);
@@ -703,6 +1366,14 @@ const CollectionHallApp: React.FC = () => {
         try {
             const next = await DB.getAllCollectionBooks();
             setBooks(next);
+            const nextWalls = await DB.getAllCollectionWalls();
+            setWalls(nextWalls);
+            const itemLists = await Promise.all(nextWalls.map(wall => DB.getCollectionWallItemsByWallId(wall.id)));
+            const nextWallItems = itemLists.flat();
+            setWallItems(nextWallItems);
+            const assetIds = Array.from(new Set(nextWallItems.map(item => item.assetId).filter((id): id is string => Boolean(id))));
+            const assets = await Promise.all(assetIds.map(id => DB.getCollectionWallAssetById(id)));
+            setWallAssets(assets.filter((asset): asset is CollectionWallAsset => Boolean(asset)));
         } finally {
             setLoading(false);
         }
@@ -726,21 +1397,79 @@ const CollectionHallApp: React.FC = () => {
             if (!byChar.has(b.charId)) byChar.set(b.charId, []);
             byChar.get(b.charId)!.push(b);
         }
+        const wallCharIds = new Set(walls.map(wall => wall.charId).filter(Boolean));
+        const assetById = new Map(wallAssets.map(asset => [asset.id, asset]));
         const orderedIds = [
-            ...characters.map(c => c.id).filter(id => byChar.has(id)),
+            ...characters.map(c => c.id).filter(id => byChar.has(id) || wallCharIds.has(id)),
             ...Array.from(byChar.keys()).filter(id => !charById.has(id)),
+            ...Array.from(wallCharIds).filter(id => !charById.has(id) && !byChar.has(id)),
         ];
         return orderedIds.map(charId => {
             const charBooks = (byChar.get(charId) || []).sort((a, b) => b.collectedAt - a.collectedAt);
             const character = charById.get(charId);
+            const freeform = charBooks.filter(b => b.kind === 'freeform');
+            const bookById = new Map(charBooks.map(book => [book.id, book]));
+            const charWalls = walls
+                .filter(wall => wall.charId === charId)
+                .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || (a.createdAt || 0) - (b.createdAt || 0));
+            const wallBookIds = new Set<string>();
+            const wallZones: { wall: CollectionWall; entries: WallZoneEntry[] }[] = charWalls.map(wall => {
+                const entries = wallItems
+                    .filter(item => item.wallId === wall.id)
+                    .sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0))
+                    .reduce<WallZoneEntry[]>((acc, item) => {
+                        if (item.type === 'card' && item.bookId) {
+                            const book = bookById.get(item.bookId);
+                            if (book?.kind !== 'freeform') return acc;
+                            wallBookIds.add(book.id);
+                            acc.push({ id: item.id, type: 'book', item, book });
+                            return acc;
+                        }
+                        if (item.type === 'image' && item.assetId) {
+                            const asset = assetById.get(item.assetId);
+                            if (!asset) return acc;
+                            acc.push({ id: item.id, type: 'image', item, asset });
+                            return acc;
+                        }
+                        if (item.type === 'text' && item.text?.content) {
+                            acc.push({ id: item.id, type: 'text', item });
+                            return acc;
+                        }
+                        return acc;
+                    }, []);
+                return { wall, entries };
+            }).filter(zone => zone.entries.length > 0);
+            const looseFreeform = freeform.filter(book => !wallBookIds.has(book.id));
+            if (looseFreeform.length > 0) {
+                const fallbackWall = charWalls.find(wall => wall.isDefault) || charWalls[0] || {
+                    id: `fallback-${charId}`,
+                    charId,
+                    name: '未分类',
+                    isDefault: true,
+                    layoutMode: 'flow',
+                    background: { type: 'color', value: '#17120e', fit: 'cover', dim: 0.18 },
+                    allowCharDecorate: true,
+                    changeCountSinceVisit: 0,
+                    hasUnseenCharItem: false,
+                    sortOrder: 0,
+                    createdAt: 0,
+                    updatedAt: 0,
+                } satisfies CollectionWall;
+                wallZones.push({
+                    wall: fallbackWall,
+                    entries: looseFreeform.map(book => ({ id: `loose-${book.id}`, type: 'book', book } satisfies WallBookEntry)),
+                });
+            }
             return {
                 char: character || { id: charId, name: '已删除角色' },
                 hue: hashOf(charId) % 360,
-                afterglow: charBooks.filter(b => b.kind !== 'heart_talk'),
+                afterglow: charBooks.filter(b => b.kind === 'afterglow'),
                 heartTalks: charBooks.filter(b => b.kind === 'heart_talk'),
+                freeform,
+                wallZones,
             };
         });
-    }, [books, characters, charById]);
+    }, [books, characters, charById, wallAssets, wallItems, walls]);
 
     const safePage = Math.min(page, Math.max(0, sections.length - 1));
 
@@ -749,6 +1478,54 @@ const CollectionHallApp: React.FC = () => {
     }, [sections.length, page]);
 
     const charOf = (b: CollectionBook) => charById.get(b.charId);
+
+    const handleInviteChar = useCallback(async (wall: CollectionWall, entries: WallZoneEntry[], charName: string) => {
+        if (!wall.allowCharDecorate) {
+            say('这面墙暂时不让 TA 布置');
+            return;
+        }
+        const anchor = entries.find(entry => entry.type !== 'text') || entries[0];
+        if (!anchor) {
+            say('先贴一点东西，再邀请 TA 来看');
+            return;
+        }
+        const label = getWallEntryLabel(anchor).slice(0, 18);
+        const content = `${label}我看过了。先把这句压在这里，等你下次来。`;
+        const items = await DB.getCollectionWallItemsByWallId(wall.id);
+        const order = items.length;
+        const maxZ = items.reduce((max, item) => Math.max(max, item.z || 0), 0);
+        const arranged = autoArrangeWallItems(items);
+        const last = arranged[arranged.length - 1];
+        const x = wall.layoutMode === 'free' ? clamp((last?.x ?? 24) + 28, 16, 560) : null;
+        const y = wall.layoutMode === 'free' ? clamp((last?.y ?? 24) + 28, 16, 900) : null;
+        try {
+            await DB.saveCollectionWallItem({
+                wallId: wall.id,
+                type: 'text',
+                author: 'char',
+                x,
+                y,
+                w: 220,
+                h: 150,
+                rotation: ((hashOf(wall.id + Date.now()) % 7) - 3) * 0.45,
+                z: maxZ + 1,
+                order,
+                text: { content: content.slice(0, 60), preset: 'char_note' },
+                name: `${charName || 'TA'} 的便签`,
+            });
+            await DB.saveCollectionWall({
+                ...wall,
+                hasUnseenCharItem: true,
+                charLastVisitAt: Date.now(),
+                changeCountSinceVisit: 0,
+            });
+            say('TA 留了一张便签');
+            await loadBooks();
+        } catch (error) {
+            console.error('[CollectionHall] char note failed:', error);
+            say('TA 这次没能留下便签');
+        }
+    }, [loadBooks, say]);
 
     const pick = (book: CollectionBook) => {
         if (pullingId) return;
@@ -808,6 +1585,7 @@ const CollectionHallApp: React.FC = () => {
         try {
             await DB.deleteCollectionBook(confirmDel.id);
             setBooks(prev => prev.filter(b => b.id !== confirmDel.id));
+            setWallItems(prev => prev.filter(item => item.bookId !== confirmDel.id));
             setConfirmDel(null);
             setSelected(null);
             say('已从典藏馆移出');
@@ -871,7 +1649,7 @@ const CollectionHallApp: React.FC = () => {
                         <path d="M4 19V5a1 1 0 0 1 1-1h3v15H5a1 1 0 0 1-1-1zM8 4h4v15H8zM13.5 4.6l3.8-.8a1 1 0 0 1 1.2.8l2.4 13.6a1 1 0 0 1-.8 1.1l-3.8.7a1 1 0 0 1-1.1-.8L12.7 5.8a1 1 0 0 1 .8-1.2z" />
                     </svg>
                     <h2>典藏馆还空着</h2>
-                    <p>去主聊天打开番外篇或谈心阅读器，点侧边的收藏按钮，这里就会为对应角色添上一本。</p>
+                    <p>去主聊天收藏番外、谈心或自由创作碎片，这里就会为对应角色添上一处可翻看的痕迹。</p>
                 </div>
             ) : (
                 <>
@@ -899,7 +1677,7 @@ const CollectionHallApp: React.FC = () => {
                                 transition: drag !== 0 ? 'none' : 'transform .36s cubic-bezier(.22,.9,.28,1)',
                             }}
                         >
-                            {sections.map(({ char, hue, afterglow, heartTalks }) => (
+                            {sections.map(({ char, hue, afterglow, heartTalks, freeform, wallZones }) => (
                                 <div className="ar-page" key={char.id}>
                                     <div className="ar-char-hd">
                                         <Avatar char={char} hue={hue} size={36} />
@@ -909,6 +1687,8 @@ const CollectionHallApp: React.FC = () => {
                                                 {afterglow.length > 0 && `${afterglow.length} 本番外`}
                                                 {afterglow.length > 0 && heartTalks.length > 0 && ' · '}
                                                 {heartTalks.length > 0 && `${heartTalks.length} 张谈心`}
+                                                {(afterglow.length > 0 || heartTalks.length > 0) && freeform.length > 0 && ' · '}
+                                                {freeform.length > 0 && `${freeform.length} 枚碎片`}
                                             </p>
                                         </div>
                                     </div>
@@ -918,6 +1698,18 @@ const CollectionHallApp: React.FC = () => {
                                     {heartTalks.length > 0 && (
                                         <KeepsakeBox books={heartTalks} pullingId={pullingId} onPick={pick} />
                                     )}
+                                    {wallZones.map(zone => (
+                                        <LightWallZone
+                                            key={zone.wall.id}
+                                            wall={zone.wall}
+                                            entries={zone.entries}
+                                            pullingId={pullingId}
+                                            onPickBook={pick}
+                                            onPickImage={entry => setSelectedImage({ entry, wallName: zone.wall.name })}
+                                            onEditWall={(wall, entries) => setEditingWall({ wall, entries })}
+                                            onInviteChar={(wall, entries) => void handleInviteChar(wall, entries, char.name)}
+                                        />
+                                    ))}
                                 </div>
                             ))}
                         </div>
@@ -926,13 +1718,42 @@ const CollectionHallApp: React.FC = () => {
             )}
 
             {selected && (
-                <EbookReader
-                    book={selected}
-                    char={charOf(selected)}
-                    onClose={() => setSelected(null)}
-                    onEdit={() => setEditing({ book: selected, draft: selected.customTitle?.trim() || getCollectionDisplayTitle(selected) })}
-                    onForward={() => setForwardFor(selected)}
-                    onDelete={() => setConfirmDel(selected)}
+                selected.kind === 'freeform' ? (
+                    <FreeformReader
+                        book={selected}
+                        char={charOf(selected)}
+                        onClose={() => setSelected(null)}
+                        onEdit={() => setEditing({ book: selected, draft: selected.customTitle?.trim() || getCollectionDisplayTitle(selected) })}
+                        onForward={() => setForwardFor(selected)}
+                        onDelete={() => setConfirmDel(selected)}
+                    />
+                ) : (
+                    <EbookReader
+                        book={selected}
+                        char={charOf(selected)}
+                        onClose={() => setSelected(null)}
+                        onEdit={() => setEditing({ book: selected, draft: selected.customTitle?.trim() || getCollectionDisplayTitle(selected) })}
+                        onForward={() => setForwardFor(selected)}
+                        onDelete={() => setConfirmDel(selected)}
+                    />
+                )
+            )}
+
+            {selectedImage && (
+                <WallImageReader
+                    entry={selectedImage.entry}
+                    wallName={selectedImage.wallName}
+                    onClose={() => setSelectedImage(null)}
+                />
+            )}
+
+            {editingWall && (
+                <WallEditor
+                    wall={editingWall.wall}
+                    entries={editingWall.entries}
+                    onClose={() => setEditingWall(null)}
+                    onSaved={() => void loadBooks()}
+                    say={say}
                 />
             )}
 
@@ -978,7 +1799,7 @@ const CollectionHallApp: React.FC = () => {
                     <div className="ar-panel" onClick={(e) => e.stopPropagation()}>
                         <div className="ar-panel-hd">
                             <div>
-                                <h3>{editing.book.kind === 'heart_talk' ? '重写谈心标签' : '重写书脊标签'}</h3>
+                                <h3>{editing.book.kind === 'heart_talk' ? '重写谈心标签' : editing.book.kind === 'freeform' ? '重写碎片标签' : '重写书脊标签'}</h3>
                                 <p>留空并保存即可恢复默认标签</p>
                             </div>
                         </div>

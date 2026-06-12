@@ -55,6 +55,7 @@ import { showLocalNotification } from '../utils/localNotification';
 import { getChatBackgroundNotificationsEnabled } from '../utils/chatBackgroundNotifications';
 import { saveChatContextMirror } from '../utils/chatContextMirror';
 import { formatNotificationBody } from '../utils/notificationPreview';
+import { consumeCollectionWallPendingContext } from '../utils/collectionWallContext';
 import type { StatusCardData } from '../types/statusCard';
 
 interface UseChatAIProps {
@@ -611,6 +612,10 @@ export const useChatAI = ({
             ]);
 
             let systemPrompt = systemPromptResult;
+            const pendingWallContext = consumeCollectionWallPendingContext(char.id);
+            if (pendingWallContext.length > 0) {
+                systemPrompt += `\n\n### 拾光墙近况（一次性上下文）\n${pendingWallContext.map(text => `- ${text}`).join('\n')}\n这些是系统提供的近况数据，不是用户当前发言。你可以自然提及，但不要刻意复述。`;
+            }
             const scheduleSignal = (senseResult?.scheduleSignal || 'none') as AgentScheduleSignal;
             const scheduleReason = typeof senseResult?.scheduleReason === 'string'
                 ? senseResult.scheduleReason
@@ -1099,6 +1104,18 @@ export const useChatAI = ({
             };
 
             let firstSavedMsgId: number | null = null;
+            const rememberFirstSavedMessage = (savedId: number) => {
+                if (firstSavedMsgId === null) firstSavedMsgId = savedId;
+            };
+            const attachStatusCardToFirstMessage = async (cardData: StatusCardData, source: string) => {
+                if (firstSavedMsgId === null) return;
+                await DB.updateMessageMetadata(firstSavedMsgId, {
+                    statusCardData: cardData,
+                    statusCardSource: source,
+                    hasStatusCard: true,
+                });
+                await refreshRecentMessages();
+            };
 
             if (aiContent) {
 
@@ -1172,6 +1189,7 @@ export const useChatAI = ({
 
                         if (textBefore) {
                             const savedId = await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: textBefore, replyTo: replyData });
+                            rememberFirstSavedMessage(savedId);
                             showBrowserChatNotification(savedId, textBefore);
                             await refreshRecentMessages();
                             playFirstNotification();
@@ -1185,6 +1203,7 @@ export const useChatAI = ({
                                 metadata: { duration: durationSecs, sourceText: voiceText, hasAudio: false },
                                 replyTo: textBefore ? undefined : replyData,
                             });
+                            rememberFirstSavedMessage(savedVoiceId);
                             showBrowserChatNotification(savedVoiceId, `语音消息：${voiceText}`);
                             await refreshRecentMessages();
                             playFirstNotification();
@@ -1199,6 +1218,7 @@ export const useChatAI = ({
 
                         if (textBefore) {
                             const savedId = await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: textBefore, replyTo: replyData });
+                            rememberFirstSavedMessage(savedId);
                             showBrowserChatNotification(savedId, textBefore);
                             await refreshRecentMessages();
                             playFirstNotification();
@@ -1212,6 +1232,7 @@ export const useChatAI = ({
                                 metadata: { duration: estimatedDuration, sourceText: voiceText, hasAudio: false },
                                 replyTo: textBefore ? undefined : replyData,
                             });
+                            rememberFirstSavedMessage(savedVoiceId2);
                             showBrowserChatNotification(savedVoiceId2, `语音消息：${voiceText}`);
                             await refreshRecentMessages();
                             playFirstNotification();
@@ -1221,6 +1242,7 @@ export const useChatAI = ({
                         if (textAfter) {
                             await new Promise(r => setTimeout(r, 400));
                             const savedId = await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: textAfter });
+                            rememberFirstSavedMessage(savedId);
                             showBrowserChatNotification(savedId, textAfter);
                             await refreshRecentMessages();
                             saved++;
@@ -1234,6 +1256,7 @@ export const useChatAI = ({
 
                         if (textBefore) {
                             const savedId = await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: textBefore, replyTo: replyData });
+                            rememberFirstSavedMessage(savedId);
                             showBrowserChatNotification(savedId, textBefore);
                             await refreshRecentMessages();
                             playFirstNotification();
@@ -1247,6 +1270,7 @@ export const useChatAI = ({
                                 metadata: { duration: estimatedDuration, sourceText: voiceText, hasAudio: false },
                                 replyTo: textBefore ? undefined : replyData,
                             });
+                            rememberFirstSavedMessage(savedVoiceId3);
                             showBrowserChatNotification(savedVoiceId3, `语音消息：${voiceText}`);
                             await refreshRecentMessages();
                             playFirstNotification();
@@ -1256,6 +1280,7 @@ export const useChatAI = ({
                         if (textAfter) {
                             await new Promise(r => setTimeout(r, 400));
                             const savedId = await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: textAfter });
+                            rememberFirstSavedMessage(savedId);
                             showBrowserChatNotification(savedId, textAfter);
                             await refreshRecentMessages();
                             saved++;
@@ -1263,7 +1288,7 @@ export const useChatAI = ({
                     } else {
                         // Normal text message
                         const savedId = await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: cleanChunk, replyTo: replyData });
-                        if (firstSavedMsgId === null) firstSavedMsgId = savedId;
+                        rememberFirstSavedMessage(savedId);
                         showBrowserChatNotification(savedId, cleanChunk);
                         await refreshRecentMessages();
                         playFirstNotification();
@@ -1305,7 +1330,7 @@ export const useChatAI = ({
                         metadata: songCard,
                         replyTo: replyData,
                     });
-                    if (firstSavedMsgId === null) firstSavedMsgId = savedId;
+                    rememberFirstSavedMessage(savedId);
                     showBrowserChatNotification(savedId, fallbackText);
                     await refreshRecentMessages();
                     playFirstNotification();
@@ -1373,6 +1398,7 @@ export const useChatAI = ({
                                     metadata: { duration: estimatedDuration, sourceText: biContent, hasAudio: false },
                                     replyTo: replyData,
                                 });
+                                rememberFirstSavedMessage(savedVoiceId);
                                 showBrowserChatNotification(savedVoiceId, originalText || translatedText);
                                 await refreshRecentMessages();
                                 playFirstNotification();
@@ -1381,6 +1407,7 @@ export const useChatAI = ({
                             } else {
                                 // Auto-voice OFF: save as text with bilingual toggle
                                 const savedId = await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: biContent, replyTo: replyData });
+                                rememberFirstSavedMessage(savedId);
                                 showBrowserChatNotification(savedId, originalText || translatedText || biContent);
                                 await refreshRecentMessages();
                                 playFirstNotification();
@@ -1420,6 +1447,7 @@ export const useChatAI = ({
                                 content: foundEmoji.url,
                                 metadata: { name: emojiName, categoryId: foundEmoji.categoryId },
                             });
+                            rememberFirstSavedMessage(savedId);
                             showBrowserChatNotification(savedId, `发来一个表情：${emojiName}`);
                             await refreshRecentMessages();
                             playFirstNotification();
@@ -1443,14 +1471,15 @@ export const useChatAI = ({
                             const foundEmoji = emojis.find(e => e.name === part.content);
                             if (foundEmoji) {
                                 await new Promise(r => setTimeout(r, Math.random() * 500 + 300));
-                                const savedId = await DB.saveMessage({
-                                    charId: char.id,
-                                    role: 'assistant',
-                                    type: 'emoji',
-                                    content: foundEmoji.url,
-                                    metadata: { name: part.content, categoryId: foundEmoji.categoryId },
-                                });
-                                showBrowserChatNotification(savedId, `发来一个表情：${part.content}`);
+                            const savedId = await DB.saveMessage({
+                                charId: char.id,
+                                role: 'assistant',
+                                type: 'emoji',
+                                content: foundEmoji.url,
+                                metadata: { name: part.content, categoryId: foundEmoji.categoryId },
+                            });
+                            rememberFirstSavedMessage(savedId);
+                            showBrowserChatNotification(savedId, `发来一个表情：${part.content}`);
                                 await refreshRecentMessages();
                                 playFirstNotification();
                             }
@@ -1565,6 +1594,8 @@ export const useChatAI = ({
                         )
                             .then(cardData => {
                                 if (cardData && char && onMoodUpdate) {
+                                    void attachStatusCardToFirstMessage(cardData, 'freeform')
+                                        .catch(e => console.error('✨ [FreeformCard] Attach metadata:', e));
                                     onMoodUpdate(char.id, { ...(charSnapshot.moodState || {}), innerVoice: cardData.body }, cardData);
                                 } else {
                                     console.warn('✨ [FreeformCard] Generation returned null');
@@ -1584,6 +1615,8 @@ export const useChatAI = ({
                             )
                                 .then(cardData => {
                                     if (cardData && char && onMoodUpdate) {
+                                        void attachStatusCardToFirstMessage(cardData, 'custom')
+                                            .catch(e => console.error('🎨 [CustomCard] Attach metadata:', e));
                                         onMoodUpdate(char.id, { ...(charSnapshot.moodState || {}), innerVoice: cardData.body }, cardData);
                                     } else {
                                         console.warn('🎨 [CustomCard] Generation returned null');
@@ -1602,6 +1635,8 @@ export const useChatAI = ({
                         )
                             .then(cardData => {
                                 if (cardData && char && onMoodUpdate) {
+                                    void attachStatusCardToFirstMessage(cardData, 'creative')
+                                        .catch(e => console.error('🎴 [CreativeCard] Attach metadata:', e));
                                     onMoodUpdate(char.id, { ...(charSnapshot.moodState || {}), innerVoice: cardData.body }, cardData);
                                 } else {
                                     console.warn('🎴 [CreativeCard] Generation returned null');

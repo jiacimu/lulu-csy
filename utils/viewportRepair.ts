@@ -1,3 +1,5 @@
+import { isIOSStandaloneWebApp } from './iosStandalone';
+
 let hasInstalledViewportRepair = false;
 let hasPatchedFocus = false;
 let viewportWatchdogTimer: number | undefined;
@@ -14,7 +16,11 @@ let isViewportOffsetFollowEnabled = false;
 const VIEWPORT_DEBUG_TRIGGER_SELECTOR = '[data-viewport-debug-trigger="true"]';
 const KEYBOARD_CLOSED_TOLERANCE = 80;
 const WATCHDOG_DELAY_MS = 150;
+const REAL_VIEWPORT_GAP_THRESHOLD = 8;
+const REAL_VIEWPORT_KEYBOARD_CLOSED_TOLERANCE = 8;
 const UNLOCK_KEYBOARD_SETTLE_TIMEOUT_MS = 350;
+const POST_UNLOCK_REPAIR_DELAY_MS = 500;
+const SCREEN_CANVAS_GAP_THRESHOLD = 40;
 const VIEWPORT_OFFSET_FOLLOW_KEY = 'sully_vv_offset_follow_enabled';
 const HARD_RESET_ROUNDS = 2;
 const HARD_RESET_ROUND_GAP_MS = 250;
@@ -27,13 +33,29 @@ export interface ViewportCalibrationRecord {
 }
 
 export interface ViewportDiagnosticsSnapshot {
+  buildHash: string;
+  runtimeMode: string;
   offsetTop: number | null;
   visualViewportHeight: number | null;
   innerHeight: number;
+  screenWidth: number;
+  screenHeight: number;
+  screenGap: number;
   documentElementClientHeight: number;
+  documentElementScrollHeight: number;
+  layoutViewportGap: number;
   scrollY: number;
   documentElementScrollTop: number;
+  safeAreaInsetTop: number;
   safeAreaInsetBottom: number;
+  rootRectTop: number | null;
+  rootRectHeight: number | null;
+  cssDvhHeight: number | null;
+  cssLvhHeight: number | null;
+  cssSvhHeight: number | null;
+  realViewportHeight: string;
+  browserVersion: string;
+  viewportVerdict: string;
   userAgent: string;
   offsetFollowEnabled: boolean;
   calibrationRecords: ViewportCalibrationRecord[];
@@ -78,6 +100,100 @@ function readViewportOffsetTop(): number | null {
   if (typeof window === 'undefined') return null;
   const offsetTop = window.visualViewport?.offsetTop;
   return typeof offsetTop === 'number' && Number.isFinite(offsetTop) ? Math.round(offsetTop) : null;
+}
+
+function readRootRect(): { top: number | null; height: number | null } {
+  if (typeof document === 'undefined') return { top: null, height: null };
+  const root = document.querySelector('.sully-app-root') || document.getElementById('root');
+  if (!root) return { top: null, height: null };
+  const rect = root.getBoundingClientRect();
+  return {
+    top: Number.isFinite(rect.top) ? Math.round(rect.top) : null,
+    height: Number.isFinite(rect.height) ? Math.round(rect.height) : null,
+  };
+}
+
+function readBrowserVersion(userAgent: string): string {
+  return userAgent.match(/\bVersion\/([0-9.]+)/)?.[1] || '';
+}
+
+function readCurrentBuildHash(): string {
+  return typeof __APP_BUILD_ID__ === 'string' && __APP_BUILD_ID__.trim()
+    ? __APP_BUILD_ID__
+    : 'dev';
+}
+
+function isStandaloneDisplayMode(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };
+  if (navigatorWithStandalone.standalone === true) return true;
+
+  try {
+    return Boolean(
+      window.matchMedia?.('(display-mode: standalone)').matches
+      || window.matchMedia?.('(display-mode: fullscreen)').matches,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function readRuntimeMode(): string {
+  if (typeof window === 'undefined') return 'unknown';
+
+  const maybeCapacitor = (window as Window & {
+    Capacitor?: {
+      isNativePlatform?: () => boolean;
+      getPlatform?: () => string;
+    };
+  }).Capacitor;
+
+  try {
+    if (maybeCapacitor?.isNativePlatform?.()) {
+      return `capacitor-${maybeCapacitor.getPlatform?.() || 'native'}`;
+    }
+  } catch {
+    return 'capacitor-native';
+  }
+
+  return isStandaloneDisplayMode() ? 'standalone' : 'browser';
+}
+
+function isKeyboardClosedForRealViewport(innerHeight: number, visualViewportHeight: number): boolean {
+  return Math.abs(visualViewportHeight - innerHeight) <= REAL_VIEWPORT_KEYBOARD_CLOSED_TOLERANCE;
+}
+
+function buildViewportVerdict(snapshot: {
+  offsetTop: number | null;
+  visualViewportHeight: number | null;
+  innerHeight: number;
+  layoutViewportGap: number;
+  runtimeMode: string;
+  screenWidth: number;
+  screenHeight: number;
+  screenGap: number;
+}): string {
+  const offsetTop = snapshot.offsetTop ?? 0;
+  const visualViewportHeight = snapshot.visualViewportHeight ?? snapshot.innerHeight;
+  const keyboardClosed = isKeyboardClosedForRealViewport(snapshot.innerHeight, visualViewportHeight);
+  const isPortrait = snapshot.screenHeight > 0 && snapshot.screenWidth > 0
+    ? snapshot.screenHeight >= snapshot.screenWidth
+    : snapshot.innerHeight >= Math.round(window.innerWidth || 0);
+
+  if (keyboardClosed && offsetTop > 0) {
+    return `键盘收起后 offsetTop 残留 ${offsetTop} px`;
+  }
+
+  if (keyboardClosed && snapshot.layoutViewportGap > REAL_VIEWPORT_GAP_THRESHOLD) {
+    return `布局视口短 ${snapshot.layoutViewportGap} px`;
+  }
+
+  if (snapshot.runtimeMode === 'standalone' && isPortrait && snapshot.screenGap > SCREEN_CANVAS_GAP_THRESHOLD) {
+    return `画布被系统截留 ${snapshot.screenGap} px`;
+  }
+
+  return '视口健康';
 }
 
 function pushCalibrationRecord(source: string, beforeOffsetTop: number | null, afterOffsetTop: number | null): void {
@@ -139,6 +255,9 @@ function checkViewport(): void {
 
   window.clearTimeout(viewportWatchdogTimer);
   viewportWatchdogTimer = window.setTimeout(() => {
+    if (document.visibilityState === 'hidden') return;
+    reconcileRealViewportHeight();
+
     const vv = window.visualViewport;
     const documentHeight = document.documentElement.clientHeight;
     const kbClosed = !vv || vv.height >= documentHeight - KEYBOARD_CLOSED_TOLERANCE;
@@ -187,6 +306,20 @@ export function prepareViewportForUnlock(): Promise<void> {
   });
 }
 
+export async function repairViewportAfterUnlockSettle(): Promise<void> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  await wait(POST_UNLOCK_REPAIR_DELAY_MS);
+
+  const innerHeight = Math.round(window.innerHeight || 0);
+  const visualViewportHeight = Math.round(window.visualViewport?.height || innerHeight);
+  if (!isKeyboardClosedForRealViewport(innerHeight, visualViewportHeight)) return;
+
+  await resetViewportHard('unlock-post');
+  reconcileRealViewportHeight();
+  refreshDebugOverlay();
+}
+
 export function focusPreventScroll<T extends FocusTarget | null | undefined>(element: T): void {
   if (!element) return;
 
@@ -217,7 +350,7 @@ function installPreventScrollFocusPatch(): void {
   };
 }
 
-function readSafeAreaInsetBottom(): number {
+function readSafeAreaInset(edge: 'top' | 'bottom'): number {
   if (typeof document === 'undefined' || !document.body) return 0;
 
   const probe = document.createElement('div');
@@ -225,26 +358,112 @@ function readSafeAreaInsetBottom(): number {
   probe.style.visibility = 'hidden';
   probe.style.pointerEvents = 'none';
   probe.style.opacity = '0';
-  probe.style.paddingBottom = 'env(safe-area-inset-bottom)';
+  probe.style.setProperty(`padding-${edge}`, `env(safe-area-inset-${edge})`);
   document.body.appendChild(probe);
 
   const computed = window.getComputedStyle(probe);
-  const value = parseFloat(computed.paddingBottom || '0') || 0;
+  const value = parseFloat(computed.getPropertyValue(`padding-${edge}`) || '0') || 0;
   document.body.removeChild(probe);
   return Math.round(value);
 }
 
+function measureViewportUnit(unit: 'dvh' | 'lvh' | 'svh'): number | null {
+  if (typeof document === 'undefined' || !document.body) return null;
+
+  const probe = document.createElement('div');
+  probe.style.position = 'fixed';
+  probe.style.visibility = 'hidden';
+  probe.style.pointerEvents = 'none';
+  probe.style.opacity = '0';
+  probe.style.width = '0';
+  probe.style.height = `1${unit}`;
+  document.body.appendChild(probe);
+
+  const rectHeight = probe.getBoundingClientRect().height;
+  const computedHeight = parseFloat(window.getComputedStyle(probe).height || '0') || 0;
+  document.body.removeChild(probe);
+
+  const oneUnitHeight = rectHeight || computedHeight;
+  if (!Number.isFinite(oneUnitHeight) || oneUnitHeight <= 0) return null;
+  return Math.round(oneUnitHeight * 100);
+}
+
+function readRealViewportHeightVar(): string {
+  if (typeof document === 'undefined') return '';
+  const inlineValue = document.documentElement.style.getPropertyValue('--real-vh').trim();
+  if (inlineValue) return inlineValue;
+  return window.getComputedStyle(document.documentElement).getPropertyValue('--real-vh').trim();
+}
+
+function reconcileRealViewportHeight(): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  if (!isIOSStandaloneWebApp()) {
+    document.documentElement.style.removeProperty('--real-vh');
+    return;
+  }
+
+  const innerHeight = Math.round(window.innerHeight || 0);
+  const clientHeight = Math.round(document.documentElement.clientHeight || 0);
+  const visualViewportHeight = Math.round(window.visualViewport?.height || innerHeight);
+  const layoutGap = innerHeight - clientHeight;
+  const keyboardClosed = isKeyboardClosedForRealViewport(innerHeight, visualViewportHeight);
+
+  if (keyboardClosed && layoutGap > REAL_VIEWPORT_GAP_THRESHOLD && innerHeight > 0) {
+    document.documentElement.style.setProperty('--real-vh', `${innerHeight}px`);
+    return;
+  }
+
+  if (keyboardClosed && layoutGap <= REAL_VIEWPORT_GAP_THRESHOLD) {
+    document.documentElement.style.removeProperty('--real-vh');
+  }
+}
+
 export function getViewportDiagnosticsSnapshot(): ViewportDiagnosticsSnapshot {
   const vv = window.visualViewport;
-  return {
+  const innerHeight = Math.round(window.innerHeight || 0);
+  const screenWidth = Math.round(window.screen?.width || 0);
+  const screenHeight = Math.round(window.screen?.height || 0);
+  const documentElementClientHeight = Math.round(document.documentElement.clientHeight || 0);
+  const rootRect = readRootRect();
+  const userAgent = navigator.userAgent || '';
+  const partialSnapshot = {
     offsetTop: readViewportOffsetTop(),
     visualViewportHeight: vv ? Math.round(vv.height) : null,
-    innerHeight: Math.round(window.innerHeight || 0),
-    documentElementClientHeight: Math.round(document.documentElement.clientHeight || 0),
+    innerHeight,
+    screenWidth,
+    screenHeight,
+    screenGap: screenHeight - innerHeight,
+    documentElementClientHeight,
+    layoutViewportGap: innerHeight - documentElementClientHeight,
+    runtimeMode: readRuntimeMode(),
+  };
+
+  return {
+    buildHash: readCurrentBuildHash(),
+    runtimeMode: partialSnapshot.runtimeMode,
+    offsetTop: partialSnapshot.offsetTop,
+    visualViewportHeight: partialSnapshot.visualViewportHeight,
+    innerHeight,
+    screenWidth,
+    screenHeight,
+    screenGap: partialSnapshot.screenGap,
+    documentElementClientHeight,
+    documentElementScrollHeight: Math.round(document.documentElement.scrollHeight || 0),
+    layoutViewportGap: partialSnapshot.layoutViewportGap,
     scrollY: Math.round(window.scrollY || 0),
     documentElementScrollTop: Math.round(document.documentElement.scrollTop || 0),
-    safeAreaInsetBottom: readSafeAreaInsetBottom(),
-    userAgent: navigator.userAgent || '',
+    safeAreaInsetTop: readSafeAreaInset('top'),
+    safeAreaInsetBottom: readSafeAreaInset('bottom'),
+    rootRectTop: rootRect.top,
+    rootRectHeight: rootRect.height,
+    cssDvhHeight: measureViewportUnit('dvh'),
+    cssLvhHeight: measureViewportUnit('lvh'),
+    cssSvhHeight: measureViewportUnit('svh'),
+    realViewportHeight: readRealViewportHeightVar(),
+    browserVersion: readBrowserVersion(userAgent),
+    viewportVerdict: buildViewportVerdict(partialSnapshot),
+    userAgent,
     offsetFollowEnabled: isViewportOffsetFollowEnabled,
     calibrationRecords: calibrationRecords.slice(),
   };
@@ -259,13 +478,25 @@ export function buildDebugText(): string {
 
   const snapshot = getViewportDiagnosticsSnapshot();
   const lines = [
+    `buildHash: ${snapshot.buildHash}`,
+    `runtimeMode: ${snapshot.runtimeMode}`,
+    `screen: ${snapshot.screenWidth}x${snapshot.screenHeight}`,
+    `screenGap: ${snapshot.screenGap}`,
+    `verdict: ${snapshot.viewportVerdict}`,
     `visualViewport.offsetTop: ${snapshot.offsetTop ?? 'n/a'}`,
     `visualViewport.height: ${snapshot.visualViewportHeight ?? 'n/a'}`,
     `innerHeight: ${snapshot.innerHeight}`,
     `documentElement.clientHeight: ${snapshot.documentElementClientHeight}`,
+    `layout gap: ${snapshot.layoutViewportGap}`,
+    `documentElement.scrollHeight: ${snapshot.documentElementScrollHeight}`,
     `scrollY: ${snapshot.scrollY}`,
     `documentElement.scrollTop: ${snapshot.documentElementScrollTop}`,
+    `env(safe-area-inset-top): ${snapshot.safeAreaInsetTop}px`,
     `env(safe-area-inset-bottom): ${snapshot.safeAreaInsetBottom}px`,
+    `root rect: top=${snapshot.rootRectTop ?? 'n/a'} height=${snapshot.rootRectHeight ?? 'n/a'}`,
+    `100dvh/100lvh/100svh: ${snapshot.cssDvhHeight ?? 'n/a'} / ${snapshot.cssLvhHeight ?? 'n/a'} / ${snapshot.cssSvhHeight ?? 'n/a'}`,
+    `--real-vh: ${snapshot.realViewportHeight || 'unset'}`,
+    `Version: ${snapshot.browserVersion || 'n/a'}`,
     `offset follow: ${snapshot.offsetFollowEnabled ? 'on' : 'off'}`,
     `recent calibrations: ${snapshot.calibrationRecords.length ? snapshot.calibrationRecords.map(formatCalibrationRecord).join(' | ') : 'none'}`,
     `UA: ${snapshot.userAgent}`,
@@ -315,14 +546,21 @@ function refreshDebugOverlay(): void {
   debugPre.textContent = lastDebugText;
 }
 
+function getDebugOverlayHost(): HTMLElement {
+  return (document.querySelector('.sully-app-root') as HTMLElement | null) || document.body;
+}
+
 export function showViewportDebugOverlay(): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   if (!debugOverlay) {
+    const overlayHost = getDebugOverlayHost();
+    const position = overlayHost === document.body ? 'fixed' : 'absolute';
+
     debugOverlay = document.createElement('div');
     debugOverlay.id = 'sully-viewport-debug-panel';
     debugOverlay.style.cssText = [
-      'position:fixed',
+      `position:${position}`,
       'left:8px',
       'right:8px',
       'bottom:calc(env(safe-area-inset-bottom, 0px) + 8px)',
@@ -371,7 +609,7 @@ export function showViewportDebugOverlay(): void {
     actions.append(copyButton, closeButton);
     header.append(title, actions);
     debugOverlay.append(header, debugPre);
-    document.body.appendChild(debugOverlay);
+    overlayHost.appendChild(debugOverlay);
   }
 
   refreshDebugOverlay();
@@ -487,6 +725,12 @@ export function installViewportRepair(): void {
     checkViewport();
   };
 
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      checkViewport();
+    }
+  };
+
   const vv = window.visualViewport;
   vv?.addEventListener('resize', handleViewportChange);
   vv?.addEventListener('scroll', handleViewportChange);
@@ -495,6 +739,7 @@ export function installViewportRepair(): void {
   window.addEventListener('pageshow', handleViewportChange);
   window.addEventListener('popstate', syncDebugFromUrl);
   window.addEventListener('hashchange', syncDebugFromUrl);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
   document.addEventListener('pointerup', handleDebugTriggerTap, true);
   document.addEventListener('click', handleDebugTriggerTap, true);
 
@@ -506,4 +751,5 @@ export function installViewportRepair(): void {
   };
 
   syncDebugFromUrl();
+  checkViewport();
 }

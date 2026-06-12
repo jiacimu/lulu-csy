@@ -294,13 +294,37 @@ function processObjectForZip(
     return newObj;
 }
 
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        const chunk = bytes.subarray(offset, offset + chunkSize);
+        binary += String.fromCharCode(...Array.from(chunk));
+    }
+    return btoa(binary);
+}
+
 async function blobToDataUrl(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ''));
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(blob);
-    });
+    if (typeof FileReader !== 'undefined') {
+        try {
+            return await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(blob);
+            });
+        } catch {
+            // Some IndexedDB implementations return cross-realm Blob objects.
+        }
+    }
+
+    if (typeof blob.arrayBuffer !== 'function') {
+        throw new TypeError('Unsupported Blob-like object');
+    }
+    const buffer = await blob.arrayBuffer();
+    const mime = blob.type || 'application/octet-stream';
+    return `data:${mime};base64,${arrayBufferToBase64(buffer)}`;
 }
 
 async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
@@ -353,6 +377,21 @@ async function serializeVoiceAudioForBackup(items: any[]): Promise<SerializedVoi
             createdAt: item?.createdAt,
             mimeType: item?.mimeType || audioAsset?.mimeType,
             dataUrl: audioAsset?.dataUrl,
+        });
+    }
+    return serialized;
+}
+
+async function serializeCollectionWallAssetsForBackup(items: any[]): Promise<any[]> {
+    const serialized = [];
+    for (const item of items) {
+        const { blob, ...rest } = item || {};
+        const asset = await serializeBlobOrDataUrl(isBlobLike(blob) ? blob : item?.dataUrl);
+        serialized.push({
+            ...rest,
+            dataUrl: asset?.dataUrl || item?.dataUrl,
+            mime: item?.mime || asset?.mimeType,
+            bytes: item?.bytes || blob?.size,
         });
     }
     return serialized;
@@ -855,7 +894,8 @@ export const SYSTEM_BACKUP_ALWAYS_STORES = [
     'xhs_activities', 'xhs_stock',
     'vector_memories',
     'memory_records', 'memory_record_audio',
-    'scheduled_messages', 'letters', 'yesterday_newspapers', 'vibe_references', 'niannian_sessions', 'collection_books'
+    'scheduled_messages', 'letters', 'yesterday_newspapers', 'vibe_references', 'niannian_sessions',
+    'collection_books', 'collection_walls', 'collection_wall_items', 'collection_wall_assets'
 ];
 
 export const SYSTEM_BACKUP_CONDITIONAL_STORES = [
@@ -1083,7 +1123,7 @@ async function restoreThemeAssetsFromBackup(theme?: OSTheme): Promise<void> {
 function getStoresToProcess(mode: SystemBackupMode, options: SystemBackupOptions = {}): string[] {
     let stores: string[];
     if (mode === 'full') stores = [...ALL_STORES];
-    else if (mode === 'text_only') stores = ALL_STORES.filter(s => s !== 'assets' && s !== 'memory_record_audio');
+    else if (mode === 'text_only') stores = ALL_STORES.filter(s => s !== 'assets' && s !== 'memory_record_audio' && s !== 'collection_wall_assets');
     // media_only
     else stores = ['gallery', 'emojis', 'emoji_categories', 'journal_stickers', 'user_profile', 'characters', 'messages', 'themes', 'assets', 'bank_data', 'memory_records', 'memory_record_audio'];
 
@@ -1286,6 +1326,12 @@ export async function exportSystemData(
                 continue;
             }
 
+            if (storeName === 'collection_wall_assets') {
+                processedData = processObject(await serializeCollectionWallAssetsForBackup(rawData));
+                backupData.collectionWallAssets = processedData;
+                continue;
+            }
+
             if (storeName === 'characters' && mode === 'media_only') {
                 const mediaList = rawData.map((c: CharacterProfile) => {
                     const extracted = {
@@ -1365,6 +1411,9 @@ export async function exportSystemData(
             case 'vibe_references': backupData.vibeReferences = processedData; break;
             case 'niannian_sessions': backupData.nianNianSessions = processedData; break;
             case 'collection_books': backupData.collectionBooks = processedData; break;
+            case 'collection_walls': backupData.collectionWalls = processedData; break;
+            case 'collection_wall_items': backupData.collectionWallItems = processedData; break;
+            case 'collection_wall_assets': backupData.collectionWallAssets = processedData; break;
         }
 
         await new Promise(resolve => setTimeout(resolve, 10));

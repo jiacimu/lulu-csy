@@ -1,7 +1,7 @@
 import React,{ useState,useEffect,useRef,useLayoutEffect,useMemo,useCallback } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { Message,MessageType,MemoryFragment,Emoji,EmojiCategory,AppID,YesterdayNewspaperPeriodType,YesterdayNewspaperRecord,type ImageGenerationConfig,type ManualPhotoGenerationOptions,type MemoryRecord,type PhotoDirectorResult,type PhotoHintTrigger,type PhotoMeta,type PhotoStylePreset,type SavedVibeEncoding,type SavedVibeReference,type VibeReferenceInput } from '../types';
+import { Message,MessageType,MemoryFragment,Emoji,EmojiCategory,AppID,YesterdayNewspaperPeriodType,YesterdayNewspaperRecord,type CollectionBook,type CollectionBookInput,type CollectionWall,type CollectionWallAsset,type CollectionWallItem,type ImageGenerationConfig,type ManualPhotoGenerationOptions,type MemoryRecord,type PhotoDirectorResult,type PhotoHintTrigger,type PhotoMeta,type PhotoStylePreset,type SavedVibeEncoding,type SavedVibeReference,type VibeReferenceInput } from '../types';
 import { processImage } from '../utils/file';
 import { safeResponseJson } from '../utils/safeApi';
 import { parseBilingual } from '../utils/chatParser';
@@ -108,9 +108,10 @@ import {
 } from '../utils/userActionSelector';
 import {
     buildCollectionBookInput,
+    buildFreeformCollectionBookInput,
     buildCollectionSourceKey,
-    inferCollectionBookKind,
 } from '../utils/collectionBooks';
+import { fnv1aBytes } from '../utils/fnv1a';
 import { PaperPlaneTilt, Plus, Smiley, Trash, X } from '@phosphor-icons/react';
 
 const DATE_WORLDLINE_ORB_ENABLED: boolean = false;
@@ -137,6 +138,7 @@ function isMainChatVisibleMessage(message: Message): boolean {
 const CHAT_HISTORY_RAW_WINDOW_MAX = 1500;
 const QUICK_SONG_RECENT_MESSAGE_LIMIT = 300;
 const AFTERGLOW_CARD_CACHE_PREFIX = 'chat_afterglow_card';
+const FREEFORM_LAST_WALL_STORAGE_PREFIX = 'collection_freeform_last_wall';
 const EMPTY_PHOTO_STYLE_PRESETS: PhotoStylePreset[] = [];
 const QUICK_SONG_COVER_STYLE_PRESET: PhotoStylePreset = {
     id: 'quick-song-cover-image2',
@@ -148,6 +150,63 @@ const QUICK_SONG_COVER_STYLE_PRESET: PhotoStylePreset = {
     responseFormat: 'auto',
     quality: 'high',
 };
+
+function isCollectableFreeformStatusCard(card?: StatusCardData): card is StatusCardData {
+    return Boolean(card?.cardType === 'freeform' && typeof card.meta?.html === 'string' && card.meta.html.trim());
+}
+
+function buildCollectionInputForStatusCard(charId: string, card: StatusCardData, sourceMessage: Message) {
+    return isCollectableFreeformStatusCard(card)
+        ? buildFreeformCollectionBookInput(charId, card, sourceMessage)
+        : buildCollectionBookInput(charId, card, sourceMessage);
+}
+
+type FreeformWallPickerState = {
+    input: CollectionBookInput;
+    sourceMessage: Message;
+    collectionKey: string;
+    walls: CollectionWall[];
+    itemCounts: Record<string, number>;
+    createDraft: string;
+    isSaving: boolean;
+};
+
+type CollectionUndoState = {
+    key: number;
+    book: CollectionBook;
+    wallItems: CollectionWallItem[];
+    collectionKey: string;
+};
+
+type ImageWallAssetInput = Omit<CollectionWallAsset, 'id' | 'createdAt'> & {
+    id?: string;
+    createdAt?: number;
+};
+
+type ImageWallPickerState = {
+    message: Message;
+    asset: ImageWallAssetInput;
+    walls: CollectionWall[];
+    itemCounts: Record<string, number>;
+    createDraft: string;
+    isSaving: boolean;
+};
+
+function getLastUsedFreeformWallId(charId: string): string {
+    try {
+        return localStorage.getItem(`${FREEFORM_LAST_WALL_STORAGE_PREFIX}_${charId}`) || '';
+    } catch {
+        return '';
+    }
+}
+
+function setLastUsedFreeformWallId(charId: string, wallId: string): void {
+    try {
+        localStorage.setItem(`${FREEFORM_LAST_WALL_STORAGE_PREFIX}_${charId}`, wallId);
+    } catch {
+        // best effort only
+    }
+}
 
 type QuickSongFlowStatus =
     | 'idle'
@@ -676,6 +735,9 @@ const Chat: React.FC = () => {
     const [afterglowLoadingIds, setAfterglowLoadingIds] = useState<Set<number>>(new Set());
     const [afterglowCollectionIds, setAfterglowCollectionIds] = useState<Record<string, string>>({});
     const [afterglowCollectionLoadingKeys, setAfterglowCollectionLoadingKeys] = useState<Set<string>>(new Set());
+    const [freeformWallPicker, setFreeformWallPicker] = useState<FreeformWallPickerState | null>(null);
+    const [imageWallPicker, setImageWallPicker] = useState<ImageWallPickerState | null>(null);
+    const [collectionUndo, setCollectionUndo] = useState<CollectionUndoState | null>(null);
     const autoAfterglowRequestedIdsRef = useRef<Set<number>>(new Set());
     const [showAfterglowPreview, setShowAfterglowPreview] = useState(() => {
         if (!import.meta.env.DEV || typeof window === 'undefined') return false;
@@ -1420,6 +1482,12 @@ const Chat: React.FC = () => {
         setAfterglowLoadingIds(new Set());
         autoAfterglowRequestedIdsRef.current.clear();
     }, [activeCharacterId]);
+
+    useEffect(() => {
+        if (!collectionUndo) return;
+        const timer = window.setTimeout(() => setCollectionUndo(null), 5000);
+        return () => window.clearTimeout(timer);
+    }, [collectionUndo]);
 
     // --- Autonomous Agent: incoming call event bridge ---
     useEffect(() => {
@@ -3932,9 +4000,21 @@ const Chat: React.FC = () => {
             return;
         }
 
-        const entries = Object.entries(afterglowCards)
+        const entriesByMessageId = new Map<number, { message: Message; card: StatusCardData }>();
+        Object.entries(afterglowCards)
             .map(([messageId, card]) => ({ messageId: Number(messageId), card }))
-            .filter(item => Number.isFinite(item.messageId) && item.card?.body);
+            .filter(item => Number.isFinite(item.messageId) && item.card?.body)
+            .forEach(({ messageId, card }) => {
+                const message = messages.find(item => item.id === messageId);
+                if (message) entriesByMessageId.set(messageId, { message, card });
+            });
+        messages.forEach(message => {
+            const boundCard = message.metadata?.statusCardData as StatusCardData | undefined;
+            if (message.role === 'assistant' && boundCard?.body) {
+                entriesByMessageId.set(message.id, { message, card: boundCard });
+            }
+        });
+        const entries = Array.from(entriesByMessageId.values());
         if (entries.length === 0) {
             setAfterglowCollectionIds({});
             return;
@@ -3943,19 +4023,21 @@ const Chat: React.FC = () => {
         let cancelled = false;
         void (async () => {
             const next: Record<string, string> = {};
-            await Promise.all(entries.map(async ({ messageId, card }) => {
-                const kind = inferCollectionBookKind(card);
+            await Promise.all(entries.map(async ({ message, card }) => {
+                const input = buildCollectionInputForStatusCard(char.id, card, message);
                 const key = buildCollectionSourceKey({
                     charId: char.id,
-                    kind,
-                    sourceMessageId: messageId,
-                    body: card.body,
+                    kind: input.kind,
+                    sourceMessageId: message.id,
+                    contentHash: input.contentHash,
+                    body: input.body,
                 });
                 const existing = await DB.findCollectionBookBySource({
                     charId: char.id,
-                    kind,
-                    sourceMessageId: messageId,
-                    body: card.body,
+                    kind: input.kind,
+                    sourceMessageId: message.id,
+                    contentHash: input.contentHash,
+                    body: input.body,
                 });
                 if (existing) next[key] = existing.id;
             }));
@@ -3965,30 +4047,295 @@ const Chat: React.FC = () => {
         return () => {
             cancelled = true;
         };
-    }, [afterglowCards, char?.id]);
+    }, [afterglowCards, char?.id, messages]);
 
     const getAfterglowCollectionState = useCallback((sourceMessage: Message, card: StatusCardData) => {
         const charId = char?.id;
         if (!charId || !card?.body) return 'idle' as const;
-        const kind = inferCollectionBookKind(card);
+        const input = buildCollectionInputForStatusCard(charId, card, sourceMessage);
         const key = buildCollectionSourceKey({
             charId,
-            kind,
+            kind: input.kind,
             sourceMessageId: sourceMessage.id,
-            body: card.body,
+            contentHash: input.contentHash,
+            body: input.body,
         });
         if (afterglowCollectionLoadingKeys.has(key)) return 'loading' as const;
         return afterglowCollectionIds[key] ? 'collected' as const : 'idle' as const;
     }, [afterglowCollectionIds, afterglowCollectionLoadingKeys, char?.id]);
 
+    const saveFreeformCollectionToWall = useCallback(async (
+        input: CollectionBookInput,
+        collectionKey: string,
+        wall: CollectionWall | null,
+    ) => {
+        const saved = await DB.saveCollectionBook(input);
+        const targetWall = wall || (await DB.getOrCreateDefaultCollectionWall(saved.charId));
+        await DB.addCollectionBookToWall(saved, targetWall.id);
+        setLastUsedFreeformWallId(saved.charId, targetWall.id);
+        setAfterglowCollectionIds(prev => ({ ...prev, [collectionKey]: saved.id }));
+        addToast(`已收进「${targetWall.name}」`, 'success');
+        return saved;
+    }, [addToast]);
+
+    const openFreeformWallPicker = useCallback(async (
+        input: CollectionBookInput,
+        collectionKey: string,
+        sourceMessage: Message,
+        walls: CollectionWall[],
+    ) => {
+        const itemCountsEntries = await Promise.all(walls.map(async wall => {
+            const items = await DB.getCollectionWallItemsByWallId(wall.id);
+            return [wall.id, items.length] as const;
+        }));
+        setFreeformWallPicker({
+            input,
+            collectionKey,
+            sourceMessage,
+            walls,
+            itemCounts: Object.fromEntries(itemCountsEntries),
+            createDraft: '',
+            isSaving: false,
+        });
+    }, []);
+
+    const handlePickFreeformWall = useCallback(async (wall: CollectionWall | null) => {
+        if (!freeformWallPicker || freeformWallPicker.isSaving) return;
+        setFreeformWallPicker(prev => prev ? { ...prev, isSaving: true } : prev);
+        setAfterglowCollectionLoadingKeys(prev => {
+            const next = new Set(prev);
+            next.add(freeformWallPicker.collectionKey);
+            return next;
+        });
+        try {
+            await saveFreeformCollectionToWall(freeformWallPicker.input, freeformWallPicker.collectionKey, wall);
+            setFreeformWallPicker(null);
+        } catch (error) {
+            console.error('[CollectionHall] freeform wall save failed:', error);
+            addToast('收进拾光墙失败，可以稍后再试', 'error');
+            setFreeformWallPicker(prev => prev ? { ...prev, isSaving: false } : prev);
+        } finally {
+            setAfterglowCollectionLoadingKeys(prev => {
+                const next = new Set(prev);
+                next.delete(freeformWallPicker.collectionKey);
+                return next;
+            });
+        }
+    }, [addToast, freeformWallPicker, saveFreeformCollectionToWall]);
+
+    const handleCreateFreeformWall = useCallback(async () => {
+        if (!freeformWallPicker || freeformWallPicker.isSaving) return;
+        const name = freeformWallPicker.createDraft.replace(/\s+/g, ' ').trim().slice(0, 12);
+        if (!name) {
+            addToast('先给墙起个名字', 'info');
+            return;
+        }
+
+        setFreeformWallPicker(prev => prev ? { ...prev, isSaving: true } : prev);
+        setAfterglowCollectionLoadingKeys(prev => {
+            const next = new Set(prev);
+            next.add(freeformWallPicker.collectionKey);
+            return next;
+        });
+        try {
+            const wall = await DB.saveCollectionWall({
+                charId: freeformWallPicker.input.charId,
+                name,
+                isDefault: false,
+                layoutMode: 'flow',
+                background: { type: 'color', value: '#17120e', fit: 'cover', dim: 0.18 },
+                allowCharDecorate: true,
+                changeCountSinceVisit: 0,
+                hasUnseenCharItem: false,
+                sortOrder: freeformWallPicker.walls.length,
+            });
+            await saveFreeformCollectionToWall(freeformWallPicker.input, freeformWallPicker.collectionKey, wall);
+            setFreeformWallPicker(null);
+        } catch (error) {
+            console.error('[CollectionHall] freeform wall create failed:', error);
+            addToast('新建拾光墙失败，可以稍后再试', 'error');
+            setFreeformWallPicker(prev => prev ? { ...prev, isSaving: false } : prev);
+        } finally {
+            setAfterglowCollectionLoadingKeys(prev => {
+                const next = new Set(prev);
+                next.delete(freeformWallPicker.collectionKey);
+                return next;
+            });
+        }
+    }, [addToast, freeformWallPicker, saveFreeformCollectionToWall]);
+
+    const handleUndoCollectionDelete = useCallback(async () => {
+        if (!collectionUndo) return;
+        try {
+            const restored = await DB.saveCollectionBook(collectionUndo.book);
+            await Promise.all(collectionUndo.wallItems.map(item => DB.saveCollectionWallItem(item)));
+            setAfterglowCollectionIds(prev => ({ ...prev, [collectionUndo.collectionKey]: restored.id }));
+            setCollectionUndo(null);
+            addToast('已恢复到拾光墙', 'success');
+        } catch (error) {
+            console.error('[CollectionHall] undo failed:', error);
+            addToast('撤销失败，可以再收藏一次', 'error');
+        }
+    }, [addToast, collectionUndo]);
+
+    const saveImageAssetToWall = useCallback(async (
+        assetInput: ImageWallAssetInput,
+        charId: string,
+        wall: CollectionWall | null,
+    ) => {
+        const existingAssets = await DB.getCollectionWallAssetsByHash(assetInput.hash);
+        const asset = existingAssets[0] || await DB.saveCollectionWallAsset(assetInput);
+        const targetWall = wall || (await DB.getOrCreateDefaultCollectionWall(charId));
+        const items = await DB.getCollectionWallItemsByWallId(targetWall.id);
+        const maxZ = items.reduce((max, item) => Math.max(max, item.z || 0), 0);
+        await DB.saveCollectionWallItem({
+            wallId: targetWall.id,
+            type: 'image',
+            author: 'user',
+            x: null,
+            y: null,
+            w: 320,
+            h: 240,
+            rotation: 0,
+            z: maxZ + 1,
+            order: items.length,
+            assetId: asset.id,
+            name: asset.meta?.name || '聊天生成图',
+        });
+        setLastUsedFreeformWallId(charId, targetWall.id);
+        addToast(`图片已收进「${targetWall.name}」`, 'success');
+    }, [addToast]);
+
+    const buildImageWallAsset = useCallback(async (message: Message): Promise<ImageWallAssetInput> => {
+        const fallbackUrl = String(message.content || '').trim();
+        const originalAssetId = typeof message.metadata?.originalAssetId === 'string'
+            ? message.metadata.originalAssetId
+            : undefined;
+        const imageUrl = await resolveOriginalImageUrl(originalAssetId, fallbackUrl);
+        if (!imageUrl) throw new Error('图片地址为空');
+        const response = await fetch(imageUrl);
+        if (!response.ok) throw new Error(`读取图片失败: ${response.status}`);
+        const blob = await response.blob();
+        const buffer = await blob.arrayBuffer();
+        const hash = fnv1aBytes(buffer);
+        const prompt = String(message.metadata?.prompt || message.metadata?.positivePrompt || message.metadata?.directorPrompt || '').trim();
+        const name = String(message.metadata?.visualSummary || message.metadata?.caption || prompt || '聊天生成图').trim().slice(0, 40);
+        return {
+            blob,
+            mime: blob.type || 'image/png',
+            width: typeof message.metadata?.width === 'number' ? message.metadata.width : undefined,
+            height: typeof message.metadata?.height === 'number' ? message.metadata.height : undefined,
+            bytes: blob.size,
+            hash,
+            origin: 'chat_gen',
+            meta: {
+                prompt: prompt || undefined,
+                sourceMessageId: message.id,
+                name,
+            },
+        };
+    }, []);
+
+    const openImageWallPicker = useCallback(async (
+        message: Message,
+        asset: ImageWallAssetInput,
+        walls: CollectionWall[],
+    ) => {
+        const itemCountsEntries = await Promise.all(walls.map(async wall => {
+            const items = await DB.getCollectionWallItemsByWallId(wall.id);
+            return [wall.id, items.length] as const;
+        }));
+        setImageWallPicker({
+            message,
+            asset,
+            walls,
+            itemCounts: Object.fromEntries(itemCountsEntries),
+            createDraft: '',
+            isSaving: false,
+        });
+    }, []);
+
+    const handleCollectImageToWall = useCallback(async () => {
+        const message = selectedMessage;
+        if (!message || message.type !== 'image' || message.role !== 'assistant') return;
+        setModalType('none');
+        try {
+            const asset = await buildImageWallAsset(message);
+            const charId = message.charId || char?.id;
+            if (!charId) throw new Error('缺少角色 ID');
+            const walls = await DB.getCollectionWallsByCharId(charId);
+            const lastWallId = getLastUsedFreeformWallId(charId);
+            const lastWall = walls.find(wall => wall.id === lastWallId);
+            if (lastWall) {
+                await saveImageAssetToWall(asset, charId, lastWall);
+                return;
+            }
+            if (walls.length > 0) {
+                await openImageWallPicker(message, asset, walls);
+                return;
+            }
+            await saveImageAssetToWall(asset, charId, null);
+        } catch (error: any) {
+            console.error('[CollectionHall] image collect failed:', error);
+            addToast(error?.message || '图片收藏失败，可以稍后再试', 'error');
+        }
+    }, [addToast, buildImageWallAsset, char?.id, openImageWallPicker, saveImageAssetToWall, selectedMessage]);
+
+    const handlePickImageWall = useCallback(async (wall: CollectionWall | null) => {
+        if (!imageWallPicker || imageWallPicker.isSaving) return;
+        const charId = imageWallPicker.message.charId || char?.id;
+        if (!charId) return;
+        setImageWallPicker(prev => prev ? { ...prev, isSaving: true } : prev);
+        try {
+            await saveImageAssetToWall(imageWallPicker.asset, charId, wall);
+            setImageWallPicker(null);
+        } catch (error) {
+            console.error('[CollectionHall] image wall save failed:', error);
+            addToast('图片上墙失败，可以稍后再试', 'error');
+            setImageWallPicker(prev => prev ? { ...prev, isSaving: false } : prev);
+        }
+    }, [addToast, char?.id, imageWallPicker, saveImageAssetToWall]);
+
+    const handleCreateImageWall = useCallback(async () => {
+        if (!imageWallPicker || imageWallPicker.isSaving) return;
+        const charId = imageWallPicker.message.charId || char?.id;
+        const name = imageWallPicker.createDraft.replace(/\s+/g, ' ').trim().slice(0, 12);
+        if (!charId) return;
+        if (!name) {
+            addToast('先给墙起个名字', 'info');
+            return;
+        }
+        setImageWallPicker(prev => prev ? { ...prev, isSaving: true } : prev);
+        try {
+            const wall = await DB.saveCollectionWall({
+                charId,
+                name,
+                isDefault: false,
+                layoutMode: 'flow',
+                background: { type: 'color', value: '#17120e', fit: 'cover', dim: 0.18 },
+                allowCharDecorate: true,
+                changeCountSinceVisit: 0,
+                hasUnseenCharItem: false,
+                sortOrder: imageWallPicker.walls.length,
+            });
+            await saveImageAssetToWall(imageWallPicker.asset, charId, wall);
+            setImageWallPicker(null);
+        } catch (error) {
+            console.error('[CollectionHall] image wall create failed:', error);
+            addToast('新建拾光墙失败，可以稍后再试', 'error');
+            setImageWallPicker(prev => prev ? { ...prev, isSaving: false } : prev);
+        }
+    }, [addToast, char?.id, imageWallPicker, saveImageAssetToWall]);
+
     const handleToggleAfterglowCollection = useCallback(async (sourceMessage: Message, card: StatusCardData) => {
         const charId = char?.id;
         if (!charId || !card?.body) return;
-        const input = buildCollectionBookInput(charId, card, sourceMessage);
+        const input = buildCollectionInputForStatusCard(charId, card, sourceMessage);
         const key = buildCollectionSourceKey({
             charId,
             kind: input.kind,
             sourceMessageId: sourceMessage.id,
+            contentHash: input.contentHash,
             body: input.body,
         });
         if (afterglowCollectionLoadingKeys.has(key)) return;
@@ -4004,16 +4351,46 @@ const Chat: React.FC = () => {
                 charId,
                 kind: input.kind,
                 sourceMessageId: sourceMessage.id,
+                contentHash: input.contentHash,
                 body: input.body,
             });
             if (existing) {
+                const wallItems = existing.kind === 'freeform'
+                    ? await DB.getCollectionWallItemsByBookId(existing.id)
+                    : [];
                 await DB.deleteCollectionBook(existing.id);
                 setAfterglowCollectionIds(prev => {
                     const next = { ...prev };
                     delete next[key];
                     return next;
                 });
-                addToast('已从典藏馆移出', 'success');
+                if (existing.kind === 'freeform') {
+                    setCollectionUndo({
+                        key: Date.now(),
+                        book: existing,
+                        wallItems,
+                        collectionKey: key,
+                    });
+                    addToast('已从拾光墙移出', 'success');
+                } else {
+                    addToast('已从典藏馆移出', 'success');
+                }
+                return;
+            }
+
+            if (input.kind === 'freeform') {
+                const walls = await DB.getCollectionWallsByCharId(charId);
+                const lastWallId = getLastUsedFreeformWallId(charId);
+                const lastWall = walls.find(wall => wall.id === lastWallId);
+                if (lastWall) {
+                    await saveFreeformCollectionToWall(input, key, lastWall);
+                    return;
+                }
+                if (walls.length > 0) {
+                    await openFreeformWallPicker(input, key, sourceMessage, walls);
+                    return;
+                }
+                await saveFreeformCollectionToWall(input, key, null);
                 return;
             }
 
@@ -4030,7 +4407,7 @@ const Chat: React.FC = () => {
                 return next;
             });
         }
-    }, [addToast, afterglowCollectionLoadingKeys, char?.id]);
+    }, [addToast, afterglowCollectionLoadingKeys, char?.id, openFreeformWallPicker, saveFreeformCollectionToWall]);
 
     // --- Transfer Action ---
     const handleTransferAction = useCallback((msg: Message) => {
@@ -4686,7 +5063,7 @@ const Chat: React.FC = () => {
                 onSetHistoryStart={handleSetHistoryStart} onEnterSelectionMode={handleEnterSelectionMode}
                 onCloseMessageOptions={() => { setModalType('none'); setSelectedMessage(null); }}
                 onReplyMessage={handleReplyMessage} onEditMessageStart={() => { if (selectedMessage) { setEditContent(selectedMessage.content); setModalType('edit-message'); } }}
-                onConfirmEditMessage={confirmEditMessage} onDeleteMessage={handleDeleteMessage} onCopyMessage={handleCopyMessage} onDeleteEmoji={handleDeleteEmoji} onDeleteSelectedEmojis={handleDeleteSelectedEmojis} onDeleteCategory={handleDeleteCategory}
+                onConfirmEditMessage={confirmEditMessage} onDeleteMessage={handleDeleteMessage} onCopyMessage={handleCopyMessage} onCollectImageToWall={handleCollectImageToWall} onDeleteEmoji={handleDeleteEmoji} onDeleteSelectedEmojis={handleDeleteSelectedEmojis} onDeleteCategory={handleDeleteCategory}
                 allCharacters={characters} onSaveCategoryVisibility={handleSaveCategoryVisibility}
                 translationEnabled={translationEnabled}
                 onToggleTranslation={() => { const next = !translationEnabled; setTranslationEnabled(next); localStorage.setItem(`chat_translate_enabled_${activeCharacterId}`, JSON.stringify(next)); if (!next) { setShowingTargetIds(new Set()); } }}
@@ -5198,6 +5575,11 @@ const Chat: React.FC = () => {
                     const isLastAssistant = m.role === 'assistant' && m.id === lastAssistantId;
                     const statusMode = char.statusBarMode || 'classic';
                     const hasStatusCardMode = statusMode === 'creative' || statusMode === 'custom' || statusMode === 'freeform';
+                    const boundStatusCard = m.role === 'assistant' ? (m.metadata?.statusCardData as StatusCardData | undefined) : undefined;
+                    const visibleStatusCard = m.role === 'assistant'
+                        ? (isLastAssistant && hasStatusCardMode ? (boundStatusCard || char.lastStatusCard) : boundStatusCard)
+                        : undefined;
+                    const canCollectStatusCard = isCollectableFreeformStatusCard(visibleStatusCard);
                     const isUserActionTarget = Boolean(userActionSelectorTarget?.userMessageIds.has(m.id)) && !selectionMode && !isTyping;
                     return (
                         <div
@@ -5236,13 +5618,15 @@ const Chat: React.FC = () => {
                                 isVoiceTextExpanded={expandedVoiceTextIds.has(m.id)}
                                 onToggleVoiceText={toggleVoiceText}
                                 innerVoice={isLastAssistant && statusMode === 'classic' ? (char.moodState as any)?.innerVoice : undefined}
-                                statusCardData={isLastAssistant && hasStatusCardMode ? char.lastStatusCard : undefined}
+                                statusCardData={visibleStatusCard}
                                 onRetryInnerVoice={isLastAssistant && statusMode !== 'off' && statusMode !== 'story_phone' && statusMode !== 'afterglow' ? retryMindSnapshot : undefined}
                                 afterglowCardData={isLastAssistant && statusMode === 'afterglow' ? afterglowCards[m.id] : undefined}
                                 isAfterglowLoading={isLastAssistant && statusMode === 'afterglow' ? afterglowLoadingIds.has(m.id) : false}
                                 onRequestAfterglow={isLastAssistant && statusMode === 'afterglow' ? handleGenerateAfterglow : undefined}
                                 getAfterglowCollectionState={isLastAssistant && statusMode === 'afterglow' ? getAfterglowCollectionState : undefined}
                                 onToggleAfterglowCollection={isLastAssistant && statusMode === 'afterglow' ? handleToggleAfterglowCollection : undefined}
+                                getStatusCardCollectionState={canCollectStatusCard ? getAfterglowCollectionState : undefined}
+                                onToggleStatusCardCollection={canCollectStatusCard ? handleToggleAfterglowCollection : undefined}
                                 onOpenStoryPhone={isLastAssistant && statusMode === 'story_phone' && !m.metadata?.storyPhoneConsumed && !selectionMode ? handleOpenStoryPhone : undefined}
                                 onUserAvatarAction={isUserActionTarget ? handleUserAvatarAction : undefined}
                                 isUserAvatarActionLoading={userActionSelectorLoadingId === m.id}
@@ -5465,6 +5849,177 @@ const Chat: React.FC = () => {
                                 );
                             })}
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {freeformWallPicker && (
+                <div
+                    className="fixed inset-0 z-[96] flex items-end bg-slate-950/30 px-2 pb-[calc(var(--safe-bottom,env(safe-area-inset-bottom,0px))+8px)] pt-12 backdrop-blur-[3px] sm:items-center sm:justify-center sm:p-4"
+                    onClick={() => !freeformWallPicker.isSaving && setFreeformWallPicker(null)}
+                >
+                    <div
+                        className="w-full max-w-md overflow-hidden rounded-t-[22px] border border-white/70 bg-[#fbf7ef] shadow-[0_24px_72px_rgba(15,23,42,0.24)] sm:rounded-[22px]"
+                        onClick={event => event.stopPropagation()}
+                    >
+                        <div className="flex items-start justify-between gap-3 border-b border-[#eadfd2] px-4 py-4">
+                            <div>
+                                <div className="text-[10px] font-black tracking-[0.24em] text-[#9b6d55]">LIGHT WALL</div>
+                                <h3 className="mt-1 text-[18px] font-semibold tracking-[0.04em] text-[#2f2923]">收进哪面拾光墙？</h3>
+                                <p className="mt-1 text-[12px] leading-relaxed text-[#8c7d70]">选一次后会记住，下次直接收入同一面墙。</p>
+                            </div>
+                            <button
+                                type="button"
+                                disabled={freeformWallPicker.isSaving}
+                                onClick={() => setFreeformWallPicker(null)}
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[#9a8d82] shadow-sm transition-transform active:scale-95 disabled:opacity-50"
+                                aria-label="关闭拾光墙选择"
+                            >
+                                <X className="h-4 w-4" weight="bold" />
+                            </button>
+                        </div>
+                        <div className="max-h-[58vh] overflow-y-auto px-4 py-4">
+                            <div className="grid grid-cols-2 gap-2">
+                                {freeformWallPicker.walls.map(wall => (
+                                    <button
+                                        key={wall.id}
+                                        type="button"
+                                        disabled={freeformWallPicker.isSaving}
+                                        onClick={() => handlePickFreeformWall(wall)}
+                                        className="min-h-[92px] rounded-[16px] border border-[#e4d8ca] bg-white/80 p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-[#c79b75] active:translate-y-0 disabled:cursor-wait disabled:opacity-60"
+                                    >
+                                        <div className="flex items-start justify-between gap-2">
+                                            <span className="line-clamp-2 text-[14px] font-bold leading-snug text-[#3d332b]">{wall.name}</span>
+                                            {wall.isDefault && (
+                                                <span className="rounded-full bg-[#efe6da] px-1.5 py-0.5 text-[9px] font-bold text-[#9b6d55]">默认</span>
+                                            )}
+                                        </div>
+                                        <div className="mt-5 flex items-end justify-between">
+                                            <span className="text-[10px] font-semibold tracking-[0.14em] text-[#a29588]">FLOW</span>
+                                            <span className="font-serif text-2xl leading-none text-[#9d3f52]">{freeformWallPicker.itemCounts[wall.id] || 0}</span>
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="mt-4 rounded-[16px] border border-dashed border-[#d8c7b5] bg-white/55 p-3">
+                                <div className="mb-2 text-[12px] font-bold text-[#6f6259]">新建一面墙</div>
+                                <div className="flex gap-2">
+                                    <input
+                                        value={freeformWallPicker.createDraft}
+                                        maxLength={12}
+                                        disabled={freeformWallPicker.isSaving}
+                                        onChange={event => setFreeformWallPicker(prev => prev ? { ...prev, createDraft: event.target.value.slice(0, 12) } : prev)}
+                                        onKeyDown={event => { if (event.key === 'Enter') void handleCreateFreeformWall(); }}
+                                        placeholder="例如：深夜歌单"
+                                        className="min-w-0 flex-1 rounded-full border border-[#e5d8ca] bg-white px-3 py-2 text-[13px] text-[#3d332b] outline-none focus:border-[#c79b75] focus:ring-2 focus:ring-[#ead5bd]"
+                                    />
+                                    <button
+                                        type="button"
+                                        disabled={freeformWallPicker.isSaving}
+                                        onClick={handleCreateFreeformWall}
+                                        className="rounded-full bg-[#2d2925] px-4 py-2 text-[12px] font-bold text-[#f8ead6] shadow-sm transition-transform active:scale-95 disabled:cursor-wait disabled:opacity-60"
+                                    >
+                                        创建
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {imageWallPicker && (
+                <div
+                    className="fixed inset-0 z-[96] flex items-end bg-slate-950/30 px-2 pb-[calc(var(--safe-bottom,env(safe-area-inset-bottom,0px))+8px)] pt-12 backdrop-blur-[3px] sm:items-center sm:justify-center sm:p-4"
+                    onClick={() => !imageWallPicker.isSaving && setImageWallPicker(null)}
+                >
+                    <div
+                        className="w-full max-w-md overflow-hidden rounded-t-[22px] border border-white/70 bg-[#fbf7ef] shadow-[0_24px_72px_rgba(15,23,42,0.24)] sm:rounded-[22px]"
+                        onClick={event => event.stopPropagation()}
+                    >
+                        <div className="flex items-start justify-between gap-3 border-b border-[#eadfd2] px-4 py-4">
+                            <div>
+                                <div className="text-[10px] font-black tracking-[0.24em] text-[#9b6d55]">IMAGE TO WALL</div>
+                                <h3 className="mt-1 text-[18px] font-semibold tracking-[0.04em] text-[#2f2923]">把图片贴到哪面墙？</h3>
+                                <p className="mt-1 text-[12px] leading-relaxed text-[#8c7d70]">会收为墙面素材，不会生成新的典藏书册。</p>
+                            </div>
+                            <button
+                                type="button"
+                                disabled={imageWallPicker.isSaving}
+                                onClick={() => setImageWallPicker(null)}
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[#9a8d82] shadow-sm transition-transform active:scale-95 disabled:opacity-50"
+                                aria-label="关闭图片上墙选择"
+                            >
+                                <X className="h-4 w-4" weight="bold" />
+                            </button>
+                        </div>
+                        <div className="max-h-[58vh] overflow-y-auto px-4 py-4">
+                            <div className="mb-3 rounded-[14px] border border-[#eadfd2] bg-white/70 px-3 py-2">
+                                <div className="text-[11px] font-bold tracking-[0.12em] text-[#9b6d55]">待上墙图片</div>
+                                <div className="mt-1 line-clamp-2 text-[13px] font-semibold text-[#3d332b]">
+                                    {imageWallPicker.asset.meta?.name || '聊天生成图'}
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                {imageWallPicker.walls.map(wall => (
+                                    <button
+                                        key={wall.id}
+                                        type="button"
+                                        disabled={imageWallPicker.isSaving}
+                                        onClick={() => handlePickImageWall(wall)}
+                                        className="min-h-[92px] rounded-[16px] border border-[#e4d8ca] bg-white/80 p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-[#c79b75] active:translate-y-0 disabled:cursor-wait disabled:opacity-60"
+                                    >
+                                        <div className="flex items-start justify-between gap-2">
+                                            <span className="line-clamp-2 text-[14px] font-bold leading-snug text-[#3d332b]">{wall.name}</span>
+                                            {wall.isDefault && (
+                                                <span className="rounded-full bg-[#efe6da] px-1.5 py-0.5 text-[9px] font-bold text-[#9b6d55]">默认</span>
+                                            )}
+                                        </div>
+                                        <div className="mt-5 flex items-end justify-between">
+                                            <span className="text-[10px] font-semibold tracking-[0.14em] text-[#a29588]">WALL</span>
+                                            <span className="font-serif text-2xl leading-none text-[#9d3f52]">{imageWallPicker.itemCounts[wall.id] || 0}</span>
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="mt-4 rounded-[16px] border border-dashed border-[#d8c7b5] bg-white/55 p-3">
+                                <div className="mb-2 text-[12px] font-bold text-[#6f6259]">新建一面墙</div>
+                                <div className="flex gap-2">
+                                    <input
+                                        value={imageWallPicker.createDraft}
+                                        maxLength={12}
+                                        disabled={imageWallPicker.isSaving}
+                                        onChange={event => setImageWallPicker(prev => prev ? { ...prev, createDraft: event.target.value.slice(0, 12) } : prev)}
+                                        onKeyDown={event => { if (event.key === 'Enter') void handleCreateImageWall(); }}
+                                        placeholder="例如：照片墙"
+                                        className="min-w-0 flex-1 rounded-full border border-[#e5d8ca] bg-white px-3 py-2 text-[13px] text-[#3d332b] outline-none focus:border-[#c79b75] focus:ring-2 focus:ring-[#ead5bd]"
+                                    />
+                                    <button
+                                        type="button"
+                                        disabled={imageWallPicker.isSaving}
+                                        onClick={handleCreateImageWall}
+                                        className="rounded-full bg-[#2d2925] px-4 py-2 text-[12px] font-bold text-[#f8ead6] shadow-sm transition-transform active:scale-95 disabled:cursor-wait disabled:opacity-60"
+                                    >
+                                        创建
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {collectionUndo && (
+                <div className="fixed inset-x-0 bottom-[calc(var(--safe-bottom,env(safe-area-inset-bottom,0px))+86px)] z-[97] flex justify-center px-4 pointer-events-none">
+                    <div className="pointer-events-auto flex max-w-md items-center gap-3 rounded-full border border-white/70 bg-slate-950/78 px-4 py-2.5 text-white shadow-[0_18px_48px_rgba(15,23,42,0.28)] backdrop-blur-md">
+                        <span className="text-[12px] font-medium">已从拾光墙移出</span>
+                        <button
+                            type="button"
+                            onClick={handleUndoCollectionDelete}
+                            className="rounded-full bg-white px-3 py-1 text-[12px] font-bold text-slate-900 transition-transform active:scale-95"
+                        >
+                            撤销
+                        </button>
                     </div>
                 </div>
             )}

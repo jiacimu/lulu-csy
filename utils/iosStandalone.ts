@@ -12,6 +12,8 @@ let lastInteractionAt = Number.NEGATIVE_INFINITY;
 let interactionRepairArmed = false;
 
 const KEYBOARD_INSET_THRESHOLD = 100;
+const REAL_VIEWPORT_GAP_THRESHOLD = 8;
+const REAL_VIEWPORT_KEYBOARD_CLOSED_TOLERANCE = 8;
 const STABLE_GROWTH_MIN_SPAN = 150;
 const STABLE_SHRINK_MIN_SPAN = 500;
 const MAX_PINCH_SCALE_FOR_SCROLL_RESET = 1.01;
@@ -146,6 +148,33 @@ function clearKeyboardArtifacts(): void {
   toggleClass(document.body, 'ios-keyboard-open', false);
   setRootStyleProperty('--keyboard-inset', '0px');
   removeRootStyleProperty('--effective-safe-bottom');
+}
+
+function syncRealViewportHeight(options: {
+  shouldApply: boolean;
+  innerHeight: number;
+  visualViewportHeight: number;
+  layoutViewportHeight: number;
+  isKeyboardOpen: boolean;
+}): void {
+  const { shouldApply, innerHeight, visualViewportHeight, layoutViewportHeight, isKeyboardOpen } = options;
+
+  if (!shouldApply) {
+    removeRootStyleProperty('--real-vh');
+    return;
+  }
+
+  const layoutGap = innerHeight - layoutViewportHeight;
+  const visualMatchesScreen = Math.abs(visualViewportHeight - innerHeight) <= REAL_VIEWPORT_KEYBOARD_CLOSED_TOLERANCE;
+
+  if (!isKeyboardOpen && visualMatchesScreen && layoutGap > REAL_VIEWPORT_GAP_THRESHOLD && innerHeight > 0) {
+    setRootStyleProperty('--real-vh', `${innerHeight}px`);
+    return;
+  }
+
+  if (!isKeyboardOpen && layoutGap <= REAL_VIEWPORT_GAP_THRESHOLD) {
+    removeRootStyleProperty('--real-vh');
+  }
 }
 
 function getScreenHeightLimit(): number {
@@ -287,6 +316,13 @@ function setViewportVars(): void {
   toggleClass(document.body, 'keyboard-open', isKeyboardOpen);
   toggleClass(document.body, 'ios-keyboard-open', isKeyboardOpen);
   setRootStyleProperty('--app-height', `${appHeight}px`);
+  syncRealViewportHeight({
+    shouldApply: shouldStabilizeHeight,
+    innerHeight,
+    visualViewportHeight: viewportHeight,
+    layoutViewportHeight,
+    isKeyboardOpen,
+  });
   if (shouldStabilizeHeight && appHeight > 0) {
     lastStandaloneAppHeight = appHeight;
   }

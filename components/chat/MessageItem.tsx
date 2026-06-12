@@ -608,6 +608,8 @@ interface MessageItemProps {
     onRequestAfterglow?: (message: Message, options?: AfterglowGenerationOptions) => Promise<StatusCardData | null>;
     getAfterglowCollectionState?: (message: Message, card: StatusCardData) => 'idle' | 'collected' | 'loading';
     onToggleAfterglowCollection?: (message: Message, card: StatusCardData) => void | Promise<void>;
+    getStatusCardCollectionState?: (message: Message, card: StatusCardData) => 'idle' | 'collected' | 'loading';
+    onToggleStatusCardCollection?: (message: Message, card: StatusCardData) => void | Promise<void>;
     onOpenStoryPhone?: (message: Message) => void;
     onUserAvatarAction?: (message: Message) => void;
     isUserAvatarActionLoading?: boolean;
@@ -647,6 +649,8 @@ const MessageItem = React.memo(({
     onRequestAfterglow,
     getAfterglowCollectionState,
     onToggleAfterglowCollection,
+    getStatusCardCollectionState,
+    onToggleStatusCardCollection,
     onOpenStoryPhone,
     onUserAvatarAction,
     isUserAvatarActionLoading,
@@ -767,6 +771,9 @@ const MessageItem = React.memo(({
     const hasAfterglowMotifDraft = sanitizeAfterglowMotif(afterglowMotifDraft).length > 0;
     const hasMotifsToAdd = parseAfterglowMotifInput(afterglowMotifDraft).length > 0;
     const isAfterglowHeartTalkMode = afterglowComposerMode === 'heartTalk';
+    const statusCardCollectionState = statusCardData && getStatusCardCollectionState
+        ? getStatusCardCollectionState(m, statusCardData)
+        : 'idle';
 
     const handleAvatarClick = () => {
         if (!hasAnyVoice || selectionMode) return;
@@ -1189,15 +1196,38 @@ const MessageItem = React.memo(({
                                     }`}
                                     style={{
                                         maxWidth: statusCardData ? 'min(96vw, 560px)' : 'min(88vw, 360px)',
-                                        height: statusCardData ? 'calc(100vh - 48px)' : undefined,
+                                        minHeight: statusCardData ? 'calc(100dvh - 48px)' : undefined,
                                     }}
                                     onClick={(e) => e.stopPropagation()}
                                 >
                                     {statusCardData ? (
                                         /* ═══ Creative Card Mode ═══ */
-                                        <React.Suspense fallback={<div style={{ color: '#fff', textAlign: 'center', padding: '40px' }}>加载中...</div>}>
-                                            <StatusCardRenderer data={statusCardData} />
-                                        </React.Suspense>
+                                        <>
+                                            <React.Suspense fallback={<div style={{ color: '#fff', textAlign: 'center', padding: '40px' }}>加载中...</div>}>
+                                                <StatusCardRenderer data={statusCardData} />
+                                            </React.Suspense>
+                                            {onToggleStatusCardCollection ? (
+                                                <button
+                                                    type="button"
+                                                    data-testid="status-card-collection-button"
+                                                    className={`mt-4 flex min-h-9 items-center justify-center gap-2 rounded-full border px-4 text-[12px] font-bold text-white shadow-[0_12px_30px_rgba(15,23,42,0.22)] backdrop-blur-md transition active:scale-95 disabled:cursor-wait disabled:opacity-70 ${
+                                                        statusCardCollectionState === 'collected'
+                                                            ? 'border-amber-200/55 bg-amber-500/70'
+                                                            : 'border-white/35 bg-slate-950/40 hover:bg-slate-950/55'
+                                                    }`}
+                                                    disabled={statusCardCollectionState === 'loading'}
+                                                    aria-label={statusCardCollectionState === 'collected' ? '取消收藏视觉碎片' : '收藏视觉碎片'}
+                                                    title={statusCardCollectionState === 'collected' ? '已收进拾光墙，点击取消' : '收藏到拾光墙'}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        void onToggleStatusCardCollection(m, statusCardData);
+                                                    }}
+                                                >
+                                                    <BookmarkSimple className="h-4 w-4" weight={statusCardCollectionState === 'collected' ? 'fill' : 'bold'} />
+                                                    <span>{statusCardCollectionState === 'collected' ? '已收藏' : '收藏'}</span>
+                                                </button>
+                                            ) : null}
+                                        </>
                                     ) : hasClassicInnerVoice ? (
                                         /* ═══ Classic Inner Voice — Premium Art Gallery Card ═══ */
                                         <div className="relative" style={{
@@ -2240,11 +2270,14 @@ const MessageItem = React.memo(({
         prev.onRequestAfterglow === next.onRequestAfterglow &&
         prev.getAfterglowCollectionState === next.getAfterglowCollectionState &&
         prev.onToggleAfterglowCollection === next.onToggleAfterglowCollection &&
+        prev.getStatusCardCollectionState === next.getStatusCardCollectionState &&
+        prev.onToggleStatusCardCollection === next.onToggleStatusCardCollection &&
         prev.onOpenStoryPhone === next.onOpenStoryPhone &&
         prev.onUserAvatarAction === next.onUserAvatarAction &&
         prev.isUserAvatarActionLoading === next.isUserAvatarActionLoading &&
         prev.showThinking === next.showThinking &&
         prev.msg.metadata?.thinking === next.msg.metadata?.thinking &&
+        prev.msg.metadata?.statusCardData === next.msg.metadata?.statusCardData &&
         prev.msg.metadata?.storyPhoneConsumed === next.msg.metadata?.storyPhoneConsumed &&
         prev.msg.metadata?.source === next.msg.metadata?.source &&
         prev.msg.metadata?.platform === next.msg.metadata?.platform &&
