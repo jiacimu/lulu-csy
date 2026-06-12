@@ -133,6 +133,8 @@ export function createNianNianId(prefix: string): string {
 
 export function createEmptyWorldBible(): NianNianWorldBible {
     return {
+        worldId: undefined,
+        worldName: undefined,
         theme: '',
         tone: '',
         charIdentity: '',
@@ -140,8 +142,15 @@ export function createEmptyWorldBible(): NianNianWorldBible {
         opening: '',
         statusSchema: [],
         eventWeights: {},
+        eventPrototypes: [],
+        eventCategories: [],
         customPrompt: '',
         worldStyle: '',
+        intimacyConstraint: '',
+        statusInstructions: '',
+        directorNotes: '',
+        endingRoutes: [],
+        fateBookSections: undefined,
         seedStatus: undefined,
         openingStep: undefined,
         hiddenVarsSeed: undefined,
@@ -241,7 +250,14 @@ export function createNianNianSession(input: {
         ...input.world,
         statusSchema: input.world.statusSchema || [],
         eventWeights: input.world.eventWeights || {},
+        eventPrototypes: input.world.eventPrototypes || [],
+        eventCategories: input.world.eventCategories || [],
         worldStyle: input.world.worldStyle || '',
+        intimacyConstraint: input.world.intimacyConstraint || '',
+        statusInstructions: input.world.statusInstructions || '',
+        directorNotes: input.world.directorNotes || '',
+        endingRoutes: input.world.endingRoutes || [],
+        fateBookSections: input.world.fateBookSections,
         seedStatus: input.world.seedStatus,
         openingStep: input.world.openingStep,
         hiddenVarsSeed: input.world.hiddenVarsSeed || {},
@@ -1035,6 +1051,28 @@ function formatFrozenSegmentsForPrompt(session: NianNianSession): string {
         .join('\n');
 }
 
+function formatEndingRoutesForPrompt(session: NianNianSession): string {
+    const routes = session.world.endingRoutes || [];
+    if (routes.length === 0) return '';
+    return routes
+        .map(route => `- ${route.title}${route.description ? `: ${route.description}` : ''}`)
+        .join('\n');
+}
+
+function buildWorldStatusTemplateLines(session: NianNianSession): string {
+    const schema = session.world.statusSchema || [];
+    const lines = schema.map(field => {
+        if (field.type === 'number') {
+            return `world.${field.key}_delta: <增减量,通常 0>`;
+        }
+        return `world.${field.key}: <文字>`;
+    });
+
+    return lines.length > 0
+        ? lines.join('\n')
+        : 'world.拘束_delta: <增减量,通常 0 或负>';
+}
+
 function buildStructuredContext(session: NianNianSession, extra: Record<string, any> = {}): string {
     const userInput = typeof extra.userInput === 'string' ? extra.userInput : '';
     const latestAssistant = [...session.rawBuffer].reverse().find(item => item.role === 'assistant');
@@ -1049,12 +1087,25 @@ function buildStructuredContext(session: NianNianSession, extra: Record<string, 
 
     return [
         '【设定】',
+        session.world.worldName ? `世界包: ${session.world.worldName}` : '',
         `题材: ${session.world.theme || '未设题材'}`,
         `基调: ${session.world.tone || '未设基调'}`,
         `文风: ${session.world.worldStyle || session.world.customPrompt || '沿用世界包文风'}`,
         `TA身份: ${session.world.charIdentity || session.charName}`,
         `玩家身份: ${session.world.protagonistIdentity || session.userName}`,
         session.world.customPrompt ? `补充提示: ${session.world.customPrompt}` : '',
+        session.world.intimacyConstraint ? `亲近约束: ${session.world.intimacyConstraint}` : '',
+        session.world.statusInstructions ? `状态补充: ${session.world.statusInstructions}` : '',
+        session.world.directorNotes ? [
+            '',
+            '【本世界天意规则】',
+            session.world.directorNotes,
+        ].join('\n') : '',
+        formatEndingRoutesForPrompt(session) ? [
+            '',
+            '【可能收束走向】',
+            formatEndingRoutesForPrompt(session),
+        ].join('\n') : '',
         characterContext ? [
             '',
             '【角色本源】',
@@ -1119,6 +1170,8 @@ function buildTianyiCommonPrompt(worldTheme: string): string {
 
 function buildTianyiEventLandingPrompt(session: NianNianSession): string {
     const worldStyle = session.world.worldStyle || session.world.customPrompt || session.world.tone || '当前世界文风';
+    const directorNotes = session.world.directorNotes?.trim();
+    const endingRoutes = formatEndingRoutesForPrompt(session);
     return `${buildTianyiCommonPrompt(session.world.theme)}
 
 你要读完本回合全部上下文,然后做四件事:
@@ -1126,6 +1179,14 @@ function buildTianyiEventLandingPrompt(session: NianNianSession): string {
 2. 定节奏:判断这一回合是否需要新事件。若上一桩刚落或两人正处静水深流,不要硬塞事件;若关系停滞或需要换场推进,从【事件库候选】按「当前阶段 x 类目权重」抽取,避开 recentEventIds,并把原型自然落地。
 3. 写下一拍:用本世界文风(${worldStyle})写玩家可见旁白,只布景与铺垫,不替 TA 说对白,不替玩家做决定或心理。
 4. 暗中记账:更新 stage、hidden.*_delta、event_used、milestone、ending_ready。
+${directorNotes ? `
+【本世界天意补充规则】
+${directorNotes}
+` : ''}
+${endingRoutes ? `
+【本世界收束走向】
+${endingRoutes}
+` : ''}
 
 输出必须使用下面格式,只输出这些分段:
 <<<SCENE>>>
@@ -1162,6 +1223,7 @@ function buildTianyiCompressionPrompt(): string {
 
 function buildTianyiSettlementPrompt(session: NianNianSession): string {
     const worldStyle = session.world.worldStyle || session.world.customPrompt || session.world.tone || '当前世界文风';
+    const endingRoutes = formatEndingRoutesForPrompt(session);
     return `${buildTianyiCommonPrompt(session.world.theme)}
 
 故事到了落幕之时。下面是这一世的全部梗概、最终状态、抵达的结局走向和玩家最后选择。
@@ -1169,6 +1231,10 @@ function buildTianyiSettlementPrompt(session: NianNianSession): string {
 1. 这一世的回顾:把所有冻段连缀成一篇回望,从初遇写到此刻,择其情之所钟的几幕,用本世界文风(${worldStyle})写成有始有终的「这一世」。
 2. 落下结局:依走向与玩家最后选择,给一个收束的结尾段落,为这段缘分画上句点。
 全程在世界与人物之内,不出戏、不提规则数值。
+${endingRoutes ? `
+本世界可参考的收束走向:
+${endingRoutes}
+` : ''}
 
 按格式输出:
 <<<RETROSPECT>>>
@@ -1197,6 +1263,10 @@ function buildNianNianMainPrompt(
     const worldStyle = session.world.worldStyle || session.world.customPrompt || session.world.tone || '当前世界文风';
     const charIdentity = session.world.charIdentity || '沿用上下文中的这一世身份与处境。';
     const mcIdentity = session.world.protagonistIdentity || '此世身份见当前状态。';
+    const intimacyConstraint = session.world.intimacyConstraint?.trim()
+        || '你能与她亲近到几分,受礼教(拘束)与场合所限:拘束高、又当众时,点到即止;唯有私下、夜深、独处,才敢稍稍逾矩。当下的拘束与场合见注入的状态。';
+    const worldStatusLines = buildWorldStatusTemplateLines(session);
+    const statusInstructions = session.world.statusInstructions?.trim();
 
     return `[你是谁]
 你不是在"扮演"谁。你**就是**「${session.charName}」--下面是你的性情、你说话的方式、你看重与厌恶的东西,这些就是你这个人,自始至终别走样:
@@ -1215,7 +1285,7 @@ ${worldTone}
 - 你依然**就是** TA 本人(性情、心思都是你的);只是落到文字时,用第三人称称呼自己(他/她),从「你」(她)的身边来写这一刻--镜头贴着她的位置,只写她看得见、感觉得到的你的言行神态与周遭,**不替她写她自己的心理、感受或动作**。
 - 含蓄克制,以神态、动作、一个未说完的字传情。一次回眸、一瞬欲言又止、衣袖将触未触,胜过直白的告白。多留白,少直抒。
 - 你只活在**眼前这一刻**:顺着她方才的话与举动往下。不要自行快进时光、跳换场景、安排大事--会有天意去掀风浪,你只管把此刻活透。
-- 你能与她亲近到几分,受礼教(拘束)与场合所限:拘束高、又当众时,点到即止;唯有私下、夜深、独处,才敢稍稍逾矩。当下的拘束与场合见注入的状态。
+- ${intimacyConstraint}
 - 沉浸,但不啰嗦:一段有体温的当下足矣;不堆砌辞藻、不抢她的戏、不替她把剧情往下推。
 - 自始至终在这个人、这个世界里:不出戏、不解释设定、不提"AI/模型/提示词"、不蹦出与这世界不符的现代词。
 
@@ -1248,9 +1318,13 @@ me.名声_delta: <增减量,通常 0>
 scene.时辰: <文字>
 scene.地点: <文字>
 scene.情境: <文字>
-world.拘束_delta: <增减量,通常 0 或负>
+${worldStatusLines}
 npc.<名>: <一句情绪>      ← 有在场配角才写;没有就写 npc: 无
 <<<END>>>
+${statusInstructions ? `
+本世界状态补充:
+${statusInstructions}
+` : ''}
 
 状态块铁律:
 - **数值字段只给增减量**(后缀 \`_delta\`,可正可负),不要给绝对值--总账由代码累计、代码说了算。**定性字段**(心情/神态/心声/情境/时辰/地点)给绝对值,直接覆盖。

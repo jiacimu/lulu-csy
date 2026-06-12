@@ -16,6 +16,7 @@ import {
 } from '../utils/statusTemplateComposer';
 import { buildStatusSampleV2, parseStatusBlock } from '../utils/statusBlockParser';
 import { AUTOFILL_SUPPRESSION_REACT_PROPS } from '../utils/autofillSuppression';
+import { focusPreventScroll } from '../utils/viewportRepair';
 
 type TabId = 'fields' | 'visual' | 'interaction' | 'advanced';
 type VisualTabId = 'html' | 'css';
@@ -1096,7 +1097,7 @@ const StatusWorkshopApp: React.FC = () => {
 
         window.setTimeout(() => {
             if (!activeTemplate.name.trim()) {
-                templateNameInputRef.current?.focus();
+                focusPreventScroll(templateNameInputRef.current);
             }
         }, 0);
     }, [activeTemplate, addToast]);

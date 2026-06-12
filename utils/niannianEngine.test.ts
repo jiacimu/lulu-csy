@@ -210,6 +210,38 @@ bad line`);
         expect(plan.directorRequest.messages[1].content).toContain('【事件库候选】');
     });
 
+    it('injects v2 world pack rules into main and director prompts', () => {
+        const world = {
+            ...createEmptyWorldBible(),
+            theme: '西幻宫廷',
+            statusSchema: [{ key: '誓约', label: '誓约', type: 'number' as const, min: 0, max: 100 }],
+            intimacyConstraint: '受骑士誓约与宫廷礼仪所限',
+            statusInstructions: 'world.誓约_delta 通常 0 或负',
+            directorNotes: '誓约-流言联动:流言高时递出议亲。',
+            endingRoutes: [{ title: '厮守 · 请誓', description: '请求解除誓约。' }],
+            hiddenVarsSeed: { 流言: 0 },
+        };
+        const session = createNianNianSession({
+            charId: 'char-1',
+            charName: '念念',
+            userName: '测试用户',
+            world,
+            now: 1700000000000,
+        });
+        const plan = buildNianNianTurnPlan(session, '【台词】你在看什么？');
+        const mainPrompt = plan.mainRequest.messages[0].content;
+        const directorPrompt = plan.directorRequest.messages[0].content;
+        const contextPrompt = plan.directorRequest.messages[1].content;
+
+        expect(mainPrompt).toContain('受骑士誓约与宫廷礼仪所限');
+        expect(mainPrompt).toContain('world.誓约_delta');
+        expect(mainPrompt).toContain('world.誓约_delta 通常 0 或负');
+        expect(directorPrompt).toContain('誓约-流言联动');
+        expect(directorPrompt).toContain('厮守 · 请誓');
+        expect(contextPrompt).toContain('【本世界天意规则】');
+        expect(contextPrompt).toContain('【可能收束走向】');
+    });
+
     it('keeps a complete pending compression buffer beyond the recent raw window', () => {
         let session = createNianNianSession({
             charId: 'char-1',

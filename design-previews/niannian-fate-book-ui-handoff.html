@@ -1,0 +1,1356 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>念念浮生 & 天机之书 UI 交接预览</title>
+  <style>
+    :root {
+      --ink: #382d2b;
+      --muted: rgba(74, 54, 46, 0.62);
+      --paper: rgba(255, 252, 246, 0.86);
+      --line: rgba(133, 103, 88, 0.2);
+      --gold: #d7a95b;
+      --rose: #b95d63;
+      --teal: #7faeaa;
+      --shadow: 0 18px 48px rgba(117, 84, 64, 0.18);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 16% 10%, rgba(127, 174, 170, 0.24), transparent 30%),
+        radial-gradient(circle at 82% 0%, rgba(185, 93, 99, 0.18), transparent 28%),
+        linear-gradient(180deg, #f6f1ea 0%, #edf5f4 100%);
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .handoff {
+      width: min(1220px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 42px;
+    }
+
+    .handoff-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .handoff-head h1 {
+      margin: 0;
+      font-family: "KaiTi", "STKaiti", "Songti SC", serif;
+      font-size: clamp(28px, 5vw, 48px);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .handoff-head p {
+      max-width: 520px;
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .source-pill {
+      flex: 0 0 auto;
+      padding: 8px 12px;
+      border: 1px solid rgba(94, 68, 54, 0.16);
+      border-radius: 999px;
+      color: rgba(54, 42, 38, 0.7);
+      background: rgba(255, 255, 255, 0.52);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .preview-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .shot {
+      min-width: 0;
+    }
+
+    .shot-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 8px;
+      color: #4d3933;
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .shot-title span {
+      display: inline-grid;
+      width: 22px;
+      height: 22px;
+      place-items: center;
+      border-radius: 999px;
+      color: #613923;
+      background: linear-gradient(180deg, #ffe8bb, #f2c681);
+      font-size: 11px;
+    }
+
+    .device {
+      position: relative;
+      height: 720px;
+      overflow: hidden;
+      border: 1px solid rgba(70, 48, 37, 0.18);
+      border-radius: 34px;
+      background: #fff7ec;
+      box-shadow: 0 26px 70px rgba(54, 39, 32, 0.22);
+      isolation: isolate;
+    }
+
+    .nn-app {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      color: #382d2b;
+      background: linear-gradient(180deg, #fff7ec 0%, #eef8f7 100%);
+    }
+
+    .nn-topbar {
+      position: absolute;
+      top: 24px;
+      left: 12px;
+      right: 12px;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      pointer-events: none;
+    }
+
+    .nn-icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border: 0;
+      border-radius: 999px;
+      color: #5f4a44;
+      background: rgba(255, 255, 255, 0.74);
+      box-shadow: 0 8px 26px rgba(111, 86, 75, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+      backdrop-filter: blur(18px);
+      pointer-events: auto;
+    }
+
+    .nn-brand {
+      display: grid;
+      justify-items: center;
+      min-width: 0;
+      padding: 9px 18px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.58);
+      box-shadow: 0 8px 28px rgba(111, 86, 75, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+      backdrop-filter: blur(18px);
+    }
+
+    .nn-brand span {
+      color: #5f433f;
+      font-size: 17px;
+      font-weight: 900;
+      line-height: 1.1;
+    }
+
+    .nn-brand small {
+      color: rgba(96, 71, 67, 0.52);
+      font-size: 10px;
+      font-weight: 850;
+      line-height: 1.2;
+    }
+
+    .nn-setup {
+      height: 100%;
+      overflow-y: auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
+      gap: 14px;
+      padding: 86px 16px 22px;
+    }
+
+    .nn-setup-panel,
+    .nn-session-list {
+      border: 1px solid rgba(146, 116, 94, 0.18);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.68);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .nn-setup-panel {
+      display: grid;
+      gap: 13px;
+      padding: 16px;
+    }
+
+    .nn-section-title {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .nn-section-title h2 {
+      margin: 0;
+      color: #604743;
+      font-size: 22px;
+      line-height: 1.15;
+    }
+
+    .nn-section-title p {
+      margin: 5px 0 0;
+      color: rgba(96, 71, 67, 0.62);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .nn-setup label {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .nn-setup label span {
+      color: rgba(96, 71, 67, 0.68);
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .nn-setup input,
+    .nn-setup select,
+    .nn-setup textarea {
+      width: 100%;
+      min-width: 0;
+      border: 1px solid rgba(133, 103, 88, 0.2);
+      border-radius: 10px;
+      color: #493835;
+      background: rgba(255, 255, 255, 0.64);
+      outline: none;
+      font: inherit;
+    }
+
+    .nn-setup input,
+    .nn-setup select {
+      height: 40px;
+      padding: 0 11px;
+    }
+
+    .nn-setup textarea {
+      min-height: 82px;
+      resize: vertical;
+      padding: 10px 11px;
+      line-height: 1.55;
+    }
+
+    .nn-setup-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .nn-primary-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 42px;
+      border: 0;
+      border-radius: 12px;
+      color: #5d372f;
+      background: linear-gradient(180deg, #ffe8bb 0%, #f5ca8d 100%);
+      box-shadow: 0 12px 24px rgba(175, 120, 70, 0.18);
+      font: inherit;
+      font-weight: 900;
+    }
+
+    .nn-session-list {
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      padding: 14px;
+    }
+
+    .nn-session-list h3 {
+      margin: 0 0 5px;
+      color: #604743;
+      font-size: 14px;
+    }
+
+    .nn-session-list button {
+      display: grid;
+      gap: 4px;
+      padding: 10px;
+      border: 1px solid rgba(133, 103, 88, 0.16);
+      border-radius: 12px;
+      color: inherit;
+      background: rgba(255, 255, 255, 0.62);
+      font: inherit;
+      text-align: left;
+    }
+
+    .nn-session-list button strong {
+      color: #503733;
+      font-size: 12px;
+    }
+
+    .nn-session-list button span {
+      color: rgba(96, 71, 67, 0.62);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .nn-stage {
+      position: relative;
+      height: 100%;
+      overflow: hidden;
+      isolation: isolate;
+      --nn-bg-a: #fff1c7;
+      --nn-bg-b: #f2a66f;
+      --nn-bg-c: #c9e8ff;
+      --nn-scene-image: url("../public/images/niannian-fusheng-scenes/scene-13-deng-hui-ye-shi.png");
+    }
+
+    .nn-scene {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      padding: 0;
+      overflow: hidden;
+      border: 0;
+      text-align: left;
+      background-color: var(--nn-bg-b);
+      background-image:
+        linear-gradient(180deg, rgba(45, 30, 24, 0.08) 0%, rgba(255, 247, 235, 0.08) 48%, rgba(255, 245, 235, 0.7) 100%),
+        var(--nn-scene-image),
+        linear-gradient(135deg, var(--nn-bg-a) 0%, var(--nn-bg-b) 48%, var(--nn-bg-c) 100%);
+      background-position: center;
+      background-repeat: no-repeat;
+      background-size: cover;
+    }
+
+    .nn-scene::before {
+      position: absolute;
+      inset: 0;
+      content: "";
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 250, 242, 0.18) 54%, rgba(255, 247, 240, 0.86) 100%),
+        radial-gradient(ellipse at center, transparent 0%, transparent 62%, rgba(67, 45, 37, 0.18) 100%);
+      pointer-events: none;
+    }
+
+    .nn-scene-label {
+      position: absolute;
+      left: 14px;
+      bottom: 214px;
+      z-index: 2;
+      max-width: calc(100% - 28px);
+      padding: 5px 9px;
+      border: 1px solid rgba(255, 255, 255, 0.42);
+      border-radius: 8px;
+      color: rgba(74, 54, 46, 0.7);
+      background: rgba(255, 248, 238, 0.34);
+      box-shadow: 0 8px 22px rgba(75, 52, 42, 0.1);
+      backdrop-filter: blur(10px);
+      font-size: 11px;
+      font-weight: 900;
+      pointer-events: none;
+    }
+
+    .nn-vn-layer {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 18px;
+      z-index: 12;
+      display: grid;
+      gap: 10px;
+    }
+
+    .nn-vn-layer.is-choice {
+      bottom: 10px;
+    }
+
+    .nn-dialogue-card {
+      position: relative;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      width: 100%;
+      min-height: 138px;
+      padding: 14px 16px 32px;
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      border-radius: 18px 18px 10px 10px;
+      color: #3d302e;
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: 0 18px 48px rgba(117, 84, 64, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(20px);
+      text-align: left;
+    }
+
+    .nn-dialogue-card.is-narrator {
+      min-height: 108px;
+      padding-top: 18px;
+      background: rgba(255, 252, 246, 0.76);
+    }
+
+    .nn-dialogue-speaker {
+      display: inline-flex;
+      align-items: center;
+      justify-self: start;
+      gap: 8px;
+      max-width: min(76%, 260px);
+      min-width: 0;
+    }
+
+    .nn-dialogue-card.is-right .nn-dialogue-speaker {
+      justify-self: end;
+      flex-direction: row-reverse;
+      text-align: right;
+    }
+
+    .nn-dialogue-avatar {
+      flex: 0 0 auto;
+      width: 46px;
+      height: 46px;
+      overflow: hidden;
+      border: 2px solid rgba(255, 255, 255, 0.82);
+      border-radius: 999px;
+      background: linear-gradient(135deg, #fff0cd, #d8ecf0);
+      box-shadow: 0 8px 18px rgba(106, 83, 73, 0.16);
+    }
+
+    .nn-dialogue-avatar span {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      place-items: center;
+      color: #6d554f;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .nn-dialogue-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 950;
+      line-height: 1.2;
+    }
+
+    .nn-dialogue-copy p {
+      margin: 0;
+      color: #342b2a;
+      font-size: 16px;
+      font-weight: 650;
+      line-height: 1.72;
+      white-space: pre-wrap;
+    }
+
+    .nn-dialogue-card.is-narrator p {
+      color: rgba(58, 47, 45, 0.72);
+      font-size: 15px;
+      font-weight: 520;
+      line-height: 1.82;
+    }
+
+    .nn-dialogue-pager {
+      position: absolute;
+      left: 50%;
+      bottom: 8px;
+      display: inline-grid;
+      grid-template-columns: 28px minmax(34px, auto) 28px;
+      align-items: center;
+      gap: 6px;
+      transform: translateX(-50%);
+      color: rgba(96, 71, 67, 0.54);
+      font-size: 10px;
+      font-weight: 850;
+    }
+
+    .nn-dialogue-nav {
+      display: inline-grid;
+      width: 28px;
+      height: 24px;
+      place-items: center;
+      border: 0;
+      border-radius: 999px;
+      color: rgba(89, 62, 56, 0.72);
+      background: rgba(255, 247, 236, 0.72);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+      font: inherit;
+    }
+
+    .nn-continue {
+      position: absolute;
+      right: 18px;
+      bottom: 10px;
+      color: rgba(96, 71, 67, 0.54);
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .nn-options {
+      display: grid;
+      gap: 8px;
+      max-height: 230px;
+      overflow-y: auto;
+    }
+
+    .nn-options button {
+      display: block;
+      width: 100%;
+      padding: 11px 14px;
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      border-radius: 999px;
+      color: #513f3b;
+      background: rgba(255, 255, 255, 0.78);
+      box-shadow: 0 10px 28px rgba(111, 86, 75, 0.13);
+      backdrop-filter: blur(18px);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.45;
+      text-align: left;
+    }
+
+    .nn-input-panel {
+      display: grid;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      border-radius: 18px 18px 12px 12px;
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: 0 16px 38px rgba(111, 86, 75, 0.16);
+      backdrop-filter: blur(20px);
+    }
+
+    .nn-beat-list {
+      display: grid;
+      gap: 8px;
+      max-height: 250px;
+      overflow-y: auto;
+    }
+
+    .nn-beat-card {
+      display: grid;
+      gap: 7px;
+      padding: 8px;
+      border: 1px solid rgba(121, 88, 70, 0.12);
+      border-radius: 12px;
+      background: rgba(255, 250, 244, 0.56);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+    }
+
+    .nn-beat-card.is-speech {
+      border-color: rgba(188, 101, 103, 0.22);
+      background: rgba(255, 243, 241, 0.64);
+    }
+
+    .nn-beat-card.is-action {
+      background: rgba(246, 239, 228, 0.58);
+    }
+
+    .nn-beat-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .nn-beat-toggle {
+      display: inline-flex;
+      gap: 3px;
+      padding: 2px;
+      border-radius: 999px;
+      background: rgba(119, 86, 72, 0.08);
+    }
+
+    .nn-beat-toggle button {
+      min-width: 44px;
+      height: 25px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 999px;
+      color: rgba(91, 68, 64, 0.62);
+      background: transparent;
+      font: inherit;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .nn-beat-toggle button.is-active {
+      color: #5d372f;
+      background: #f6d196;
+    }
+
+    .nn-beat-remove {
+      display: grid;
+      place-items: center;
+      width: 26px;
+      height: 26px;
+      border: 0;
+      border-radius: 999px;
+      color: rgba(91, 68, 64, 0.38);
+      background: rgba(119, 86, 72, 0.07);
+      font: inherit;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .nn-beat-card textarea {
+      width: 100%;
+      min-height: 44px;
+      resize: none;
+      border: 0;
+      outline: none;
+      color: #3d302e;
+      background: transparent;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 620;
+      line-height: 1.58;
+    }
+
+    .nn-input-actions {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 44px;
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .nn-beat-add {
+      display: flex;
+      gap: 7px;
+      min-width: 0;
+      overflow-x: auto;
+    }
+
+    .nn-beat-add button {
+      flex: 0 0 auto;
+      min-height: 40px;
+      padding: 0 13px;
+      border: 0;
+      border-radius: 13px;
+      color: rgba(91, 68, 64, 0.68);
+      background: rgba(245, 232, 214, 0.72);
+      font: inherit;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .nn-send-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 14px;
+      color: #5d372f;
+      background: linear-gradient(180deg, #ffe6b5 0%, #f3c988 100%);
+      font: inherit;
+      font-weight: 950;
+    }
+
+    .nn-status-orb {
+      position: absolute;
+      top: 92px;
+      right: 12px;
+      z-index: 20;
+      display: grid;
+      place-items: center;
+      width: 62px;
+      height: 62px;
+      padding: 6px;
+      border: 0;
+      border-radius: 999px;
+      color: #6d3f2c;
+      background:
+        radial-gradient(circle at 34% 20%, rgba(255, 255, 255, 0.9) 0 18%, transparent 40%),
+        linear-gradient(135deg, rgba(255, 247, 221, 0.9), rgba(231, 205, 157, 0.82));
+      box-shadow:
+        0 14px 36px rgba(111, 86, 75, 0.2),
+        inset 0 0 0 1px rgba(133, 84, 46, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.78);
+      backdrop-filter: blur(18px);
+      font: inherit;
+    }
+
+    .nn-status-orb span {
+      margin-top: -2px;
+      font-size: 11px;
+      font-weight: 950;
+      letter-spacing: 0.08em;
+    }
+
+    .nn-status-orb strong {
+      margin-top: -8px;
+      color: #5c3324;
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    .nn-status-orb.is-expanded strong {
+      font-size: 10px;
+    }
+
+    .nn-history-toggle {
+      position: absolute;
+      top: 94px;
+      left: 12px;
+      z-index: 20;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 88px;
+      height: 42px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 999px;
+      color: #5d433b;
+      background: rgba(255, 250, 241, 0.76);
+      box-shadow: 0 12px 30px rgba(111, 86, 75, 0.17), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+      backdrop-filter: blur(18px);
+      font: inherit;
+    }
+
+    .nn-history-toggle span {
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .nn-history-toggle strong {
+      display: inline-grid;
+      min-width: 20px;
+      height: 20px;
+      place-items: center;
+      padding: 0 5px;
+      border-radius: 999px;
+      color: #6b3a28;
+      background: rgba(241, 203, 142, 0.76);
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .nn-history-panel {
+      position: absolute;
+      top: 150px;
+      left: 10px;
+      z-index: 24;
+      display: grid;
+      gap: 10px;
+      width: min(372px, calc(100% - 20px));
+      max-height: 520px;
+      overflow: hidden;
+      padding: 12px;
+      border: 1px solid rgba(129, 86, 61, 0.24);
+      border-radius: 16px;
+      color: #453431;
+      background: rgba(255, 250, 241, 0.88);
+      box-shadow: 0 22px 54px rgba(82, 57, 45, 0.23), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+      backdrop-filter: blur(24px);
+    }
+
+    .nn-history-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .nn-history-head span {
+      color: #5f3d2d;
+      font-family: "KaiTi", "STKaiti", "Songti SC", serif;
+      font-size: 19px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+    }
+
+    .nn-history-head strong {
+      display: block;
+      color: rgba(80, 54, 45, 0.56);
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .nn-history-close {
+      display: grid;
+      flex: 0 0 auto;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 0;
+      border-radius: 999px;
+      color: rgba(84, 58, 50, 0.55);
+      background: rgba(115, 78, 59, 0.08);
+      font: inherit;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .nn-history-list {
+      display: grid;
+      gap: 7px;
+      max-height: 328px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+
+    .nn-history-row {
+      display: flex;
+      align-items: start;
+      gap: 8px;
+      width: 100%;
+      min-height: 64px;
+      padding: 8px 9px;
+      border: 1px solid rgba(124, 86, 64, 0.14);
+      border-radius: 12px;
+      color: inherit;
+      background: rgba(255, 255, 255, 0.58);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+      font: inherit;
+      text-align: left;
+    }
+
+    .nn-history-row.is-user {
+      background: rgba(237, 246, 255, 0.62);
+    }
+
+    .nn-history-row.is-character {
+      background: rgba(255, 241, 239, 0.66);
+    }
+
+    .nn-history-row.is-active {
+      border-color: rgba(169, 91, 76, 0.42);
+      background: rgba(255, 236, 208, 0.84);
+      box-shadow: 0 10px 22px rgba(124, 86, 64, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.74);
+    }
+
+    .nn-history-turn {
+      display: inline-grid;
+      flex: 0 0 54px;
+      width: 54px;
+      min-height: 24px;
+      place-items: center;
+      padding: 0 6px;
+      border-radius: 999px;
+      color: rgba(91, 62, 50, 0.64);
+      background: rgba(121, 88, 70, 0.08);
+      font-size: 10px;
+      font-weight: 950;
+      white-space: nowrap;
+    }
+
+    .nn-history-copy {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .nn-history-copy strong {
+      overflow: hidden;
+      color: rgba(68, 45, 39, 0.68);
+      font-size: 11px;
+      font-weight: 950;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .nn-history-copy em {
+      display: block;
+      color: #3c302d;
+      font-size: 12px;
+      font-style: normal;
+      font-weight: 690;
+      line-height: 1.45;
+    }
+
+    .nn-history-current {
+      min-height: 36px;
+      border: 0;
+      border-radius: 12px;
+      color: #5d372f;
+      background: linear-gradient(180deg, #ffe7b9 0%, #f1c786 100%);
+      font: inherit;
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .nn-fate-book {
+      position: absolute;
+      top: 160px;
+      right: 10px;
+      z-index: 22;
+      display: grid;
+      grid-template-columns: 15px minmax(0, 1fr);
+      width: min(348px, calc(100% - 20px));
+      max-height: 560px;
+      overflow: hidden;
+      border: 1px solid rgba(125, 78, 39, 0.32);
+      border-radius: 14px 9px 9px 14px;
+      color: #4e3528;
+      background:
+        linear-gradient(90deg, rgba(104, 63, 33, 0.18), transparent 22px),
+        radial-gradient(circle at 18% 14%, rgba(132, 86, 45, 0.11) 0 1px, transparent 2px),
+        radial-gradient(circle at 78% 20%, rgba(132, 86, 45, 0.09) 0 1px, transparent 2px),
+        linear-gradient(135deg, rgba(255, 249, 229, 0.96), rgba(237, 218, 176, 0.92));
+      box-shadow:
+        0 20px 50px rgba(87, 58, 36, 0.24),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.44);
+    }
+
+    .nn-fate-spine {
+      position: relative;
+      background:
+        radial-gradient(circle at 50% 12%, rgba(255, 235, 181, 0.24) 0 9%, transparent 18%),
+        radial-gradient(circle at 50% 88%, rgba(59, 26, 14, 0.2) 0 10%, transparent 20%),
+        linear-gradient(180deg, rgba(93, 47, 27, 0.92), rgba(142, 82, 42, 0.88));
+    }
+
+    .nn-fate-spine::after {
+      position: absolute;
+      inset: 12px 5px;
+      border-radius: 999px;
+      content: "";
+      background: rgba(255, 240, 198, 0.22);
+    }
+
+    .nn-fate-pages {
+      position: relative;
+      min-width: 0;
+      max-height: 560px;
+      overflow-y: auto;
+      padding: 13px 13px 15px;
+      background:
+        repeating-linear-gradient(0deg, rgba(116, 78, 42, 0.035) 0 1px, transparent 1px 28px),
+        radial-gradient(circle at 20% 18%, rgba(126, 76, 39, 0.08), transparent 34%),
+        linear-gradient(180deg, rgba(255, 250, 233, 0.94), rgba(246, 232, 196, 0.9));
+    }
+
+    .nn-fate-head {
+      display: grid;
+      justify-items: center;
+      margin-bottom: 9px;
+    }
+
+    .nn-fate-head span {
+      color: #573522;
+      font-family: "KaiTi", "STKaiti", "Songti SC", serif;
+      font-size: 21px;
+      font-weight: 900;
+      letter-spacing: 0.14em;
+    }
+
+    .nn-fate-layout {
+      position: relative;
+      min-height: 214px;
+      padding-right: 23px;
+    }
+
+    .nn-fate-tabs {
+      position: absolute;
+      top: 18px;
+      right: 0;
+      z-index: 2;
+      display: grid;
+      align-content: start;
+      gap: 5px;
+    }
+
+    .nn-fate-tab {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 21px;
+      min-height: 43px;
+      padding: 0;
+      border: 1px solid rgba(132, 82, 42, 0.13);
+      border-left: 0;
+      border-radius: 0 7px 7px 0;
+      color: rgba(102, 67, 41, 0.5);
+      background: linear-gradient(90deg, rgba(235, 204, 149, 0.54), rgba(255, 244, 214, 0.7));
+      box-shadow: 2px 3px 8px rgba(88, 55, 34, 0.06);
+      font: inherit;
+    }
+
+    .nn-fate-tab.is-active {
+      color: rgba(87, 48, 30, 0.8);
+      background: linear-gradient(90deg, rgba(224, 185, 125, 0.58), rgba(255, 236, 194, 0.86));
+      box-shadow: 2px 4px 10px rgba(88, 55, 34, 0.09);
+    }
+
+    .nn-fate-tab .nn-fate-seal {
+      width: auto;
+      height: auto;
+      border: 0;
+      border-radius: 0;
+      color: currentColor;
+      background: transparent;
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .nn-fate-section {
+      position: relative;
+      display: grid;
+      gap: 8px;
+      min-height: 214px;
+      padding: 10px 10px 11px;
+      border: 1px solid rgba(132, 82, 42, 0.16);
+      border-radius: 9px;
+      background: rgba(255, 252, 241, 0.52);
+    }
+
+    .nn-fate-section header {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .nn-fate-seal {
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      border: 1px solid rgba(151, 42, 32, 0.48);
+      border-radius: 5px;
+      color: rgba(139, 37, 29, 0.82);
+      font-family: "KaiTi", "STKaiti", serif;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .nn-fate-section h3 {
+      margin: 0;
+      color: #5b3927;
+      font-family: "KaiTi", "STKaiti", "Songti SC", serif;
+      font-size: 16px;
+      letter-spacing: 0.1em;
+    }
+
+    .nn-fate-section dl {
+      display: grid;
+      gap: 5px;
+      margin: 0;
+    }
+
+    .nn-fate-row {
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+      padding: 5px 0;
+      border-top: 1px dotted rgba(108, 72, 42, 0.22);
+    }
+
+    .nn-fate-row:first-child {
+      border-top: 0;
+    }
+
+    .nn-fate-row dt {
+      color: rgba(80, 50, 32, 0.54);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+    }
+
+    .nn-fate-row dd {
+      margin: 0;
+      color: #3f2c22;
+      font-size: 12px;
+      font-weight: 780;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .legend-card {
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid rgba(94, 68, 54, 0.14);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.54);
+      box-shadow: 0 12px 28px rgba(54, 39, 32, 0.08);
+    }
+
+    .legend-card strong {
+      display: block;
+      color: #4d3933;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .legend-card code {
+      display: block;
+      overflow: hidden;
+      color: rgba(54, 42, 38, 0.68);
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 980px) {
+      .preview-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .device {
+        height: 700px;
+      }
+
+      .legend {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 620px) {
+      .handoff {
+        width: min(100% - 20px, 1220px);
+        padding-top: 18px;
+      }
+
+      .handoff-head {
+        display: grid;
+      }
+
+      .source-pill {
+        justify-self: start;
+      }
+
+      .device {
+        height: 680px;
+        border-radius: 24px;
+      }
+
+      .nn-setup {
+        grid-template-columns: 1fr;
+      }
+
+      .nn-setup-grid,
+      .legend {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="handoff">
+    <header class="handoff-head">
+      <div>
+        <h1>念念浮生 UI 交接</h1>
+        <p>静态预览只复刻当前界面的关键层级和视觉入口：初始化、剧情对白、选项输入、回想录、天机之书。业务逻辑仍以源码为准。</p>
+      </div>
+      <div class="source-pill">source: apps/niannian</div>
+    </header>
+
+    <section class="preview-grid" aria-label="UI 状态预览">
+      <article class="shot">
+        <h2 class="shot-title"><span>1</span>副本初始化</h2>
+        <div class="device">
+          <div class="nn-app">
+            <header class="nn-topbar">
+              <button class="nn-icon-btn" aria-label="返回">‹</button>
+              <div class="nn-brand"><span>念念浮生</span><small>副本初始化</small></div>
+              <button class="nn-icon-btn" aria-label="新副本">↻</button>
+            </header>
+            <main class="nn-setup">
+              <section class="nn-setup-panel">
+                <div class="nn-section-title">
+                  <span aria-hidden="true">✦</span>
+                  <div>
+                    <h2>副本初始化</h2>
+                    <p>世界包会预填设定；你修改或清空后，会以你的版本为准。</p>
+                  </div>
+                </div>
+                <label><span>选择角色</span><select><option>沈砚</option></select></label>
+                <div class="nn-setup-grid">
+                  <label><span>题材 theme</span><input value="古代中国" /></label>
+                  <label><span>基调 tone</span><input value="慢热、克制、暧昧" /></label>
+                  <label><span>角色身份</span><input value="清贵世家公子" /></label>
+                  <label><span>主角身份</span><input value="寄居府中的旧识" /></label>
+                </div>
+                <label><span>开场情境</span><textarea>灯会将散，你在桥边捡到一枚旧玉扣。</textarea></label>
+                <label><span>补充提示词（可选）</span><textarea>保持古典但轻松的口吻，少解释，多留白。</textarea></label>
+                <button class="nn-primary-btn">开始这一世</button>
+              </section>
+              <aside class="nn-session-list">
+                <h3>旧副本</h3>
+                <button><strong>沈砚 · 心意渐明</strong><span>第 7 回合 · 灯会夜市</span></button>
+                <button><strong>谢临舟 · 拉扯</strong><span>第 3 回合 · 书房</span></button>
+              </aside>
+            </main>
+          </div>
+        </div>
+      </article>
+
+      <article class="shot">
+        <h2 class="shot-title"><span>2</span>剧情对白</h2>
+        <div class="device">
+          <div class="nn-app">
+            <header class="nn-topbar">
+              <button class="nn-icon-btn" aria-label="返回">‹</button>
+              <div class="nn-brand"><span>沈砚</span><small>心意渐明</small></div>
+              <button class="nn-icon-btn" aria-label="新副本">↻</button>
+            </header>
+            <main class="nn-stage">
+              <button class="nn-scene" aria-label="场景背景"><span class="nn-scene-label">灯会夜市</span></button>
+              <button class="nn-history-toggle"><span>回想</span><strong>12</strong></button>
+              <button class="nn-status-orb"><span>天机</span><strong>68</strong></button>
+              <section class="nn-vn-layer is-dialogue">
+                <div class="nn-dialogue-card is-character is-left">
+                  <div class="nn-dialogue-speaker">
+                    <div class="nn-dialogue-avatar"><span>沈砚</span></div>
+                    <div class="nn-dialogue-name" style="color:#8a4d54">沈砚</div>
+                  </div>
+                  <div class="nn-dialogue-copy">
+                    <p>他垂眸看向你掌心里的玉扣，像是终于认出什么，又像是不愿太早认出。</p>
+                  </div>
+                  <div class="nn-dialogue-pager">
+                    <button class="nn-dialogue-nav">‹</button><span>2/4</span><button class="nn-dialogue-nav">›</button>
+                  </div>
+                </div>
+              </section>
+            </main>
+          </div>
+        </div>
+      </article>
+
+      <article class="shot">
+        <h2 class="shot-title"><span>3</span>选项与输入</h2>
+        <div class="device">
+          <div class="nn-app">
+            <header class="nn-topbar">
+              <button class="nn-icon-btn" aria-label="返回">‹</button>
+              <div class="nn-brand"><span>沈砚</span><small>选择下一步</small></div>
+              <button class="nn-icon-btn" aria-label="新副本">↻</button>
+            </header>
+            <main class="nn-stage">
+              <button class="nn-scene" aria-label="场景背景"><span class="nn-scene-label">灯会夜市</span></button>
+              <button class="nn-history-toggle"><span>回想</span><strong>12</strong></button>
+              <button class="nn-status-orb"><span>天机</span><strong>68</strong></button>
+              <section class="nn-vn-layer is-choice">
+                <div class="nn-options">
+                  <button>把玉扣递给他，问他是否认得此物。</button>
+                  <button>将玉扣收回袖中，先转开话题。</button>
+                  <button>低声说这是在桥边捡到的，看他如何反应。</button>
+                </div>
+                <section class="nn-input-panel">
+                  <div class="nn-beat-list">
+                    <div class="nn-beat-card is-speech">
+                      <div class="nn-beat-head">
+                        <div class="nn-beat-toggle"><button class="is-active">台词</button><button>动作</button></div>
+                        <button class="nn-beat-remove">×</button>
+                      </div>
+                      <textarea>你以前见过它吗？</textarea>
+                    </div>
+                    <div class="nn-beat-card is-action">
+                      <div class="nn-beat-head">
+                        <div class="nn-beat-toggle"><button>台词</button><button class="is-active">动作</button></div>
+                        <button class="nn-beat-remove">×</button>
+                      </div>
+                      <textarea>把手心摊开，等他自己来拿。</textarea>
+                    </div>
+                  </div>
+                  <div class="nn-input-actions">
+                    <div class="nn-beat-add"><button>+ 台词</button><button>+ 动作</button></div>
+                    <button class="nn-send-btn">➤</button>
+                  </div>
+                </section>
+              </section>
+            </main>
+          </div>
+        </div>
+      </article>
+
+      <article class="shot">
+        <h2 class="shot-title"><span>4</span>浮层素材：回想录 / 天机之书</h2>
+        <div class="device">
+          <div class="nn-app">
+            <header class="nn-topbar">
+              <button class="nn-icon-btn" aria-label="返回">‹</button>
+              <div class="nn-brand"><span>沈砚</span><small>心意渐明</small></div>
+              <button class="nn-icon-btn" aria-label="新副本">↻</button>
+            </header>
+            <main class="nn-stage">
+              <button class="nn-scene" aria-label="场景背景"><span class="nn-scene-label">灯会夜市</span></button>
+              <button class="nn-history-toggle"><span>回想</span><strong>12</strong></button>
+              <button class="nn-status-orb is-expanded"><span>天机</span><strong>合卷</strong></button>
+              <aside class="nn-history-panel" aria-label="回想录">
+                <header class="nn-history-head">
+                  <div><span>回想录</span><strong>沈砚 · 心意渐明</strong></div>
+                  <button class="nn-history-close">×</button>
+                </header>
+                <div class="nn-history-list">
+                  <button class="nn-history-row is-character is-active">
+                    <span class="nn-history-turn">第 7 回</span>
+                    <span class="nn-history-copy"><strong>沈砚</strong><em>他接过玉扣，指腹停在裂纹处。</em></span>
+                  </button>
+                  <button class="nn-history-row is-user">
+                    <span class="nn-history-turn">第 7 回</span>
+                    <span class="nn-history-copy"><strong>你</strong><em>你问他是否认得此物。</em></span>
+                  </button>
+                </div>
+                <button class="nn-history-current">回到当前</button>
+              </aside>
+              <aside class="nn-status-panel nn-fate-book" aria-label="天机之书">
+                <div class="nn-fate-spine" aria-hidden="true"></div>
+                <div class="nn-fate-pages">
+                  <header class="nn-fate-head"><span>天机之书</span></header>
+                  <div class="nn-fate-layout">
+                    <nav class="nn-fate-tabs" aria-label="天机之书目录">
+                      <button class="nn-fate-tab is-active"><span class="nn-fate-seal">景</span></button>
+                      <button class="nn-fate-tab"><span class="nn-fate-seal">他</span></button>
+                      <button class="nn-fate-tab"><span class="nn-fate-seal">我</span></button>
+                      <button class="nn-fate-tab"><span class="nn-fate-seal">世</span></button>
+                    </nav>
+                    <section class="nn-fate-section is-active-page">
+                      <header><span class="nn-fate-seal">景</span><h3>此刻</h3></header>
+                      <dl>
+                        <div class="nn-fate-row"><dt>阶段</dt><dd>心意渐明</dd></div>
+                        <div class="nn-fate-row"><dt>回合</dt><dd>第 7 回合</dd></div>
+                        <div class="nn-fate-row"><dt>时辰</dt><dd>上元夜半</dd></div>
+                        <div class="nn-fate-row"><dt>地点</dt><dd>石桥边的灯市</dd></div>
+                        <div class="nn-fate-row"><dt>场景</dt><dd>灯会夜市</dd></div>
+                      </dl>
+                    </section>
+                  </div>
+                </div>
+              </aside>
+            </main>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="legend" aria-label="源码定位">
+      <div class="legend-card"><strong>React</strong><code>apps/niannian/NianNianApp.tsx</code></div>
+      <div class="legend-card"><strong>Styles</strong><code>apps/niannian/niannian.css</code></div>
+      <div class="legend-card"><strong>Scenes</strong><code>utils/niannianSceneVisuals.ts</code></div>
+      <div class="legend-card"><strong>Types</strong><code>types/niannian.ts</code></div>
+    </section>
+  </main>
+</body>
+</html>

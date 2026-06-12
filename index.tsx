@@ -6,6 +6,7 @@ import { initSystemInterceptor } from './utils/systemInterceptor';
 import { initAppLifecycle } from './utils/appLifecycle';
 import { preloadLocalAssets,scheduleIdlePreload } from './utils/preloadResources';
 import { installIOSStandaloneWorkaround } from './utils/iosStandalone';
+import { installViewportRepair } from './utils/viewportRepair';
 
 // ── Production Log Suppression ──────────────────────────────────
 // 生产环境下隐藏 console.log / console.warn，只保留 console.error
@@ -26,6 +27,7 @@ initSystemInterceptor();
 initAppLifecycle();
 
 installIOSStandaloneWorkaround();
+installViewportRepair();
 
 // 预加载本地关键图片（心声水墨画 + 邮戳装饰）
 preloadLocalAssets();

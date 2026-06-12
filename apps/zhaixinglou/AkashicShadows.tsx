@@ -15,6 +15,7 @@ import { CharacterProfile } from '../../types';
 import { SelectedCard } from './zhaixinglouStore';
 import ShareCardModal,{ type ShareContext } from './ShareCardModal';
 import { truncateMessages } from './chatUtils';
+import { focusPreventScroll } from '../../utils/viewportRepair';
 
 
 // ── Floating Latin text fragments for entrance ──
@@ -644,7 +645,7 @@ const AkashicShadows: React.FC<Props> = ({
                             <button
                                 onClick={() => {
                                     setShowInput(!showInput);
-                                    if (!showInput) setTimeout(() => inputRef.current?.focus(), 300);
+                                    if (!showInput) setTimeout(() => focusPreventScroll(inputRef.current), 300);
                                 }}
                                 className="relative transition-all duration-500 active:scale-95"
                             >

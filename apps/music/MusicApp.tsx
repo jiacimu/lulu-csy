@@ -8,6 +8,7 @@ import { useOS } from '../../context/OSContext';
 import { useAudioPlayer } from '../../hooks/useAudioPlayer';
 import { useLyrics } from '../../hooks/useLyrics';
 import { useDominantColor } from '../../hooks/useDominantColor';
+import { focusPreventScroll } from '../../utils/viewportRepair';
 import {
   isMemoryRecordPlayable,
   isSongPlayable,
@@ -1052,7 +1053,7 @@ const SearchPage = ({
   const trimmedKeyword = keyword.trim();
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => inputRef.current?.focus(), 180);
+    const timeoutId = window.setTimeout(() => focusPreventScroll(inputRef.current), 180);
     return () => window.clearTimeout(timeoutId);
   }, []);
 

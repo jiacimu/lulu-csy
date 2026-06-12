@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "packs": [
+    {
+      "worldId": "minguo",
+      "worldName": "民国 · 风声与旧影",
+      "style": "手机竖屏 9:16，清透、明媚、温馨，适合作为念念浮生地图与地点背景",
+      "map": {
+        "title": "民国总地图",
+        "url": "/images/niannian-worldpacks/minguo/map.png"
+      },
+      "locations": [
+        { "id": "newspaper-office", "title": "报馆编辑部", "url": "/images/niannian-worldpacks/minguo/01-newspaper-office.png" },
+        { "id": "tram-street", "title": "雨后电车街", "url": "/images/niannian-worldpacks/minguo/02-tram-street.png" },
+        { "id": "ballroom", "title": "霞光舞厅", "url": "/images/niannian-worldpacks/minguo/03-ballroom.png" },
+        { "id": "mansion-drawing-room", "title": "老洋房会客厅", "url": "/images/niannian-worldpacks/minguo/04-mansion-drawing-room.png" },
+        { "id": "train-platform", "title": "火车月台", "url": "/images/niannian-worldpacks/minguo/05-train-platform.png" },
+        { "id": "river-pier", "title": "江边码头", "url": "/images/niannian-worldpacks/minguo/06-river-pier.png" },
+        { "id": "teahouse-private-room", "title": "茶楼雅座", "url": "/images/niannian-worldpacks/minguo/07-teahouse-private-room.png" },
+        { "id": "telegraph-bureau", "title": "电报局", "url": "/images/niannian-worldpacks/minguo/08-telegraph-bureau.png" },
+        { "id": "clinic", "title": "小诊所", "url": "/images/niannian-worldpacks/minguo/09-clinic.png" },
+        { "id": "police-veranda", "title": "巡捕房外廊", "url": "/images/niannian-worldpacks/minguo/10-police-veranda.png" },
+        { "id": "theater-lobby", "title": "旧剧院前厅", "url": "/images/niannian-worldpacks/minguo/11-theater-lobby.png" },
+        { "id": "lane-courtyard", "title": "里弄小院", "url": "/images/niannian-worldpacks/minguo/12-lane-courtyard.png" },
+        { "id": "riverside-bridge", "title": "石桥河畔", "url": "/images/niannian-worldpacks/minguo/13-riverside-bridge.png" },
+        { "id": "bookstore-second-floor", "title": "书店二楼", "url": "/images/niannian-worldpacks/minguo/14-bookstore-second-floor.png" },
+        { "id": "school-garden", "title": "女校花园", "url": "/images/niannian-worldpacks/minguo/15-school-garden.png" },
+        { "id": "tailor-shop", "title": "裁缝铺", "url": "/images/niannian-worldpacks/minguo/16-tailor-shop.png" },
+        { "id": "photo-studio", "title": "照相馆", "url": "/images/niannian-worldpacks/minguo/17-photo-studio.png" },
+        { "id": "park-lake-pavilion", "title": "公园湖心亭", "url": "/images/niannian-worldpacks/minguo/18-park-lake-pavilion.png" },
+        { "id": "secret-attic", "title": "秘密阁楼", "url": "/images/niannian-worldpacks/minguo/19-secret-attic.png" },
+        { "id": "harbor-warehouse", "title": "港口仓库", "url": "/images/niannian-worldpacks/minguo/20-harbor-warehouse.png" }
+      ]
+    },
+    {
+      "worldId": "westfantasy",
+      "worldName": "西幻 · 誓约与心",
+      "style": "手机竖屏 9:16，清透、明媚、温馨，适合作为念念浮生地图与地点背景",
+      "map": {
+        "title": "西幻总地图",
+        "url": "/images/niannian-worldpacks/westfantasy/map.png"
+      },
+      "locations": [
+        { "id": "west-corridor", "title": "王宫西回廊", "url": "/images/niannian-worldpacks/westfantasy/01-west-corridor.png" },
+        { "id": "rose-garden", "title": "玫瑰园", "url": "/images/niannian-worldpacks/westfantasy/02-rose-garden.png" },
+        { "id": "chapel", "title": "礼拜堂", "url": "/images/niannian-worldpacks/westfantasy/03-chapel.png" },
+        { "id": "training-yard", "title": "骑士训练场", "url": "/images/niannian-worldpacks/westfantasy/04-training-yard.png" },
+        { "id": "library-tower", "title": "图书塔", "url": "/images/niannian-worldpacks/westfantasy/05-library-tower.png" },
+        { "id": "throne-hall", "title": "王座厅", "url": "/images/niannian-worldpacks/westfantasy/06-throne-hall.png" },
+        { "id": "guest-wing-balcony", "title": "客翼露台", "url": "/images/niannian-worldpacks/westfantasy/07-guest-wing-balcony.png" },
+        { "id": "stables", "title": "王家马厩", "url": "/images/niannian-worldpacks/westfantasy/08-stables.png" },
+        { "id": "northern-gate-road", "title": "北门石路", "url": "/images/niannian-worldpacks/westfantasy/09-northern-gate-road.png" },
+        { "id": "council-chamber", "title": "议事厅", "url": "/images/niannian-worldpacks/westfantasy/10-council-chamber.png" },
+        { "id": "old-shrine", "title": "旧神龛", "url": "/images/niannian-worldpacks/westfantasy/11-old-shrine.png" },
+        { "id": "secret-garden-door", "title": "秘园门", "url": "/images/niannian-worldpacks/westfantasy/12-secret-garden-door.png" },
+        { "id": "river-bridge", "title": "宫河石桥", "url": "/images/niannian-worldpacks/westfantasy/13-river-bridge.png" },
+        { "id": "lower-town-market", "title": "下城集市", "url": "/images/niannian-worldpacks/westfantasy/14-lower-town-market.png" },
+        { "id": "armory", "title": "军械室", "url": "/images/niannian-worldpacks/westfantasy/15-armory.png" },
+        { "id": "royal-ballroom", "title": "王家舞厅", "url": "/images/niannian-worldpacks/westfantasy/16-royal-ballroom.png" },
+        { "id": "observatory", "title": "星图观测室", "url": "/images/niannian-worldpacks/westfantasy/17-observatory.png" },
+        { "id": "border-fortress", "title": "北境堡垒", "url": "/images/niannian-worldpacks/westfantasy/18-border-fortress.png" },
+        { "id": "ivy-courtyard", "title": "常春藤庭院", "url": "/images/niannian-worldpacks/westfantasy/19-ivy-courtyard.png" },
+        { "id": "healing-conservatory", "title": "疗愈花房", "url": "/images/niannian-worldpacks/westfantasy/20-healing-conservatory.png" }
+      ]
+    }
+  ]
+}

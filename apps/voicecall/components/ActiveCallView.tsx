@@ -6,6 +6,7 @@ import { formatDuration } from '../utils';
 import { sanitizeVoiceCallAssistantText } from '../voiceCallTextSanitizer';
 import type { EngineState,VoiceCallSubtitleEntry } from '../useVoiceCallEngine';
 import type { VoiceCallMode,VoiceCallReplyChannel } from '../voiceCallTypes';
+import { focusPreventScroll } from '../../../utils/viewportRepair';
 
 // ─── 打字机效果组件 ────────────────────────────────────────────
 const TypewriterText: React.FC<{ text: string; speed?: number }> = ({ text, speed = 40 }) => {
@@ -209,7 +210,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
         if (isTextReplyChannel && !textInputOpenedForReplyChannelRef.current) {
             textInputOpenedForReplyChannelRef.current = true;
             setIsTextInputVisible(true);
-            setTimeout(() => inputRef.current?.focus(), 200);
+            setTimeout(() => focusPreventScroll(inputRef.current), 200);
         } else if (!isTextReplyChannel) {
             textInputOpenedForReplyChannelRef.current = false;
         }
@@ -224,7 +225,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
             if (!isTextInputVisible) {
                 textInputAutoOpenedByMuteRef.current = false;
                 setIsTextInputVisible(true);
-                setTimeout(() => inputRef.current?.focus(), 200);
+                setTimeout(() => focusPreventScroll(inputRef.current), 200);
             }
             return;
         }
@@ -233,7 +234,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
             if (!isTextInputVisible) {
                 textInputAutoOpenedByMuteRef.current = true;
                 setIsTextInputVisible(true);
-                setTimeout(() => inputRef.current?.focus(), 200);
+                setTimeout(() => focusPreventScroll(inputRef.current), 200);
             }
             // 用户已手动打开 → 不干涉，ref 保持 false
         } else {
@@ -248,7 +249,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
     const toggleTextInput = useCallback(() => {
         if (voiceInputDisabled) {
             setIsTextInputVisible(true);
-            setTimeout(() => inputRef.current?.focus(), 100);
+            setTimeout(() => focusPreventScroll(inputRef.current), 100);
             return;
         }
 
@@ -256,7 +257,7 @@ const ActiveCallView: React.FC<ActiveCallViewProps> = ({
             const next = !prev;
             if (next) {
                 // 延迟 focus，等动画展开
-                setTimeout(() => inputRef.current?.focus(), 200);
+                setTimeout(() => focusPreventScroll(inputRef.current), 200);
             }
             return next;
         });

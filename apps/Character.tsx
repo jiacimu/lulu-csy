@@ -69,6 +69,10 @@ function areWorldbookContentsEqual(existingContent: string, importedContent?: st
     return (existingContent || '').trim() === (importedContent || '').trim();
 }
 
+function hasWorldbookContent(content?: string): boolean {
+    return typeof content === 'string' && content.trim().length > 0;
+}
+
 function buildImportedWorldbookId(usedIds: Set<string>, index: number): string {
     let suffix = 0;
     let candidate = `wb-imported-${Date.now()}-${index}`;
@@ -608,7 +612,10 @@ const CharacterComponent: React.FC = () => {
             const existingBook = existingById.get(importedId);
             let finalBook: Worldbook;
 
-            if (existingBook && areWorldbookContentsEqual(existingBook.content, mounted.content)) {
+            if (
+                existingBook
+                && (!hasWorldbookContent(mounted.content) || areWorldbookContentsEqual(existingBook.content, mounted.content))
+            ) {
                 finalBook = existingBook;
             } else {
                 const finalId = existingBook

@@ -289,4 +289,53 @@ describe('Character render isolation', () => {
         expect(mockSetActiveCharacterId).toHaveBeenCalledWith(savedCharacter.id);
         expect(mockAddToast).toHaveBeenCalledWith(expect.stringContaining('已同步 1 本世界书'), 'success');
     });
+
+    it('reuses existing worldbook content when an imported card mount is empty', async () => {
+        const existingWorldbook = {
+            id: 'wb-shared',
+            title: '已有世界书',
+            content: '全局世界书正文应该被模型读取。',
+            category: '全局分组',
+            position: 'bottom',
+            createdAt: 1,
+            updatedAt: 1,
+        };
+        mockCharacterDeps({
+            worldbooks: [existingWorldbook],
+        });
+        const { container } = render(<Character />);
+        const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+        const file = new File([
+            JSON.stringify({
+                type: 'sully_character_card',
+                version: 1,
+                name: '导入角色',
+                avatar: 'avatar-import.png',
+                description: '导入测试',
+                systemPrompt: '导入的人设',
+                mountedWorldbooks: [{
+                    id: 'wb-shared',
+                    title: '卡内空世界书',
+                    content: '',
+                    category: '',
+                }],
+            }),
+        ], 'character-card.json', { type: 'application/json' });
+
+        fireEvent.change(input, { target: { files: [file] } });
+
+        await waitFor(() => expect(DB.saveCharacter).toHaveBeenCalled());
+
+        expect(DB.saveWorldbook).not.toHaveBeenCalled();
+        const savedCharacter = vi.mocked(DB.saveCharacter).mock.calls[0][0] as any;
+        expect(savedCharacter.mountedWorldbooks).toEqual([
+            expect.objectContaining({
+                id: 'wb-shared',
+                title: '已有世界书',
+                content: '全局世界书正文应该被模型读取。',
+                category: '全局分组',
+                position: 'bottom',
+            }),
+        ]);
+    });
 });

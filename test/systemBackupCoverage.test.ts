@@ -4,6 +4,7 @@ import path from 'node:path';
 import JSZip from 'jszip';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { DB } from '../utils/db';
+import { ContextBuilder } from '../utils/context';
 import {
     DB_NAME_CONST,
     STORE_MEMORY_RECORD_AUDIO,
@@ -287,6 +288,60 @@ describe('system backup coverage', () => {
         expect(localStorage.getItem('chat_auto_tts_char-a')).toBe('true');
         expect(localStorage.getItem('csyos_backend_alive')).toBeNull();
     }, 15000);
+
+    it('hydrates character-mounted worldbook content from the imported worldbook library', async () => {
+        const zip = new JSZip();
+        zip.file('data.json', JSON.stringify({
+            timestamp: Date.now(),
+            version: 1,
+            characters: [{
+                id: 'char-wb',
+                name: '导入角色',
+                avatar: '',
+                description: '',
+                systemPrompt: '保持导入人设。',
+                memories: [],
+                mountedWorldbooks: [{
+                    id: 'wb-imported',
+                    title: '旧挂载标题',
+                    content: '',
+                    category: '',
+                }],
+            }],
+            worldbooks: [{
+                id: 'wb-imported',
+                title: '导入世界书',
+                content: '这段世界书正文必须进入模型上下文。',
+                category: '导入设定',
+                position: 'bottom',
+                createdAt: 1,
+                updatedAt: 1,
+            }],
+        }));
+        const backupBlob = await zip.generateAsync({ type: 'blob' });
+
+        await importWithoutReload(new File([backupBlob], 'worldbook-hydration.zip', { type: 'application/zip' }));
+
+        const restoredChars = await DB.getAllCharacters();
+        expect(restoredChars[0].mountedWorldbooks).toEqual([
+            expect.objectContaining({
+                id: 'wb-imported',
+                title: '旧挂载标题',
+                content: '这段世界书正文必须进入模型上下文。',
+                category: '导入设定',
+                position: 'bottom',
+            }),
+        ]);
+
+        const prompt = ContextBuilder.buildCoreContext(
+            restoredChars[0],
+            { name: 'User', avatar: '', bio: '' },
+            false,
+            'vector',
+        );
+        expect(prompt).toContain('扩展设定集 · 最终指令');
+        expect(prompt).toContain('这段世界书正文必须进入模型上下文。');
+    });
 
     it('roundtrips image generation settings, saved image references, newspapers, and HalfSugar data', async () => {
         await DB.saveCharacter({

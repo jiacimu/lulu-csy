@@ -26,7 +26,10 @@ const DesktopClock = React.memo(({ contentColor, isLite }: {
     return (
         <div className="flex flex-col mb-6 mt-6 relative animate-fade-in" style={{ color: contentColor }}>
             <div className="absolute -top-6 left-1 flex items-center gap-2">
-                <div className={`${isLite ? 'bg-white/45 shadow-sm' : 'bg-white/20 backdrop-blur-md'} px-2 py-0.5 rounded text-[10px] font-bold tracking-widest uppercase border border-white/10`}>
+                <div
+                    className={`${isLite ? 'bg-white/45 shadow-sm' : 'bg-white/20 backdrop-blur-md'} px-2 py-0.5 rounded text-[10px] font-bold tracking-widest uppercase border border-white/10`}
+                    data-viewport-debug-trigger="true"
+                >
                     System Ready
                 </div>
                 <div className="h-[1px] w-20 bg-gradient-to-r from-current to-transparent opacity-40"></div>

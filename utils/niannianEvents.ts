@@ -314,11 +314,11 @@ function getStageWeightOverride(
     const weights = world.eventWeights || {};
     const stageWeights = weights[stage];
     if (stageWeights && typeof stageWeights === 'object' && !Array.isArray(stageWeights)) {
-        const keyed = stageWeights[event.名称] ?? stageWeights[event.id];
+        const keyed = stageWeights[event.名称] ?? stageWeights[event.id] ?? (event.类目 ? stageWeights[event.类目] : undefined);
         return typeof keyed === 'number' && Number.isFinite(keyed) ? keyed : undefined;
     }
 
-    const flat = weights[event.名称] ?? weights[event.id];
+    const flat = weights[event.名称] ?? weights[event.id] ?? (event.类目 ? weights[event.类目] : undefined);
     return typeof flat === 'number' && Number.isFinite(flat) ? flat : undefined;
 }
 
@@ -330,11 +330,11 @@ function normalizeEventLookupText(value: string): string {
 }
 
 function getEventAliasTokens(event: NianNianEventPrototype): string[] {
-    const examples = Object.values(event.跨题材示例)
+    const examples = Object.values(event.跨题材示例 || {})
         .flatMap(value => value.split(/[\/｜|、，,\s]+/))
         .map(value => value.trim())
         .filter(Boolean);
-    return [event.id, event.名称, ...examples];
+    return [event.id, event.名称, event.类目 || '', ...examples].filter(Boolean);
 }
 
 export function resolveNianNianEventPrototype(raw: string): NianNianEventPrototype | null {
@@ -356,7 +356,11 @@ export function buildNianNianEventDeck(input: {
 }): NianNianEventDeck {
     const recentEventIds = (input.recentEventIds || []).slice(-NIANNIAN_RECENT_EVENT_LIMIT);
     const recentSet = new Set(recentEventIds);
-    const compatible = NIANNIAN_EVENT_PROTOTYPES
+    const eventPrototypes = [
+        ...NIANNIAN_EVENT_PROTOTYPES,
+        ...(input.world.eventPrototypes || []),
+    ];
+    const compatible = eventPrototypes
         .filter(event => event.适配stage.includes(input.stage))
         .map((event): NianNianEventCandidate => {
             const override = getStageWeightOverride(input.world, input.stage, event);

@@ -102,6 +102,49 @@ const deserializeVoiceAudio = async (items?: SerializedVoiceAudio[]): Promise<Vo
     return restored;
 };
 
+const hasTextContent = (value: unknown): value is string => (
+    typeof value === 'string' && value.trim().length > 0
+);
+
+const hydrateMountedWorldbooksFromBackupLibrary = (data: FullBackupData): void => {
+    if (!Array.isArray(data.characters) || data.characters.length === 0) return;
+    if (!Array.isArray(data.worldbooks) || data.worldbooks.length === 0) return;
+
+    const worldbookById = new Map<string, any>();
+    for (const book of data.worldbooks) {
+        if (book?.id) worldbookById.set(book.id, book);
+    }
+    if (worldbookById.size === 0) return;
+
+    data.characters = data.characters.map(character => {
+        if (!Array.isArray(character.mountedWorldbooks) || character.mountedWorldbooks.length === 0) {
+            return character;
+        }
+
+        let changed = false;
+        const mountedWorldbooks = character.mountedWorldbooks.map(mounted => {
+            const source = mounted?.id ? worldbookById.get(mounted.id) : null;
+            if (!source) return mounted;
+
+            const next = {
+                ...mounted,
+                title: hasTextContent(mounted.title) ? mounted.title : source.title,
+                content: hasTextContent(mounted.content) ? mounted.content : source.content,
+                category: hasTextContent(mounted.category) ? mounted.category : source.category,
+                position: mounted.position || source.position,
+            };
+
+            changed = changed || next.title !== mounted.title
+                || next.content !== mounted.content
+                || next.category !== mounted.category
+                || next.position !== mounted.position;
+            return next;
+        });
+
+        return changed ? { ...character, mountedWorldbooks } : character;
+    });
+};
+
 export const exportFullData = async (): Promise<Partial<FullBackupData>> => {
     const db = await openDB();
 
@@ -164,6 +207,7 @@ export const importFullData = async (data: FullBackupData): Promise<void> => {
     const db = await openDB();
     const importedMemoryRecordAudio = await deserializeMemoryRecordAudio(data.memoryRecordAudio);
     const importedVoiceAudio = await deserializeVoiceAudio(data.voiceAudio);
+    hydrateMountedWorldbooksFromBackupLibrary(data);
 
     const availableStores = [
         STORE_CHARACTERS, STORE_MESSAGES, STORE_THEMES, STORE_EMOJIS, STORE_EMOJI_CATEGORIES,
@@ -181,7 +225,7 @@ export const importFullData = async (data: FullBackupData): Promise<void> => {
     const tx = db.transaction(availableStores, 'readwrite');
 
     const clearAndAdd = (storeName: string, items: any[]) => {
-        if (!availableStores.includes(storeName) || !items || items.length === 0) return;
+        if (!availableStores.includes(storeName) || !Array.isArray(items)) return;
         const store = tx.objectStore(storeName);
         store.clear();
         items.forEach(item => store.put(item));

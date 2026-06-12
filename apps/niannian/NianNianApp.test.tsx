@@ -68,6 +68,73 @@ world.拘束: 75
 \`world.拘束[0-100]\`
 `;
 
+const minguoWorldPackMarkdown = `# 念念浮生 · 世界包 · 民国测试
+
+## meta
+- world_id: \`minguo\`
+- world_name: 民国 · 风声与旧影
+
+### genre
+民国乱世 · 测试
+
+### tone
+风声与体面。
+
+### 文风
+报纸油墨与雨夜电车。
+
+### char_identity
+报馆主笔
+
+### mc_identity
+名门小姐
+
+### seedStatus
+\`\`\`status
+<<<STATUS>>>
+ta.好感: 6
+me.名声: 70
+world.风声: 12
+world.牵连: 5
+<<<END>>>
+\`\`\`
+
+### openingStep
+\`\`\`json
+{
+  "sceneText": "舞厅后门,雨声正密。",
+  "options": [
+    { "id": "minguo-test", "label": "接过他的伞。" }
+  ],
+  "allowFreeInput": true
+}
+\`\`\`
+
+### hiddenVarsSeed
+\`\`\`json
+{ "旧案": 5 }
+\`\`\`
+
+### status_schema
+\`world.风声[0-100]\`
+\`world.牵连[0-100]\`
+
+### fateBook
+\`\`\`json
+[
+  {
+    "key": "rumor",
+    "seal": "声",
+    "title": "名声",
+    "items": [
+      { "label": "风声", "path": "status.worldExtra.风声" },
+      { "label": "旧案", "path": "director.hiddenVars.旧案", "fallback": "0" }
+    ]
+  }
+]
+\`\`\`
+`;
+
 const character = {
     id: 'char-1',
     name: '念念',
@@ -169,6 +236,33 @@ describe('NianNianApp', () => {
         expect(saved.currentStep.options).toEqual([]);
         expect(saved.status.me.身份).toBe('未设定');
         expect(saved.status.scene.情境).toBe('');
+    });
+
+    it('loads a selected world pack and saves its custom fate book', async () => {
+        vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+            ok: true,
+            text: async () => String(url).includes('minguo')
+                ? minguoWorldPackMarkdown
+                : worldPackMarkdown,
+        })));
+
+        render(<NianNianApp />);
+
+        await screen.findByText('副本初始化');
+        fireEvent.change(screen.getByLabelText('世界包'), {
+            target: { value: 'minguo' },
+        });
+
+        await screen.findByDisplayValue('民国乱世 · 测试');
+        fireEvent.click(screen.getByText('初始化 Session'));
+
+        await screen.findByText('舞厅后门,雨声正密。');
+        const saved = mockedSaveSession.mock.calls[0][0] as NianNianSession;
+        expect(saved.world.worldId).toBe('minguo');
+        expect(saved.world.worldName).toBe('民国 · 风声与旧影');
+        expect(saved.world.fateBookSections?.[0].title).toBe('名声');
+        expect(saved.status.worldExtra.风声).toBe(12);
+        expect(saved.director.hiddenVars.旧案).toBe(5);
     });
 
     it('applies real main and director replies when the player clicks an opening option', async () => {

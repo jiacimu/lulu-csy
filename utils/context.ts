@@ -13,9 +13,10 @@ import { buildSoftDevotionChatModePrompt } from './softDevotionPrompt';
 // 世界书渲染辅助函数（按数组顺序输出）
 type MountedWb = NonNullable<CharacterProfile['mountedWorldbooks']>[number];
 const renderWbBlock = (books: MountedWb[], label?: string): string => {
-    if (books.length === 0) return '';
+    const readableBooks = books.filter(wb => typeof wb.content === 'string' && wb.content.trim().length > 0);
+    if (readableBooks.length === 0) return '';
     let block = label ? `### ${label}\n` : '';
-    books.forEach(wb => {
+    readableBooks.forEach(wb => {
         const cat = wb.category || '通用设定 (General)';
         block += `#### [${cat}] ${wb.title}\n${wb.content}\n---\n`;
     });
@@ -189,7 +190,11 @@ export const ContextBuilder = {
         if (!char.impression) missing.push('impression');
         if (!char.refinedMemories || Object.keys(char.refinedMemories).length === 0) missing.push('refinedMemories');
         if (!char.activeMemoryMonths || char.activeMemoryMonths.length === 0) missing.push('activeMemoryMonths');
-        if (!char.mountedWorldbooks || char.mountedWorldbooks.length === 0) missing.push('worldbooks');
+        if (!char.mountedWorldbooks || char.mountedWorldbooks.length === 0) {
+            missing.push('worldbooks');
+        } else if (!char.mountedWorldbooks.some(wb => typeof wb.content === 'string' && wb.content.trim().length > 0)) {
+            missing.push('worldbookContent');
+        }
         if (!char.worldview) missing.push('worldview');
         if (missing.length > 0) {
             console.log(`⚠️ [Context] Missing/empty fields: ${missing.join(', ')} | context_chars=${context.length}`);

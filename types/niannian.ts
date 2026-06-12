@@ -12,17 +12,13 @@ export type NianNianEventWeights = Record<string, number | Record<string, number
 
 export interface NianNianEventPrototype {
     id: string;
+    类目?: string;
     名称: string;
     功能: string;
     情绪: string;
     适配stage: NianNianStage[];
     基础权重: number;
-    跨题材示例: {
-        古代: string;
-        仙侠: string;
-        武侠: string;
-        民国: string;
-    };
+    跨题材示例: Record<string, string>;
 }
 
 export interface NianNianStatusField {
@@ -33,7 +29,39 @@ export interface NianNianStatusField {
     max?: number;
 }
 
+export interface NianNianFateBookItem {
+    label: string;
+    path?: string;
+    value?: string | number | boolean;
+    format?: 'text' | 'turn' | 'reputation' | 'milestones' | 'recentEvents' | 'endingReady' | 'endingRoutes';
+    fallback?: string;
+}
+
+export interface NianNianFateBookSection {
+    key: string;
+    seal: string;
+    title: string;
+    items: NianNianFateBookItem[];
+}
+
+export interface NianNianEndingRoute {
+    key?: string;
+    title: string;
+    description?: string;
+}
+
+export interface NianNianEventCategory {
+    name: string;
+    events: Array<{
+        id?: string;
+        name: string;
+        description: string;
+    }>;
+}
+
 export interface NianNianWorldBible {
+    worldId?: string;
+    worldName?: string;
     theme: string;
     tone: string;
     charIdentity: string;
@@ -41,8 +69,15 @@ export interface NianNianWorldBible {
     opening: string;
     statusSchema: NianNianStatusField[];
     eventWeights: NianNianEventWeights;
+    eventPrototypes?: NianNianEventPrototype[];
+    eventCategories?: NianNianEventCategory[];
     customPrompt?: string;
     worldStyle?: string;
+    intimacyConstraint?: string;
+    statusInstructions?: string;
+    directorNotes?: string;
+    endingRoutes?: NianNianEndingRoute[];
+    fateBookSections?: NianNianFateBookSection[];
     seedStatus?: Record<string, any>;
     openingStep?: NianNianWorldOpeningStep;
     hiddenVarsSeed?: Record<string, number>;

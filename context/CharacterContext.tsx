@@ -16,6 +16,55 @@ const LEGACY_SULLY_AVATAR_URLS = new Set([
     'https://sharkpan.xyz/f/BZ3VSa/head.png',
 ]);
 
+function hasWorldbookText(value: unknown): value is string {
+    return typeof value === 'string' && value.trim().length > 0;
+}
+
+function hydrateMountedWorldbooksFromLibrary(
+    characters: CharacterProfile[],
+    worldbooks: Worldbook[],
+): { characters: CharacterProfile[]; changedCharacters: CharacterProfile[] } {
+    if (characters.length === 0 || worldbooks.length === 0) {
+        return { characters, changedCharacters: [] };
+    }
+
+    const worldbookById = new Map(worldbooks.map(book => [book.id, book]));
+    const changedCharacters: CharacterProfile[] = [];
+
+    const hydratedCharacters = characters.map(character => {
+        if (!Array.isArray(character.mountedWorldbooks) || character.mountedWorldbooks.length === 0) {
+            return character;
+        }
+
+        let changed = false;
+        const mountedWorldbooks = character.mountedWorldbooks.map(mounted => {
+            const source = mounted.id ? worldbookById.get(mounted.id) : undefined;
+            if (!source) return mounted;
+
+            const next = {
+                ...mounted,
+                title: hasWorldbookText(mounted.title) ? mounted.title : source.title,
+                content: hasWorldbookText(mounted.content) ? mounted.content : source.content,
+                category: hasWorldbookText(mounted.category) ? mounted.category : source.category,
+                position: mounted.position || source.position,
+            };
+
+            changed = changed || next.title !== mounted.title
+                || next.content !== mounted.content
+                || next.category !== mounted.category
+                || next.position !== mounted.position;
+            return next;
+        });
+
+        if (!changed) return character;
+        const hydratedCharacter = { ...character, mountedWorldbooks };
+        changedCharacters.push(hydratedCharacter);
+        return hydratedCharacter;
+    });
+
+    return { characters: hydratedCharacters, changedCharacters };
+}
+
 interface MigrationProgress {
     current: number;
     total: number;
@@ -330,6 +379,13 @@ export const CharacterProvider: React.FC<CharacterProviderProps> = ({
                 }
 
                 if (finalChars.length > 0) {
+                    const hydrationResult = hydrateMountedWorldbooksFromLibrary(finalChars, dbWorldbooks);
+                    finalChars = hydrationResult.characters;
+                    if (hydrationResult.changedCharacters.length > 0) {
+                        await Promise.all(hydrationResult.changedCharacters.map(character => DB.saveCharacter(character)));
+                        console.log(`[Migration] Hydrated mounted worldbook content for ${hydrationResult.changedCharacters.length} character(s)`);
+                    }
+
                     // One-time migration: revert chinst_ data back to char.id
                     await runChinstRevertMigration(finalChars, setMigrationProgress);
 

@@ -9,6 +9,7 @@ import { processImage } from '../utils/file';
 import ChatBubble from '../components/chat/ChatBubble';
 import VoiceBubble from '../components/chat/VoiceBubble';
 import DefaultTransferCard from '../components/chat/plugins/DefaultTransferCard';
+import { focusPreventScroll } from '../utils/viewportRepair';
 
 const DEFAULT_STYLE: BubbleStyle = {
     textColor: '#334155',
@@ -538,7 +539,7 @@ const ThemeMaker: React.FC = () => {
 
     const copyThemeJson = async () => {
         const selectTextarea = (textarea: HTMLTextAreaElement) => {
-            textarea.focus();
+            focusPreventScroll(textarea);
             textarea.select();
             textarea.setSelectionRange(0, textarea.value.length);
         };

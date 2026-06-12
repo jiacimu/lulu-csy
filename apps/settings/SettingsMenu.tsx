@@ -1,11 +1,12 @@
 
-import React,{ useMemo } from 'react';
+import React,{ useMemo,useState } from 'react';
 import { haptic } from '../../utils/haptics';
 import { requestSystemFullscreen,exitSystemFullscreen } from '../../utils/systemFullscreen';
 import { getRuntimeConfigSnapshot,inferEmbeddingEngineId } from '../../utils/runtimeConfig';
 import { safeLocalStorageGet,safeLocalStorageSet } from '../../utils/storage';
 import { usePerformanceMode } from '../../hooks/usePerformanceMode';
 import type { PerformanceModePreference } from '../../utils/performanceMode';
+import { resetViewport } from '../../utils/viewportRepair';
 
 export type SettingsPanel = 'menu' | 'data' | 'api' | 'subapi' | 'realtime' | 'tts' | 'stt' | 'image' | 'embedding' | 'agent' | 'debug';
 
@@ -143,6 +144,7 @@ function readStatuses(): Record<string, string | undefined> {
 const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
     const statuses = useMemo(readStatuses, []);
     const performanceMode = usePerformanceMode();
+    const [viewportCalibrated, setViewportCalibrated] = useState(false);
 
     // Haptics toggle — UI-only preference via storage helper
     const [hapticsEnabled, setHapticsEnabled] = React.useState(() => {
@@ -171,6 +173,12 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
     const setPerformancePreference = (preference: PerformanceModePreference) => {
         haptic.light();
         performanceMode.setPreference(preference);
+    };
+
+    const calibrateViewport = () => {
+        haptic.medium();
+        resetViewport();
+        setViewportCalibrated(true);
     };
 
     const statusMap: Record<string, string | undefined> = {
@@ -241,6 +249,26 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
                     <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500"></div>
                 </label>
             </div>
+
+            {/* 画面校准 */}
+            <button
+                type="button"
+                onClick={calibrateViewport}
+                className="w-full flex items-center justify-between bg-white/60 backdrop-blur-sm rounded-2xl p-4 shadow-sm border border-white/50 active:scale-[0.98] transition-all text-left"
+            >
+                <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2 bg-rose-100/50 rounded-xl text-rose-600 shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.364-6.364-2.121 2.121M7.757 16.243l-2.121 2.121m12.728 0-2.121-2.121M7.757 7.757 5.636 5.636M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z" /></svg>
+                    </div>
+                    <div className="min-w-0">
+                        <div className="text-sm font-semibold text-slate-700">校准画面</div>
+                        <div className="text-[10px] text-slate-400 truncate">
+                            {viewportCalibrated ? '已重新归位页面偏移' : '修正键盘收起后的错位与黑边'}
+                        </div>
+                    </div>
+                </div>
+                <span className="text-[10px] font-bold text-rose-500 shrink-0">执行</span>
+            </button>
 
             {/* 流畅模式 */}
             <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-4 shadow-sm border border-white/50">

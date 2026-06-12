@@ -26,4 +26,35 @@ describe('niannianWorldPackage', () => {
             { key: '拘束', label: '拘束', type: 'number', min: 0, max: 100 },
         ]);
     });
+
+    it('parses v2 world pack fields for western fantasy and republic-era packs', () => {
+        const west = parseNianNianWorldBibleMarkdown(readFileSync(
+            'public/worldpacks/westfantasy.md',
+            'utf8',
+        ));
+        const minguo = parseNianNianWorldBibleMarkdown(readFileSync(
+            'public/worldpacks/minguo.md',
+            'utf8',
+        ));
+
+        expect(west.worldId).toBe('westfantasy');
+        expect(west.worldName).toContain('誓约');
+        expect(west.statusSchema).toEqual([
+            { key: '誓约', label: '誓约', type: 'number', min: 0, max: 100 },
+        ]);
+        expect(west.hiddenVarsSeed?.流言).toBe(0);
+        expect(west.fateBookSections?.[0].title).toBe('誓约');
+        expect(west.eventPrototypes?.some(event => event.类目 === '礼缚规训')).toBe(true);
+        expect(west.eventWeights.厮守).toEqual(expect.objectContaining({ 收束抉择: 5 }));
+        expect(west.directorNotes).toContain('誓约-流言联动');
+        expect(west.endingRoutes?.[0].title).toContain('请誓');
+
+        expect(minguo.worldId).toBe('minguo');
+        expect(minguo.statusSchema.map(field => field.key)).toEqual(['风声', '牵连']);
+        expect(minguo.seedStatus?.worldExtra.风声).toBe(12);
+        expect(minguo.fateBookSections?.[2].title).toBe('名声');
+        expect(minguo.eventPrototypes?.some(event => event.名称 === '报纸绯闻')).toBe(true);
+        expect(minguo.directorNotes).toContain('报纸绯闻');
+        expect(minguo.endingRoutes?.map(route => route.title)).toContain('别离 · 月台送行');
+    });
 });

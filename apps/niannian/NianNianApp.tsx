@@ -42,7 +42,9 @@ import {
     weave,
 } from '../../utils/niannianEngine';
 import {
-    DEFAULT_NIANNIAN_WORLD_PACK_URL,
+    AVAILABLE_NIANNIAN_WORLD_PACKS,
+    DEFAULT_NIANNIAN_WORLD_PACK_ID,
+    getNianNianWorldPackDefinition,
     loadNianNianWorldBibleFromMarkdown,
 } from '../../utils/niannianWorldPackage';
 import {
@@ -129,14 +131,18 @@ const createInputBeat = (kind: NianNianInputBeat['kind']): NianNianInputBeat & {
     text: '',
 });
 
-function makeSetupDraft(activeCharacterId: string | null | undefined, userName: string): SetupDraft {
+function makeSetupDraft(
+    activeCharacterId: string | null | undefined,
+    userName: string,
+    world?: NianNianWorldBible | null,
+): SetupDraft {
     return {
         charId: activeCharacterId || '',
-        theme: '',
-        tone: '',
-        charIdentity: '',
-        protagonistIdentity: userName || '',
-        opening: '',
+        theme: world?.theme || '',
+        tone: world?.tone || '',
+        charIdentity: world?.charIdentity || '',
+        protagonistIdentity: world?.protagonistIdentity || userName || '',
+        opening: world?.opening || '',
         customPrompt: '',
     };
 }
@@ -208,7 +214,16 @@ function buildWorldBible(
         customPrompt: draft.customPrompt.trim(),
         statusSchema: fallbackWorld.statusSchema || [],
         eventWeights: fallbackWorld.eventWeights || {},
+        eventPrototypes: fallbackWorld.eventPrototypes || [],
+        eventCategories: fallbackWorld.eventCategories || [],
+        worldId: fallbackWorld.worldId,
+        worldName: fallbackWorld.worldName,
         worldStyle: fallbackWorld.worldStyle,
+        intimacyConstraint: fallbackWorld.intimacyConstraint,
+        statusInstructions: fallbackWorld.statusInstructions,
+        directorNotes: fallbackWorld.directorNotes,
+        endingRoutes: fallbackWorld.endingRoutes,
+        fateBookSections: fallbackWorld.fateBookSections,
         seedStatus: buildSeedStatus(fallbackWorld.seedStatus, draft, touched),
         openingStep: openingTouched
             ? undefined
@@ -545,8 +560,130 @@ function makeInitials(name: string): string {
 
 function formatFateValue(value: unknown): string | number {
     if (value === null || value === undefined || value === '') return '未载';
-    if (Array.isArray(value)) return value.length > 0 ? value.join('、') : '无';
+    if (Array.isArray(value)) {
+        if (value.length === 0) return '无';
+        if (value.every(item => item && typeof item === 'object' && 'name' in item)) {
+            return value.map((item: any) => `${item.name}${item.mood ? ` · ${item.mood}` : ''}`).join('、');
+        }
+        return value.join('、');
+    }
     return typeof value === 'number' ? value : String(value);
+}
+
+function readFatePath(source: any, path?: string): unknown {
+    if (!path) return undefined;
+    return path.split('.').reduce((value, key) => {
+        if (value === null || value === undefined) return undefined;
+        return value[key];
+    }, source);
+}
+
+function formatConfiguredFateValue(
+    session: NianNianSession,
+    item: NonNullable<NianNianWorldBible['fateBookSections']>[number]['items'][number],
+): string | number {
+    const rawValue = item.value ?? readFatePath(session, item.path);
+    const fallback = item.fallback || '未载';
+
+    if (item.format === 'turn') {
+        const turn = Number(rawValue || 0);
+        return Number.isFinite(turn) ? `第 ${turn} 回合` : fallback;
+    }
+
+    if (item.format === 'reputation') {
+        const reputation = Number(rawValue);
+        return Number.isFinite(reputation) ? formatReputation(reputation) : fallback;
+    }
+
+    if (item.format === 'milestones') {
+        return session.milestones.length > 0 ? session.milestones.slice(-3).join('、') : fallback;
+    }
+
+    if (item.format === 'recentEvents') {
+        const events = session.director.eventHistory || [];
+        return events.length > 0 ? events.slice(-3).map(event => event.name).join('、') : fallback;
+    }
+
+    if (item.format === 'endingReady') {
+        return rawValue ? '已临终局' : '未到火候';
+    }
+
+    if (item.format === 'endingRoutes') {
+        const routes = session.world.endingRoutes || [];
+        return routes.length > 0 ? routes.map(route => route.title).join(' / ') : fallback;
+    }
+
+    const formatted = formatFateValue(rawValue);
+    return formatted === '未载' ? fallback : formatted;
+}
+
+function buildDefaultFateBookSections(session: NianNianSession, sceneBg: NianNianSceneVisual): FateBookSection[] {
+    return [
+        {
+            key: 'moment',
+            seal: '景',
+            title: '此刻',
+            items: [
+                { label: '阶段', value: session.director.stage },
+                { label: '回合', value: `第 ${session.director.turn} 回合` },
+                { label: '时辰', value: formatFateValue(session.status.scene.时辰) },
+                { label: '地点', value: formatFateValue(session.status.scene.地点) },
+                { label: '场景', value: sceneBg.label },
+            ],
+        },
+        {
+            key: 'ta',
+            seal: '他',
+            title: '其人',
+            items: [
+                { label: '好感', value: session.status.ta.好感 },
+                { label: '暧昧', value: session.status.ta.暧昧度 },
+                { label: '心情', value: formatFateValue(session.status.ta.心情) },
+                { label: '心声', value: formatFateValue(session.status.ta.心声) },
+            ],
+        },
+        {
+            key: 'me',
+            seal: '我',
+            title: '我身',
+            items: [
+                { label: '身份', value: formatFateValue(session.status.me.身份) },
+                { label: '银两', value: session.status.me.银两 },
+                { label: '体力', value: session.status.me.体力 },
+                { label: '名声', value: formatReputation(session.status.me.名声) },
+            ],
+        },
+        {
+            key: 'world',
+            seal: '世',
+            title: '世局',
+            items: [
+                ...Object.entries(session.status.worldExtra || {}).map(([label, value]) => ({
+                    label,
+                    value: formatFateValue(value),
+                })),
+                {
+                    label: '在场旁人',
+                    value: formatFateValue(session.status.npcsOnScene),
+                },
+            ],
+        },
+    ];
+}
+
+function buildFateBookSections(session: NianNianSession, sceneBg: NianNianSceneVisual): FateBookSection[] {
+    const configured = session.world.fateBookSections;
+    if (!configured || configured.length === 0) return buildDefaultFateBookSections(session, sceneBg);
+
+    return configured.map(section => ({
+        key: section.key,
+        seal: section.seal,
+        title: section.title,
+        items: section.items.map(item => ({
+            label: item.label,
+            value: formatConfiguredFateValue(session, item),
+        })),
+    }));
 }
 
 function cloneInputBeats(beats: Array<NianNianInputBeat & { id?: string }>): Array<NianNianInputBeat & { id: string }> {
@@ -591,6 +728,7 @@ const NianNianApp: React.FC = () => {
     const userName = userProfile?.name?.trim() || '你';
     const [sessions, setSessions] = useState<NianNianSession[]>([]);
     const [session, setSession] = useState<NianNianSession | null>(null);
+    const [selectedWorldPackId, setSelectedWorldPackId] = useState(DEFAULT_NIANNIAN_WORLD_PACK_ID);
     const [setupDraft, setSetupDraft] = useState<SetupDraft>(() => makeSetupDraft(activeCharacterId, userName));
     const [setupTouched, setSetupTouched] = useState<SetupTouchedState>({});
     const setupTouchedRef = useRef<SetupTouchedState>({});
@@ -614,6 +752,10 @@ const NianNianApp: React.FC = () => {
         () => resolveCharacter(characters, setupDraft.charId),
         [characters, setupDraft.charId],
     );
+    const selectedWorldPack = useMemo(
+        () => getNianNianWorldPackDefinition(selectedWorldPackId),
+        [selectedWorldPackId],
+    );
     const sessionCharacter = session ? resolveCharacter(characters, session.charId) : null;
     const sendableBeats = useMemo(() => sanitizeNianNianInputBeats(inputBeats), [inputBeats]);
 
@@ -624,23 +766,35 @@ const NianNianApp: React.FC = () => {
         setSetupDraft(prev => ({ ...prev, [field]: value }));
     };
 
+    const handleWorldPackChange = (worldPackId: string) => {
+        setSelectedWorldPackId(worldPackId);
+        setupTouchedRef.current = {};
+        setSetupTouched({});
+        setTurnError(null);
+    };
+
     useEffect(() => {
         let cancelled = false;
         const loadWorldPackage = async () => {
             try {
-                const world = await loadNianNianWorldBibleFromMarkdown(DEFAULT_NIANNIAN_WORLD_PACK_URL);
+                const world = await loadNianNianWorldBibleFromMarkdown(selectedWorldPack.url);
                 if (cancelled) return;
-                setWorldPackage(world);
+                const normalizedWorld: NianNianWorldBible = {
+                    ...world,
+                    worldId: world.worldId || selectedWorldPack.id,
+                    worldName: world.worldName || selectedWorldPack.name,
+                };
+                setWorldPackage(normalizedWorld);
                 setSetupDraft(prev => ({
                     ...prev,
-                    theme: setupTouchedRef.current.theme ? prev.theme : prev.theme || world.theme,
-                    tone: setupTouchedRef.current.tone ? prev.tone : prev.tone || world.tone,
-                    charIdentity: setupTouchedRef.current.charIdentity ? prev.charIdentity : prev.charIdentity || world.charIdentity,
+                    theme: setupTouchedRef.current.theme ? prev.theme : normalizedWorld.theme,
+                    tone: setupTouchedRef.current.tone ? prev.tone : normalizedWorld.tone,
+                    charIdentity: setupTouchedRef.current.charIdentity ? prev.charIdentity : normalizedWorld.charIdentity,
                     protagonistIdentity:
                         setupTouchedRef.current.protagonistIdentity
                             ? prev.protagonistIdentity
-                            : world.protagonistIdentity || prev.protagonistIdentity,
-                    opening: setupTouchedRef.current.opening ? prev.opening : prev.opening || world.opening,
+                            : normalizedWorld.protagonistIdentity || userName || prev.protagonistIdentity,
+                    opening: setupTouchedRef.current.opening ? prev.opening : normalizedWorld.opening,
                 }));
             } catch (err) {
                 if (!cancelled) console.warn('[NianNian] failed to load world package', err);
@@ -651,7 +805,7 @@ const NianNianApp: React.FC = () => {
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [selectedWorldPack, userName]);
 
     useEffect(() => {
         let cancelled = false;
@@ -735,59 +889,7 @@ const NianNianApp: React.FC = () => {
     const showLoadingCard = Boolean(session && isSubmittingTurn);
     const showErrorCard = Boolean(session && turnError && !isSubmittingTurn);
     const sceneBg = getSceneBg(session);
-    const fateBookSections: FateBookSection[] = session ? [
-        {
-            key: 'moment',
-            seal: '景',
-            title: '此刻',
-            items: [
-                { label: '阶段', value: session.director.stage },
-                { label: '回合', value: `第 ${session.director.turn} 回合` },
-                { label: '时辰', value: formatFateValue(session.status.scene.时辰) },
-                { label: '地点', value: formatFateValue(session.status.scene.地点) },
-                { label: '场景', value: sceneBg.label },
-            ],
-        },
-        {
-            key: 'ta',
-            seal: '他',
-            title: '其人',
-            items: [
-                { label: '好感', value: session.status.ta.好感 },
-                { label: '暧昧', value: session.status.ta.暧昧度 },
-                { label: '心情', value: formatFateValue(session.status.ta.心情) },
-                { label: '心声', value: formatFateValue(session.status.ta.心声) },
-            ],
-        },
-        {
-            key: 'me',
-            seal: '我',
-            title: '我身',
-            items: [
-                { label: '身份', value: formatFateValue(session.status.me.身份) },
-                { label: '银两', value: session.status.me.银两 },
-                { label: '体力', value: session.status.me.体力 },
-                { label: '名声', value: formatReputation(session.status.me.名声) },
-            ],
-        },
-        {
-            key: 'world',
-            seal: '世',
-            title: '世局',
-            items: [
-                ...Object.entries(session.status.worldExtra || {}).map(([label, value]) => ({
-                    label,
-                    value: formatFateValue(value),
-                })),
-                {
-                    label: '在场旁人',
-                    value: session.status.npcsOnScene.length > 0
-                        ? session.status.npcsOnScene.map(npc => `${npc.name}${npc.mood ? ` · ${npc.mood}` : ''}`).join('、')
-                        : '无',
-                },
-            ],
-        },
-    ] : [];
+    const fateBookSections: FateBookSection[] = session ? buildFateBookSections(session, sceneBg) : [];
     const activeFateSection =
         fateBookSections.find(section => section.key === activeFatePageKey) || fateBookSections[0] || null;
 
@@ -1080,7 +1182,7 @@ const NianNianApp: React.FC = () => {
         setTurnError(null);
         setupTouchedRef.current = {};
         setSetupTouched({});
-        setSetupDraft(makeSetupDraft(activeCharacterId, userName));
+        setSetupDraft(makeSetupDraft(activeCharacterId, userName, worldPackage));
     };
 
     const handleToggleFateBook = () => {
@@ -1151,6 +1253,18 @@ const NianNianApp: React.FC = () => {
                         </div>
 
                         <label>
+                            <span>世界包</span>
+                            <select
+                                value={selectedWorldPackId}
+                                onChange={event => handleWorldPackChange(event.target.value)}
+                            >
+                                {AVAILABLE_NIANNIAN_WORLD_PACKS.map(pack => (
+                                    <option key={pack.id} value={pack.id}>{pack.name}</option>
+                                ))}
+                            </select>
+                        </label>
+
+                        <label>
                             <span>选择角色</span>
                             <select
                                 value={setupDraft.charId}
@@ -1203,7 +1317,7 @@ const NianNianApp: React.FC = () => {
                             {sessions.map(item => (
                                 <button key={item.id} type="button" onClick={() => handleSelectSession(item)}>
                                     <strong>{item.charName}</strong>
-                                    <span>{item.world.theme || '未设题材'} · {item.director.stage} · 第 {item.director.turn} 回合</span>
+                                    <span>{item.world.worldName || item.world.theme || '未设题材'} · {item.director.stage} · 第 {item.director.turn} 回合</span>
                                 </button>
                             ))}
                         </section>

@@ -16,6 +16,7 @@ import {
     findLatestDateStatusMessage,
     getRecentDateStatusMessageIds,
 } from '../../utils/dateStatusVisibility';
+import { focusPreventScroll } from '../../utils/viewportRepair';
 
 const StatusCardRenderer = React.lazy(() => import('../chat/StatusCardRenderer'));
 
@@ -662,7 +663,7 @@ const DateSession: React.FC<DateSessionProps> = ({
 
     useEffect(() => {
         if (!showInputBox || isTyping || isAppleMobileWebKit()) return;
-        const id = window.setTimeout(() => inputRef.current?.focus(), 0);
+        const id = window.setTimeout(() => focusPreventScroll(inputRef.current), 0);
         return () => window.clearTimeout(id);
     }, [showInputBox, isTyping]);
 

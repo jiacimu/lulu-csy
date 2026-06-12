@@ -17,6 +17,7 @@ import { Capacitor } from '@capacitor/core';
 import { requestSystemFullscreen } from '../utils/systemFullscreen';
 import { IOS_STANDALONE_CHANGE_EVENT,isIOSStandaloneBrowserWebApp,isIOSStandaloneWebApp } from '../utils/iosStandalone';
 import { usePerformanceMode } from '../hooks/usePerformanceMode';
+import { prepareViewportForUnlock } from '../utils/viewportRepair';
 
 // --- Lazy-loaded Apps (only downloaded when user opens them) ---
 const Settings = React.lazy(() => import('../apps/Settings'));
@@ -314,17 +315,24 @@ const LockScreen: React.FC<LockScreenProps> = ({
   const unreadCount = Object.values(unreadMessages).reduce((a, b) => a + b, 0);
   const unreadCharId = Object.keys(unreadMessages)[0];
   const unreadChar = unreadCharId ? characters.find(c => c.id === unreadCharId) : null;
+  const [isUnlocking, setIsUnlocking] = useState(false);
+
+  const handleUnlock = async () => {
+    if (isUnlocking) return;
+    setIsUnlocking(true);
+
+    if ('Notification' in window && Notification.permission !== 'granted') {
+      Notification.requestPermission();
+    }
+    haptic.light();
+    requestSystemFullscreen();
+    await prepareViewportForUnlock();
+    onUnlock();
+  };
 
   return (
     <div
-      onClick={() => {
-        if ('Notification' in window && Notification.permission !== 'granted') {
-          Notification.requestPermission();
-        }
-        haptic.light();
-        requestSystemFullscreen();
-        onUnlock();
-      }}
+      onClick={handleUnlock}
       className="relative w-full h-full bg-cover bg-center cursor-pointer overflow-hidden group font-light select-none overscroll-none"
       style={{ backgroundImage: bgImageValue, color: contentColor }}
     >
@@ -334,7 +342,12 @@ const LockScreen: React.FC<LockScreenProps> = ({
         <div className="text-8xl tracking-tighter opacity-95 font-bold">
           {virtualTime.hours.toString().padStart(2, '0')}<span className="animate-pulse">:</span>{virtualTime.minutes.toString().padStart(2, '0')}
         </div>
-        <div className="text-lg tracking-widest opacity-90 mt-2 uppercase text-xs font-bold">SullyOS Simulation</div>
+        <div
+          className="text-lg tracking-widest opacity-90 mt-2 uppercase text-xs font-bold"
+          data-viewport-debug-trigger="true"
+        >
+          SullyOS Simulation
+        </div>
       </div>
 
       {unreadCount > 0 && (

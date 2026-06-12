@@ -251,6 +251,7 @@ function FeaturePreviewPage({ onEnterApp }: FeaturePreviewPageProps) {
           <button
             type="button"
             onClick={onEnterApp}
+            data-viewport-debug-trigger="true"
             className="flex items-center gap-3 rounded-full border border-white/20 bg-white/10 px-3 py-2 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] backdrop-blur-xl transition hover:bg-white/15"
           >
             <img src="/icons/icon-192.webp" alt="SullyOS" className="h-9 w-9 rounded-2xl" />
