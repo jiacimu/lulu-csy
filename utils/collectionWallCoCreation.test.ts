@@ -38,10 +38,11 @@ describe('collection wall co-creation guardrails', () => {
         expect(parsed.action === 'note' ? parsed.content.length : 0).toBe(60);
     });
 
-    it('skips non-json, missing fields, and fields outside the whitelist', () => {
+    it('skips non-json, missing content, and fields outside the whitelist', () => {
         expect(parseCharWallNoteResponse('乱码不是 JSON')).toEqual({ action: 'skip' });
         expect(parseCharWallNoteResponse('{"action":"note","anchorId":"item-a","placement":"near_anchor"}')).toEqual({ action: 'skip' });
         expect(parseCharWallNoteResponse('{"action":"note","anchorId":"item-a","placement":"near_anchor","content":"好","deleteItemId":"user-item"}')).toEqual({ action: 'skip' });
+        expect(parseCharWallNoteResponse('{"action":"note","content":"好"}')).toEqual({ action: 'note', content: '好' });
     });
 
     it('falls back to a bottom-right empty spot when the note would cover a user item center', () => {
@@ -68,6 +69,8 @@ describe('collection wall co-creation guardrails', () => {
         expect((note as Partial<CollectionWallItem>).createdAt).toBeUndefined();
         expect(note.author).toBe('char');
         expect(note.type).toBe('text');
+        expect(note.x).toBeGreaterThan(400);
+        expect(note.y).toBeGreaterThan(600);
         expect(note.text?.preset).toBe('char_note');
         expect(note.text?.content).toHaveLength(60);
         expect(source.id).toBe('user-item');

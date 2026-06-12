@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, PaperPlaneTilt, PencilSimple, Trash, X } from '@phosphor-icons/react';
+import { ArrowDown, ArrowUp, Check, PaperPlaneTilt, PencilSimple, Trash, X } from '@phosphor-icons/react';
 import { useOS } from '../context/OSContext';
 import { AppID, type CollectionBook, type CollectionWall, type CollectionWallAsset, type CollectionWallItem, type GalleryImage } from '../types';
 import { DB } from '../utils/db';
@@ -9,9 +9,10 @@ import {
     getCollectionDisplayTitle,
 } from '../utils/collectionBooks';
 import { addCollectionWallPendingContext } from '../utils/collectionWallContext';
-import { buildCharWallNoteItem } from '../utils/collectionWallCoCreation';
+import { buildCharWallNoteItem, requestCharWallNote } from '../utils/collectionWallCoCreation';
 import { hasWallEditorDraftChanges, serializeWallEditorDraft } from '../utils/collectionWallEditorDraft';
 import { getGalleryImageDisplayUrl } from '../utils/generatedImageStorage';
+import { STATUS_CARD_IFRAME_SHELL, STATUS_CARD_MEASURE_BUFFER_PX } from '../components/chat/statusCardIframe';
 const StatusCardRenderer = React.lazy(() => import('../components/chat/StatusCardRenderer'));
 
 /* ============================================================
@@ -136,33 +137,57 @@ const CSS = `
 .ar-dcard:focus-visible{outline:2px solid var(--ar-accent);outline-offset:2px}
 .ar-dcard.pull{transform:translateY(-16px)}
 
-/* ---------- 拾光墙 · 文艺杂志碎片 ---------- */
-.ar-wall{position:relative;margin:19px 16px 28px;padding:18px 14px 16px;overflow:hidden;border-radius:10px;background:linear-gradient(135deg,rgba(244,235,220,.95),rgba(214,229,224,.92) 48%,rgba(237,213,217,.92));box-shadow:0 22px 54px -28px rgba(0,0,0,.78),inset 0 0 0 1px rgba(255,255,255,.42)}
-.ar-wall::before{content:'';position:absolute;inset:0;pointer-events:none;background-image:${NOISE};opacity:.045;mix-blend-mode:multiply}
-.ar-wall-top{position:relative;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;border-bottom:1px solid rgba(49,55,51,.14);padding-bottom:12px}
-.ar-wall-kicker{margin:0;font-size:9px;font-weight:900;letter-spacing:.32em;color:#58665f}
-.ar-wall-title{margin:4px 0 0;font-family:var(--ar-font-display);font-size:24px;line-height:1;font-weight:700;letter-spacing:.05em;color:#211f1b}
-.ar-wall-sub{margin:7px 0 0;font-size:11px;line-height:1.5;color:#6d6157}
-.ar-wall-count{flex:none;min-width:48px;text-align:right;font-family:var(--ar-font-display);font-size:32px;line-height:.9;font-weight:700;color:#9d3f52}
-.ar-wall-count span{display:block;margin-top:5px;font-family:var(--ar-font-ui);font-size:8px;font-weight:900;letter-spacing:.24em;color:#6b7069}
+/* ---------- 角色分区与拾光墙 ---------- */
+.ar-seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:14px 16px 2px;padding:4px;border:1px solid rgba(201,163,106,.16);border-radius:999px;background:rgba(12,9,6,.36)}
+.ar-seg button{height:32px;border:0;border-radius:999px;background:transparent;color:var(--ar-t3);font-size:12px;font-weight:900;letter-spacing:.08em;cursor:pointer;transition:color .18s,background .18s,box-shadow .18s}
+.ar-seg button.on{background:linear-gradient(180deg,rgba(245,224,181,.18),rgba(201,163,106,.10));color:var(--ar-accent);box-shadow:inset 0 0 0 1px rgba(201,163,106,.28)}
+.ar-section-empty{margin:18px 16px 34px;border:1px dashed rgba(201,163,106,.2);border-radius:10px;padding:22px 18px;text-align:center;color:var(--ar-t3);font-size:12px;line-height:1.9;background:rgba(255,236,210,.035)}
+.ar-wall{position:relative;margin:18px 16px 28px;padding:18px 14px 16px;overflow:hidden;border-radius:10px;background:linear-gradient(145deg,#f5efe2,#efe7d6);box-shadow:0 22px 54px -28px rgba(0,0,0,.78),inset 0 0 0 1px rgba(255,255,255,.50)}
+.ar-wall::before,.ar-wall-card::before{content:'';position:absolute;inset:0;pointer-events:none;background-image:${NOISE};opacity:.038;mix-blend-mode:multiply}
+.ar-wall-top{position:relative;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;border-bottom:1px solid rgba(63,48,31,.14);padding-bottom:12px}
+.ar-wall-kicker{margin:0;font-size:9px;font-weight:900;letter-spacing:.32em;color:#8a473f}
+.ar-wall-title{margin:4px 0 0;font-family:var(--ar-font-display);font-size:24px;line-height:1;font-weight:700;letter-spacing:.05em;color:#211a14}
+.ar-wall-sub{margin:7px 0 0;font-size:11px;line-height:1.5;color:#6d5843}
+.ar-wall-count{flex:none;min-width:48px;text-align:right;font-family:var(--ar-font-display);font-size:32px;line-height:.9;font-weight:700;color:#a83a4e}
+.ar-wall-count span{display:block;margin-top:5px;font-family:var(--ar-font-ui);font-size:8px;font-weight:900;letter-spacing:.24em;color:#72593d}
+.ar-wall-actions{position:relative;z-index:1;display:flex;gap:8px;margin-top:13px}
+.ar-wall-act{height:30px;border-radius:999px;border:1px solid rgba(201,163,106,.72);background:transparent;padding:0 12px;font-size:10.5px;font-weight:900;color:#3b2a18;cursor:pointer;transition:background .16s,border-color .16s,transform .12s}
+.ar-wall-act:hover{border-color:rgba(168,58,78,.52);background:rgba(201,163,106,.12)}
+.ar-wall-act:active{transform:scale(.97);background:rgba(201,163,106,.24)}
+.ar-wall-list{display:flex;flex-direction:column;gap:10px;margin:18px 16px 34px}
+.ar-wall-card{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;width:100%;min-height:92px;border:0;border-radius:8px;padding:14px 13px;text-align:left;cursor:pointer;overflow:hidden;background:linear-gradient(145deg,#f5efe2,#efe7d6);box-shadow:0 18px 40px -28px rgba(0,0,0,.8),inset 0 0 0 1px rgba(255,255,255,.48);transition:transform .16s,box-shadow .16s}
+.ar-wall-card:hover{transform:translateY(-2px);box-shadow:0 24px 48px -30px rgba(0,0,0,.85),inset 0 0 0 1px rgba(201,163,106,.34)}
+.ar-wall-card:active{transform:translateY(0) scale(.99)}
+.ar-wall-card h3{position:relative;z-index:1;margin:0;font-family:var(--ar-font-display);font-size:20px;line-height:1.1;color:#231a12;letter-spacing:.04em}
+.ar-wall-card p{position:relative;z-index:1;margin:6px 0 0;font-size:11px;font-weight:800;color:#a83a4e;letter-spacing:.12em}
+.ar-wall-seen{position:absolute;right:13px;top:12px;width:8px;height:8px;border-radius:999px;background:var(--ar-accent);box-shadow:0 0 0 4px rgba(201,163,106,.16)}
+.ar-wall-teasers{position:relative;z-index:1;display:flex;flex-direction:column;gap:5px;margin-top:12px}
+.ar-wall-teaser{display:flex;align-items:center;gap:7px;min-width:0;color:#5f503f;font-size:11px;font-weight:700}
+.ar-wall-teaser i{flex:none;width:28px;height:18px;border-radius:2px;background:linear-gradient(145deg,#ddcfb4,#f7f0e2);box-shadow:inset 0 0 0 1px rgba(63,48,31,.12)}
+.ar-wall-teaser span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ar-wall-card-count{position:relative;z-index:1;align-self:end;text-align:right;font-family:var(--ar-font-display);font-size:34px;line-height:.85;color:#a83a4e}
+.ar-wall-card-count small{display:block;margin-top:5px;font-family:var(--ar-font-ui);font-size:8px;font-weight:900;letter-spacing:.24em;color:#72593d}
+.ar-wall-back{display:inline-flex;align-items:center;gap:6px;height:28px;margin:0 0 10px;border:0;background:transparent;color:#6d5843;font-size:11px;font-weight:900;letter-spacing:.08em;cursor:pointer}
 .ar-wall-chips{position:relative;z-index:1;display:flex;gap:7px;overflow-x:auto;margin:13px -2px 0;padding:0 2px 3px;scrollbar-width:none}
 .ar-wall-chips::-webkit-scrollbar{display:none}
-.ar-wchip{flex:none;height:25px;border:1px solid rgba(49,55,51,.16);border-radius:999px;background:rgba(255,255,255,.36);padding:0 10px;font-size:10.5px;font-weight:800;color:#5b605a;cursor:pointer}
-.ar-wchip.on{border-color:rgba(157,63,82,.45);background:#2d2a25;color:#f8ead6}
-.ar-wall-grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:13px}
+.ar-wchip{flex:none;max-width:96px;height:25px;border:1px solid rgba(63,48,31,.16);border-radius:999px;background:rgba(255,255,255,.32);padding:0 10px;font-size:10.5px;font-weight:800;color:#5e513f;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ar-wchip.on{border-color:rgba(168,58,78,.44);background:#2d2117;color:#f8ead6}
+.ar-wall-grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:13px}
 .ar-frag{position:relative;min-height:152px;border:0;border-radius:4px;background:#fffaf1;color:#211f1b;text-align:left;overflow:hidden;cursor:pointer;box-shadow:0 13px 24px -20px rgba(30,25,20,.8),inset 0 0 0 1px rgba(50,45,38,.1);transform:rotate(var(--rot,0deg));transition:transform .18s ease,box-shadow .18s ease}
 .ar-frag:hover{transform:rotate(var(--rot,0deg)) translateY(-3px);box-shadow:0 18px 30px -22px rgba(30,25,20,.9),inset 0 0 0 1px rgba(50,45,38,.12)}
 .ar-frag:active{transform:rotate(var(--rot,0deg)) translateY(-1px) scale(.985)}
 .ar-frag.pull{transform:rotate(var(--rot,0deg)) translateY(-12px)}
-.ar-frag-cover{display:block;position:absolute;inset:0;background:linear-gradient(155deg,var(--frag-a),#fff7e7 42%,var(--frag-b));opacity:.95}
+.ar-frag-cover{display:block;position:absolute;inset:0;background:linear-gradient(155deg,#f5efe2,#fff8ec 42%,#efe7d6);opacity:.98}
 .ar-frag-rule{position:absolute;left:11px;right:11px;top:13px;height:1px;background:rgba(45,42,37,.28)}
 .ar-frag-no{position:absolute;right:10px;top:18px;font-size:9px;font-weight:900;letter-spacing:.16em;color:rgba(35,32,28,.45)}
 .ar-frag-body{position:relative;z-index:1;display:flex;min-height:152px;flex-direction:column;padding:29px 11px 11px}
-.ar-frag-shape{margin:0;max-width:88%;font-family:var(--ar-font-display);font-size:18px;line-height:1.08;font-weight:700;color:#231f1c;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.ar-frag-summary{margin:9px 0 0;font-size:10.5px;line-height:1.65;color:#5f5a50;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ar-frag-placeholder{margin:0;max-width:78%;font-family:var(--ar-font-display);font-size:18px;line-height:1.08;font-weight:700;color:#231f1c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ar-frag-preview{position:relative;z-index:1;margin:20px -1px 9px;border-radius:3px;overflow:hidden;background:#efe7d6;box-shadow:inset 0 0 0 1px rgba(45,42,37,.12)}
+.ar-frag-preview iframe{pointer-events:none}
+.ar-frag-preview-empty{position:relative;z-index:1;margin:31px 0 0;font-family:var(--ar-font-display);font-size:17px;font-weight:700;color:#231f1c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ar-frag-foot{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid rgba(45,42,37,.12);padding-top:8px;font-size:8.5px;font-weight:900;letter-spacing:.18em;color:#8a473f}
+.ar-frag-foot span:last-child{max-width:8em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
 .ar-frag-tape{position:absolute;left:14px;top:-5px;width:42px;height:15px;background:rgba(255,255,255,.5);box-shadow:0 1px 3px rgba(30,25,20,.12);transform:rotate(-5deg)}
-.ar-frag-pin{position:absolute;right:13px;bottom:13px;width:9px;height:9px;border-radius:999px;background:#2f7470;box-shadow:0 0 0 3px rgba(47,116,112,.12)}
 .ar-imgfrag{position:relative;min-height:152px;border:0;border-radius:3px;background:#f8f2e7;padding:8px 8px 31px;color:#211f1b;text-align:left;overflow:hidden;cursor:pointer;box-shadow:0 15px 27px -21px rgba(30,25,20,.86),inset 0 0 0 1px rgba(50,45,38,.1);transform:rotate(var(--rot,0deg));transition:transform .18s ease,box-shadow .18s ease}
 .ar-imgfrag:hover{transform:rotate(var(--rot,0deg)) translateY(-3px);box-shadow:0 20px 32px -22px rgba(30,25,20,.92),inset 0 0 0 1px rgba(50,45,38,.12)}
 .ar-imgfrag:active{transform:rotate(var(--rot,0deg)) translateY(-1px) scale(.985)}
@@ -172,11 +197,11 @@ const CSS = `
 .ar-imgfrag-media::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(140deg,rgba(255,255,255,.22),transparent 36%),radial-gradient(circle at 12% 18%,rgba(255,255,255,.26),transparent 30%);mix-blend-mode:screen}
 .ar-imgfrag-name{position:absolute;left:10px;right:10px;bottom:13px;font-family:var(--ar-font-display);font-size:13px;font-weight:700;line-height:1.15;color:#2d2925;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ar-imgfrag-tag{position:absolute;right:9px;top:100px;border:1px solid rgba(45,42,37,.16);background:rgba(248,242,231,.88);padding:2px 6px;font-size:7.5px;font-weight:900;letter-spacing:.16em;color:#8a473f}
-.ar-textfrag{position:relative;min-height:142px;border:0;border-radius:5px;background:#fff1a8;color:#2d2925;text-align:left;overflow:hidden;cursor:default;padding:20px 13px 12px;box-shadow:0 14px 24px -21px rgba(30,25,20,.82),inset 0 0 0 1px rgba(107,89,34,.14);transform:rotate(var(--rot,0deg))}
-.ar-textfrag.char{background:#fff5be}
+.ar-textfrag{position:relative;min-height:142px;border:0;border-radius:5px;background:#fff1a8;color:#2d2925;text-align:left;overflow:hidden;cursor:default;padding:23px 13px 12px;box-shadow:0 14px 24px -21px rgba(30,25,20,.82),inset 0 0 0 1px rgba(107,89,34,.14);transform:rotate(var(--rot,0deg))}
+.ar-textfrag.char{background:#fff5be;transform:rotate(-2deg);animation:ar-note-in .28s cubic-bezier(.2,.9,.3,1)}
 .ar-textfrag::before{content:'';position:absolute;left:0;right:0;top:0;height:18px;background:linear-gradient(180deg,rgba(255,255,255,.32),rgba(255,255,255,0))}
-.ar-textfrag-dot{position:absolute;left:12px;top:10px;width:9px;height:9px;border-radius:999px;background:#bf6c58;box-shadow:0 0 0 4px rgba(191,108,88,.12)}
-.ar-textfrag-body{display:block;font-family:'Kaiti SC',STKaiti,'楷体',cursive;font-size:15px;line-height:1.55;color:#3f3528;white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+.ar-textfrag-dot{position:absolute;left:12px;top:9px;min-width:18px;height:18px;border-radius:999px;border:1px solid #a83a4e;background:rgba(255,245,190,.62);display:flex;align-items:center;justify-content:center;padding:0 3px;font-size:10px;font-family:var(--ar-font-display);font-weight:800;color:#a83a4e;box-shadow:0 0 0 3px rgba(168,58,78,.08)}
+.ar-textfrag-body{display:block;font-family:'Kaiti SC',STKaiti,'楷体',serif;font-size:15px;line-height:1.55;color:#3f3528;white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
 .ar-textfrag-foot{position:absolute;left:13px;right:13px;bottom:10px;border-top:1px solid rgba(63,53,40,.12);padding-top:6px;font-size:8px;font-weight:900;letter-spacing:.18em;color:#8a6b26}
 .ar-frag-empty{position:relative;z-index:1;margin-top:12px;border:1px dashed rgba(49,55,51,.22);border-radius:8px;padding:18px;text-align:center;color:#6d6157;font-size:12px;line-height:1.8;background:rgba(255,255,255,.25)}
 .ar-freader{position:relative;width:min(94vw,560px);max-height:calc(100dvh - 42px);display:flex;flex-direction:column;align-items:center;gap:13px}
@@ -188,33 +213,39 @@ const CSS = `
 .ar-imgreader-frame{overflow:hidden;border-radius:16px;background:#090807;box-shadow:0 24px 60px -24px rgba(0,0,0,.82),inset 0 0 0 1px rgba(255,236,210,.1)}
 .ar-imgreader-frame img{display:block;width:100%;max-height:calc(100dvh - 188px);object-fit:contain}
 .ar-imgreader-prompt{margin:0;border-radius:13px;border:1px solid rgba(255,236,210,.1);background:rgba(12,10,8,.76);padding:11px 12px;font-size:12px;line-height:1.65;color:var(--ar-t2);white-space:pre-wrap}
-.ar-wall-actions{position:relative;z-index:1;display:flex;gap:8px;margin-top:13px}
-.ar-wall-act{height:30px;border-radius:999px;border:1px solid rgba(49,55,51,.18);background:rgba(255,255,255,.42);padding:0 12px;font-size:10.5px;font-weight:900;color:#423d36;cursor:pointer}
-.ar-wall-act:hover{border-color:rgba(157,63,82,.38);background:#fffaf2}
 .ar-editor{width:min(96vw,720px);max-height:calc(100dvh - 38px);display:flex;flex-direction:column;border-radius:22px;overflow:hidden;background:#17120e;color:var(--ar-t1);box-shadow:0 28px 80px -28px rgba(0,0,0,.9),inset 0 0 0 1px rgba(255,236,210,.08)}
 .ar-editor-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;border-bottom:1px solid var(--ar-line);padding:17px 18px 13px;background:linear-gradient(180deg,#241b14,#17120e)}
 .ar-editor-hd h3{margin:0;font-family:var(--ar-font-display);font-size:22px;letter-spacing:.06em}
 .ar-editor-hd p{margin:4px 0 0;font-size:11px;color:var(--ar-t3);letter-spacing:.08em}
 .ar-editor-body{overflow-y:auto;padding:15px 16px 16px}
+.ar-editor-section{margin-top:24px}
+.ar-editor-section:first-child{margin-top:0}
+.ar-editor-sec-title{margin:0 0 12px;font-size:9px;font-weight:900;letter-spacing:.28em;color:var(--ar-accent)}
 .ar-editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .ar-field{display:flex;flex-direction:column;gap:6px}
 .ar-field span{font-size:10px;font-weight:900;letter-spacing:.2em;color:var(--ar-t3)}
 .ar-field input,.ar-field textarea,.ar-field select{border:1px solid var(--ar-line);border-radius:12px;background:#100c09;color:var(--ar-t1);font:inherit;font-size:13px;outline:none;padding:10px 11px}
-.ar-field textarea{min-height:78px;resize:vertical}
+.ar-field input[type=range]{accent-color:var(--ar-accent)}
+.ar-field textarea{min-height:40px;resize:none;transition:min-height .18s}
+.ar-note-compose{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px;align-items:start}
+.ar-note-input:focus{min-height:86px}
+.ar-note-compose button{height:40px;border-radius:999px;border:1px solid rgba(201,163,106,.55);background:transparent;color:var(--ar-accent);padding:0 13px;font-size:12px;font-weight:900;cursor:pointer}
 .ar-editor-row{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-top:12px}
 .ar-editor-chip{display:flex;align-items:center;gap:7px;border:1px solid var(--ar-line);border-radius:999px;background:#100c09;padding:8px 11px;font-size:12px;color:var(--ar-t2)}
 .ar-editor-chip input{accent-color:#c9a36a}
+.ar-swatch-row{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+.ar-swatch-row::-webkit-scrollbar{display:none}
+.ar-swatch{flex:none;width:34px;height:34px;border-radius:999px;border:1px solid rgba(255,236,210,.14);background:var(--sw);box-shadow:inset 0 0 0 2px rgba(0,0,0,.16);cursor:pointer}
+.ar-swatch.on{border-color:var(--ar-accent);box-shadow:0 0 0 2px rgba(201,163,106,.22),inset 0 0 0 2px rgba(0,0,0,.16)}
 .ar-editor-list{display:flex;flex-direction:column;gap:8px;margin-top:14px}
 .ar-editor-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--ar-line);border-radius:14px;background:rgba(255,236,210,.035);padding:10px 10px 10px 12px}
 .ar-editor-item b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--ar-t1)}
 .ar-editor-item small{display:block;margin-top:3px;font-size:10px;color:var(--ar-t3);letter-spacing:.08em}
 .ar-editor-mini{display:flex;gap:6px}
 .ar-editor-mini button,.ar-editor-tools button{border:1px solid var(--ar-line);border-radius:999px;background:#100c09;color:var(--ar-t2);height:29px;padding:0 10px;font-size:11px;font-weight:800;cursor:pointer}
+.ar-editor-mini button{display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0}
 .ar-editor-mini button:hover,.ar-editor-tools button:hover{color:var(--ar-t1);border-color:rgba(201,163,106,.35)}
 .ar-editor-tools{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
-.ar-editor-canvas{position:relative;width:100%;aspect-ratio:750/620;min-height:420px;margin-top:14px;border-radius:18px;overflow:hidden;background:linear-gradient(135deg,#201811,#100c09);box-shadow:inset 0 0 0 1px var(--ar-line)}
-.ar-editor-freeitem{position:absolute;border:1px solid rgba(255,236,210,.16);border-radius:10px;background:rgba(255,236,210,.08);color:var(--ar-t1);padding:8px;font-size:11px;overflow:hidden;transform:rotate(var(--rot,0deg));cursor:pointer}
-.ar-editor-freeitem.on{border-color:rgba(201,163,106,.68);box-shadow:0 0 0 3px rgba(201,163,106,.14)}
 .ar-editor-ft{display:flex;gap:9px;border-top:1px solid var(--ar-line);padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 12px);background:#120e0a}
 .ar-editor-ft button{flex:1;height:40px;border-radius:999px;border:1px solid var(--ar-line);background:transparent;color:var(--ar-t2);font-size:13px;font-weight:800;cursor:pointer}
 .ar-editor-ft button.primary{border:0;background:linear-gradient(180deg,#d2ab6e,#a87f43);color:#241704}
@@ -228,6 +259,7 @@ const CSS = `
 @keyframes ar-fade{from{opacity:0}}
 @keyframes ar-rise{from{transform:translateY(30px);opacity:0}}
 @keyframes ar-bookin{from{opacity:0;transform:perspective(900px) rotateY(-14deg) translateY(22px)}}
+@keyframes ar-note-in{from{opacity:0;transform:rotate(-2deg) translateY(12px) scale(.96)}}
 .ar-ebk-wrap{display:flex;flex-direction:column;align-items:center;gap:15px;width:100%;max-width:430px}
 .ar-ebk{position:relative;width:min(80vw,322px);height:min(64dvh,520px);min-height:380px;border-radius:5px 13px 13px 5px;padding:9px 12px 13px 21px;box-shadow:0 24px 60px -24px rgba(0,0,0,.78), inset 0 1px 0 rgba(255,236,200,.16);animation:ar-bookin .34s cubic-bezier(.2,.85,.3,1)}
 .ar-ebk::before{content:'';position:absolute;left:0;top:0;bottom:0;width:14px;border-radius:5px 0 0 5px;background:linear-gradient(90deg, rgba(0,0,0,.5), rgba(255,240,210,.12) 55%, rgba(0,0,0,.38))}
@@ -475,7 +507,7 @@ const chunk = <T,>(arr: T[], n: number): T[][] => {
     return out;
 };
 
-function useWidth(ref: React.RefObject<HTMLDivElement | null>, fallback = 372) {
+function useWidth<T extends HTMLElement>(ref: React.RefObject<T | null>, fallback = 372) {
     const [w, setW] = useState(fallback);
     useEffect(() => {
         const el = ref.current;
@@ -675,22 +707,24 @@ const KeepsakeBox: React.FC<{ books: CollectionBook[]; pullingId: string | null;
     );
 };
 
-const FRAGMENT_PALETTES = [
-    ['#f3d2cf', '#d7e7df'],
-    ['#ead5a5', '#cdd9e5'],
-    ['#d9d0ee', '#f1dcc7'],
-    ['#cfe0d7', '#ecd0d7'],
-    ['#f1e2b7', '#d2d0c7'],
-] as const;
+const getFreeformShape = (book: CollectionBook): string =>
+    String(
+        book.cardData?.meta?.freeformShape
+        || book.meta?.shape
+        || book.cardData?.meta?.shape
+        || getCollectionDisplayTitle(book)
+        || '视觉碎片',
+    ).trim();
 
-const getFreeformSummary = (book: CollectionBook): string => {
-    const summary = String(book.meta?.summary || book.sourceReplyExcerpt || '').replace(/\s+/g, ' ').trim();
-    if (summary) return summary.slice(0, 92);
-    return stripHtml(book.cardData?.body || book.body || '').replace(/\s+/g, ' ').trim().slice(0, 92);
+const truncateUiLabel = (value: string, max = 8): string => {
+    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    return normalized.length > max ? `${normalized.slice(0, max)}...` : normalized;
 };
 
-const getFreeformShape = (book: CollectionBook): string =>
-    String(book.meta?.shape || getCollectionDisplayTitle(book) || '视觉碎片').trim();
+const WALL_PREVIEW_WIDTH = 375;
+const WALL_PREVIEW_LIMIT = 12;
+const WALL_PREVIEW_SLOT_EVENT = 'collection-wall-preview-slots';
+const wallPreviewMountedIds = new Set<string>();
 
 type WallBookEntry = {
     id: string;
@@ -723,6 +757,141 @@ const getAssetLabel = (asset: CollectionWallAsset, item?: CollectionWallItem): s
 
 const getTextLabel = (item: CollectionWallItem): string =>
     String(item.text?.content || item.name || '一张便签').trim().slice(0, 60);
+
+function useWallPreviewMountSlot(id: string, ref: React.RefObject<HTMLElement | null>): boolean {
+    const [inRange, setInRange] = useState(false);
+    const [mounted, setMounted] = useState(false);
+
+    useEffect(() => {
+        const el = ref.current;
+        if (!el || typeof IntersectionObserver === 'undefined') {
+            setInRange(true);
+            return undefined;
+        }
+        const observer = new IntersectionObserver(
+            ([entry]) => setInRange(Boolean(entry?.isIntersecting)),
+            { rootMargin: '600px 0px' },
+        );
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [ref]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+        let disposed = false;
+
+        const release = () => {
+            if (wallPreviewMountedIds.delete(id)) {
+                window.dispatchEvent(new Event(WALL_PREVIEW_SLOT_EVENT));
+            }
+            setMounted(false);
+        };
+
+        const tryAcquire = () => {
+            if (disposed || !inRange) return;
+            if (wallPreviewMountedIds.has(id) || wallPreviewMountedIds.size < WALL_PREVIEW_LIMIT) {
+                wallPreviewMountedIds.add(id);
+                setMounted(true);
+            }
+        };
+
+        if (!inRange) {
+            release();
+            return undefined;
+        }
+
+        tryAcquire();
+        window.addEventListener(WALL_PREVIEW_SLOT_EVENT, tryAcquire);
+        return () => {
+            disposed = true;
+            window.removeEventListener(WALL_PREVIEW_SLOT_EVENT, tryAcquire);
+            release();
+        };
+    }, [id, inRange]);
+
+    return mounted;
+}
+
+const WallHtmlPreview: React.FC<{
+    book: CollectionBook;
+    hostRef: React.RefObject<HTMLElement | null>;
+    width: number;
+}> = ({ book, hostRef, width }) => {
+    const html = String(book.cardData?.meta?.html || '');
+    const frameRef = useRef<HTMLIFrameElement>(null);
+    const frameChannel = React.useId().replace(/:/g, '_');
+    const shouldMount = useWallPreviewMountSlot(book.id, hostRef);
+    const [ready, setReady] = useState(false);
+    const [hasMeasured, setHasMeasured] = useState(false);
+    const [frameHeight, setFrameHeight] = useState(220);
+
+    useEffect(() => {
+        if (!shouldMount) {
+            setReady(false);
+            setHasMeasured(false);
+            setFrameHeight(220);
+        }
+    }, [shouldMount]);
+
+    useEffect(() => {
+        const handleMessage = (event: MessageEvent<{ type?: string; channel?: string; height?: number }>) => {
+            if (event.source !== frameRef.current?.contentWindow) return;
+            if (event.data?.type !== 'preview-height') return;
+            if (event.data.channel !== frameChannel) return;
+            const nextHeight = typeof event.data.height === 'number'
+                ? Math.max(160, event.data.height + STATUS_CARD_MEASURE_BUFFER_PX)
+                : 220;
+            setFrameHeight(nextHeight);
+            setHasMeasured(true);
+        };
+        window.addEventListener('message', handleMessage);
+        return () => window.removeEventListener('message', handleMessage);
+    }, [frameChannel]);
+
+    useEffect(() => {
+        if (!shouldMount || !ready || !html) return;
+        frameRef.current?.contentWindow?.postMessage(
+            {
+                type: 'preview-update',
+                channel: frameChannel,
+                html,
+                allowScripts: book.cardData?.meta?.allowScripts === true,
+                stageWidth: WALL_PREVIEW_WIDTH,
+            },
+            '*',
+        );
+    }, [book.cardData?.meta?.allowScripts, frameChannel, html, ready, shouldMount]);
+
+    if (!html || !shouldMount) return null;
+
+    const scale = Math.max(0.2, width / WALL_PREVIEW_WIDTH);
+    const fittedHeight = Math.ceil(frameHeight * scale);
+
+    return (
+        <span className="ar-frag-preview" style={{ height: fittedHeight || 120, opacity: hasMeasured ? 1 : 0, transition: 'opacity 200ms ease' }}>
+            <iframe
+                ref={frameRef}
+                srcDoc={STATUS_CARD_IFRAME_SHELL}
+                sandbox="allow-scripts"
+                title="Freeform creative card"
+                style={{
+                    width: WALL_PREVIEW_WIDTH,
+                    height: frameHeight,
+                    border: 'none',
+                    borderRadius: 0,
+                    background: 'transparent',
+                    colorScheme: 'light dark',
+                    overflow: 'hidden',
+                    display: 'block',
+                    transform: `scale(${scale})`,
+                    transformOrigin: 'top left',
+                    pointerEvents: 'none',
+                }}
+                onLoad={() => setReady(true)}
+            />
+        </span>
+    );
+};
 
 const useAssetObjectUrl = (asset: CollectionWallAsset | null): string => {
     const [url, setUrl] = useState('');
