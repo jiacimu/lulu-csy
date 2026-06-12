@@ -169,6 +169,19 @@ function looksLikeImageReplyContent(value: string | undefined): boolean {
     return !!value && IMAGE_REPLY_CONTENT_RE.test(value.trim());
 }
 
+function sanitizeReplyQuoteContent(content: string): string {
+    let cleaned = content;
+    const bilingualMarkerRe = /%%\s*BILINGUAL\s*%%/i;
+    if (bilingualMarkerRe.test(cleaned)) {
+        const sides = cleaned.split(bilingualMarkerRe).map(side => side.trim());
+        cleaned = sides.find(Boolean) || '';
+    }
+    return cleaned
+        .replace(/<翻译>\s*<原文>([\s\S]*?)<\/原文>\s*<译文>[\s\S]*?<\/译文>\s*<\/翻译>/g, '$1')
+        .replace(/<\/?翻译>|<\/?原文>|<\/?译文>/g, '')
+        .trim();
+}
+
 function formatReplyPrefix(message: ContextMessage, options: FormatMessageContextOptions): string {
     const reply = message.replyTo;
     if (!reply?.content) return '';
@@ -178,7 +191,7 @@ function formatReplyPrefix(message: ContextMessage, options: FormatMessageContex
         || looksLikeImageReplyContent(reply.content);
     const content = isImageReply
         ? (safeImageReplySummary(reply.visualSummary) || (looksLikeImageReplyContent(reply.content) ? '图片' : safeImageReplySummary(reply.content) || '图片'))
-        : reply.content;
+        : sanitizeReplyQuoteContent(reply.content);
     const replyName = compactText(reply.name || '对方');
     const replyContent = truncateInline(content, 80);
     const whose = replyName === compactText(options.charName || '')

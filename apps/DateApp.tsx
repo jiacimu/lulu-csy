@@ -582,6 +582,11 @@ const buildDateStatusPromptForMainApi = (char: CharacterProfile): string => {
     return buildDateStatusInlineInstruction(resolveDateStatusTemplate(char));
 };
 
+export const buildDateStatusSnapshotForMainApi = (char: CharacterProfile, messages: Message[]): string => {
+    if (char.dateStatusBarEnabled !== true) return '';
+    return buildLatestDateStatusSnapshotBlock(messages);
+};
+
 const buildDatePhotoPromptForMainApi = (char: CharacterProfile): string => {
     if (char.autoPhotoEnabled !== true) return '';
     return `\n\n### 【请求发送见面照片】\n若本轮需要发照片，只追加隐藏标签：\`[[PHOTO_DECISION:true]]\`。\n标签外正常写见面正文；不要说“已经发了/看到了吗”；不发图时不要写标签。`;
@@ -2229,7 +2234,7 @@ ${exitPromptContent}
             : '';
 
         const historyContextBlock = buildDateRequestHistoryBlock(requestContext, char.name, userProfile.name, userMessageId);
-        const statusSnapshotBlock = buildLatestDateStatusSnapshotBlock(sessionMessages);
+        const statusSnapshotBlock = buildDateStatusSnapshotForMainApi(char, sessionMessages);
 
         // --- Separate informational specialNote from directive content ---
         const temporalNote = temporalContext ? `\n\n<temporal_context>${temporalContext}</temporal_context>` : '';
@@ -2402,7 +2407,7 @@ ${exitPromptContent}
                 || getTimeGapHint(previousContextMsg?.timestamp)
             : '';
         const historyContextBlock = buildDateRequestHistoryBlock(requestContext, char.name, userProfile.name, lastUserMsg.id);
-        const statusSnapshotBlock = buildLatestDateStatusSnapshotBlock(validSessionMessages);
+        const statusSnapshotBlock = buildDateStatusSnapshotForMainApi(char, validSessionMessages);
 
         // --- Separate informational specialNote from directive content ---
         const temporalNote = temporalContext ? `\n\n<temporal_context>${temporalContext}</temporal_context>` : '';

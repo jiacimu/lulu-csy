@@ -54,6 +54,17 @@ const SECONDARY_LLM_MAX_TOKENS = 65536;
 const AFTERGLOW_LLM_MAX_TOKENS = SECONDARY_LLM_MAX_TOKENS;
 const CLASSIC_INNER_VOICE_MAX_LENGTH = 120;
 const AFTERGLOW_TEXT_MAX_LENGTH = 12000;
+const FREEFORM_RECENT_SHAPE_LIMIT = 3;
+const FREEFORM_RANDOM_CONSTRAINT_CHANCE = 0.4;
+const FREEFORM_RECENT_SHAPES_STORAGE_PREFIX = 'aetheros_freeform_recent_shapes';
+const FREEFORM_RANDOM_CONSTRAINTS = [
+    '本次碎片必须是数字界面类。',
+    '本次必须有破损或污渍。',
+    '本次只能有一行字。',
+    '本次必须是竖长形态。',
+    '本次必须出现一个被划掉的词。',
+    '本次必须包含一个具体时间戳。',
+];
 const AFTERGLOW_FORM_ROLL_SLOT = '__AFTERGLOW_FORM_ROLL_SLOT__';
 const AFTERGLOW_CHAR_NAME_SLOT = '__AFTERGLOW_CHAR_NAME__';
 const AFTERGLOW_USER_NAME_SLOT = '__AFTERGLOW_USER_NAME__';
@@ -2492,6 +2503,111 @@ function extractHtmlFromResponse(content: string): string | null {
     return null;
 }
 
+type FreeformShapeChoice = {
+    line: string;
+    candidates: string[];
+    selectedShape?: string;
+};
+
+const getFreeformRecentShapesStorageKey = (charId: string): string =>
+    `${FREEFORM_RECENT_SHAPES_STORAGE_PREFIX}_${encodeURIComponent(charId || 'default')}`;
+
+function getFreeformLocalStorage(): Storage | null {
+    if (typeof window === 'undefined') return null;
+    try {
+        return window.localStorage || null;
+    } catch {
+        return null;
+    }
+}
+
+function normalizeFreeformShapeName(value: string): string {
+    return String(value || '')
+        .replace(/[（(].*?[）)]/g, '')
+        .replace(/^[ABCabc][\s.。:：、)）-]+/, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 28);
+}
+
+function loadRecentFreeformShapes(charId: string): string[] {
+    const storage = getFreeformLocalStorage();
+    if (!storage) return [];
+    try {
+        const parsed = JSON.parse(storage.getItem(getFreeformRecentShapesStorageKey(charId)) || '[]');
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+            .map(item => normalizeFreeformShapeName(String(item || '')))
+            .filter(Boolean)
+            .slice(0, FREEFORM_RECENT_SHAPE_LIMIT);
+    } catch {
+        return [];
+    }
+}
+
+function saveRecentFreeformShape(charId: string, shape: string): void {
+    const normalized = normalizeFreeformShapeName(shape);
+    if (!normalized) return;
+    const storage = getFreeformLocalStorage();
+    if (!storage) return;
+    const next = [
+        normalized,
+        ...loadRecentFreeformShapes(charId).filter(item => item !== normalized),
+    ].slice(0, FREEFORM_RECENT_SHAPE_LIMIT);
+    try {
+        storage.setItem(getFreeformRecentShapesStorageKey(charId), JSON.stringify(next));
+    } catch {
+        // Local storage is only used to reduce repetition; generation should never depend on it.
+    }
+}
+
+function buildFreeformDynamicConstraints(charId: string): string {
+    const parts: string[] = [];
+    const recentShapes = loadRecentFreeformShapes(charId);
+    if (recentShapes.length > 0) {
+        parts.push(`近三次已使用形态：${recentShapes.join('、')}——本次禁止再用这${recentShapes.length}种。`);
+    }
+    if (Math.random() < FREEFORM_RANDOM_CONSTRAINT_CHANCE) {
+        const constraint = FREEFORM_RANDOM_CONSTRAINTS[Math.floor(Math.random() * FREEFORM_RANDOM_CONSTRAINTS.length)];
+        if (constraint) parts.push(constraint);
+        if (constraint && recentShapes.length > 0) {
+            console.info('[FreeformCard] Dynamic constraints combined', {
+                charId,
+                recentShapes,
+                randomConstraint: constraint,
+            });
+        }
+    }
+    return parts.join('\n');
+}
+
+function extractFreeformShapeChoice(content: string): FreeformShapeChoice | null {
+    const cleaned = String(content || '')
+        .replace(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/g, '')
+        .trim();
+    const line = cleaned.split(/\r?\n/).map(item => item.trim()).find(Boolean) || '';
+    const match = line.match(/^候选[:：]\s*(.+?)\s*(?:→|->|=>)\s*选\s*(.+?)\s*$/);
+    if (!match) return null;
+
+    const candidates = match[1]
+        .split(/\s*[\/|、,，]\s*/)
+        .map(normalizeFreeformShapeName)
+        .filter(Boolean);
+    const selectedRaw = normalizeFreeformShapeName(match[2]);
+    const letterMatch = selectedRaw.match(/^[ABCabc]$/);
+    const selectedFromLetter = letterMatch
+        ? candidates[letterMatch[0].toUpperCase().charCodeAt(0) - 65]
+        : undefined;
+    const selectedShape = selectedFromLetter || selectedRaw;
+    const isPlaceholderOnly = /^[ABCabc]$/.test(selectedShape || '') && candidates.every(item => /^[ABCabc]$/.test(item));
+
+    return {
+        line,
+        candidates,
+        selectedShape: isPlaceholderOnly ? undefined : selectedShape,
+    };
+}
+
 function buildFreeformCardPrompt(
     charName: string,
     aiReply: string,
@@ -2499,6 +2615,7 @@ function buildFreeformCardPrompt(
     charContext: string,
     currentState: InternalState,
     timeContext: { timeStr: string; timeOfDay: string; dateStr: string; dayOfWeek: string },
+    dynamicConstraints: string,
 ): { system: string; user: string } {
     const stateHints: string[] = [];
     if (currentState.cortisol > 0.65) stateHints.push('身体紧绷');
@@ -2518,54 +2635,70 @@ function buildFreeformCardPrompt(
 你的任务：根据${charName}此刻的状态和对话，从ta的日常里"捡"起一件碎片，用 HTML+CSS 将它还原成一张视觉卡片。
 </ephemera>
 
-你是一个创意视觉引擎。输出一段完整的 HTML 代码，它会被渲染在一个 360×220px 的 iframe 沙箱中。
-不要角色扮演，不要解释，直接输出 HTML 代码。
+你是一个创意视觉引擎，最终输出一段完整的 HTML 代码。不要角色扮演，不要解释。
 
-## 视觉约束（必须遵守）
+## 〇、本次硬约束（由系统注入，可能为空；非空时优先级最高）
+
+${dynamicConstraints}
+
+## 一、推导形态（不从清单里挑，从对话里"长"出来）
+
+按顺序自问三个问题：
+
+1. **刚才的对话发生在什么场景？** 那个场景里天然存在什么纸片和屏幕？
+   医院→缴费凭条、住院腕带；深夜→锁屏上堆叠的通知；做饭→沾了油渍的菜谱页；赶路→揉皱的登机牌、地铁卡余额不足的提示。
+2. **${charName}是谁？** ta的职业、习惯、所在地决定了ta身边有什么。外科医生和乐队主唱随手留下的东西完全不同。碎片必须是"ta此刻真的会经手的实物"。
+3. 前两步都推不出来时，才从**材质维度**发散：热敏纸小票 / 某个App的截图 / 衣服洗标 / 包装盒残片 / 票据存根 / 药板锡纸背面写的字 / 借阅卡……
+
+**发散规则**：先想出 3 个候选形态，划掉其中最常规的一个，再从剩下两个里选更贴合当前情绪的那个。
+
+## 二、写文案（最重要）
+
+卡片上的字要读起来像${charName}亲手写的/打的，而不是AI生成的。
+
+- 完全沿用${charName}的人设、语气、用词和标点习惯
+- 它是生活碎屑：随手的备忘、脱口而出的吐槽、写到一半搁下的句子
+- 用残缺句和流水账；琐事夹着琐事；允许涂改、缩写、被划掉的错字
+- 必须有具体细节：具体的东西、具体的数字、具体的时间，不要抒情空话
+
+对照样本（体会差别，不要照抄内容）：
+- 坏（AI味）："今天的晚霞很温柔，像极了某个人的笑。"
+- 好（碎片感）："葱 姜都没了 / 楼下超市21:30关门 来得及 / ——他上次说想吃的那个，周末吧"
+
+**关系感知**：从人设和对话推断${charName}与用户的关系，但用户只能间接出现——一个通讯录备注、第二只杯子、一条没舍得删的转发。把关系藏在第三件小事里，绝不直白表白。
+
+## 三、视觉还原
+
+**反默认（重要）**：
+
+- 禁止"标准卡片三件套"：整体居中 + 大圆角 + 柔和box-shadow。真实的碎片不长这样。
+- 每张卡片至少包含一处"不完美"：歪斜1~3度（transform: rotate）、咖啡渍（radial-gradient）、撕边（clip-path锯齿）、半透明胶带压角、一道折痕（linear-gradient暗线）、划掉重写的字。
+- 排版允许不对称、允许怪异的留白，文字可以顶到纸边。
+- 数字类碎片（截图、通知）要带边角真实感：状态栏时间、电量、未读角标、输入框里打了一半的字。
+- 纹理全部用CSS伪造：横线纸用repeating-linear-gradient，热敏纸用极淡的颗粒渐变，屏幕加细微的顶部高光。
+
+**情绪映射（不只是颜色）**：
+
+- 颜色避开俗套对应：悲伤不必蓝灰，可以是过曝的白、刺眼的医院绿；雀跃也可以克制。务必保证文字在背景上可读。
+- 字重、行距、密度、动画速度都跟着情绪走：疲惫=低对比+松散行距+缓慢动画；烦躁=紧凑排版+轻微抖动；平静=几乎静止。
+
+## 四、技术约束（必须全部遵守）
+
 - 输出一个完整的 HTML 文档，包含 <style> 和 <body>
 - body 背景必须透明（background: transparent）
-- 整体高度不超过 220px，宽度 100%
+- 整体高度在 120px ~ 220px 之间，由形态决定；宽度 100%
 - 严禁 min-height，严禁 overflow: visible
-- 所有样式用 <style> 标签或 style 属性（内联），禁止 class 引用外部框架
+- 所有样式写在 <style> 标签或 style 属性里，禁止 class 引用外部框架
 - 不使用任何外部资源（外部字体URL、图片URL、CDN链接）
-- 字体用系统字体栈：-apple-system, "Noto Sans SC", "Helvetica Neue", sans-serif
-- 手写体可用："Kaiti SC", STKaiti, "楷体", cursive
-- 动画用 CSS @keyframes，时长 2-6s，不要太快闪烁
+- 字体用系统字体栈：-apple-system, "Noto Sans SC", "Helvetica Neue", sans-serif；手写体可用："Kaiti SC", STKaiti, "楷体", cursive
+- 动画用 CSS @keyframes，时长 2-6s，禁止快速闪烁
 - 可以用少量 JavaScript 做微交互（点击展开、hover 效果等）
-- 颜色方案需和情绪匹配，确保文字在背景上可读
 
-## 你可以自由创作的形态（不限于此）
-- 纸条、便利贴、信封、处方笺、演唱会门票、电影票根
-- 聊天截图、通知卡片、天气卡、外卖订单、快递单
-- 日记本页、手账贴纸、明信片、相框
-- 报纸剪报、书签、歌词卡、电台频率
-- 任何你觉得适合当前语境的实物碎片
-- 最重要的是——每次都不一样，绝不重复上次的形态
+## 五、输出格式
 
-## 文案写作指南（最重要）
-卡片上的文字应该读起来像${charName}亲手写的/打的，而不是AI生成的。
-
-### 必须做到
-- 完全按${charName}的人设、语气、用词习惯来写
-- 是角色的"生活碎片"——随手记下的备忘、脱口而出的吐槽、匆匆写的日记
-- 有具体的细节：具体的事物、具体的感受，不要空泛
-- 简短自然，文字内容不超过40字
-- 参考角色身体状态（累了就写得潦草随意，兴奋就用感叹号，疏离就写得冷淡）
-
-### 绝对不要
-- ❌ 网文套路："想把你揉进怀里"、"心跳漏了一拍"
-- ❌ 刻意卖萌或刻意深情
-- ❌ 空洞的感叹："真好啊"、"好幸福"
-- ❌ 重复角色刚说过的话
-- ❌ 正能量鸡汤
-
-### 关系感知
-- 从人设和对话推断${charName}和用户的关系
-- 卡片内容应隐隐折射这种关系——通过生活细节，不是通过直白表白
-
-## 输出格式
-直接输出 HTML 代码，用 \`\`\`html 包裹。不要输出 JSON。不要解释。
-先在 <thinking> 内用1-2句话极简短思考适合什么碎片形态，然后输出代码。`;
+1. 第一行用普通文字写出候选与选择，固定格式：候选：A / B / C → 选B（理由不超过10字）
+2. 然后直接输出用 \`\`\`html 包裹的完整代码。
+3. 除以上两项外不输出任何东西。不要JSON，不要解释。`;
 
     const user = `## ${charName}的信息
 ${charContext}
@@ -2622,10 +2755,11 @@ async function generateFreeformCard(
         const charContext = resolvedContext.charContext;
         const timeContext = RealtimeContextManager.getTimeContext();
         const currentState = resolveInternalState(char.moodState as any) || createBaselineState();
+        const dynamicConstraints = buildFreeformDynamicConstraints(char.id);
 
         const prompt = buildFreeformCardPrompt(
             char.name, aiReply.slice(0, 500),
-            recentContext, charContext, currentState, timeContext,
+            recentContext, charContext, currentState, timeContext, dynamicConstraints,
         );
 
         const content = await callSecondaryLLM(
@@ -2640,6 +2774,7 @@ async function generateFreeformCard(
         );
         if (!content) return null;
 
+        const shapeChoice = extractFreeformShapeChoice(content);
         const html = extractHtmlFromResponse(content);
         if (!html || html.length < 50) {
             console.warn('✨ [FreeformCard] Failed to extract HTML:', content.slice(0, 200));
@@ -2654,9 +2789,19 @@ async function generateFreeformCard(
         const cardData: StatusCardData = {
             cardType: 'freeform',
             body: bodyText,
-            meta: { html },
+            meta: {
+                html,
+                freeformChoiceLine: shapeChoice?.line,
+                freeformCandidates: shapeChoice?.candidates,
+                freeformShape: shapeChoice?.selectedShape,
+                freeformDynamicConstraints: dynamicConstraints || undefined,
+            },
             style: { mood: '' },
         };
+
+        if (shapeChoice?.selectedShape) {
+            saveRecentFreeformShape(char.id, shapeChoice.selectedShape);
+        }
 
         // Update InternalState
         const updatedState: InternalState = {

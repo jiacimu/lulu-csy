@@ -6,7 +6,13 @@ import { getRuntimeConfigSnapshot,inferEmbeddingEngineId } from '../../utils/run
 import { safeLocalStorageGet,safeLocalStorageSet } from '../../utils/storage';
 import { usePerformanceMode } from '../../hooks/usePerformanceMode';
 import type { PerformanceModePreference } from '../../utils/performanceMode';
-import { resetViewport } from '../../utils/viewportRepair';
+import {
+    copyViewportDiagnostics,
+    getViewportDiagnosticsSnapshot,
+    resetViewport,
+    setViewportOffsetFollowEnabled,
+    type ViewportDiagnosticsSnapshot,
+} from '../../utils/viewportRepair';
 
 export type SettingsPanel = 'menu' | 'data' | 'api' | 'subapi' | 'realtime' | 'tts' | 'stt' | 'image' | 'embedding' | 'agent' | 'debug';
 
@@ -145,6 +151,25 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
     const statuses = useMemo(readStatuses, []);
     const performanceMode = usePerformanceMode();
     const [viewportCalibrated, setViewportCalibrated] = useState(false);
+    const [viewportDiagnostics, setViewportDiagnostics] = useState<ViewportDiagnosticsSnapshot>(() => getViewportDiagnosticsSnapshot());
+    const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
+
+    React.useEffect(() => {
+        const syncDiagnostics = () => setViewportDiagnostics(getViewportDiagnosticsSnapshot());
+        syncDiagnostics();
+        const interval = window.setInterval(syncDiagnostics, 800);
+
+        window.addEventListener('resize', syncDiagnostics);
+        window.visualViewport?.addEventListener('resize', syncDiagnostics);
+        window.visualViewport?.addEventListener('scroll', syncDiagnostics);
+
+        return () => {
+            window.clearInterval(interval);
+            window.removeEventListener('resize', syncDiagnostics);
+            window.visualViewport?.removeEventListener('resize', syncDiagnostics);
+            window.visualViewport?.removeEventListener('scroll', syncDiagnostics);
+        };
+    }, []);
 
     // Haptics toggle — UI-only preference via storage helper
     const [hapticsEnabled, setHapticsEnabled] = React.useState(() => {
@@ -175,10 +200,22 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
         performanceMode.setPreference(preference);
     };
 
-    const calibrateViewport = () => {
+    const calibrateViewport = async () => {
         haptic.medium();
-        resetViewport();
+        await resetViewport('settings');
         setViewportCalibrated(true);
+        setViewportDiagnostics(getViewportDiagnosticsSnapshot());
+    };
+
+    const handleCopyDiagnostics = () => {
+        copyViewportDiagnostics();
+        setDiagnosticsCopied(true);
+        window.setTimeout(() => setDiagnosticsCopied(false), 1500);
+    };
+
+    const toggleViewportOffsetFollow = (checked: boolean) => {
+        setViewportOffsetFollowEnabled(checked);
+        setViewportDiagnostics(getViewportDiagnosticsSnapshot());
     };
 
     const statusMap: Record<string, string | undefined> = {
@@ -269,6 +306,69 @@ const SettingsMenu: React.FC<Props> = ({ onNavigate }) => {
                 </div>
                 <span className="text-[10px] font-bold text-rose-500 shrink-0">执行</span>
             </button>
+
+            {/* 视口诊断 */}
+            <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-4 shadow-sm border border-white/50">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-2 bg-slate-100 rounded-xl text-slate-600 shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h14.25c.621 0 1.125.504 1.125 1.125v14.25c0 .621-.504 1.125-1.125 1.125H4.875A1.125 1.125 0 0 1 3.75 19.125V4.875Z" /><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3.75h9m-9 3.75h5.25" /></svg>
+                        </div>
+                        <div className="min-w-0">
+                            <div className="text-sm font-semibold text-slate-700">诊断信息</div>
+                            <div className="text-[10px] text-slate-400 truncate">iOS 26.5 视口偏移回传</div>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={handleCopyDiagnostics}
+                        className="shrink-0 rounded-full bg-slate-900/85 px-3 py-1.5 text-[10px] font-bold text-white active:scale-95 transition-transform"
+                    >
+                        {diagnosticsCopied ? '已复制' : '复制'}
+                    </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-xl bg-slate-100/70 p-3 font-mono text-[10px] text-slate-500">
+                    <div>offsetTop: {viewportDiagnostics.offsetTop ?? 'n/a'}</div>
+                    <div>vv.height: {viewportDiagnostics.visualViewportHeight ?? 'n/a'}</div>
+                    <div>innerHeight: {viewportDiagnostics.innerHeight}</div>
+                    <div>clientHeight: {viewportDiagnostics.documentElementClientHeight}</div>
+                    <div>scrollY: {viewportDiagnostics.scrollY}</div>
+                    <div>safeBottom: {viewportDiagnostics.safeAreaInsetBottom}px</div>
+                    <div className="col-span-2 truncate">UA: {viewportDiagnostics.userAgent}</div>
+                </div>
+
+                <div className="mt-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                        <div className="text-xs font-bold text-slate-600">可视视口跟随</div>
+                        <div className="text-[10px] text-slate-400 truncate">实验开关，默认关闭，等真机回传后再决定</div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input
+                            type="checkbox"
+                            checked={viewportDiagnostics.offsetFollowEnabled}
+                            onChange={e => toggleViewportOffsetFollow(e.target.checked)}
+                            className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-rose-500"></div>
+                    </label>
+                </div>
+
+                <div className="mt-3 rounded-xl bg-white/55 p-3">
+                    <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">最近校准</div>
+                    {viewportDiagnostics.calibrationRecords.length > 0 ? (
+                        <div className="space-y-1 font-mono text-[10px] text-slate-500">
+                            {viewportDiagnostics.calibrationRecords.map(record => (
+                                <div key={`${record.at}-${record.source}-${record.beforeOffsetTop}-${record.afterOffsetTop}`} className="truncate">
+                                    {record.at} {record.source}: {record.beforeOffsetTop ?? 'n/a'} → {record.afterOffsetTop ?? 'n/a'}
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-[10px] text-slate-400">暂无记录，点击「校准画面」后会显示前后 offsetTop。</div>
+                    )}
+                </div>
+            </div>
 
             {/* 流畅模式 */}
             <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-4 shadow-sm border border-white/50">

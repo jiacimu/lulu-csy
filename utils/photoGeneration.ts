@@ -26,6 +26,7 @@ import { extractJson } from './safeApi';
 import {
     DEFAULT_NOVELAI_IMAGE_CONFIG,
     DEFAULT_PHOTO_STYLE_PRESETS,
+    GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS,
     NAI_IMAGE_MODELS,
     getOpenAICompatibleStyleFamily,
     markSecondaryApiConfigFailure,
@@ -911,7 +912,7 @@ export function createPhotoMeta(
             photoHint,
             directorResult,
             stylePresetId: style.id,
-            model: normalizeOpenAICompatibleModelId(style.model || openai.model),
+            model: normalizeOpenAICompatibleModelId(openai.model),
             positivePrompt: prompts.positivePrompt,
             negativePrompt: prompts.negativePrompt,
             finalPrompt: prompts.finalPrompt,
@@ -1640,6 +1641,31 @@ function setOptionalNumberParam(target: Record<string, unknown>, key: string, va
     }
 }
 
+function isGeminiOpenAICompatibleImageModel(
+    provider: OpenAICompatibleImageProviderConfig,
+    model: unknown,
+): boolean {
+    return getOpenAICompatibleStyleFamily({
+        baseUrl: provider.baseUrl,
+        model: String(model || provider.model || ''),
+    }) === 'gemini';
+}
+
+function buildGeminiCompatibleImageRequestBody(model: string, prompt: unknown): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+        model,
+        prompt,
+    };
+    const size = String(GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS.size || '').trim();
+    if (size) body.size = normalizeOpenAIImageSize(size);
+    const responseFormat = GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS.responseFormat || 'b64_json';
+    if (responseFormat && responseFormat !== 'auto') {
+        body.response_format = responseFormat;
+    }
+    body.n = 1;
+    return body;
+}
+
 function presetValue<T>(value: T | undefined, fallback: T): T {
     return value === undefined ? fallback : value;
 }
@@ -1648,10 +1674,14 @@ function buildOpenAICompatibleImageRequestBody(
     provider: OpenAICompatibleImageProviderConfig,
     meta: PhotoMeta,
 ): Record<string, unknown> {
-    const model = normalizeOpenAICompatibleModelId(meta.model || provider.model);
+    const model = normalizeOpenAICompatibleModelId(provider.model);
+    const prompt = meta.finalPrompt || meta.positivePrompt;
+    if (isGeminiOpenAICompatibleImageModel(provider, model)) {
+        return buildGeminiCompatibleImageRequestBody(model, prompt);
+    }
     const body: Record<string, unknown> = {
         model,
-        prompt: meta.finalPrompt || meta.positivePrompt,
+        prompt,
     };
     const size = String(meta.size || provider.size || '').trim();
     if (size) body.size = size;
@@ -1677,6 +1707,190 @@ function buildOpenAICompatibleImageRequestBody(
         ...body,
         ...parseOpenAICompatibleExtraRequestBody(provider.extraRequestBody),
         ...parseOpenAICompatibleExtraRequestBody(meta.extraRequestBody),
+    };
+}
+
+type OpenAICompatibleImageAttempt = {
+    requestBody: Record<string, unknown>;
+    removedGeminiParams: string[];
+};
+
+type OpenAICompatibleImageAttemptResult = {
+    requestBody: Record<string, unknown>;
+    authAttempt: string;
+    response: Response;
+    responseText: string;
+    contentType: string;
+};
+
+type OpenAICompatibleImageAttemptOutcome = {
+    photo?: GeneratedPhotoImage;
+    error?: Error;
+    authError?: boolean;
+    invalidArgument?: boolean;
+};
+
+function buildGeminiImageRequestAttempts(requestBody: Record<string, unknown>): OpenAICompatibleImageAttempt[] {
+    const attempts: OpenAICompatibleImageAttempt[] = [{ requestBody, removedGeminiParams: [] }];
+    let current = requestBody;
+    const removed: string[] = [];
+    for (const key of ['size', 'n', 'response_format']) {
+        if (!Object.prototype.hasOwnProperty.call(current, key)) continue;
+        const next = { ...current };
+        delete next[key];
+        removed.push(key);
+        attempts.push({ requestBody: next, removedGeminiParams: [...removed] });
+        current = next;
+    }
+    return attempts;
+}
+
+function buildGeminiDegradePrefix(removedGeminiParams: string[]): string {
+    if (removedGeminiParams.length === 0) return '';
+    return `Gemini 参数降级：移除 ${removedGeminiParams.join(' -> 移除 ')}。`;
+}
+
+function isOpenAICompatibleInvalidArgumentError(status: number, detail: string): boolean {
+    return status >= 400 && /(?:invalid argument|invalid request|unsupported|unrecognized|unknown field|not supported|参数|字段)/i.test(detail);
+}
+
+async function fetchOpenAICompatibleImageAttempt(
+    requestUrl: string,
+    provider: OpenAICompatibleImageProviderConfig,
+    requestBody: Record<string, unknown>,
+    authAttempt: string,
+): Promise<OpenAICompatibleImageAttemptResult> {
+    const apiKey = provider.apiKey.trim();
+    const headers: Record<string, string> = {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+    };
+    if (authAttempt.includes('x-goog-api-key')) {
+        headers['x-goog-api-key'] = apiKey;
+    }
+    const response = await fetch(requestUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+    });
+
+    const { text: responseText, contentType } = await readResponseText(response);
+    logPhotoResponse('OpenAICompatibleImage', response, responseText, contentType);
+    return {
+        requestBody,
+        authAttempt,
+        response,
+        responseText,
+        contentType,
+    };
+}
+
+async function resolveOpenAICompatibleImageAttempt(
+    requestUrl: string,
+    result: OpenAICompatibleImageAttemptResult,
+): Promise<OpenAICompatibleImageAttemptOutcome> {
+    const {
+        requestBody,
+        authAttempt,
+        response,
+        responseText,
+        contentType,
+    } = result;
+    if (looksLikeHtmlResponse(responseText, contentType)) {
+        console.warn('[OpenAICompatibleImage] image result parse failed', {
+            reason: 'html_response',
+            requestUrl,
+            status: response.status,
+            contentType: contentType || 'unknown',
+        });
+        const htmlError = buildHtmlResponseError('OpenAI 兼容生图', response, responseText, contentType);
+        return {
+            error: new Error(`${htmlError.message}${buildOpenAICompatibleImageDebugDetails({
+                requestUrl,
+                authAttempt,
+                requestBody,
+                response,
+                responseText,
+                contentType,
+            })}`),
+        };
+    }
+    if (!responseText.trim()) {
+        return {
+            error: new Error(`OpenAI 兼容接口返回空响应，请检查 endpoint、model、key、CORS 或代理日志。${buildOpenAICompatibleImageDebugDetails({
+                requestUrl,
+                authAttempt,
+                requestBody,
+                response,
+                responseText,
+                contentType,
+            })}`),
+        };
+    }
+    const payload = parseOpenAICompatibleResponsePayload(responseText);
+    const image = extractGeneratedImage(payload);
+    if (!response.ok && !image) {
+        const detail = readOpenAICompatibleErrorMessage(payload, responseText);
+        if (isOpenAICompatibleAuthError(response.status, detail)) {
+            return {
+                authError: true,
+                error: new Error(`${buildOpenAICompatibleAuthError('OpenAI 兼容生图', response.status, detail)}${buildOpenAICompatibleImageDebugDetails({
+                    requestUrl,
+                    authAttempt,
+                    requestBody,
+                    response,
+                    responseText,
+                    contentType,
+                    payload,
+                })}`),
+            };
+        }
+        const textOnlyHint = detail && !extractImageFromText(detail) && !looksLikeBase64ImagePayload(detail)
+            ? `：接口返回了文字说明，未返回图片。${detail}`
+            : detail
+                ? `: ${detail}`
+                : '';
+        return {
+            invalidArgument: isOpenAICompatibleInvalidArgumentError(response.status, detail),
+            error: new Error(`OpenAI 兼容生图失败 (${response.status})${textOnlyHint}${buildOpenAICompatibleImageDebugDetails({
+                requestUrl,
+                authAttempt,
+                requestBody,
+                response,
+                responseText,
+                contentType,
+                payload,
+            })}`),
+        };
+    }
+    if (!response.ok) {
+        console.warn('[OpenAICompatibleImage] non-OK response contained a usable image payload:', response.status);
+    }
+    if (image) {
+        console.info('[OpenAICompatibleImage] image result parse success', {
+            requestUrl,
+            kind: image.kind,
+            status: response.status,
+            authAttempt,
+        });
+        return { photo: await extractedImageToGeneratedPhoto(image) };
+    }
+    console.warn('[OpenAICompatibleImage] image result parse failed', {
+        requestUrl,
+        status: response.status,
+        payloadShape: summarizePayloadShape(payload),
+        responseTextPreview: responsePreview(responseText, 500),
+    });
+    return {
+        error: new Error(`OpenAI 兼容接口没有返回可识别的图片（返回结构：${summarizePayloadShape(payload)}${buildOpenAICompatiblePayloadPreview(payload, responseText)}）${buildOpenAICompatibleImageDebugDetails({
+            requestUrl,
+            authAttempt,
+            requestBody,
+            response,
+            responseText,
+            contentType,
+            payload,
+        })}`),
     };
 }
 
@@ -1709,102 +1923,36 @@ async function generateOpenAICompatibleImage(
         userInitiated: meta.source === 'manual',
         url: requestUrl,
     }, async () => {
-        const authAttempt = 'Authorization Bearer';
-        const response = await fetch(requestUrl, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${provider.apiKey.trim()}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(requestBody),
-        });
+        const isGeminiRequest = isGeminiOpenAICompatibleImageModel(provider, requestBody.model);
+        const attempts = isGeminiRequest
+            ? buildGeminiImageRequestAttempts(requestBody)
+            : [{ requestBody, removedGeminiParams: [] }];
 
-        const { text: responseText, contentType } = await readResponseText(response);
-        logPhotoResponse('OpenAICompatibleImage', response, responseText, contentType);
-        if (looksLikeHtmlResponse(responseText, contentType)) {
-            console.warn('[OpenAICompatibleImage] image result parse failed', {
-                reason: 'html_response',
+        for (let index = 0; index < attempts.length; index += 1) {
+            const attempt = attempts[index];
+            let outcome = await resolveOpenAICompatibleImageAttempt(
                 requestUrl,
-                status: response.status,
-                contentType: contentType || 'unknown',
-            });
-            const htmlError = buildHtmlResponseError('OpenAI 兼容生图', response, responseText, contentType);
-            throw new Error(`${htmlError.message}${buildOpenAICompatibleImageDebugDetails({
-                requestUrl,
-                authAttempt,
-                requestBody,
-                response,
-                responseText,
-                contentType,
-            })}`);
-        }
-        if (!responseText.trim()) {
-            throw new Error(`OpenAI 兼容接口返回空响应，请检查 endpoint、model、key、CORS 或代理日志。${buildOpenAICompatibleImageDebugDetails({
-                requestUrl,
-                authAttempt,
-                requestBody,
-                response,
-                responseText,
-                contentType,
-            })}`);
-        }
-        const payload = parseOpenAICompatibleResponsePayload(responseText);
-        const image = extractGeneratedImage(payload);
-        if (!response.ok && !image) {
-            const detail = readOpenAICompatibleErrorMessage(payload, responseText);
-            if (isOpenAICompatibleAuthError(response.status, detail)) {
-                throw new Error(`${buildOpenAICompatibleAuthError('OpenAI 兼容生图', response.status, detail)}${buildOpenAICompatibleImageDebugDetails({
+                await fetchOpenAICompatibleImageAttempt(requestUrl, provider, attempt.requestBody, 'Authorization Bearer'),
+            );
+
+            if (outcome.authError && isGeminiRequest) {
+                outcome = await resolveOpenAICompatibleImageAttempt(
                     requestUrl,
-                    authAttempt,
-                    requestBody,
-                    response,
-                    responseText,
-                    contentType,
-                    payload,
-                })}`);
+                    await fetchOpenAICompatibleImageAttempt(requestUrl, provider, attempt.requestBody, 'Authorization Bearer + x-goog-api-key'),
+                );
             }
-            const textOnlyHint = detail && !extractImageFromText(detail) && !looksLikeBase64ImagePayload(detail)
-                ? `：接口返回了文字说明，未返回图片。${detail}`
-                : detail
-                    ? `: ${detail}`
-                    : '';
-            throw new Error(`OpenAI 兼容生图失败 (${response.status})${textOnlyHint}${buildOpenAICompatibleImageDebugDetails({
-                requestUrl,
-                authAttempt,
-                requestBody,
-                response,
-                responseText,
-                contentType,
-                payload,
-            })}`);
+
+            if (outcome.photo) return outcome.photo;
+            if (outcome.invalidArgument && isGeminiRequest && index < attempts.length - 1) {
+                continue;
+            }
+            if (outcome.error) {
+                const prefix = buildGeminiDegradePrefix(attempt.removedGeminiParams);
+                throw new Error(prefix ? `${prefix}${outcome.error.message}` : outcome.error.message);
+            }
         }
-        if (!response.ok) {
-            console.warn('[OpenAICompatibleImage] non-OK response contained a usable image payload:', response.status);
-        }
-        if (image) {
-            console.info('[OpenAICompatibleImage] image result parse success', {
-                requestUrl,
-                kind: image.kind,
-                status: response.status,
-                authAttempt,
-            });
-            return extractedImageToGeneratedPhoto(image);
-        }
-        console.warn('[OpenAICompatibleImage] image result parse failed', {
-            requestUrl,
-            status: response.status,
-            payloadShape: summarizePayloadShape(payload),
-            responseTextPreview: responsePreview(responseText, 500),
-        });
-        throw new Error(`OpenAI 兼容接口没有返回可识别的图片（返回结构：${summarizePayloadShape(payload)}${buildOpenAICompatiblePayloadPreview(payload, responseText)}）${buildOpenAICompatibleImageDebugDetails({
-            requestUrl,
-            authAttempt,
-            requestBody,
-            response,
-            responseText,
-            contentType,
-            payload,
-        })}`);
+
+        throw new Error('OpenAI 兼容生图失败：没有可用的请求尝试。');
     });
 }
 

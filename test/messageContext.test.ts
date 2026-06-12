@@ -412,6 +412,49 @@ describe('message context formatter', () => {
         expect(text).toContain('本条消息正文：你要接住我后面这句话');
     });
 
+    it('formats bilingual marker reply context with original text only', () => {
+        const text = formatMessageForContext(msg({
+            role: 'user',
+            content: '我的实际回复内容，不能被吞掉',
+            replyTo: {
+                id: 93,
+                name: '糯米',
+                content: 'Bonjour, ça va ?\n%%BILINGUAL%%\n你好，最近怎么样？',
+                type: 'text',
+            },
+        }), {
+            surface: 'chat',
+            charName: '糯米',
+        });
+
+        expect(text).toContain('用户引用了你之前说的「Bonjour, ça va ?」');
+        expect(text).toContain('本条消息正文：我的实际回复内容，不能被吞掉');
+        expect(text).not.toContain('%%BILINGUAL%%');
+        expect(text).not.toContain('你好，最近怎么样？');
+    });
+
+    it('formats translation XML reply context with original text only', () => {
+        const text = formatMessageForContext(msg({
+            role: 'user',
+            content: '继续说刚才那句',
+            replyTo: {
+                id: 94,
+                name: '糯米',
+                content: '<翻译><原文>おはよう</原文><译文>早上好</译文></翻译>',
+                type: 'text',
+            },
+        }), {
+            surface: 'chat',
+            charName: '糯米',
+        });
+
+        expect(text).toContain('用户引用了你之前说的「おはよう」');
+        expect(text).toContain('本条消息正文：继续说刚才那句');
+        expect(text).not.toContain('<翻译>');
+        expect(text).not.toContain('<译文>');
+        expect(text).not.toContain('早上好');
+    });
+
     it('formats collection forwards with the full book body for chat context', () => {
         const fullBody = [
             '《灯雨》',

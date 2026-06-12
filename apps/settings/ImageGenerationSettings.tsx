@@ -80,7 +80,7 @@ const responseFormatLabel = (value: OpenAIImageResponseFormat) => (
 
 const buildPresetParamSummary = (preset: PhotoStylePreset): string => {
     const params = [
-        preset.model ? `model ${preset.model}` : '',
+        preset.providerScope === 'novelai' && preset.model ? `model ${preset.model}` : '',
         preset.size ? `size ${preset.size}` : (preset.width && preset.height ? `${preset.width}x${preset.height}` : ''),
         preset.steps ? `steps ${preset.steps}` : '',
         preset.scale ? `scale ${preset.scale}` : '',
@@ -122,7 +122,6 @@ const buildCurrentPresetParams = (
         ? config.openaiCompatible
         : DEFAULT_OPENAI_COMPATIBLE_IMAGE_CONFIG;
     return {
-        model: openai.model || undefined,
         size: openai.size,
         responseFormat: openai.responseFormat,
         n: openai.n,

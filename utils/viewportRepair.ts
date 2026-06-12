@@ -8,11 +8,38 @@ let lastDebugText = '';
 let logoTapCount = 0;
 let logoTapTimer: number | undefined;
 let lastPointerDebugTapAt = Number.NEGATIVE_INFINITY;
+let isResettingViewport = false;
+let isViewportOffsetFollowEnabled = false;
 
 const VIEWPORT_DEBUG_TRIGGER_SELECTOR = '[data-viewport-debug-trigger="true"]';
 const KEYBOARD_CLOSED_TOLERANCE = 80;
 const WATCHDOG_DELAY_MS = 150;
 const UNLOCK_KEYBOARD_SETTLE_TIMEOUT_MS = 350;
+const VIEWPORT_OFFSET_FOLLOW_KEY = 'sully_vv_offset_follow_enabled';
+const HARD_RESET_ROUNDS = 2;
+const HARD_RESET_ROUND_GAP_MS = 250;
+
+export interface ViewportCalibrationRecord {
+  at: string;
+  source: string;
+  beforeOffsetTop: number | null;
+  afterOffsetTop: number | null;
+}
+
+export interface ViewportDiagnosticsSnapshot {
+  offsetTop: number | null;
+  visualViewportHeight: number | null;
+  innerHeight: number;
+  documentElementClientHeight: number;
+  scrollY: number;
+  documentElementScrollTop: number;
+  safeAreaInsetBottom: number;
+  userAgent: string;
+  offsetFollowEnabled: boolean;
+  calibrationRecords: ViewportCalibrationRecord[];
+}
+
+const calibrationRecords: ViewportCalibrationRecord[] = [];
 
 type FocusTarget = HTMLElement & {
   focus(options?: FocusOptions): void;
@@ -21,9 +48,10 @@ type FocusTarget = HTMLElement & {
 declare global {
   interface Window {
     SullyViewportRepair?: {
-      resetViewport: () => void;
+      resetViewport: () => Promise<void>;
       showDebug: () => void;
       getDebugText: () => string;
+      setOffsetFollowEnabled: (enabled: boolean) => void;
     };
   }
 }
@@ -36,15 +64,74 @@ function safeScrollTo(x: number, y: number): void {
   }
 }
 
-export function resetViewport(): void {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+function waitForAnimationFrame(): Promise<void> {
+  return new Promise(resolve => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
 
-  safeScrollTo(0, 1);
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+function readViewportOffsetTop(): number | null {
+  if (typeof window === 'undefined') return null;
+  const offsetTop = window.visualViewport?.offsetTop;
+  return typeof offsetTop === 'number' && Number.isFinite(offsetTop) ? Math.round(offsetTop) : null;
+}
+
+function pushCalibrationRecord(source: string, beforeOffsetTop: number | null, afterOffsetTop: number | null): void {
+  calibrationRecords.unshift({
+    at: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+    source,
+    beforeOffsetTop,
+    afterOffsetTop,
+  });
+
+  calibrationRecords.splice(5);
+}
+
+async function resetViewportHardRound(): Promise<void> {
+  const de = document.documentElement;
+  const prevMinHeight = de.style.minHeight;
+
+  de.style.minHeight = 'calc(100% + 3px)';
+  await waitForAnimationFrame();
+  safeScrollTo(0, 2);
+  await waitForAnimationFrame();
   safeScrollTo(0, 0);
-  document.documentElement.scrollTop = 0;
+  de.scrollTop = 0;
   if (document.body) {
     document.body.scrollTop = 0;
   }
+  await wait(80);
+  de.style.minHeight = prevMinHeight;
+}
+
+export async function resetViewportHard(source = 'manual'): Promise<void> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  if (isResettingViewport) return;
+
+  isResettingViewport = true;
+  const beforeOffsetTop = readViewportOffsetTop();
+
+  try {
+    for (let round = 0; round < HARD_RESET_ROUNDS; round += 1) {
+      await resetViewportHardRound();
+      if (round < HARD_RESET_ROUNDS - 1) {
+        await wait(HARD_RESET_ROUND_GAP_MS);
+      }
+    }
+  } finally {
+    const afterOffsetTop = readViewportOffsetTop();
+    pushCalibrationRecord(source, beforeOffsetTop, afterOffsetTop);
+    refreshDebugOverlay();
+    isResettingViewport = false;
+  }
+}
+
+export function resetViewport(source = 'manual'): Promise<void> {
+  return resetViewportHard(source);
 }
 
 function checkViewport(): void {
@@ -58,7 +145,7 @@ function checkViewport(): void {
     const stuck = Boolean(vv && vv.offsetTop > 0) || document.documentElement.scrollTop !== 0 || window.scrollY !== 0;
 
     if (kbClosed && stuck) {
-      resetViewport();
+      resetViewportHard('watchdog');
     }
   }, WATCHDOG_DELAY_MS);
 }
@@ -89,8 +176,7 @@ export function prepareViewportForUnlock(): Promise<void> {
         window.clearTimeout(timeoutId);
       }
       vv?.removeEventListener('resize', finish);
-      resetViewport();
-      resolve();
+      resetViewportHard('unlock').finally(resolve);
     };
 
     timeoutId = window.setTimeout(finish, UNLOCK_KEYBOARD_SETTLE_TIMEOUT_MS);
@@ -148,22 +234,48 @@ function readSafeAreaInsetBottom(): number {
   return Math.round(value);
 }
 
-function buildDebugText(): string {
+export function getViewportDiagnosticsSnapshot(): ViewportDiagnosticsSnapshot {
+  const vv = window.visualViewport;
+  return {
+    offsetTop: readViewportOffsetTop(),
+    visualViewportHeight: vv ? Math.round(vv.height) : null,
+    innerHeight: Math.round(window.innerHeight || 0),
+    documentElementClientHeight: Math.round(document.documentElement.clientHeight || 0),
+    scrollY: Math.round(window.scrollY || 0),
+    documentElementScrollTop: Math.round(document.documentElement.scrollTop || 0),
+    safeAreaInsetBottom: readSafeAreaInsetBottom(),
+    userAgent: navigator.userAgent || '',
+    offsetFollowEnabled: isViewportOffsetFollowEnabled,
+    calibrationRecords: calibrationRecords.slice(),
+  };
+}
+
+function formatCalibrationRecord(record: ViewportCalibrationRecord): string {
+  return `${record.at} ${record.source}: ${record.beforeOffsetTop ?? 'n/a'} -> ${record.afterOffsetTop ?? 'n/a'}`;
+}
+
+export function buildDebugText(): string {
   if (typeof window === 'undefined' || typeof document === 'undefined') return '';
 
-  const vv = window.visualViewport;
+  const snapshot = getViewportDiagnosticsSnapshot();
   const lines = [
-    `visualViewport.offsetTop: ${vv ? Math.round(vv.offsetTop) : 'n/a'}`,
-    `visualViewport.height: ${vv ? Math.round(vv.height) : 'n/a'}`,
-    `innerHeight: ${Math.round(window.innerHeight || 0)}`,
-    `documentElement.clientHeight: ${Math.round(document.documentElement.clientHeight || 0)}`,
-    `scrollY: ${Math.round(window.scrollY || 0)}`,
-    `documentElement.scrollTop: ${Math.round(document.documentElement.scrollTop || 0)}`,
-    `env(safe-area-inset-bottom): ${readSafeAreaInsetBottom()}px`,
-    `UA: ${navigator.userAgent || ''}`,
+    `visualViewport.offsetTop: ${snapshot.offsetTop ?? 'n/a'}`,
+    `visualViewport.height: ${snapshot.visualViewportHeight ?? 'n/a'}`,
+    `innerHeight: ${snapshot.innerHeight}`,
+    `documentElement.clientHeight: ${snapshot.documentElementClientHeight}`,
+    `scrollY: ${snapshot.scrollY}`,
+    `documentElement.scrollTop: ${snapshot.documentElementScrollTop}`,
+    `env(safe-area-inset-bottom): ${snapshot.safeAreaInsetBottom}px`,
+    `offset follow: ${snapshot.offsetFollowEnabled ? 'on' : 'off'}`,
+    `recent calibrations: ${snapshot.calibrationRecords.length ? snapshot.calibrationRecords.map(formatCalibrationRecord).join(' | ') : 'none'}`,
+    `UA: ${snapshot.userAgent}`,
   ];
 
   return lines.join('\n');
+}
+
+export function copyViewportDiagnostics(): void {
+  copyText(buildDebugText());
 }
 
 function copyText(text: string): void {
@@ -279,6 +391,40 @@ function hideViewportDebugOverlay(): void {
   debugPre = null;
 }
 
+function syncViewportOffsetVar(): void {
+  if (typeof document === 'undefined') return;
+  const offsetTop = isViewportOffsetFollowEnabled ? (readViewportOffsetTop() ?? 0) : 0;
+  document.documentElement.style.setProperty('--vv-offset', `${offsetTop}px`);
+}
+
+function readStoredViewportOffsetFollow(): boolean {
+  try {
+    return localStorage.getItem(VIEWPORT_OFFSET_FOLLOW_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function setViewportOffsetFollowEnabled(enabled: boolean): void {
+  isViewportOffsetFollowEnabled = enabled;
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.toggle('vv-offset-follow', enabled);
+  }
+
+  try {
+    localStorage.setItem(VIEWPORT_OFFSET_FOLLOW_KEY, String(enabled));
+  } catch {
+    // Storage can be unavailable in private or embedded contexts.
+  }
+
+  syncViewportOffsetVar();
+  refreshDebugOverlay();
+}
+
+export function getViewportOffsetFollowEnabled(): boolean {
+  return isViewportOffsetFollowEnabled;
+}
+
 function shouldEnableDebugFromUrl(): boolean {
   try {
     return new URLSearchParams(window.location.search).get('debug') === '1';
@@ -334,13 +480,19 @@ export function installViewportRepair(): void {
 
   hasInstalledViewportRepair = true;
   installPreventScrollFocusPatch();
+  setViewportOffsetFollowEnabled(readStoredViewportOffsetFollow());
+
+  const handleViewportChange = () => {
+    syncViewportOffsetVar();
+    checkViewport();
+  };
 
   const vv = window.visualViewport;
-  vv?.addEventListener('resize', checkViewport);
-  vv?.addEventListener('scroll', checkViewport);
+  vv?.addEventListener('resize', handleViewportChange);
+  vv?.addEventListener('scroll', handleViewportChange);
   window.addEventListener('focusout', checkViewport);
-  window.addEventListener('resize', checkViewport);
-  window.addEventListener('pageshow', checkViewport);
+  window.addEventListener('resize', handleViewportChange);
+  window.addEventListener('pageshow', handleViewportChange);
   window.addEventListener('popstate', syncDebugFromUrl);
   window.addEventListener('hashchange', syncDebugFromUrl);
   document.addEventListener('pointerup', handleDebugTriggerTap, true);
@@ -350,6 +502,7 @@ export function installViewportRepair(): void {
     resetViewport,
     showDebug: showViewportDebugOverlay,
     getDebugText: buildDebugText,
+    setOffsetFollowEnabled: setViewportOffsetFollowEnabled,
   };
 
   syncDebugFromUrl();

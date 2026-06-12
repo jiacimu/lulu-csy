@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { CharacterProfile, UserProfile } from '../types';
-import { buildDateSessionPromptMessages, runDateRecapBridgeFirstSync } from '../apps/DateApp';
+import type { CharacterProfile, Message, UserProfile } from '../types';
+import { buildDateSessionPromptMessages, buildDateStatusSnapshotForMainApi, runDateRecapBridgeFirstSync } from '../apps/DateApp';
 
 const char = {
     id: 'char-1',
@@ -84,6 +84,39 @@ describe('date session prompt assembly', () => {
         expect(userMessage).toContain('<turn_directives>');
         expect(userMessage).toContain('现在输出。你回复的第一个字符必须是 <thinking>。');
         expect(userMessage).not.toContain('上一轮正文');
+    });
+
+    it('does not inject old status snapshots when the Date status bar is disabled', () => {
+        const statusMessage: Message = {
+            id: 11,
+            charId: char.id,
+            role: 'assistant',
+            type: 'text',
+            content: '[normal] 上一轮正文。',
+            timestamp: 2000,
+            metadata: {
+                source: 'date',
+                hasDateStatusCard: true,
+                statusCardData: {
+                    cardType: 'custom_text',
+                    body: '此幕-当前场景: 雨夜',
+                    style: {},
+                    meta: {
+                        dateStatusRaw: '【此幕】\n此幕-当前场景: 雨夜 · 窗边餐桌\n命途-当前弧线: 旧弧线',
+                    },
+                },
+            },
+        };
+
+        expect(buildDateStatusSnapshotForMainApi({
+            ...char,
+            dateStatusBarEnabled: true,
+        }, [statusMessage])).toContain('此幕-当前场景');
+
+        expect(buildDateStatusSnapshotForMainApi({
+            ...char,
+            dateStatusBarEnabled: false,
+        }, [statusMessage])).toBe('');
     });
 });
 

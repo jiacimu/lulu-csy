@@ -409,7 +409,7 @@ describe('photoGeneration helpers', () => {
 
         expect(getPhotoStylePresets()[0]).toMatchObject({
             id: 'param-style',
-            providerScope: 'openai-compatible',
+            providerScope: 'openai-gpt',
             size: 'auto',
             responseFormat: 'url',
             n: 2,
@@ -427,7 +427,7 @@ describe('photoGeneration helpers', () => {
         });
     });
 
-    it('normalizes legacy split OpenAI-compatible style scopes back to OpenAI-compatible', () => {
+    it('preserves split OpenAI-compatible style scopes', () => {
         localStorage.setItem(PHOTO_STYLE_PRESETS_KEY, JSON.stringify([
             {
                 id: 'legacy-gpt-soft',
@@ -445,9 +445,11 @@ describe('photoGeneration helpers', () => {
             },
         ]));
 
-        expect(getPhotoStylePresets().map(preset => [preset.id, preset.providerScope])).toEqual([
-            ['legacy-gpt-soft', 'openai-compatible'],
-            ['legacy-gemini-soft', 'openai-compatible'],
+        expect(getPhotoStylePresets()
+            .filter(preset => preset.id.startsWith('legacy-'))
+            .map(preset => [preset.id, preset.providerScope])).toEqual([
+            ['legacy-gpt-soft', 'openai-gpt'],
+            ['legacy-gemini-soft', 'openai-gemini'],
         ]);
     });
 
@@ -463,7 +465,7 @@ describe('photoGeneration helpers', () => {
             {
                 id: 'custom-openai',
                 name: 'Custom',
-                providerScope: 'openai-compatible',
+                providerScope: 'openai-gpt',
                 positivePrompt: 'custom style',
                 negativePrompt: '',
             },
@@ -478,13 +480,13 @@ describe('photoGeneration helpers', () => {
         expect(ids).toContain('loveshow-couple-real');
         expect(ids).toContain('style-openai-compatible-1779814872010');
         expect(ids).toContain('style-openai-compatible-mature-male-real-couple');
-        expect(presets.find(preset => preset.id === 'custom-openai')?.providerScope).toBe('openai-compatible');
+        expect(presets.find(preset => preset.id === 'custom-openai')?.providerScope).toBe('openai-gpt');
     });
 
     it('filters style presets by the active provider without mixing shared presets', () => {
         const presets: PhotoStylePreset[] = [
             { ...style, id: 'nai-only', providerScope: 'novelai' },
-            { ...style, id: 'compat-only', providerScope: 'openai-compatible' },
+            { ...style, id: 'compat-only', providerScope: 'openai-gpt' },
             { ...style, id: 'shared', providerScope: 'all' },
         ];
 
@@ -554,7 +556,7 @@ describe('photoGeneration helpers', () => {
             {
                 id: 'custom-style',
                 name: 'Custom',
-                providerScope: 'openai-compatible',
+                providerScope: 'openai-gpt',
                 positivePrompt: 'custom',
                 negativePrompt: '',
             },
@@ -677,7 +679,7 @@ describe('photoGeneration helpers', () => {
         const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
         const compatStyle: PhotoStylePreset = {
             ...style,
-            providerScope: 'openai-compatible',
+            providerScope: 'openai-gpt',
             positivePrompt: '柔和胶片感，生活化抓拍',
             negativePrompt: '过曝',
         };
@@ -695,7 +697,7 @@ describe('photoGeneration helpers', () => {
         const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
         const compatStyle: PhotoStylePreset = {
             ...style,
-            providerScope: 'openai-compatible',
+            providerScope: 'openai-gpt',
             positivePrompt: '生活化抓拍',
             negativePrompt: '',
         };
@@ -788,7 +790,7 @@ describe('photoGeneration helpers', () => {
 
         expect(preset).toMatchObject({
             id: 'community-soft',
-            providerScope: 'openai-compatible',
+            providerScope: 'openai-gpt',
             positivePrompt: 'soft focus, gentle color',
             negativePrompt: 'blur, watermark',
             width: 1024,
@@ -819,7 +821,7 @@ describe('photoGeneration helpers', () => {
             'size: 832x1216',
         ].join('\n'), 'openai-compatible');
 
-        expect(preset.providerScope).toBe('openai-compatible');
+        expect(preset.providerScope).toBe('openai-gpt');
         expect(preset.positivePrompt).toBe('cinematic portrait, window light');
         expect(preset.negativePrompt).toBe('lowres, bad anatomy');
         expect(preset.steps).toBe(24);
@@ -1031,9 +1033,16 @@ describe('photoGeneration helpers', () => {
         await expect(generatePhotoImage(config, openAICompatibleMeta)).rejects.toThrow('接口返回 HTML 页面');
     });
 
-    it('sends stored OpenAI-compatible model names verbatim', async () => {
-        const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
-        const meta: PhotoMeta = { ...openAICompatibleMeta, model: '【0.08】米/gpt-image-2' };
+    it('sends configured OpenAI-compatible model names verbatim', async () => {
+        const config: ImageGenerationConfig = {
+            ...baseConfig,
+            activeProvider: 'openai-compatible',
+            openaiCompatible: {
+                ...baseConfig.openaiCompatible,
+                model: '【0.08】米/gpt-image-2',
+            },
+        };
+        const meta: PhotoMeta = { ...openAICompatibleMeta, model: 'stale-style/gpt-image-1' };
         vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
             data: [{ b64_json: 'aGVsbG8=' }],
         }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
@@ -1044,8 +1053,7 @@ describe('photoGeneration helpers', () => {
         expect(JSON.parse(init.body).model).toBe('【0.08】米/gpt-image-2');
     });
 
-    it('preserves provider-prefixed model names before requesting', async () => {
-        const config: ImageGenerationConfig = { ...baseConfig, activeProvider: 'openai-compatible' };
+    it('preserves provider-prefixed configured model names before requesting', async () => {
         const cases: Array<[string, string]> = [
             ['openai/gpt-image-2', 'openai/gpt-image-2'],
             ['provider/gpt-image-2', 'provider/gpt-image-2'],
@@ -1061,7 +1069,15 @@ describe('photoGeneration helpers', () => {
         }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
         for (const [storedModel] of cases) {
-            await generatePhotoImage(config, { ...openAICompatibleMeta, model: storedModel });
+            const config: ImageGenerationConfig = {
+                ...baseConfig,
+                activeProvider: 'openai-compatible',
+                openaiCompatible: {
+                    ...baseConfig.openaiCompatible,
+                    model: storedModel,
+                },
+            };
+            await generatePhotoImage(config, { ...openAICompatibleMeta, model: 'stale-style/gpt-image-1' });
         }
 
         expect(fetchMock).toHaveBeenCalledTimes(cases.length);
@@ -1176,7 +1192,7 @@ describe('photoGeneration helpers', () => {
         });
     });
 
-    it('lets OpenAI-compatible style presets override image request params', async () => {
+    it('lets OpenAI-compatible style presets override image request params except model', async () => {
         const config: ImageGenerationConfig = {
             ...baseConfig,
             activeProvider: 'openai-compatible',
@@ -1217,14 +1233,14 @@ describe('photoGeneration helpers', () => {
 
         const [, init] = (fetch as any).mock.calls[0];
         expect(meta).toMatchObject({
-            model: 'style-image',
+            model: 'global-image',
             size: 'auto',
             responseFormat: 'url',
             quality: 'high',
             openAIStyle: 'natural',
         });
         expect(JSON.parse(init.body)).toMatchObject({
-            model: 'style-image',
+            model: 'global-image',
             size: 'auto',
             response_format: 'url',
             n: 2,
@@ -1473,7 +1489,7 @@ describe('photoGeneration helpers', () => {
         const secondBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
         const thirdBody = JSON.parse(String(fetchMock.mock.calls[2][1]?.body));
         const fourthBody = JSON.parse(String(fetchMock.mock.calls[3][1]?.body));
-        expect(firstBody.size).toBe('1024x1024');
+        expect(firstBody.size).toBe('1024x1536');
         expect(firstBody.n).toBe(1);
         expect(firstBody.response_format).toBe('b64_json');
         expect(secondBody.size).toBeUndefined();
@@ -1527,7 +1543,12 @@ describe('photoGeneration helpers', () => {
         const config: ImageGenerationConfig = {
             ...baseConfig,
             activeProvider: 'openai-compatible',
-            openaiCompatible: { ...baseConfig.openaiCompatible, apiKey: 'gemini-key', responseFormat: 'url' },
+            openaiCompatible: {
+                ...baseConfig.openaiCompatible,
+                apiKey: 'gemini-key',
+                model: GEMINI_OPENAI_COMPATIBLE_IMAGE_MODEL,
+                responseFormat: 'url',
+            },
         };
         const meta: PhotoMeta = {
             source: 'manual',

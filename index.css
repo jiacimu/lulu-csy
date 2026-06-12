@@ -4938,6 +4938,7 @@
   --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--standalone-safe-area-bottom, 0px));
   --effective-safe-bottom: var(--safe-bottom, env(safe-area-inset-bottom, 0px));
   --system-status-top: 8px;
+  --vv-offset: 0px;
 }
 
 /* In fullscreen/PWA/native shells, keep the hardware safe areas. Some Android
@@ -4972,6 +4973,10 @@ body {
   width: 100vw;
   font-family: var(--app-font);
   color: var(--app-system-text);
+}
+
+.vv-offset-follow .sully-app-root {
+  transform: translateY(var(--vv-offset, 0px));
 }
 
 #root,
