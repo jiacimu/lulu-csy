@@ -93,5 +93,10 @@ describe('App iOS standalone shell layout', () => {
     expect(appRoot?.classList.contains('inset-0')).toBe(true);
     expect(appRoot?.style.height).toBe('');
     expect(appRoot?.getAttribute('style') ?? '').not.toContain('--real-vh');
+
+    const appCanvas = appRoot?.firstElementChild as HTMLElement | null;
+
+    expect(appCanvas?.classList.contains('fixed')).toBe(true);
+    expect(appCanvas?.classList.contains('inset-0')).toBe(true);
   });
 });

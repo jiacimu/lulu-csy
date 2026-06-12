@@ -4989,6 +4989,13 @@ body {
   min-height: 100dvh;
 }
 
+html.ios-standalone .sully-app-root {
+  position: fixed;
+  inset: 0;
+  height: auto;
+  min-height: 0;
+}
+
 .sully-system-text-scope {
   color: var(--app-system-text);
 }
@@ -5073,6 +5080,10 @@ textarea[readonly] {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+.sully-thinking-scroll {
+  -webkit-overflow-scrolling: touch;
 }
 
 .sully-bubble-text {

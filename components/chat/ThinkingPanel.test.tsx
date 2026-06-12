@@ -29,4 +29,25 @@ describe('ThinkingPanel', () => {
 
         expect(onParentClick).not.toHaveBeenCalled();
     });
+
+    it('keeps expanded thinking scroll gestures inside the panel', () => {
+        const onParentTouchMove = vi.fn();
+        const thinking = Array.from({ length: 30 }, (_, index) => `Step ${index + 1}`).join('\n');
+        render(
+            <div onTouchMove={onParentTouchMove}>
+                <ThinkingPanel thinking={thinking} />
+            </div>,
+        );
+
+        fireEvent.click(screen.getByRole('button'));
+        const scrollArea = screen.getByTestId('thinking-panel-scroll');
+
+        expect(scrollArea).toHaveClass('sully-thinking-scroll');
+        expect(scrollArea.getAttribute('style')).toContain('overscroll-behavior: contain');
+        expect(scrollArea.getAttribute('style')).toContain('touch-action: pan-y');
+
+        fireEvent.touchMove(scrollArea);
+
+        expect(onParentTouchMove).not.toHaveBeenCalled();
+    });
 });

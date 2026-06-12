@@ -19,6 +19,10 @@ const alphaColor = (color: string | undefined, alphaHex: string, fallback: strin
     return trimmed;
 };
 
+const stopNestedScrollPropagation = (event: React.TouchEvent | React.WheelEvent) => {
+    event.stopPropagation();
+};
+
 const ThinkingPanel: React.FC<ThinkingPanelProps> = ({
     thinking,
     textColor,
@@ -81,9 +85,16 @@ const ThinkingPanel: React.FC<ThinkingPanelProps> = ({
                 }}
             >
                 <div
-                    className="overflow-y-auto no-scrollbar"
+                    data-testid="thinking-panel-scroll"
+                    className="sully-thinking-scroll overflow-y-auto no-scrollbar"
+                    onTouchStart={stopNestedScrollPropagation}
+                    onTouchMove={stopNestedScrollPropagation}
+                    onWheel={stopNestedScrollPropagation}
                     style={{
                         maxHeight: `${bodyMaxHeight}px`,
+                        overscrollBehavior: 'contain',
+                        touchAction: 'pan-y',
+                        minHeight: 0,
                         padding: '8px 10px',
                         borderRadius: '6px',
                         background: alphaColor(textColor, '08', 'rgba(140, 130, 115, 0.06)'),
