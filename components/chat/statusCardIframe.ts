@@ -32,6 +32,20 @@ body {
     width: max-content;
     max-width: none;
 }
+#root[data-status-card-stage="mobile"] {
+    align-items: center;
+    justify-content: center;
+}
+#root[data-status-card-stage="mobile"],
+#root[data-status-card-stage="mobile"] * {
+    box-sizing: border-box;
+}
+#root[data-status-card-stage="mobile"] > :where(div, section, article, main, aside, header, footer) {
+    max-width: 100%;
+}
+#root[data-status-card-stage="mobile"] :where(img, svg, canvas, video) {
+    max-width: 100%;
+}
 </style>
 </head>
 <body>
@@ -182,6 +196,40 @@ body {
         });
     }
 
+    function getStageWidth(value) {
+        var numeric = Number(value);
+        if (!Number.isFinite(numeric) || numeric <= 0) return null;
+        return Math.max(160, Math.round(numeric));
+    }
+
+    function applyStageWidth(stageWidth) {
+        if (!root) return;
+
+        if (!stageWidth) {
+            root.removeAttribute('data-status-card-stage');
+            root.style.width = '';
+            root.style.maxWidth = '';
+            root.style.minWidth = '';
+            root.style.boxSizing = '';
+            document.body.style.width = '';
+            document.body.style.maxWidth = '';
+            document.body.style.minWidth = '';
+            document.body.style.boxSizing = '';
+            return;
+        }
+
+        var stageWidthPx = stageWidth + 'px';
+        root.setAttribute('data-status-card-stage', 'mobile');
+        root.style.width = stageWidthPx;
+        root.style.maxWidth = stageWidthPx;
+        root.style.minWidth = stageWidthPx;
+        root.style.boxSizing = 'border-box';
+        document.body.style.width = stageWidthPx;
+        document.body.style.maxWidth = stageWidthPx;
+        document.body.style.minWidth = stageWidthPx;
+        document.body.style.boxSizing = 'border-box';
+    }
+
     function reconnectObserver() {
         if (resizeObserver) {
             resizeObserver.disconnect();
@@ -282,6 +330,7 @@ body {
 
         var html = typeof event.data.html === 'string' ? event.data.html : '';
         var allowScripts = event.data.allowScripts === true;
+        var stageWidth = getStageWidth(event.data.stageWidth);
         activeChannel = typeof event.data.channel === 'string' ? event.data.channel : null;
         cleanupRuntime();
 
@@ -307,12 +356,14 @@ body {
                 document.body.style.cssText += parsed.body.getAttribute('style');
             }
 
+            applyStageWidth(stageWidth);
             reconnectObserver();
             runInlineScripts(inlineScripts, allowScripts);
         } catch (error) {
             styles.innerHTML = '';
             root.textContent = html;
             document.body.style.cssText = 'margin:0;background:transparent;overflow:hidden;min-height:0;display:inline-flex;align-items:center;justify-content:center;width:max-content;';
+            applyStageWidth(stageWidth);
             reconnectObserver();
         }
 

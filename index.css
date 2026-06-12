@@ -4981,7 +4981,9 @@ body {
 
 #root,
 .sully-app-root {
-  height: var(--real-vh, 100dvh);
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
   min-height: 100vh;
   min-height: -webkit-fill-available;
   min-height: 100dvh;
@@ -5012,7 +5014,9 @@ body.ios-standalone {
   overflow: hidden;
   overscroll-behavior: none;
   width: 100%;
-  height: var(--real-vh, 100dvh);
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
   min-height: 100vh;
   min-height: -webkit-fill-available;
   min-height: 100dvh;
@@ -5021,7 +5025,9 @@ body.ios-standalone {
 html.ios-standalone,
 html.ios-standalone #root {
   overflow: hidden;
-  height: var(--real-vh, 100dvh);
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
   min-height: 100vh;
   min-height: -webkit-fill-available;
   min-height: 100dvh;

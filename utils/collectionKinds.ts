@@ -26,7 +26,7 @@ export const KIND_META: Record<CollectionBookKind, CollectionKindMeta> = {
         label: '视觉碎片',
         shelf: 'walls',
         emptyText: '还没有收下任何碎片',
-        forwardLabel: (book) => book.meta?.name || book.meta?.shape || book.customTitle || book.title || '视觉碎片',
+        forwardLabel: (book) => book.meta?.name || book.meta?.shape || '视觉碎片',
     },
 };
 

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { DB } from '../utils/db';
-import { buildFreeformCollectionBookInput } from '../utils/collectionBooks';
+import { buildCollectionForwardPayload, buildFreeformCollectionBookInput } from '../utils/collectionBooks';
 import type { CollectionBookInput, FullBackupData, Message } from '../types';
 import type { StatusCardData } from '../types/statusCard';
 
@@ -37,26 +37,30 @@ function makeBook(overrides: Partial<CollectionBookInput> = {}): CollectionBookI
     };
 }
 
-function makeFreeformInput(sourceMessageId = 101): CollectionBookInput {
+const DEFAULT_FREEFORM_HTML = '<!doctype html><html><body><article>21:30 / 牛奶 / 没发出的消息</article></body></html>';
+
+function makeFreeformInput(sourceMessageId: number | null = 101, html = DEFAULT_FREEFORM_HTML): CollectionBookInput {
     const cardData = {
         cardType: 'freeform',
         title: '自由创作',
         body: '便利店小票，背面写了一句没发出去的话。',
         meta: {
-            html: '<!doctype html><html><body><article>21:30 / 牛奶 / 没发出的消息</article></body></html>',
+            html,
             freeformShape: '便利店小票',
             freeformCandidates: ['便利店小票', '聊天截图', '药板锡纸'],
         },
         style: {},
     } satisfies StatusCardData;
-    const sourceMessage = {
-        id: sourceMessageId,
-        charId: 'char-a',
-        role: 'assistant',
-        type: 'text',
-        content: '我刚刚下楼买了牛奶。',
-        timestamp: 200 + sourceMessageId,
-    } as Message;
+    const sourceMessage = typeof sourceMessageId === 'number'
+        ? {
+            id: sourceMessageId,
+            charId: 'char-a',
+            role: 'assistant',
+            type: 'text',
+            content: '我刚刚下楼买了牛奶。',
+            timestamp: 200 + sourceMessageId,
+        } as Message
+        : undefined;
     return buildFreeformCollectionBookInput('char-a', cardData, sourceMessage);
 }
 
@@ -117,6 +121,76 @@ describe('collection book store', () => {
             body: '不同摘要也不影响 hash 去重',
         })).toBe(true);
         expect(await DB.getCollectionBooksByCharId('char-a')).toHaveLength(1);
+    });
+
+    it('blocks repeated collection of the same freeform card by content hash', async () => {
+        const firstInput = makeFreeformInput(101);
+        const first = await DB.saveCollectionBook(firstInput);
+        const duplicate = await DB.saveCollectionBook({ ...firstInput, title: '重复收藏也不新建' });
+
+        expect(duplicate.id).toBe(first.id);
+        expect(await DB.getCollectionBooksByCharId('char-a')).toHaveLength(1);
+    });
+
+    it('allows a regenerated freeform card with a different content hash to be collected separately', async () => {
+        const first = await DB.saveCollectionBook(makeFreeformInput(101));
+        const regenerated = await DB.saveCollectionBook(makeFreeformInput(101, `${DEFAULT_FREEFORM_HTML}<section>第二版</section>`));
+
+        expect(regenerated.id).not.toBe(first.id);
+        expect(regenerated.contentHash).not.toBe(first.contentHash);
+        expect(await DB.getCollectionBooksByCharId('char-a')).toHaveLength(2);
+    });
+
+    it('collects legacy freeform cards without sourceMessageId by content hash', async () => {
+        const legacy = await DB.saveCollectionBook(makeFreeformInput(null));
+
+        expect(legacy.sourceMessageId).toBeUndefined();
+        expect(await DB.isCollectionSourceCollected({
+            charId: 'char-a',
+            kind: 'freeform',
+            contentHash: legacy.contentHash,
+            body: '存量卡摘要不同也按 hash 查询',
+        })).toBe(true);
+    });
+
+    it('deletes freeform wall items when canceling collection by content hash', async () => {
+        const saved = await DB.saveCollectionBook(makeFreeformInput(101));
+        const { wall } = await DB.addCollectionBookToDefaultWall(saved);
+        expect(await DB.getCollectionWallItemsByWallId(wall.id)).toHaveLength(1);
+
+        const removed = await DB.deleteCollectionBookBySource({
+            charId: 'char-a',
+            kind: 'freeform',
+            contentHash: saved.contentHash,
+            body: '按 hash 删除时不依赖摘要全文',
+        });
+
+        expect(removed?.id).toBe(saved.id);
+        expect(await DB.getCollectionWallItemsByWallId(wall.id)).toHaveLength(0);
+        expect(await DB.getCollectionWallItemsByBookId(saved.id)).toHaveLength(0);
+    });
+
+    it('uses only freeform meta name, shape, or fallback for forward labels', async () => {
+        const saved = await DB.saveCollectionBook(makeFreeformInput(101));
+
+        expect(buildCollectionForwardPayload({
+            ...saved,
+            title: '摘要全文标题',
+            customTitle: '自定义标签',
+            meta: { ...saved.meta, name: '多喝水卡片' },
+        }).title).toBe('多喝水卡片');
+        expect(buildCollectionForwardPayload({
+            ...saved,
+            title: '摘要全文标题',
+            customTitle: '自定义标签',
+            meta: { shape: '购物小票' },
+        }).title).toBe('购物小票');
+        expect(buildCollectionForwardPayload({
+            ...saved,
+            title: '摘要全文标题',
+            customTitle: '自定义标签',
+            meta: undefined,
+        }).title).toBe('视觉碎片');
     });
 
     it('creates a default wall and keeps wall items in backups', async () => {

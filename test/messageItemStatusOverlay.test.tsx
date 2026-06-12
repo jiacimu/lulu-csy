@@ -113,6 +113,49 @@ describe('MessageItem status overlay', () => {
         expect(screen.queryByTestId('status-card-overlay-shell')).not.toBeInTheDocument();
     });
 
+    it('hides the status badge on non-final assistant messages in the same group', () => {
+        renderMessageItem({
+            isLastInGroup: false,
+            statusCardData: {
+                cardType: 'custom_text',
+                body: 'Location: Executive Office',
+                style: {},
+            } satisfies StatusCardData,
+        });
+
+        expect(screen.queryByLabelText('打开状态卡片')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByAltText('avatar').parentElement!);
+
+        expect(screen.queryByTestId('status-card-overlay-shell')).not.toBeInTheDocument();
+    });
+
+    it('closes the status card overlay before handing off to the wall picker', async () => {
+        const onToggleStatusCardCollection = vi.fn();
+        const statusCard = {
+            cardType: 'freeform',
+            body: '购物小票',
+            meta: {
+                html: '<!doctype html><html><body>receipt</body></html>',
+            },
+            style: {},
+        } satisfies StatusCardData;
+
+        renderMessageItem({
+            statusCardData: statusCard,
+            getStatusCardCollectionState: vi.fn(() => 'idle'),
+            onToggleStatusCardCollection,
+        });
+
+        fireEvent.click(screen.getByAltText('avatar').parentElement!);
+        expect(await screen.findByTestId('status-card-overlay-shell')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByTestId('status-card-collection-button'));
+
+        expect(onToggleStatusCardCollection).toHaveBeenCalledWith(baseMessage, statusCard);
+        expect(screen.queryByTestId('status-card-overlay-shell')).not.toBeInTheDocument();
+    });
+
     it('keeps classic inner voice overlays open past 8 seconds and closes only when the backdrop is clicked', () => {
         vi.useFakeTimers();
 

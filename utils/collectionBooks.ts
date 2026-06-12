@@ -1,6 +1,6 @@
 import type { CollectionBook, CollectionBookInput, CollectionForwardPayload, CollectionBookKind, Message } from '../types';
 import type { StatusCardData } from '../types/statusCard';
-import { formatCollectionKindLabel } from './collectionKinds';
+import { formatCollectionKindLabel, getCollectionKindMeta } from './collectionKinds';
 import { fnv1aWithLength } from './fnv1a';
 
 const TITLE_FALLBACK: Record<CollectionBookKind, string> = {
@@ -208,6 +208,7 @@ export function buildCollectionForwardPayload(
     book: CollectionBook,
     options: { charName?: string; charAvatar?: string; targetCharId?: string; coverImageId?: string; coverImageUrl?: string; coverImageAlt?: string } = {},
 ): CollectionForwardPayload {
+    const kindMeta = getCollectionKindMeta(book.kind);
     return {
         bookId: book.id,
         charId: book.charId,
@@ -215,7 +216,7 @@ export function buildCollectionForwardPayload(
         charAvatar: options.charAvatar,
         targetCharId: options.targetCharId,
         kind: book.kind,
-        title: getCollectionDisplayTitle(book),
+        title: kindMeta.forwardLabel(book),
         body: book.body,
         excerpt: buildCollectionExcerpt(book.body, 120),
         tags: book.tags,

@@ -771,12 +771,13 @@ const MessageItem = React.memo(({
     const hasAfterglowMotifDraft = sanitizeAfterglowMotif(afterglowMotifDraft).length > 0;
     const hasMotifsToAdd = parseAfterglowMotifInput(afterglowMotifDraft).length > 0;
     const isAfterglowHeartTalkMode = afterglowComposerMode === 'heartTalk';
+    const canShowCharAvatarBadge = isLastInGroup;
     const statusCardCollectionState = statusCardData && getStatusCardCollectionState
         ? getStatusCardCollectionState(m, statusCardData)
         : 'idle';
 
     const handleAvatarClick = () => {
-        if (!hasAnyVoice || selectionMode) return;
+        if (!canShowCharAvatarBadge || !hasAnyVoice || selectionMode) return;
         setShowInnerVoice(prev => !prev);
     };
 
@@ -929,7 +930,7 @@ const MessageItem = React.memo(({
         const isUserActionAvatar = !isCharAvatar && isUser && !!onUserAvatarAction;
         return (
         <div
-            className={`relative w-9 h-9 shrink-0 z-0 ${(isCharAvatar && hasAnyVoice) || isUserActionAvatar ? 'cursor-pointer' : ''}`}
+            className={`relative w-9 h-9 shrink-0 z-0 ${(isCharAvatar && canShowCharAvatarBadge && hasAnyVoice) || isUserActionAvatar ? 'cursor-pointer' : ''}`}
             onClick={isCharAvatar ? handleAvatarClick : isUserActionAvatar ? (event) => {
                 event.stopPropagation();
                 if (!selectionMode) onUserAvatarAction?.(m);
@@ -955,7 +956,7 @@ const MessageItem = React.memo(({
                     }}
                 />
             )}
-            {isCharAvatar && !showInnerVoice && (hasAnyVoice || onRequestAfterglow || onOpenStoryPhone || (!hasAnyVoice && onRetryInnerVoice)) && (
+            {isCharAvatar && canShowCharAvatarBadge && !showInnerVoice && (hasAnyVoice || onRequestAfterglow || onOpenStoryPhone || (!hasAnyVoice && onRetryInnerVoice)) && (
                 <div className="absolute -top-1 -right-1 z-20 flex items-center gap-0.5">
                     {onOpenStoryPhone ? (
                         <button
@@ -1220,6 +1221,9 @@ const MessageItem = React.memo(({
                                                     title={statusCardCollectionState === 'collected' ? '已收进拾光墙，点击取消' : '收藏到拾光墙'}
                                                     onClick={(event) => {
                                                         event.stopPropagation();
+                                                        if (statusCardCollectionState !== 'collected') {
+                                                            setShowInnerVoice(false);
+                                                        }
                                                         void onToggleStatusCardCollection(m, statusCardData);
                                                     }}
                                                 >

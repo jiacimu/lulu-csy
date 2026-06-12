@@ -48,6 +48,8 @@ describe('StatusCardRenderer', () => {
         expect(STATUS_CARD_IFRAME_SHELL).toContain("collectAndRemoveScripts");
         expect(STATUS_CARD_IFRAME_SHELL).toContain("node.hasAttribute('src')");
         expect(STATUS_CARD_IFRAME_SHELL).toContain("type === 'text/javascript'");
+        expect(STATUS_CARD_IFRAME_SHELL).toContain('data-status-card-stage');
+        expect(STATUS_CARD_IFRAME_SHELL).toContain('getStageWidth');
     });
 
     it('sizes freeform cards from the reported html width and height', async () => {
@@ -75,9 +77,9 @@ describe('StatusCardRenderer', () => {
         reportFrameSize(frame, channel, 286, 360);
 
         await waitFor(() => {
-            expect(fitShell).toHaveStyle({ width: '294px' });
+            expect(fitShell).toHaveStyle({ width: '360px' });
             expect(fitShell).toHaveStyle({ height: '368px' });
-            expect(frame).toHaveStyle({ width: '294px' });
+            expect(frame).toHaveStyle({ width: '360px' });
             expect(frame).toHaveStyle({ height: '368px' });
             expect(frame.style.transform).toBe('translate(-50%, -50%) scale(1)');
         });
@@ -106,10 +108,10 @@ describe('StatusCardRenderer', () => {
 
         await waitFor(() => {
             expect(fitShell).toHaveStyle({ width: '200px' });
-            expect(fitShell).toHaveStyle({ height: '104px' });
-            expect(frame).toHaveStyle({ width: '400px' });
+            expect(fitShell).toHaveStyle({ height: '107px' });
+            expect(frame).toHaveStyle({ width: '392px' });
             expect(frame).toHaveStyle({ height: '208px' });
-            expect(frame.style.transform).toBe('translate(-50%, -50%) scale(0.5)');
+            expect(frame.style.transform).toContain('scale(0.5102040816326531)');
         });
     });
 
@@ -135,9 +137,9 @@ describe('StatusCardRenderer', () => {
         reportFrameSize(frame, channel, 192, 792);
 
         await waitFor(() => {
-            expect(fitShell).toHaveStyle({ width: '111px' });
+            expect(fitShell).toHaveStyle({ width: '199px' });
             expect(fitShell).toHaveStyle({ height: '441px' });
-            expect(frame).toHaveStyle({ width: '200px' });
+            expect(frame).toHaveStyle({ width: '360px' });
             expect(frame).toHaveStyle({ height: '800px' });
             expect(frame.style.transform).toContain('scale(0.55');
         });
@@ -245,10 +247,10 @@ describe('StatusCardRenderer', () => {
 
         await waitFor(() => {
             expect(fitShell).toHaveStyle({ width: '400px' });
-            expect(fitShell).toHaveStyle({ height: '267px' });
-            expect(frame).toHaveStyle({ width: '1200px' });
+            expect(fitShell).toHaveStyle({ height: '269px' });
+            expect(frame).toHaveStyle({ width: '1192px' });
             expect(frame).toHaveStyle({ height: '800px' });
-            expect(frame.style.transform).toContain('scale(0.3333333333333333)');
+            expect(frame.style.transform).toContain('scale(0.33557046979865773)');
         });
     });
 
@@ -276,6 +278,36 @@ describe('StatusCardRenderer', () => {
                     type: 'preview-update',
                     html: data.meta?.html,
                     allowScripts: true,
+                }),
+                '*',
+            );
+        });
+    });
+
+    it('passes a mobile stage width to viewport-fitted freeform cards', async () => {
+        setViewportSize(390, 844);
+
+        const data: StatusCardData = {
+            cardType: 'freeform',
+            body: 'Stage card',
+            meta: {
+                html: '<html><body><div style="width:100%;height:240px">stage</div></body></html>',
+            },
+            style: {},
+        };
+
+        render(<StatusCardRenderer data={data} />);
+
+        const frame = screen.getByTitle('Freeform creative card') as HTMLIFrameElement;
+        const postMessageSpy = vi.spyOn(frame.contentWindow!, 'postMessage');
+
+        loadFrame(frame);
+
+        await waitFor(() => {
+            expect(postMessageSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'preview-update',
+                    stageWidth: 360,
                 }),
                 '*',
             );

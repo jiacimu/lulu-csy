@@ -9,6 +9,8 @@ import {
     getCollectionDisplayTitle,
 } from '../utils/collectionBooks';
 import { addCollectionWallPendingContext } from '../utils/collectionWallContext';
+import { buildCharWallNoteItem } from '../utils/collectionWallCoCreation';
+import { hasWallEditorDraftChanges, serializeWallEditorDraft } from '../utils/collectionWallEditorDraft';
 import { getGalleryImageDisplayUrl } from '../utils/generatedImageStorage';
 const StatusCardRenderer = React.lazy(() => import('../components/chat/StatusCardRenderer'));
 
@@ -1078,8 +1080,9 @@ const WallEditor: React.FC<{
     entries: WallZoneEntry[];
     onClose: () => void;
     onSaved: () => void;
+    onDirtyChange?: (dirty: boolean) => void;
     say: (message: string) => void;
-}> = ({ wall, entries, onClose, onSaved, say }) => {
+}> = ({ wall, entries, onClose, onSaved, onDirtyChange, say }) => {
     const [draftWall, setDraftWall] = useState<CollectionWall>(wall);
     const [draftItems, setDraftItems] = useState<CollectionWallItem[]>(() => relabelItems(entries.map(entry => entry.item).filter((item): item is CollectionWallItem => Boolean(item))));
     const [textDraft, setTextDraft] = useState('');
@@ -1087,6 +1090,49 @@ const WallEditor: React.FC<{
     const [saving, setSaving] = useState(false);
     const entryByItemId = useMemo(() => new Map(entries.filter(entry => Boolean(entry.item)).map(entry => [entry.item!.id, entry])), [entries]);
     const selectedItem = draftItems.find(item => item.id === selectedId) || null;
+    const initialDraftSnapshotRef = useRef('');
+    if (!initialDraftSnapshotRef.current) {
+        initialDraftSnapshotRef.current = serializeWallEditorDraft(wall, draftItems, '');
+    }
+    const hasUnsavedChanges = hasWallEditorDraftChanges(initialDraftSnapshotRef.current, draftWall, draftItems, textDraft);
+
+    useEffect(() => {
+        onDirtyChange?.(hasUnsavedChanges);
+        return () => onDirtyChange?.(false);
+    }, [hasUnsavedChanges, onDirtyChange]);
+
+    useEffect(() => {
+        if (!hasUnsavedChanges) return undefined;
+        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+            event.preventDefault();
+            event.returnValue = '未保存更改';
+            return '未保存更改';
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [hasUnsavedChanges]);
+
+    useEffect(() => {
+        if (!hasUnsavedChanges) return undefined;
+        const state = { ...(window.history.state || {}), collectionWallEditorGuard: true };
+        window.history.pushState(state, '', window.location.href);
+        const handlePopState = () => {
+            if (window.confirm('未保存更改')) {
+                onClose();
+                return;
+            }
+            window.history.pushState(state, '', window.location.href);
+        };
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, [hasUnsavedChanges, onClose]);
+
+    const requestClose = useCallback(() => {
+        if (saving) return;
+        if (!hasUnsavedChanges || window.confirm('未保存更改')) {
+            onClose();
+        }
+    }, [hasUnsavedChanges, onClose, saving]);
 
     const updateWall = (patch: Partial<CollectionWall>) => {
         setDraftWall(prev => ({ ...prev, ...patch }));
@@ -1176,6 +1222,7 @@ const WallEditor: React.FC<{
             await Promise.all(deletedIds.map(id => DB.deleteCollectionWallItem(id)));
             await Promise.all(relabelItems(draftItems).map(item => DB.saveCollectionWallItem({ ...item, wallId: wall.id })));
             addCollectionWallPendingContext(wall.charId, `用户最近在「${name}」整理了拾光墙，墙上现在有 ${draftItems.length} 件内容。下次对话可自然提及，不要刻意。`);
+            initialDraftSnapshotRef.current = serializeWallEditorDraft(draftWall, draftItems, textDraft);
             say('拾光墙已保存');
             onSaved();
             onClose();
@@ -1188,14 +1235,14 @@ const WallEditor: React.FC<{
     };
 
     return (
-        <div className="ar-veil book over" onClick={onClose}>
+        <div className="ar-veil book over" onClick={requestClose}>
             <div className="ar-editor" onClick={(event) => event.stopPropagation()}>
                 <div className="ar-editor-hd">
                     <div>
                         <h3>装修拾光墙</h3>
                         <p>{draftItems.length} 件内容 · {draftWall.layoutMode === 'free' ? '自由画布' : 'Flow 排列'}</p>
                     </div>
-                    <button type="button" className="ar-ebk-x" aria-label="关闭" onClick={onClose}><X weight="bold" /></button>
+                    <button type="button" className="ar-ebk-x" aria-label="关闭" onClick={requestClose}><X weight="bold" /></button>
                 </div>
                 <div className="ar-editor-body">
                     <div className="ar-editor-grid">
@@ -1295,7 +1342,7 @@ const WallEditor: React.FC<{
                     )}
                 </div>
                 <div className="ar-editor-ft">
-                    <button type="button" onClick={onClose} disabled={saving}>取消</button>
+                    <button type="button" onClick={requestClose} disabled={saving}>取消</button>
                     <button type="button" className="primary" onClick={handleSave} disabled={saving}>{saving ? '保存中...' : '完成'}</button>
                 </div>
             </div>
@@ -1357,6 +1404,7 @@ const CollectionHallApp: React.FC = () => {
     const [saving, setSaving] = useState(false);
     const [forwardFor, setForwardFor] = useState<CollectionBook | null>(null);
     const [confirmDel, setConfirmDel] = useState<CollectionBook | null>(null);
+    const [wallEditorDirty, setWallEditorDirty] = useState(false);
     const [toast, setToast] = useState<{ key: number; msg: string } | null>(null);
     const touch = useRef({ x: 0, y: 0, axis: '' as 'h' | 'v' | '', on: false });
 
@@ -1390,6 +1438,10 @@ const CollectionHallApp: React.FC = () => {
     }, [toast]);
 
     const say = (msg: string) => setToast({ key: Date.now(), msg });
+    const handleCloseApp = useCallback(() => {
+        if (editingWall && wallEditorDirty && !window.confirm('未保存更改')) return;
+        closeApp();
+    }, [closeApp, editingWall, wallEditorDirty]);
 
     const sections = useMemo(() => {
         const byChar = new Map<string, CollectionBook[]>();
@@ -1492,27 +1544,15 @@ const CollectionHallApp: React.FC = () => {
         const label = getWallEntryLabel(anchor).slice(0, 18);
         const content = `${label}我看过了。先把这句压在这里，等你下次来。`;
         const items = await DB.getCollectionWallItemsByWallId(wall.id);
-        const order = items.length;
-        const maxZ = items.reduce((max, item) => Math.max(max, item.z || 0), 0);
-        const arranged = autoArrangeWallItems(items);
-        const last = arranged[arranged.length - 1];
-        const x = wall.layoutMode === 'free' ? clamp((last?.x ?? 24) + 28, 16, 560) : null;
-        const y = wall.layoutMode === 'free' ? clamp((last?.y ?? 24) + 28, 16, 900) : null;
         try {
-            await DB.saveCollectionWallItem({
+            const noteItem = buildCharWallNoteItem({
                 wallId: wall.id,
-                type: 'text',
-                author: 'char',
-                x,
-                y,
-                w: 220,
-                h: 150,
-                rotation: ((hashOf(wall.id + Date.now()) % 7) - 3) * 0.45,
-                z: maxZ + 1,
-                order,
-                text: { content: content.slice(0, 60), preset: 'char_note' },
-                name: `${charName || 'TA'} 的便签`,
+                layoutMode: wall.layoutMode,
+                items,
+                content,
+                charName,
             });
+            await DB.saveCollectionWallItem(noteItem);
             await DB.saveCollectionWall({
                 ...wall,
                 hasUnseenCharItem: true,
@@ -1630,7 +1670,7 @@ const CollectionHallApp: React.FC = () => {
         <div className="ar-root">
             <style>{CSS}</style>
             <div className="ar-grain" /><div className="ar-vig" />
-            <button type="button" className="ar-exit" aria-label="退出典藏馆" onClick={closeApp}>
+            <button type="button" className="ar-exit" aria-label="退出典藏馆" onClick={handleCloseApp}>
                 <X weight="bold" size={15} />
             </button>
 
@@ -1753,6 +1793,7 @@ const CollectionHallApp: React.FC = () => {
                     entries={editingWall.entries}
                     onClose={() => setEditingWall(null)}
                     onSaved={() => void loadBooks()}
+                    onDirtyChange={setWallEditorDirty}
                     say={say}
                 />
             )}

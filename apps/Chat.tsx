@@ -5855,7 +5855,7 @@ const Chat: React.FC = () => {
 
             {freeformWallPicker && (
                 <div
-                    className="fixed inset-0 z-[96] flex items-end bg-slate-950/30 px-2 pb-[calc(var(--safe-bottom,env(safe-area-inset-bottom,0px))+8px)] pt-12 backdrop-blur-[3px] sm:items-center sm:justify-center sm:p-4"
+                    className="fixed inset-0 z-[10050] flex items-end bg-slate-950/30 px-2 pb-[calc(var(--safe-bottom,env(safe-area-inset-bottom,0px))+8px)] pt-12 backdrop-blur-[3px] sm:items-center sm:justify-center sm:p-4"
                     onClick={() => !freeformWallPicker.isSaving && setFreeformWallPicker(null)}
                 >
                     <div
@@ -5930,7 +5930,7 @@ const Chat: React.FC = () => {
 
             {imageWallPicker && (
                 <div
-                    className="fixed inset-0 z-[96] flex items-end bg-slate-950/30 px-2 pb-[calc(var(--safe-bottom,env(safe-area-inset-bottom,0px))+8px)] pt-12 backdrop-blur-[3px] sm:items-center sm:justify-center sm:p-4"
+                    className="fixed inset-0 z-[10050] flex items-end bg-slate-950/30 px-2 pb-[calc(var(--safe-bottom,env(safe-area-inset-bottom,0px))+8px)] pt-12 backdrop-blur-[3px] sm:items-center sm:justify-center sm:p-4"
                     onClick={() => !imageWallPicker.isSaving && setImageWallPicker(null)}
                 >
                     <div

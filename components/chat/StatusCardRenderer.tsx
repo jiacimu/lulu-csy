@@ -34,6 +34,7 @@ const SAFE_COLOR_RE = /^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\)|[a-zA-Z
 const SAFE_FONT_STYLES = new Set(['serif', 'sans', 'handwrite', 'mono']);
 const FREEFORM_VIEWPORT_PADDING_X_PX = 20;
 const FREEFORM_VIEWPORT_PADDING_Y_PX = 56;
+const FREEFORM_MOBILE_STAGE_WIDTH_PX = 360;
 
 function getFreeformViewportLimits() {
     if (typeof window === 'undefined') {
@@ -140,6 +141,9 @@ const FreeformStatusCard: React.FC<{
     const [viewportLimits, setViewportLimits] = useState(getFreeformViewportLimits);
     const previousHtmlRef = useRef(html);
     const lockedWidthRef = useRef<number | null>(null);
+    const mobileStageWidth = fitMode === 'viewport'
+        ? Math.min(FREEFORM_MOBILE_STAGE_WIDTH_PX, viewportLimits.width)
+        : undefined;
     const renderedHtml = useMemo(
         () => injectHtmlHeadStyle(html, buildHostOverrideCss(customFont, stabilizeDateStatusLayout)),
         [customFont, html, stabilizeDateStatusLayout, viewportLimits.width],
@@ -168,9 +172,12 @@ const FreeformStatusCard: React.FC<{
             if (event.data?.type !== 'preview-height') return;
             if (event.data.channel !== frameChannel) return;
 
-            let nextWidth = typeof event.data.width === 'number'
-                ? Math.max(event.data.width + (fitMode === 'width' ? 0 : STATUS_CARD_MEASURE_BUFFER_PX), 1)
+            const reportedWidth = typeof event.data.width === 'number'
+                ? Math.max(event.data.width, 1)
                 : STATUS_CARD_WIDTH_PX;
+            let nextWidth = fitMode === 'viewport' && mobileStageWidth
+                ? Math.max(reportedWidth, mobileStageWidth)
+                : Math.max(reportedWidth + (fitMode === 'width' ? 0 : STATUS_CARD_MEASURE_BUFFER_PX), 1);
 
             const nextHeight = typeof event.data.height === 'number'
                 ? Math.max(event.data.height + STATUS_CARD_MEASURE_BUFFER_PX, 1)
@@ -190,18 +197,18 @@ const FreeformStatusCard: React.FC<{
 
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [fitMode, frameChannel]);
+    }, [fitMode, frameChannel, mobileStageWidth]);
 
     useEffect(() => {
         if (!previewReady) return;
 
         previewRef.current?.contentWindow?.postMessage(
-            { type: 'preview-update', channel: frameChannel, html: renderedHtml, allowScripts },
+            { type: 'preview-update', channel: frameChannel, html: renderedHtml, allowScripts, stageWidth: mobileStageWidth },
             '*',
         );
-    }, [allowScripts, frameChannel, renderedHtml, previewReady]);
+    }, [allowScripts, frameChannel, mobileStageWidth, renderedHtml, previewReady]);
 
-    const measuredWidth = hasMeasuredSize ? previewSize.width : viewportLimits.width;
+    const measuredWidth = hasMeasuredSize ? previewSize.width : (mobileStageWidth || viewportLimits.width);
     const measuredHeight = hasMeasuredSize ? previewSize.height : 1;
     const fitScale = hasMeasuredSize && fitMode === 'viewport'
         ? Math.min(

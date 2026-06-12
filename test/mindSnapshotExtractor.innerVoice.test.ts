@@ -217,7 +217,8 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
 
         expect(promptText).toContain('## 二、决定文字');
         expect(promptText).toContain('自由文案禁止覆盖载体的功能区');
-        expect(promptText).toContain('整体高度在 180px ~ 640px');
+        expect(promptText).toContain('你会被放入前端提供的手机竖屏舞台中');
+        expect(promptText).toContain('舞台宽度约 360px，高度建议 220px~680px');
         expect(promptText).toContain('档位只能是这三个词之一');
         expect(result?.meta?.freeformCandidates).toEqual(['登机牌', '锁屏通知', '药袋贴纸']);
         expect(result?.meta?.freeformShape).toBe('锁屏通知');

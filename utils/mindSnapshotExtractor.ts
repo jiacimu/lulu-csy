@@ -2714,7 +2714,8 @@ ${dynamicConstraints}
 
 - 输出一个完整的 HTML 文档，包含 <style> 和 <body>
 - body 背景必须透明（background: transparent）
-- 以手机竖屏展示为主，整体高度在 180px ~ 640px 之间，由形态决定；宽度 100%
+- 你会被放入前端提供的手机竖屏舞台中；
+- 舞台宽度约 360px，高度建议 220px~680px；
 - 严禁 min-height，严禁 overflow: visible
 - 所有样式写在 <style> 标签或 style 属性里，禁止 class 引用外部框架
 - 不使用任何外部资源（外部字体URL、图片URL、CDN链接）
