@@ -7,7 +7,6 @@ import FeaturePreviewPage from './components/FeaturePreviewPage';
 import { startKeepAlive,startBackendHeartbeat } from './utils/keepAlive';
 import { installGlobalAutofillSuppression } from './utils/autofillSuppression';
 import { isFullscreenEnabled,requestSystemFullscreenForMobileRestore } from './utils/systemFullscreen';
-import { IOS_STANDALONE_CHANGE_EVENT,isIOSStandaloneWebApp } from './utils/iosStandalone';
 
 const EDITABLE_SELECTION_SELECTOR = 'input:not([readonly]), textarea:not([readonly]), select, [contenteditable="true"], [data-allow-text-selection="true"]';
 
@@ -39,29 +38,6 @@ function isFeaturePreviewRoute(): boolean {
 }
 
 const SullyOSApp: React.FC = () => {
-  const [useAbsoluteShell, setUseAbsoluteShell] = useState(() => (
-    typeof window !== 'undefined' && isIOSStandaloneWebApp()
-  ));
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const syncIOSStandaloneShell = () => {
-      setUseAbsoluteShell(isIOSStandaloneWebApp());
-    };
-
-    syncIOSStandaloneShell();
-    window.addEventListener(IOS_STANDALONE_CHANGE_EVENT, syncIOSStandaloneShell);
-    window.addEventListener('pageshow', syncIOSStandaloneShell);
-    window.addEventListener('resize', syncIOSStandaloneShell);
-
-    return () => {
-      window.removeEventListener(IOS_STANDALONE_CHANGE_EVENT, syncIOSStandaloneShell);
-      window.removeEventListener('pageshow', syncIOSStandaloneShell);
-      window.removeEventListener('resize', syncIOSStandaloneShell);
-    };
-  }, []);
-
   useEffect(() => {
     startKeepAlive();
     startBackendHeartbeat();
@@ -101,10 +77,10 @@ const SullyOSApp: React.FC = () => {
 
   return (
     <div
-      className={`${useAbsoluteShell ? 'fixed inset-0' : 'relative'} sully-app-root w-full bg-black overflow-hidden`}
+      className="fixed inset-0 sully-app-root w-full bg-black overflow-hidden"
     >
       <div
-        className="fixed inset-0 w-full h-full z-0 bg-black"
+        className="absolute inset-0 w-full h-full z-0 bg-black"
         style={{ transform: 'translateZ(0)' }}
       >
         <VirtualTimeProvider>

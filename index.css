@@ -4989,9 +4989,21 @@ body {
   min-height: 100dvh;
 }
 
-html.ios-standalone .sully-app-root {
+.sully-app-root {
   position: fixed;
   inset: 0;
+  height: auto;
+  min-height: 0;
+}
+
+html:not(.ios-standalone) .sully-app-root {
+  height: 100vh;
+  height: 100lvh;
+  min-height: 100vh;
+  min-height: 100lvh;
+}
+
+html.ios-standalone .sully-app-root {
   height: auto;
   min-height: 0;
 }

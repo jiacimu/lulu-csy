@@ -59,7 +59,7 @@ vi.mock('./utils/iosStandalone', () => ({
   isIOSStandaloneWebApp: vi.fn(() => isIOSStandalone),
 }));
 
-describe('App iOS standalone shell layout', () => {
+describe('App viewport shell layout', () => {
   beforeEach(() => {
     isIOSStandalone = true;
     window.history.replaceState({}, '', '/');
@@ -83,7 +83,7 @@ describe('App iOS standalone shell layout', () => {
     vi.clearAllMocks();
   });
 
-  it('pins the iOS standalone canvas to all viewport edges without using real-vh inline height', () => {
+  it('pins the app canvas to all viewport edges without using real-vh inline height', () => {
     const { container } = render(<App />);
 
     const appRoot = container.querySelector('.sully-app-root') as HTMLElement | null;
@@ -96,7 +96,20 @@ describe('App iOS standalone shell layout', () => {
 
     const appCanvas = appRoot?.firstElementChild as HTMLElement | null;
 
-    expect(appCanvas?.classList.contains('fixed')).toBe(true);
+    expect(appCanvas?.classList.contains('absolute')).toBe(true);
     expect(appCanvas?.classList.contains('inset-0')).toBe(true);
+  });
+
+  it('keeps the same pinned root outside iOS standalone mode', () => {
+    isIOSStandalone = false;
+    const { container } = render(<App />);
+
+    const appRoot = container.querySelector('.sully-app-root') as HTMLElement | null;
+
+    expect(appRoot).not.toBeNull();
+    expect(appRoot?.classList.contains('fixed')).toBe(true);
+    expect(appRoot?.classList.contains('inset-0')).toBe(true);
+    expect(appRoot?.classList.contains('relative')).toBe(false);
+    expect(appRoot?.style.height).toBe('');
   });
 });
