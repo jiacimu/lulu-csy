@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Check, PaperPlaneTilt, PencilSimple, Trash, X } from '@phosphor-icons/react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import Moveable from 'react-moveable';
+import { ArrowClockwise, ArrowCounterClockwise, ArrowDown, ArrowUp, Check, ImageSquare, PaintBrush, PaperPlaneTilt, PencilSimple, Sticker, Trash, UploadSimple, X } from '@phosphor-icons/react';
 import { useOS } from '../context/OSContext';
-import { AppID, type CollectionBook, type CollectionWall, type CollectionWallAsset, type CollectionWallItem, type GalleryImage } from '../types';
+import { AppID, type APIConfig, type CharacterProfile, type CollectionBook, type CollectionWall, type CollectionWallAsset, type CollectionWallItem, type CollectionWallRemarkTemplate, type GalleryImage, type GroupProfile, type Message, type RealtimeConfig, type UserProfile } from '../types';
 import { DB } from '../utils/db';
 import {
     buildCollectionForwardPayload,
@@ -9,10 +10,21 @@ import {
     getCollectionDisplayTitle,
 } from '../utils/collectionBooks';
 import { addCollectionWallPendingContext } from '../utils/collectionWallContext';
-import { buildCharWallNoteItem, requestCharWallNote } from '../utils/collectionWallCoCreation';
+import {
+    buildCharWallNoteItem,
+    buildCollectionWallVisitSystemPrompt,
+    buildCollectionWallVisitUserPrompt,
+    requestCharWallNote,
+    type ChatCompletionMessage,
+    type CollectionWallManifest,
+    type CollectionWallManifestItem,
+} from '../utils/collectionWallCoCreation';
 import { hasWallEditorDraftChanges, serializeWallEditorDraft } from '../utils/collectionWallEditorDraft';
+import { ChatPrompts } from '../utils/chatPrompts';
+import { loadCharacterGoals } from '../utils/goalService';
+import { getEmbeddingConfig } from '../utils/runtimeConfig';
 import { getGalleryImageDisplayUrl } from '../utils/generatedImageStorage';
-import { STATUS_CARD_IFRAME_SHELL, STATUS_CARD_MEASURE_BUFFER_PX } from '../components/chat/statusCardIframe';
+import { fnv1aBytes } from '../utils/fnv1a';
 const StatusCardRenderer = React.lazy(() => import('../components/chat/StatusCardRenderer'));
 
 /* ============================================================
@@ -39,6 +51,17 @@ const CSS = `
   --ar-font-display:'Cormorant Garamond','Noto Serif SC',Georgia,'Songti SC','STSong','SimSun',serif;
   --ar-font-script:'Dancing Script','Segoe Script','Pinyon Script',cursive;
   --ar-font-ui:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
+  --tk-ink:#161616;
+  --tk-ink-soft:#3a3a3a;
+  --tk-grey:#8f8f8c;
+  --tk-grey-lt:#c8c8c4;
+  --tk-hairline:#e6e6e2;
+  --tk-stamp:#c33d22;
+  --tk-paper-a:#fefefd;
+  --tk-paper-b:#f8f8f6;
+  --tk-font-serif:Georgia,'Times New Roman','Noto Serif SC','Songti SC','STSong',serif;
+  --tk-font-mono:ui-monospace,'SF Mono','Roboto Mono',Menlo,Consolas,monospace;
+  --tk-font-note:'Kaiti SC',STKaiti,'KaiTi','Noto Serif SC',serif;
 }
 .ar-root{position:relative;width:100%;height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden;background:radial-gradient(130% 55% at 50% -6%, rgba(201,163,106,.10), transparent 58%),linear-gradient(180deg,#1a1410,#14100c 34%,var(--ar-bg-deep));font-family:var(--ar-font-ui);box-shadow:inset 0 0 0 1px rgba(255,236,210,.05)}
 .ar-grain{position:absolute;inset:0;z-index:60;pointer-events:none;background-image:${NOISE};opacity:.05;mix-blend-mode:overlay}
@@ -150,14 +173,13 @@ const CSS = `
 .ar-wall-sub{margin:7px 0 0;font-size:11px;line-height:1.5;color:#6d5843}
 .ar-wall-count{flex:none;min-width:48px;text-align:right;font-family:var(--ar-font-display);font-size:32px;line-height:.9;font-weight:700;color:#a83a4e}
 .ar-wall-count span{display:block;margin-top:5px;font-family:var(--ar-font-ui);font-size:8px;font-weight:900;letter-spacing:.24em;color:#72593d}
-.ar-wall-actions{position:relative;z-index:1;display:flex;gap:8px;margin-top:13px}
-.ar-wall-act{height:30px;border-radius:999px;border:1px solid rgba(201,163,106,.72);background:transparent;padding:0 12px;font-size:10.5px;font-weight:900;color:#3b2a18;cursor:pointer;transition:background .16s,border-color .16s,transform .12s}
-.ar-wall-act:hover{border-color:rgba(168,58,78,.52);background:rgba(201,163,106,.12)}
-.ar-wall-act:active{transform:scale(.97);background:rgba(201,163,106,.24)}
 .ar-wall-list{display:flex;flex-direction:column;gap:10px;margin:18px 16px 34px}
-.ar-wall-card{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;width:100%;min-height:92px;border:0;border-radius:8px;padding:14px 13px;text-align:left;cursor:pointer;overflow:hidden;background:linear-gradient(145deg,#f5efe2,#efe7d6);box-shadow:0 18px 40px -28px rgba(0,0,0,.8),inset 0 0 0 1px rgba(255,255,255,.48);transition:transform .16s,box-shadow .16s}
+.ar-wall-card-wrap{position:relative}
+.ar-wall-card{position:relative;display:flex;flex-direction:column;gap:10px;width:100%;min-height:112px;border-radius:8px;padding:14px 13px;text-align:left;overflow:hidden;background:linear-gradient(145deg,#f5efe2,#efe7d6);box-shadow:0 18px 40px -28px rgba(0,0,0,.8),inset 0 0 0 1px rgba(255,255,255,.48);transition:transform .16s,box-shadow .16s}
 .ar-wall-card:hover{transform:translateY(-2px);box-shadow:0 24px 48px -30px rgba(0,0,0,.85),inset 0 0 0 1px rgba(201,163,106,.34)}
 .ar-wall-card:active{transform:translateY(0) scale(.99)}
+.ar-wall-card-main{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;width:100%;min-height:76px;padding:0;border:0;background:transparent;text-align:left;cursor:pointer;color:inherit}
+.ar-wall-card-copy{min-width:0}
 .ar-wall-card h3{position:relative;z-index:1;margin:0;font-family:var(--ar-font-display);font-size:20px;line-height:1.1;color:#231a12;letter-spacing:.04em}
 .ar-wall-card p{position:relative;z-index:1;margin:6px 0 0;font-size:11px;font-weight:800;color:#a83a4e;letter-spacing:.12em}
 .ar-wall-seen{position:absolute;right:13px;top:12px;width:8px;height:8px;border-radius:999px;background:var(--ar-accent);box-shadow:0 0 0 4px rgba(201,163,106,.16)}
@@ -167,43 +189,254 @@ const CSS = `
 .ar-wall-teaser span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ar-wall-card-count{position:relative;z-index:1;align-self:end;text-align:right;font-family:var(--ar-font-display);font-size:34px;line-height:.85;color:#a83a4e}
 .ar-wall-card-count small{display:block;margin-top:5px;font-family:var(--ar-font-ui);font-size:8px;font-weight:900;letter-spacing:.24em;color:#72593d}
-.ar-wall-back{display:inline-flex;align-items:center;gap:6px;height:28px;margin:0 0 10px;border:0;background:transparent;color:#6d5843;font-size:11px;font-weight:900;letter-spacing:.08em;cursor:pointer}
-.ar-wall-chips{position:relative;z-index:1;display:flex;gap:7px;overflow-x:auto;margin:13px -2px 0;padding:0 2px 3px;scrollbar-width:none}
-.ar-wall-chips::-webkit-scrollbar{display:none}
-.ar-wchip{flex:none;max-width:96px;height:25px;border:1px solid rgba(63,48,31,.16);border-radius:999px;background:rgba(255,255,255,.32);padding:0 10px;font-size:10.5px;font-weight:800;color:#5e513f;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ar-wchip.on{border-color:rgba(168,58,78,.44);background:#2d2117;color:#f8ead6}
-.ar-wall-grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:13px}
-.ar-frag{position:relative;min-height:152px;border:0;border-radius:4px;background:#fffaf1;color:#211f1b;text-align:left;overflow:hidden;cursor:pointer;box-shadow:0 13px 24px -20px rgba(30,25,20,.8),inset 0 0 0 1px rgba(50,45,38,.1);transform:rotate(var(--rot,0deg));transition:transform .18s ease,box-shadow .18s ease}
-.ar-frag:hover{transform:rotate(var(--rot,0deg)) translateY(-3px);box-shadow:0 18px 30px -22px rgba(30,25,20,.9),inset 0 0 0 1px rgba(50,45,38,.12)}
-.ar-frag:active{transform:rotate(var(--rot,0deg)) translateY(-1px) scale(.985)}
-.ar-frag.pull{transform:rotate(var(--rot,0deg)) translateY(-12px)}
-.ar-frag-cover{display:block;position:absolute;inset:0;background:linear-gradient(155deg,#f5efe2,#fff8ec 42%,#efe7d6);opacity:.98}
-.ar-frag-rule{position:absolute;left:11px;right:11px;top:13px;height:1px;background:rgba(45,42,37,.28)}
-.ar-frag-no{position:absolute;right:10px;top:18px;font-size:9px;font-weight:900;letter-spacing:.16em;color:rgba(35,32,28,.45)}
-.ar-frag-body{position:relative;z-index:1;display:flex;min-height:152px;flex-direction:column;padding:29px 11px 11px}
-.ar-frag-placeholder{margin:0;max-width:78%;font-family:var(--ar-font-display);font-size:18px;line-height:1.08;font-weight:700;color:#231f1c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ar-frag-preview{position:relative;z-index:1;margin:20px -1px 9px;border-radius:3px;overflow:hidden;background:#efe7d6;box-shadow:inset 0 0 0 1px rgba(45,42,37,.12)}
-.ar-frag-preview iframe{pointer-events:none}
-.ar-frag-preview-empty{position:relative;z-index:1;margin:31px 0 0;font-family:var(--ar-font-display);font-size:17px;font-weight:700;color:#231f1c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ar-frag-foot{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid rgba(45,42,37,.12);padding-top:8px;font-size:8.5px;font-weight:900;letter-spacing:.18em;color:#8a473f}
-.ar-frag-foot span:last-child{max-width:8em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
-.ar-frag-tape{position:absolute;left:14px;top:-5px;width:42px;height:15px;background:rgba(255,255,255,.5);box-shadow:0 1px 3px rgba(30,25,20,.12);transform:rotate(-5deg)}
-.ar-imgfrag{position:relative;min-height:152px;border:0;border-radius:3px;background:#f8f2e7;padding:8px 8px 31px;color:#211f1b;text-align:left;overflow:hidden;cursor:pointer;box-shadow:0 15px 27px -21px rgba(30,25,20,.86),inset 0 0 0 1px rgba(50,45,38,.1);transform:rotate(var(--rot,0deg));transition:transform .18s ease,box-shadow .18s ease}
-.ar-imgfrag:hover{transform:rotate(var(--rot,0deg)) translateY(-3px);box-shadow:0 20px 32px -22px rgba(30,25,20,.92),inset 0 0 0 1px rgba(50,45,38,.12)}
-.ar-imgfrag:active{transform:rotate(var(--rot,0deg)) translateY(-1px) scale(.985)}
-.ar-imgfrag::before{content:'';position:absolute;left:14px;top:-6px;width:46px;height:16px;background:rgba(255,255,255,.55);box-shadow:0 1px 4px rgba(30,25,20,.13);transform:rotate(-4deg);z-index:2}
-.ar-imgfrag-media{display:block;position:relative;width:100%;height:108px;overflow:hidden;background:linear-gradient(135deg,#ddd2c0,#f7efe1);box-shadow:inset 0 0 0 1px rgba(50,45,38,.12)}
-.ar-imgfrag-media img{display:block;width:100%;height:100%;object-fit:cover}
-.ar-imgfrag-media::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(140deg,rgba(255,255,255,.22),transparent 36%),radial-gradient(circle at 12% 18%,rgba(255,255,255,.26),transparent 30%);mix-blend-mode:screen}
-.ar-imgfrag-name{position:absolute;left:10px;right:10px;bottom:13px;font-family:var(--ar-font-display);font-size:13px;font-weight:700;line-height:1.15;color:#2d2925;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ar-imgfrag-tag{position:absolute;right:9px;top:100px;border:1px solid rgba(45,42,37,.16);background:rgba(248,242,231,.88);padding:2px 6px;font-size:7.5px;font-weight:900;letter-spacing:.16em;color:#8a473f}
-.ar-textfrag{position:relative;min-height:142px;border:0;border-radius:5px;background:#fff1a8;color:#2d2925;text-align:left;overflow:hidden;cursor:default;padding:23px 13px 12px;box-shadow:0 14px 24px -21px rgba(30,25,20,.82),inset 0 0 0 1px rgba(107,89,34,.14);transform:rotate(var(--rot,0deg))}
-.ar-textfrag.char{background:#fff5be;transform:rotate(-2deg);animation:ar-note-in .28s cubic-bezier(.2,.9,.3,1)}
-.ar-textfrag::before{content:'';position:absolute;left:0;right:0;top:0;height:18px;background:linear-gradient(180deg,rgba(255,255,255,.32),rgba(255,255,255,0))}
-.ar-textfrag-dot{position:absolute;left:12px;top:9px;min-width:18px;height:18px;border-radius:999px;border:1px solid #a83a4e;background:rgba(255,245,190,.62);display:flex;align-items:center;justify-content:center;padding:0 3px;font-size:10px;font-family:var(--ar-font-display);font-weight:800;color:#a83a4e;box-shadow:0 0 0 3px rgba(168,58,78,.08)}
-.ar-textfrag-body{display:block;font-family:'Kaiti SC',STKaiti,'楷体',serif;font-size:15px;line-height:1.55;color:#3f3528;white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
-.ar-textfrag-foot{position:absolute;left:13px;right:13px;bottom:10px;border-top:1px solid rgba(63,53,40,.12);padding-top:6px;font-size:8px;font-weight:900;letter-spacing:.18em;color:#8a6b26}
-.ar-frag-empty{position:relative;z-index:1;margin-top:12px;border:1px dashed rgba(49,55,51,.22);border-radius:8px;padding:18px;text-align:center;color:#6d6157;font-size:12px;line-height:1.8;background:rgba(255,255,255,.25)}
+.ar-wall-invite{position:relative;z-index:2;align-self:flex-start;max-width:100%;height:28px;border:1px solid rgba(168,58,78,.22);border-radius:999px;background:rgba(255,250,241,.72);color:#7c4d3f;padding:0 12px;font-size:10px;font-weight:900;letter-spacing:.08em;cursor:pointer;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);transition:transform .16s,border-color .16s,background .16s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ar-wall-invite:hover{transform:translateY(-1px);border-color:rgba(168,58,78,.34);background:rgba(255,250,241,.84)}
+.ar-wall-invite:disabled{opacity:.54;cursor:wait;transform:none}
+.ar-wall-empty-list{margin:18px 16px 34px;border:1px dashed rgba(201,163,106,.2);border-radius:10px;padding:20px 16px;text-align:center;color:var(--ar-t3);font-size:12px;line-height:1.8;background:rgba(255,236,210,.035)}
+.ar-full-wall{position:fixed;inset:0;z-index:90;overflow-y:auto;overflow-x:hidden;background:#17120e;color:#f4ead8;-webkit-overflow-scrolling:touch;touch-action:pan-y}
+.ar-full-wall.editing{overflow:hidden;touch-action:none}
+.ar-full-wall.preview{scrollbar-width:none;-ms-overflow-style:none;cursor:pointer}
+.ar-full-wall.preview::-webkit-scrollbar{display:none}
+.ar-full-bg{position:fixed;inset:0;pointer-events:none;background:var(--wall-bg,#17120e)}
+.ar-full-bg::after{content:'';position:absolute;inset:0;background:rgba(0,0,0,var(--wall-dim,.18))}
+.ar-full-bg::before{content:'';position:absolute;inset:0;background-image:${NOISE};opacity:var(--wall-noise-opacity,.035);mix-blend-mode:overlay}
+.ar-full-exit,.ar-full-action,.ar-edit-toolbar button,.ar-tray-item,.ar-wall-item-menu button{display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(255,236,210,.18);background:rgba(11,9,7,.64);color:rgba(246,232,206,.9);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);cursor:pointer;box-shadow:0 14px 34px -24px rgba(0,0,0,.95)}
+.ar-full-exit{position:fixed;left:14px;top:calc(env(safe-area-inset-top,0px) + 14px);z-index:5;width:38px;height:38px;border-radius:999px;font-size:28px;line-height:1}
+.ar-full-actions{position:fixed;right:14px;top:calc(env(safe-area-inset-top,0px) + 14px);z-index:5;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.ar-full-action{height:38px;border-radius:999px;padding:0 13px;gap:6px;font-size:12px;font-weight:900;letter-spacing:.08em}
+.ar-full-action-menu{display:flex;flex-direction:column;gap:8px;padding:7px;border:1px solid rgba(247,202,214,.55);border-radius:18px;background:rgba(255,255,255,.88);box-shadow:0 18px 40px -26px rgba(120,80,90,.7),inset 0 1px 0 #fff;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.ar-full-menu-action{height:36px;min-width:84px;border:1px solid rgba(231,140,160,.32);border-radius:999px;background:rgba(255,255,255,.75);color:var(--wall-ink);font-size:12px;font-weight:800;cursor:pointer}
+.ar-full-menu-action.primary{border-color:transparent;background:linear-gradient(180deg,var(--wall-rose-hi),var(--wall-rose));color:#fff;box-shadow:0 12px 22px -14px rgba(228,124,151,.85)}
+.ar-full-wall.preview .ar-full-exit,.ar-full-wall.preview .ar-full-actions,.ar-full-wall.preview .ar-edit-toolbar,.ar-full-wall.preview .ar-tray,.ar-full-wall.preview .moveable-control-box,.ar-full-wall.preview .ar-selection-actions,.ar-full-wall.preview .ar-text-style-panel,.ar-full-wall.preview .ar-asset-sheet{display:none!important}
+.ar-full-stage-wrap{position:relative;width:100%;min-height:100dvh}
+.ar-full-canvas{position:relative;width:750px;transform:scale(var(--wall-scale,1));transform-origin:top left;isolation:isolate}
+.ar-edit-toolbar{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);z-index:6;display:flex;gap:8px;transform:translateX(-50%);padding:6px;border-radius:999px;background:rgba(11,9,7,.44);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.ar-edit-toolbar button{height:36px;border-radius:999px;padding:0 12px;gap:6px;font-size:12px;font-weight:800}
+.ar-edit-toolbar button:disabled{opacity:.45;cursor:default}
+.ar-tray{position:fixed;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 62px);z-index:5;display:flex;gap:8px;overflow-x:auto;padding:0 12px 8px;scrollbar-width:none}
+.ar-tray::-webkit-scrollbar{display:none}
+.ar-tray-item{flex:none;min-width:118px;height:38px;border-radius:999px;padding:0 13px;font-size:12px;font-weight:800;gap:6px;white-space:nowrap}
+.ar-wall-free-item{position:absolute;left:0;top:0;z-index:var(--z,1);width:var(--item-w,320px);height:var(--item-h,260px);transform:translate3d(var(--x,0px),var(--y,0px),0) rotate(var(--r,0deg));transform-origin:center center;touch-action:auto}
+.ar-wall-free-item.editing{touch-action:none;cursor:grab}
+.ar-wall-free-item.selected{outline:1px solid rgba(245,224,181,.9);outline-offset:5px}
+.ar-wall-free-item.dragging{cursor:grabbing}
+.ar-wall-free-item button{font:inherit}
+.ar-live-card{position:absolute;inset:0;overflow:hidden;background:transparent}
+.ar-live-card-frame{position:absolute;left:0;top:0;width:375px;height:var(--frame-h,320px);border:0;border-radius:0;background:transparent;color-scheme:light dark;overflow:hidden;display:block;pointer-events:none;transform:scale(var(--card-scale,1));transform-origin:top left;opacity:0;transition:opacity 200ms ease}
+.ar-live-card-frame.mounted{opacity:1}
+.ar-live-card-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border:1px solid rgba(68,55,40,.22);background:rgba(255,250,241,.88);color:#2b241d;font-family:var(--ar-font-display);font-size:20px;font-weight:700;line-height:1.2;text-align:center;padding:18px;overflow:hidden}
+.ar-live-card-missing{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border:1px dashed rgba(255,236,210,.34);color:rgba(255,236,210,.82);font-size:12px;line-height:1.7;text-align:center;padding:18px;background:rgba(0,0,0,.18)}
+.ar-wall-img-item{position:absolute;inset:0;overflow:hidden;border-radius:3px;background:#100f0d;box-shadow:0 18px 34px -26px rgba(0,0,0,.92)}
+.ar-wall-img-item img{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;user-select:none}
+.ar-wall-img-item.transparent{background:transparent;box-shadow:none;border-radius:0}
+.ar-wall-img-item.transparent img{object-fit:contain;filter:drop-shadow(0 10px 12px rgba(0,0,0,.38))}
+.ar-wall-img-item.sticker{background:transparent;box-shadow:none;border-radius:0}
+.ar-wall-img-item.sticker img{object-fit:contain;filter:drop-shadow(0 10px 12px rgba(0,0,0,.38))}
+.ar-wall-note-item{position:absolute;inset:0;overflow:hidden;border-radius:6px;background:#fff2a8;color:#342a1d;padding:20px 16px 14px;box-shadow:0 18px 34px -26px rgba(0,0,0,.82),inset 0 0 0 1px rgba(110,92,42,.14)}
+.ar-wall-note-item.char{background:#fff6c5}
+.ar-wall-note-item p{margin:0;font-family:'Kaiti SC',STKaiti,'楷体',serif;font-size:20px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.ar-wall-note-item small{position:absolute;left:16px;right:16px;bottom:12px;border-top:1px solid rgba(80,62,26,.14);padding-top:7px;font-size:9px;font-weight:900;letter-spacing:.2em;color:#8b6d28}
+.ar-wall-text-item{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:visible;background:transparent;padding:8px;color:var(--wall-ink-strong)}
+.ar-wall-text-item p{margin:0;width:100%;line-height:1.22;white-space:pre-wrap;word-break:break-word}
+.ar-bond-widget{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:999px;background:linear-gradient(135deg,rgba(255,252,244,.96),rgba(244,234,216,.92));box-shadow:0 18px 34px -24px rgba(56,42,24,.55),inset 0 0 0 1px rgba(170,134,78,.18),inset 0 1px 0 rgba(255,255,255,.9);color:#7a6040}
+.ar-bond-widget::before{content:'';position:absolute;left:18px;right:18px;top:50%;height:1px;background:linear-gradient(90deg,transparent,rgba(196,157,96,.54),transparent)}
+.ar-bond-widget::after{content:'';position:absolute;inset:7px;border:1px solid rgba(196,157,96,.14);border-radius:999px;pointer-events:none}
+.ar-bond-avatar{position:relative;z-index:2;width:58px;height:58px;border-radius:999px;padding:3px;background:linear-gradient(145deg,#fffaf0,#e8d7b5);box-shadow:0 8px 18px -12px rgba(60,44,24,.58),inset 0 0 0 1px rgba(151,111,58,.18)}
+.ar-bond-avatar img,.ar-bond-avatar span{display:flex;width:100%;height:100%;align-items:center;justify-content:center;border-radius:inherit;object-fit:cover;background:linear-gradient(145deg,#f9efe0,#dcc8a5);color:#8b6b44;font-family:var(--ar-font-display);font-size:24px;font-weight:800}
+.ar-bond-avatar.char{margin-left:-4px}
+.ar-bond-link{position:relative;z-index:3;display:flex;align-items:center;justify-content:center;width:66px;height:30px;margin:0 -4px;border-radius:999px;background:linear-gradient(180deg,#fff7e8,#ecd7b7);box-shadow:0 8px 18px -14px rgba(65,46,22,.55),inset 0 0 0 1px rgba(190,148,78,.24);font-family:var(--ar-font-script);font-size:19px;color:#b38749}
+.ar-bond-meta{position:absolute;left:0;right:0;bottom:11px;z-index:4;display:flex;justify-content:center;gap:7px;min-width:0;padding:0 20px;font-size:9px;font-weight:900;letter-spacing:.16em;color:rgba(122,96,64,.72);text-transform:uppercase}
+.ar-bond-meta b{max-width:82px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit;color:inherit}
+.ar-pinned-remark{position:absolute;inset:0;overflow:hidden;color:var(--tk-ink-soft);background:linear-gradient(180deg,var(--tk-paper-a),var(--tk-paper-b));box-shadow:0 18px 34px -26px rgba(0,0,0,.72),inset 0 0 0 1px var(--tk-hairline)}
+.ar-pinned-remark .txt{white-space:pre-wrap;word-break:break-word}
+.ar-pinned-remark.ticket{border-radius:4px;padding:14px 15px 38px 18px}.ar-pinned-remark.ticket::after{content:'到访';position:absolute;right:12px;top:14px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:2px solid var(--tk-stamp);border-radius:999px;color:var(--tk-stamp);font-size:11px;font-weight:900;letter-spacing:.18em;transform:rotate(-12deg);opacity:.78;mix-blend-mode:multiply}.ar-pinned-remark.ticket .hd{display:flex;justify-content:space-between;margin-bottom:10px;color:var(--tk-grey);font-family:var(--tk-font-mono);font-size:8px;letter-spacing:.2em}.ar-pinned-remark.ticket .txt{font-family:var(--tk-font-serif);font-size:15px;line-height:1.65;padding-right:42px}.ar-pinned-remark.ticket .foot{position:absolute;left:15px;right:15px;bottom:12px;border-top:1px dashed var(--tk-grey-lt);padding-top:8px;color:var(--tk-grey);font-family:var(--tk-font-mono);font-size:8px;letter-spacing:.18em}
+.ar-pinned-remark.pol{border-radius:4px;background:#fff;padding:10px 10px 38px;transform:rotate(-1deg)}.ar-pinned-pol-photo{height:58px;overflow:hidden;background:#eae2d4}.ar-pinned-pol-photo img{width:100%;height:100%;object-fit:cover;filter:saturate(.85) contrast(.96)}.ar-pinned-remark.pol .txt{padding:9px 3px 0;font-family:var(--tk-font-note);font-size:15px;line-height:1.45;color:#2b2b2b}.ar-pinned-remark.pol .foot{position:absolute;left:13px;right:13px;bottom:10px;display:flex;justify-content:space-between;color:var(--tk-grey);font-family:var(--tk-font-mono);font-size:8px;letter-spacing:.18em}
+.ar-pinned-remark.card{border-radius:12px;background:#fbfbfa}.ar-pinned-remark.card .art{height:42%;overflow:hidden;background:#14161a}.ar-pinned-remark.card .art img{width:100%;height:100%;object-fit:cover}.ar-pinned-remark.card .name{display:flex;justify-content:space-between;padding:8px 12px 0;color:var(--tk-grey);font-size:8px;font-weight:900;letter-spacing:.2em}.ar-pinned-remark.card .name b{color:var(--tk-ink);font-size:12px}.ar-pinned-remark.card .txt{padding:7px 12px 0;font-family:var(--tk-font-serif);font-size:13px;line-height:1.5}.ar-pinned-remark.card::after{content:'';position:absolute;inset:0;background:linear-gradient(110deg,transparent 38%,rgba(255,255,255,.45) 48%,transparent 58%);transform:translateX(35%);pointer-events:none}
+.ar-pinned-remark.letter{border-radius:4px;padding:14px 16px;background:linear-gradient(180deg,rgba(0,0,0,.035) 0,transparent 1px) 0 33%/100% 1px no-repeat,linear-gradient(180deg,var(--tk-paper-a),var(--tk-paper-b))}.ar-pinned-remark.letter .hd{display:flex;justify-content:space-between;margin-bottom:9px;color:var(--tk-grey);font-family:var(--tk-font-mono);font-size:8px;letter-spacing:.18em}.ar-pinned-remark.letter .txt{font-family:var(--tk-font-serif);font-size:14px;line-height:1.7}.ar-pinned-remark.letter .seal{display:inline-flex;width:17px;height:17px;margin-left:5px;align-items:center;justify-content:center;border-radius:3px;background:var(--tk-stamp);color:white;font-family:var(--tk-font-serif);font-size:11px;transform:rotate(4deg);opacity:.9}
+.ar-pinned-remark.receipt{border-radius:0;background:#fdfdfc;padding:13px 13px 18px;filter:drop-shadow(0 18px 24px rgba(0,0,0,.18))}.ar-pinned-remark.receipt::after{content:'';position:absolute;left:0;right:0;bottom:0;height:7px;background:linear-gradient(135deg,#fdfdfc 50%,transparent 50%) 0 0/14px 14px repeat-x,linear-gradient(225deg,#fdfdfc 50%,transparent 50%) 7px 0/14px 14px repeat-x}.ar-pinned-remark.receipt .ln{margin:0;color:#232323;font-family:var(--tk-font-mono);font-size:10px;line-height:1.55;letter-spacing:.04em;white-space:pre-wrap;word-break:break-all}.ar-pinned-remark.receipt .ln.c{text-align:center}.ar-pinned-remark.receipt .stamp{position:absolute;right:12px;bottom:18px;border:1.5px dashed var(--tk-stamp);border-radius:5px;padding:4px 7px;color:var(--tk-stamp);font-size:10px;font-weight:900;letter-spacing:.14em;transform:rotate(-8deg);opacity:.82}
+.ar-note-editor{position:absolute;inset:8px;z-index:3;border:1px solid rgba(80,62,26,.2);border-radius:4px;background:rgba(255,252,224,.96);color:#302719;font:20px/1.55 'Kaiti SC',STKaiti,'楷体',serif;resize:none;outline:none;padding:10px}
+.ar-wall-item-menu{position:fixed;z-index:7;display:flex;gap:6px;padding:6px;border-radius:999px;background:rgba(11,9,7,.62);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.ar-wall-item-menu button{height:32px;border-radius:999px;padding:0 11px;font-size:11px;font-weight:800}
+.ar-selection-actions{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 68px);z-index:7;display:flex;gap:7px;max-width:calc(100% - 18px);overflow-x:auto;transform:translateX(-50%);padding:6px;border:1px solid rgba(255,236,210,.16);border-radius:999px;background:rgba(17,13,10,.72);box-shadow:0 18px 38px -24px rgba(0,0,0,.9);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);scrollbar-width:none}
+.ar-selection-actions::-webkit-scrollbar{display:none}
+.ar-selection-actions button{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;height:32px;border:1px solid rgba(255,236,210,.16);border-radius:999px;background:rgba(11,9,7,.72);color:var(--ar-t2);padding:0 12px;font-size:11px;font-weight:900;cursor:pointer;white-space:nowrap}
+.ar-selection-actions button.danger{color:#e6b3a8;border-color:rgba(200,110,96,.3)}
+.ar-text-style-panel{position:fixed;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 112px);z-index:7;display:flex;flex-direction:column;gap:10px;border:1px solid rgba(255,236,210,.16);border-radius:18px;background:rgba(17,13,10,.86);color:var(--ar-t1);padding:12px;box-shadow:0 28px 70px -34px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,236,210,.08);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.ar-text-style-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ar-text-style-head b{display:block;font-size:13px;letter-spacing:.08em}
+.ar-text-style-head small{display:block;margin-top:3px;color:var(--ar-t3);font-size:10px}
+.ar-text-style-head button,.ar-text-style-actions button{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:31px;border:1px solid rgba(201,163,106,.34);border-radius:999px;background:rgba(11,9,7,.62);color:var(--ar-accent);padding:0 10px;font-size:11px;font-weight:900;cursor:pointer}
+.ar-text-color-row{display:flex;align-items:center;gap:8px;overflow-x:auto;scrollbar-width:none}
+.ar-text-color-row::-webkit-scrollbar{display:none}
+.ar-text-color-row>button{flex:none;width:28px;height:28px;border:1px solid rgba(255,236,210,.2);border-radius:999px;background:var(--text-color);box-shadow:inset 0 0 0 2px rgba(255,255,255,.18);cursor:pointer}
+.ar-text-color-row>button.on{outline:2px solid var(--ar-accent);outline-offset:2px}
+.ar-text-color-picker{flex:none;display:flex;align-items:center;gap:6px;height:30px;border:1px solid rgba(255,236,210,.14);border-radius:999px;padding:0 9px;color:var(--ar-t2);font-size:10px;font-weight:900}
+.ar-text-color-picker input{width:22px;height:22px;border:0;background:transparent;padding:0}
+.ar-text-range{display:flex;align-items:center;gap:10px}
+.ar-text-range span{flex:none;width:70px;color:var(--ar-t2);font-size:10px;font-weight:900}
+.ar-text-range input{flex:1;accent-color:var(--ar-accent)}
+.ar-text-style-actions{display:flex;align-items:center;gap:7px;overflow-x:auto;scrollbar-width:none}
+.ar-text-style-actions::-webkit-scrollbar{display:none}
+.ar-text-style-actions button.on{background:rgba(201,163,106,.16);color:var(--ar-t1)}
+.ar-text-stroke{flex:none;display:flex;align-items:center;gap:6px;height:31px;border:1px solid rgba(255,236,210,.14);border-radius:999px;padding:0 10px;color:var(--ar-t2);font-size:11px;font-weight:900}
+.ar-text-stroke input{accent-color:var(--ar-accent)}
+.ar-asset-drawer{position:fixed;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 66px);z-index:8;height:min(72dvh,620px);max-height:calc(100dvh - env(safe-area-inset-top,0px) - 132px);display:flex;flex-direction:column;overflow:hidden;border:1px solid rgba(255,236,210,.16);border-radius:18px;background:rgba(17,13,10,.88);color:var(--ar-t1);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:0 28px 80px -34px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,236,210,.08)}
+.ar-asset-drawer-hd{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px 10px;border-bottom:1px solid var(--ar-line)}
+.ar-asset-drawer-hd h3{margin:0;font-size:14px;font-weight:900;letter-spacing:.08em}
+.ar-asset-drawer-hd p{margin:3px 0 0;font-size:10px;color:var(--ar-t3);letter-spacing:.08em}
+.ar-asset-upload{flex:none;display:inline-flex;align-items:center;gap:6px;height:34px;border:1px solid rgba(201,163,106,.42);border-radius:999px;background:transparent;color:var(--ar-accent);padding:0 12px;font-size:12px;font-weight:900;cursor:pointer}
+.ar-asset-upload:disabled{opacity:.56;cursor:wait}
+.ar-asset-empty{margin:18px 14px 16px;border:1px dashed rgba(201,163,106,.24);border-radius:14px;padding:22px 16px;text-align:center;color:var(--ar-t3);font-size:12px;line-height:1.8;background:rgba(255,236,210,.035)}
+.ar-asset-grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));align-content:start;gap:10px;overflow-y:auto;overscroll-behavior:contain;padding:12px 14px calc(env(safe-area-inset-bottom,0px) + 26px);scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.ar-asset-grid::-webkit-scrollbar{display:none}
+.ar-asset-card{min-width:0;display:flex;flex-direction:column;border:1px solid var(--ar-line);border-radius:14px;background:rgba(255,236,210,.04);overflow:hidden}
+.ar-asset-thumb{position:relative;display:flex;align-items:center;justify-content:center;width:100%;aspect-ratio:1;border:0;padding:0;background:rgba(0,0,0,.2);cursor:pointer;-webkit-touch-callout:none;user-select:none}
+.ar-asset-thumb img{display:block;width:100%;height:100%;object-fit:contain;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;user-select:none}
+.ar-asset-use-chip{position:absolute;right:6px;bottom:6px;display:inline-flex;align-items:center;justify-content:center;height:22px;border-radius:999px;background:rgba(11,9,7,.72);color:var(--ar-accent);padding:0 8px;font-size:10px;font-weight:900;letter-spacing:.04em;box-shadow:0 8px 18px -12px rgba(0,0,0,.8);pointer-events:none}
+.ar-asset-card b{display:block;margin:7px 8px 9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:1.15;color:var(--ar-t1)}
+.ar-asset-actions{display:none}
+.ar-asset-actions button{min-width:0;height:28px;display:inline-flex;align-items:center;justify-content:center;gap:4px;border:1px solid var(--ar-line);border-radius:999px;background:#100c09;color:var(--ar-t2);font-size:10px;font-weight:900;cursor:pointer}
+.ar-asset-actions button:hover{color:var(--ar-t1);border-color:rgba(201,163,106,.35)}
+.ar-asset-actions button.wide{grid-column:1 / -1}
+.ar-asset-actions button.primary{border-color:rgba(201,163,106,.46);background:linear-gradient(180deg,rgba(245,224,181,.18),rgba(201,163,106,.10));color:var(--ar-accent)}
+.ar-asset-sheet{position:fixed;left:18px;right:18px;bottom:calc(env(safe-area-inset-bottom,0px) + 96px);z-index:9;display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;border:1px solid rgba(255,236,210,.16);border-radius:20px;background:rgba(17,13,10,.92);color:var(--ar-t1);padding:12px;box-shadow:0 28px 80px -34px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,236,210,.08);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.ar-asset-sheet-preview{grid-row:span 2;display:flex;align-items:center;justify-content:center;width:72px;height:72px;border-radius:14px;background:rgba(0,0,0,.22);overflow:hidden;-webkit-touch-callout:none;user-select:none}
+.ar-asset-sheet-preview img{display:block;width:100%;height:100%;object-fit:contain;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;user-select:none}
+.ar-asset-sheet-copy{min-width:0;align-self:center}
+.ar-asset-sheet-copy b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.ar-asset-sheet-copy small{display:block;margin-top:4px;color:var(--ar-t3);font-size:10px;font-weight:800;letter-spacing:.12em}
+.ar-asset-sheet-actions{grid-column:1 / -1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.ar-asset-sheet-actions button{min-width:0;height:36px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--ar-line);border-radius:999px;background:#100c09;color:var(--ar-t2);font-size:11px;font-weight:900;cursor:pointer}
+.ar-asset-sheet-actions button.primary{grid-column:1 / -1;border-color:rgba(201,163,106,.46);background:linear-gradient(180deg,rgba(245,224,181,.18),rgba(201,163,106,.10));color:var(--ar-accent)}
+.ar-asset-sheet-actions button.danger{color:#e6b3a8;border-color:rgba(200,110,96,.32)}
+.ar-wall-empty-canvas{position:absolute;left:50%;top:45dvh;transform:translate(-50%,-50%);width:280px;text-align:center;color:rgba(246,232,206,.6);font-size:13px;line-height:1.9}
+
+/* ---------- light wall fullscreen refresh ---------- */
+.ar-full-wall{--wall-petal:#fff6f2;--wall-blush:#fbe9ee;--wall-blush-soft:#fff1f5;--wall-sage:#eaf1e6;--wall-sage-ink:#5e7a57;--wall-lilac:#efe7f6;--wall-lilac-ink:#6e5a8e;--wall-line:rgba(247,202,214,.58);--wall-rose:#e2718d;--wall-rose-hi:#ee89a2;--wall-rose-ink:#9f4f64;--wall-ink:#76565b;--wall-ink-strong:#4d3438;--wall-ink-soft:#9a7379;--wall-gold:#d9c49b;--ar-font-hand:'Kaiti SC',STKaiti,'KaiTi','Noto Serif SC',serif;background:var(--wall-petal);color:var(--wall-ink);font-family:var(--ar-font-ui)}
+.ar-full-wall.editing{overflow:hidden;touch-action:none}
+.ar-full-wall.preview .ar-full-exit,.ar-full-wall.preview .ar-full-actions,.ar-full-wall.preview .ar-edit-toolbar,.ar-full-wall.preview .ar-tray,.ar-full-wall.preview .moveable-control-box,.ar-full-wall.preview .ar-wall-item-menu,.ar-full-wall.preview .ar-asset-drawer,.ar-full-wall.preview .html-modal,.ar-full-wall.preview .ar-selection-actions,.ar-full-wall.preview .ar-text-style-panel,.ar-full-wall.preview .ar-asset-sheet{display:none!important}
+.ar-full-bg{position:fixed;inset:0;pointer-events:none;background:var(--wall-bg,var(--wall-petal))}
+.ar-full-bg::after{content:'';position:absolute;inset:0;background:rgba(0,0,0,var(--wall-dim,.02))}
+.ar-full-bg::before{content:'';position:absolute;inset:0;background-image:${NOISE};opacity:var(--wall-noise-opacity,.03);mix-blend-mode:multiply}
+.ar-full-exit,.ar-full-action,.ar-edit-toolbar button,.ar-tray-item,.ar-wall-item-menu button{border:1px solid rgba(231,140,160,.35);background:rgba(255,255,255,.85);color:var(--wall-ink);box-shadow:0 12px 26px -20px rgba(120,80,90,.7);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.ar-full-exit{width:40px;height:40px;border-radius:999px;color:var(--wall-rose-ink);font-size:26px}
+.ar-full-action{height:40px;border-radius:999px;padding:0 15px;gap:6px;font-size:12px;font-weight:800;letter-spacing:.04em}
+.ar-full-actions .ar-full-action:first-child{border-color:transparent;background:linear-gradient(180deg,var(--wall-rose-hi),var(--wall-rose));color:#fff;box-shadow:0 12px 22px -12px rgba(228,124,151,.85)}
+.ar-full-action:active,.ar-full-exit:active,.ar-edit-toolbar button:active,.ar-tray-item:active,.ar-wall-item-menu button:active{transform:scale(.96)}
+.ar-full-stage-wrap{position:relative;width:100%;min-height:100dvh}
+.ar-full-canvas{position:relative;width:750px;min-height:980px;transform:scale(var(--wall-scale,1));transform-origin:top left;isolation:isolate}
+.ar-tray{position:fixed;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 64px);z-index:5;display:flex;gap:8px;overflow-x:auto;padding:0 12px 8px;scrollbar-width:none}
+.ar-tray-item{flex:none;min-width:118px;height:40px;border-radius:999px;padding:0 14px;color:var(--wall-rose-ink);font-size:12px;font-weight:800;gap:6px;white-space:nowrap}
+.ar-wall-free-item{transition:filter .16s ease}
+.ar-wall-free-item.selected{outline:1.5px solid rgba(228,124,151,.95);outline-offset:5px;border-radius:6px}
+.ar-wall-free-item.dragging{filter:drop-shadow(0 18px 22px rgba(150,90,110,.3))}
+.ar-live-card-placeholder{border:1px solid rgba(231,140,160,.3);background:rgba(255,250,251,.92);color:var(--wall-ink-strong);font-family:var(--ar-font-display);font-size:20px;font-weight:600}
+.ticket-card{position:absolute;inset:0;overflow:hidden;border-radius:6px;background:linear-gradient(180deg,#fff,#fff1f4);color:var(--wall-ink);padding:28px 22px;box-shadow:0 18px 34px -26px rgba(150,90,110,.6),inset 0 0 0 1px rgba(247,202,214,.55)}
+.ticket-card::before,.ticket-card::after{content:'';position:absolute;top:50%;width:28px;height:28px;border-radius:999px;background:var(--wall-bg,var(--wall-petal));transform:translateY(-50%)}
+.ticket-card::before{left:-14px}.ticket-card::after{right:-14px}
+.ticket-card b{display:block;font-family:var(--ar-font-display);font-weight:600;font-size:28px;line-height:1.05;color:var(--wall-ink-strong)}
+.ticket-card p{margin:16px 0 0;font-size:14px;line-height:1.7;color:var(--wall-ink-soft)}
+.ticket-card small{position:absolute;left:22px;right:22px;bottom:20px;border-top:1px dashed rgba(231,140,160,.5);padding-top:10px;color:var(--wall-rose-ink);font-size:10px;letter-spacing:.16em;font-weight:900}
+.ar-html-card{position:absolute;inset:0;overflow:hidden;border-radius:6px;background:#fff;box-shadow:0 18px 30px -24px rgba(150,90,110,.55),inset 0 0 0 1px rgba(247,202,214,.4)}
+.ar-html-frame{display:block;width:100%;height:100%;border:0;background:#fff}
+.ar-full-wall.editing .ar-html-card .ar-html-frame{pointer-events:none}
+.ar-wall-img-item{border-radius:6px;background:#fff;padding:7px;box-shadow:0 18px 30px -24px rgba(150,90,110,.55),inset 0 0 0 1px rgba(247,202,214,.4)}
+.ar-wall-img-item img{border-radius:3px;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;user-select:none}
+.ar-wall-img-item.transparent{background:transparent;box-shadow:none;border-radius:0;padding:0}
+.ar-wall-img-item.transparent img{border-radius:0;object-fit:contain;filter:drop-shadow(0 8px 12px rgba(180,100,120,.35))}
+.ar-wall-img-item.sticker{background:transparent;box-shadow:none;border-radius:0;padding:0}
+.ar-wall-img-item.sticker img{object-fit:contain;filter:drop-shadow(0 8px 12px rgba(180,100,120,.35))}
+.ar-wall-note-item{overflow:visible;border-radius:10px;background:linear-gradient(165deg,#fff7e6,#fcefd2);color:#6b5638;padding:24px 18px 16px;box-shadow:0 16px 28px -22px rgba(150,110,60,.55),inset 0 0 0 1px rgba(231,196,120,.4)}
+.ar-wall-note-item.char{background:linear-gradient(165deg,#fff0f4,#fbdde7);color:#7a4a57;box-shadow:0 16px 28px -22px rgba(180,100,120,.5),inset 0 0 0 1px rgba(247,202,214,.5)}
+.ar-wall-note-item::before{content:'';position:absolute;left:50%;top:-9px;width:66px;height:20px;border-radius:2px;background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(231,196,120,.4));box-shadow:0 5px 9px -6px rgba(120,90,40,.45);transform:translateX(-50%) rotate(-3deg)}
+.ar-wall-note-item.char::before{background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(247,202,214,.55))}
+.ar-wall-note-item p{font-family:var(--ar-font-hand);font-size:20px;line-height:1.55;color:inherit}
+.ar-wall-note-item small{left:18px;right:18px;bottom:11px;border-top:1px solid rgba(120,90,40,.15);padding-top:7px;color:rgba(120,90,40,.65);font-size:9px;font-weight:900;letter-spacing:.18em}
+.ar-wall-note-item.char small{border-top-color:rgba(180,100,120,.2);color:rgba(150,80,100,.7)}
+.ar-wall-text-item{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:visible;background:transparent;padding:8px;color:var(--wall-ink-strong)}
+.ar-wall-text-item p{margin:0;width:100%;line-height:1.22;white-space:pre-wrap;word-break:break-word}
+.ar-bond-widget{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:13px;padding:12px;background:none;box-shadow:none;color:var(--wall-ink)}
+.bond-row{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;gap:4px}
+.bond-av{position:relative;width:82px;height:82px;border-radius:999px;padding:5px;background:#fff;box-shadow:inset 0 0 0 1px rgba(201,169,138,.75),0 0 0 1.5px rgba(201,169,138,.6),0 9px 18px -12px rgba(120,86,92,.5)}
+.bond-av-inner{display:grid;place-items:center;width:100%;height:100%;overflow:hidden;border-radius:inherit;font-family:var(--ar-font-display);font-weight:500;font-size:33px;letter-spacing:.01em}
+.bond-av-inner img{display:block;width:100%;height:100%;object-fit:cover}
+.bond-av.you .bond-av-inner{background:linear-gradient(150deg,#f6ecec,#e9dad8);color:#9a6f77}
+.bond-av.char .bond-av-inner{background:linear-gradient(150deg,#f4edf2,#e3d7df);color:#8c6574}
+.bond-av-frame{position:absolute;inset:-5px;width:calc(100% + 10px);height:calc(100% + 10px);object-fit:contain;pointer-events:none}
+.bond-amp{position:relative;display:inline-flex;align-items:center;justify-content:center;width:132px;height:40px;color:#d7bf92;filter:drop-shadow(0 1px 1px rgba(150,110,70,.22))}
+.bond-amp svg{position:absolute;inset:0;display:block;width:100%;height:100%}
+.bond-word{position:relative;z-index:1;font-family:'Tangerine','Snell Roundhand','Apple Chancery',var(--ar-font-script);font-weight:700;font-size:30px;line-height:1;padding-bottom:2px;color:#d9c49b;background:linear-gradient(160deg,#f2e5c2,#dcc59a 55%,#cbb082);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.bond-names{position:relative;z-index:1;font-family:var(--ar-font-display);font-weight:500;font-size:21px;color:var(--wall-ink-strong);letter-spacing:.05em}
+.bond-since{position:relative;z-index:1;display:flex;align-items:center;gap:9px;color:#c8ad7a;font-family:'Tangerine','Snell Roundhand','Apple Chancery',var(--ar-font-script);font-size:22px;font-weight:700;line-height:1;letter-spacing:.01em;text-align:center}
+.bond-since i{flex:none;width:20px;height:1px;background:linear-gradient(90deg,transparent,rgba(201,169,138,.7))}
+.bond-since i:last-child{background:linear-gradient(90deg,rgba(201,169,138,.7),transparent)}
+.bond-since span{min-width:0;white-space:nowrap}
+.ar-pinned-remark{box-shadow:0 18px 30px -26px rgba(150,90,110,.6),inset 0 0 0 1px var(--tk-hairline)}
+.ar-pinned-remark.ticket{border-radius:6px}
+.ar-pinned-remark .txt{font-family:var(--ar-font-hand);font-size:17px;color:var(--wall-ink)}
+.ar-note-editor{inset:8px;border:1px solid rgba(231,140,160,.4);border-radius:8px;background:rgba(255,252,253,.97);color:var(--wall-ink);font:20px/1.55 var(--ar-font-hand);padding:10px}
+.ar-wall-item-menu{gap:6px;padding:6px;border:1px solid rgba(247,202,214,.7);border-radius:999px;background:rgba(255,255,255,.92);box-shadow:0 18px 38px -22px rgba(120,80,90,.7)}
+.ar-wall-item-menu button{height:34px;border-color:transparent;background:transparent;color:var(--wall-ink);box-shadow:none;font-size:11px;font-weight:800}
+.ar-wall-item-menu button:hover{background:var(--wall-blush-soft);color:var(--wall-rose-ink)}
+.ar-wall-item-menu button[data-menu="delete"]{color:var(--wall-rose-ink)}
+.ar-selection-actions{border-color:rgba(247,202,214,.7);background:rgba(255,255,255,.92);box-shadow:0 18px 38px -22px rgba(120,80,90,.7)}
+.ar-selection-actions button{border-color:transparent;background:transparent;color:var(--wall-ink);font-weight:800;box-shadow:none}
+.ar-selection-actions button:hover{background:var(--wall-blush-soft);color:var(--wall-rose-ink)}
+.ar-selection-actions button.danger{color:var(--wall-rose-ink)}
+.ar-text-style-panel{border-color:rgba(247,202,214,.65);background:rgba(255,251,250,.94);color:var(--wall-ink);box-shadow:0 28px 64px -32px rgba(120,80,90,.7),inset 0 1px 0 #fff}
+.ar-text-style-head b{color:var(--wall-ink-strong)}
+.ar-text-style-head small,.ar-text-range span,.ar-text-stroke,.ar-text-color-picker{color:var(--wall-ink-soft)}
+.ar-text-style-head button,.ar-text-style-actions button{border-color:var(--wall-line);background:#fff6f8;color:var(--wall-rose-ink)}
+.ar-text-style-actions button.on{background:linear-gradient(180deg,#fff,var(--wall-lilac));color:var(--wall-lilac-ink)}
+.ar-text-color-picker,.ar-text-stroke{border-color:var(--wall-line);background:#fff}
+.ar-text-color-row>button{border-color:rgba(247,202,214,.82);box-shadow:inset 0 0 0 2px rgba(255,255,255,.55),0 8px 14px -12px rgba(120,80,90,.55)}
+.ar-text-color-row>button.on{outline-color:var(--wall-rose)}
+.ar-asset-drawer{border:1px solid rgba(247,202,214,.6);border-radius:20px;background:rgba(255,251,250,.94);color:var(--wall-ink);box-shadow:0 28px 64px -32px rgba(120,80,90,.7),inset 0 1px 0 #fff}
+.ar-asset-drawer-hd{border-bottom:1px solid var(--wall-line)}
+.ar-asset-drawer-hd h3{font-family:var(--ar-font-display);font-size:16px;font-weight:600;color:var(--wall-ink-strong);letter-spacing:.02em}
+.ar-asset-drawer-hd p{color:var(--wall-ink-soft);font-weight:600}
+.ar-asset-upload{border-color:rgba(228,124,151,.55);background:rgba(255,255,255,.7);color:var(--wall-rose-ink)}
+.ar-asset-empty{border-color:rgba(247,202,214,.65);background:#fff;color:var(--wall-ink-soft)}
+.ar-asset-card{border-color:var(--wall-line);background:#fff;box-shadow:0 10px 22px -18px rgba(120,80,90,.5)}
+.ar-asset-thumb{background:#fbeff2}
+.ar-asset-use-chip{background:rgba(255,255,255,.86);color:var(--wall-rose-ink);box-shadow:0 8px 16px -12px rgba(120,80,90,.62)}
+.ar-asset-card b{color:var(--wall-ink);font-weight:800}
+.ar-asset-actions button{border-color:var(--wall-line);background:#fff6f8;color:var(--wall-rose-ink);font-weight:800}
+.ar-asset-actions button.primary{border-color:transparent;background:linear-gradient(180deg,var(--wall-rose-hi),var(--wall-rose));color:#fff;box-shadow:0 10px 18px -12px rgba(228,124,151,.8)}
+.ar-asset-sheet{border-color:rgba(247,202,214,.68);background:rgba(255,251,250,.96);color:var(--wall-ink);box-shadow:0 28px 64px -32px rgba(120,80,90,.72),inset 0 1px 0 #fff}
+.ar-asset-sheet-preview{background:#fbeff2}
+.ar-asset-sheet-copy b{color:var(--wall-ink-strong)}
+.ar-asset-sheet-copy small{color:var(--wall-ink-soft)}
+.ar-asset-sheet-actions button{border-color:var(--wall-line);background:#fff6f8;color:var(--wall-rose-ink)}
+.ar-asset-sheet-actions button.primary{border-color:transparent;background:linear-gradient(180deg,var(--wall-rose-hi),var(--wall-rose));color:#fff;box-shadow:0 10px 18px -12px rgba(228,124,151,.8)}
+.ar-asset-sheet-actions button.danger{color:var(--wall-rose-ink)}
+.ar-edit-toolbar{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);z-index:6;display:flex;gap:8px;max-width:calc(100% - 16px);overflow-x:auto;padding:7px;border:1px solid rgba(247,202,214,.55);border-radius:999px;background:rgba(255,255,255,.72);box-shadow:0 18px 40px -26px rgba(120,80,90,.7),inset 0 1px 0 #fff;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);scrollbar-width:none;transform:translateX(-50%)}
+.ar-edit-toolbar::-webkit-scrollbar{display:none}
+.ar-edit-toolbar button{flex:none;height:42px;border-radius:999px;padding:0 14px;gap:6px;font-size:12px;font-weight:800;white-space:nowrap}
+.ar-edit-toolbar button:first-child{border-color:transparent;background:linear-gradient(180deg,var(--wall-rose-hi),var(--wall-rose));color:#fff;box-shadow:0 12px 22px -12px rgba(228,124,151,.85)}
+.ar-edit-toolbar button:nth-child(2){border-color:rgba(167,196,160,.6);background:linear-gradient(180deg,#fff,var(--wall-sage));color:var(--wall-sage-ink)}
+.ar-edit-toolbar button:nth-child(3){border-color:rgba(196,169,224,.6);background:linear-gradient(180deg,#fff,var(--wall-lilac));color:var(--wall-lilac-ink)}
+.ar-edit-toolbar button[aria-label="撤销"],.ar-edit-toolbar button[aria-label="重做"]{width:42px;padding:0;color:var(--wall-rose-ink)}
+.ar-edit-tools{display:flex;gap:8px}
+.ar-preview-hint{position:fixed;left:50%;bottom:24px;z-index:5;display:none;transform:translateX(-50%);padding:9px 15px;border:1px solid rgba(247,202,214,.7);border-radius:999px;background:rgba(255,255,255,.88);color:var(--wall-rose-ink);font-size:12px;font-weight:800;letter-spacing:.04em;box-shadow:0 12px 26px -18px rgba(120,80,90,.6);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);pointer-events:none}
+.ar-full-wall.preview .ar-preview-hint{display:inline-flex}
+.ar-full-wall .moveable-control-box{--moveable-color:rgba(228,124,151,.95)!important}
+.ar-full-wall .moveable-line{background:rgba(228,124,151,.95)!important}
+.ar-full-wall .moveable-control{border:1.5px solid rgba(228,124,151,.95)!important;background:#fff!important}
+.html-modal{position:fixed;inset:0;z-index:8;display:grid;place-items:center;padding:22px;background:rgba(255,246,245,.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.html-panel{width:min(360px,100%);max-height:calc(100dvh - 44px);display:flex;flex-direction:column;border-radius:22px;padding:18px;background:linear-gradient(180deg,#fff,#fff4f7);color:var(--wall-ink);box-shadow:0 30px 70px -36px rgba(120,80,90,.6),inset 0 0 0 1px rgba(247,202,214,.6)}
+.html-panel-hd{display:flex;align-items:center;justify-content:space-between}
+.html-panel-hd h3{margin:0;font-family:var(--ar-font-display);font-size:22px;font-weight:600;color:var(--wall-ink-strong)}
+.html-x{width:30px;height:30px;border:1px solid rgba(228,124,151,.4);border-radius:999px;background:rgba(255,255,255,.7);color:var(--wall-rose-ink);cursor:pointer;font-size:18px;line-height:1}
+.html-hint{margin:8px 0 12px;color:var(--wall-ink-soft);font-size:12px;line-height:1.6}
+.html-upload{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border:1px solid rgba(196,169,224,.6);border-radius:999px;background:#f3eefa;color:var(--wall-lilac-ink);font-size:12px;font-weight:800;cursor:pointer}
+.html-input{margin:12px 0;flex:1;min-height:168px;resize:none;border:1px solid var(--wall-line);border-radius:14px;padding:12px;background:#fffdfe;color:var(--wall-ink);font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;outline:none}
+.html-input:focus{border-color:rgba(228,124,151,.55)}
+.html-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.html-actions button{flex:1;height:42px;border:1px solid var(--wall-line);border-radius:999px;background:rgba(255,255,255,.8);color:var(--wall-ink);font-size:13px;font-weight:800;cursor:pointer}
+.html-actions button.primary{border-color:transparent;background:linear-gradient(180deg,var(--wall-rose-hi),var(--wall-rose));color:#fff;box-shadow:0 12px 22px -12px rgba(228,124,151,.8)}
+.html-actions button.danger{grid-column:1 / -1;border-color:rgba(218,110,126,.36);background:#fff1f4;color:#b34d63}
+.html-actions button:active,.html-upload:active,.html-x:active{transform:scale(.98)}
 .ar-freader{position:relative;width:min(94vw,560px);max-height:calc(100dvh - 42px);display:flex;flex-direction:column;align-items:center;gap:13px}
 .ar-freader-card{width:100%;max-height:calc(100dvh - 142px);display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:14px;background:rgba(11,10,9,.34);box-shadow:0 24px 60px -24px rgba(0,0,0,.82),inset 0 0 0 1px rgba(255,236,210,.1);padding:14px}
 .ar-freader-meta{width:100%;display:flex;align-items:flex-end;justify-content:space-between;gap:12px;color:var(--ar-t1)}
@@ -225,6 +458,7 @@ const CSS = `
 .ar-field{display:flex;flex-direction:column;gap:6px}
 .ar-field span{font-size:10px;font-weight:900;letter-spacing:.2em;color:var(--ar-t3)}
 .ar-field input,.ar-field textarea,.ar-field select{border:1px solid var(--ar-line);border-radius:12px;background:#100c09;color:var(--ar-t1);font:inherit;font-size:13px;outline:none;padding:10px 11px}
+.ar-field input[readonly]{color:var(--ar-accent)}
 .ar-field input[type=range]{accent-color:var(--ar-accent)}
 .ar-field textarea{min-height:40px;resize:none;transition:min-height .18s}
 .ar-note-compose{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px;align-items:start}
@@ -244,6 +478,7 @@ const CSS = `
 .ar-editor-mini{display:flex;gap:6px}
 .ar-editor-mini button,.ar-editor-tools button{border:1px solid var(--ar-line);border-radius:999px;background:#100c09;color:var(--ar-t2);height:29px;padding:0 10px;font-size:11px;font-weight:800;cursor:pointer}
 .ar-editor-mini button{display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0}
+.ar-editor-mini button.text{width:auto;min-width:44px;padding:0 11px}
 .ar-editor-mini button:hover,.ar-editor-tools button:hover{color:var(--ar-t1);border-color:rgba(201,163,106,.35)}
 .ar-editor-tools{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
 .ar-editor-ft{display:flex;gap:9px;border-top:1px solid var(--ar-line);padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 12px);background:#120e0a}
@@ -330,6 +565,66 @@ const CSS = `
 .ar-panel-c{width:100%;max-width:320px;border:1px solid var(--ar-line);border-radius:16px;background:var(--ar-surface);box-shadow:0 24px 60px -24px rgba(0,0,0,.78);animation:ar-rise .22s cubic-bezier(.2,.9,.3,1);padding:20px 18px 14px}
 .ar-panel-c h3{margin:0;font-size:16px;font-weight:800;color:var(--ar-t1)}
 .ar-panel-c p{margin:8px 0 2px;font-size:12.5px;line-height:1.7;color:var(--ar-t2)}
+.ar-remark-overlay{position:fixed;inset:0;z-index:320;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;background:rgba(18,18,18,.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:ar-remark-fade .24s ease both}
+.ar-remark-overlay.scrolly{justify-content:flex-start;overflow-y:auto;padding:7vh 24px 12vh}
+@keyframes ar-remark-fade{from{opacity:0}to{opacity:1}}
+.tk-card-slot{position:relative;display:flex;align-items:center;justify-content:center;width:100%;max-width:430px}
+.tk-card-slot>.active{display:block}
+.tk-remark .caret{display:inline-block;width:1px;height:1em;margin-left:1px;background:currentColor;vertical-align:-.15em;animation:tk-caret .9s steps(1) infinite}
+@keyframes tk-caret{50%{opacity:0}}
+.tk-barcode{display:block;height:26px;background:repeating-linear-gradient(90deg,var(--tk-ink) 0 1.5px,transparent 1.5px 4px,var(--tk-ink) 4px 7px,transparent 7px 8.5px,var(--tk-ink) 8.5px 9.5px,transparent 9.5px 14px,var(--tk-ink) 14px 16px,transparent 16px 18px)}
+.ar-remark-actions{display:flex;gap:10px;opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .24s ease .12s,transform .24s ease .12s}
+.ar-remark-actions.show{opacity:1;transform:translateY(0);pointer-events:auto}
+.ar-remark-actions button{height:42px;border-radius:999px;padding:0 22px;font-size:12px;font-weight:800;letter-spacing:.12em;text-indent:.12em;cursor:pointer}
+.ar-remark-actions button:disabled{opacity:.58;cursor:wait}
+.ar-remark-pin{border:1px solid var(--tk-ink);background:var(--tk-ink);color:#fff}
+.ar-remark-keep{border:1px solid rgba(255,255,255,.7);background:rgba(255,255,255,.86);color:var(--tk-ink);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.ar-ticket{--py:calc(100% - 70px);position:relative;width:min(346px,92vw);border:1px solid var(--tk-hairline);border-radius:3px;background:linear-gradient(180deg,var(--tk-paper-a),var(--tk-paper-b));box-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 34px 70px -30px rgba(0,0,0,.4),0 6px 16px rgba(0,0,0,.08);transform:translateY(26px) rotate(-1.6deg) scale(.97);opacity:0;transition:transform .34s cubic-bezier(.2,.9,.25,1.12),opacity .26s ease;cursor:pointer;-webkit-mask:radial-gradient(circle 9px at 0 var(--py),transparent 8px,#000 9px),radial-gradient(circle 9px at 100% var(--py),transparent 8px,#000 9px);-webkit-mask-composite:source-in;mask:radial-gradient(circle 9px at 0 var(--py),transparent 8px,#000 9px),radial-gradient(circle 9px at 100% var(--py),transparent 8px,#000 9px);mask-composite:intersect}
+.ar-remark-overlay .ar-ticket.active{transform:translateY(0) rotate(-.6deg) scale(1);opacity:1}
+.ar-ticket-spine{position:absolute;left:7px;top:18px;color:var(--tk-grey-lt);font-size:7px;font-weight:800;letter-spacing:.34em;writing-mode:vertical-rl;pointer-events:none;user-select:none}
+.ar-ticket-body{position:relative;padding:18px 20px 20px 26px}
+.ar-ticket-eyebrow,.tk-letter-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.ar-ticket-eyebrow b,.tk-letter-head b{color:var(--tk-grey);font-size:8px;font-weight:800;letter-spacing:.34em}
+.ar-ticket-no,.tk-letter-head span{font-family:var(--tk-font-mono);font-size:11px;letter-spacing:.08em}
+.ar-ticket-venue{margin:10px 0 0;font-size:21px;font-weight:800;line-height:1.15;color:var(--tk-ink)}
+.ar-ticket-venue small{display:block;margin-top:4px;color:var(--tk-grey);font-size:8px;font-weight:800;letter-spacing:.3em}
+.ar-ticket-rule,.tk-letter-rule{height:1px;margin:14px 0;background:var(--tk-hairline)}
+.ar-ticket .tk-remark{min-height:96px;margin:0;color:var(--tk-ink-soft);font-family:var(--tk-font-serif);font-size:17px;line-height:1.85;white-space:pre-wrap;word-break:break-word}
+.ar-ticket-seal{position:absolute;right:18px;top:58px;width:78px;height:78px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:2.5px solid var(--tk-stamp);border-radius:999px;color:var(--tk-stamp);transform:rotate(-12deg) scale(1.7);opacity:0;pointer-events:none;mix-blend-mode:multiply}
+.ar-ticket-seal::before{content:'';position:absolute;inset:4px;border:1px dashed var(--tk-stamp);border-radius:inherit;opacity:.7}
+.ar-ticket-seal em{font-style:normal;font-size:13px;font-weight:900;letter-spacing:.42em;text-indent:.42em}
+.ar-ticket-seal small{font-family:var(--tk-font-mono);font-size:7px;letter-spacing:.18em}
+.ar-ticket.fin .ar-ticket-seal{animation:tk-stamp .34s cubic-bezier(.2,1.1,.3,1) forwards}
+@keyframes tk-stamp{0%{transform:rotate(-3deg) scale(1.7);opacity:0}62%{transform:rotate(-13deg) scale(.96);opacity:.92}100%{transform:rotate(-12deg) scale(1);opacity:.88}}
+.ar-ticket-perf{height:0;border-top:1px dashed var(--tk-grey-lt);margin:0 12px}
+.ar-ticket-stub{display:flex;align-items:center;justify-content:space-between;gap:14px;height:68px;padding:0 20px 0 26px}
+.ar-ticket-fields{display:flex;gap:18px;min-width:0}
+.ar-ticket-field{display:flex;flex-direction:column;gap:4px}
+.ar-ticket-field b{color:var(--tk-grey);font-size:7px;font-weight:800;letter-spacing:.28em}
+.ar-ticket-field span{font-family:var(--tk-font-mono);font-size:11px;letter-spacing:.04em;color:var(--tk-ink)}
+.ar-ticket-codewrap{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.ar-ticket-codewrap .tk-barcode{width:92px;height:28px}.ar-ticket-codewrap small{color:var(--tk-grey);font-family:var(--tk-font-mono);font-size:7px;letter-spacing:.3em}
+.tk-pol{width:min(302px,88vw);padding:13px 13px 0;border-radius:4px;background:#fff;box-shadow:0 34px 70px -30px rgba(0,0,0,.42),0 6px 16px rgba(0,0,0,.08);transform:translateY(26px) rotate(-2deg) scale(.97);opacity:0;transition:transform .34s cubic-bezier(.2,.9,.25,1.12),opacity .26s ease;cursor:pointer}
+.ar-remark-overlay .tk-pol.active{transform:translateY(0) rotate(-2deg) scale(1);opacity:1}
+.tk-pol.fin{animation:tk-settle .5s ease}@keyframes tk-settle{0%{transform:rotate(-2deg)}38%{transform:rotate(-3.1deg)}72%{transform:rotate(-1.2deg)}100%{transform:rotate(-2deg)}}
+.tk-pol-photo{position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;background:#14161a}.tk-pol-photo img{width:100%;height:100%;object-fit:cover;filter:brightness(2.3) contrast(.55) saturate(.12) sepia(.22);transition:filter 2.4s ease}.tk-pol.dev .tk-pol-photo img{filter:none}.tk-pol-photo::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,#f3f0e9,#e8e5de);opacity:.93;transition:opacity 2.4s ease;pointer-events:none}.tk-pol.dev .tk-pol-photo::after{opacity:0}
+.tk-pol-date{position:absolute;right:10px;bottom:9px;color:#ff8a3c;font-family:var(--tk-font-mono);font-size:13px;letter-spacing:.14em;text-shadow:0 0 7px rgba(255,138,60,.6);opacity:0;transition:opacity .35s ease}.tk-pol.fin .tk-pol-date{opacity:.95}
+.tk-pol-cap{min-height:112px;padding:13px 4px 10px}.tk-pol .tk-remark{min-height:74px;margin:0;color:#2b2b2b;font-family:var(--tk-font-note);font-size:17px;line-height:1.75;white-space:pre-wrap;word-break:break-word}.tk-pol-meta{display:flex;justify-content:space-between;padding:8px 0 10px;color:var(--tk-grey);font-family:var(--tk-font-mono);font-size:8px;letter-spacing:.26em}
+.tk-cardflip{width:min(288px,84vw);height:404px;perspective:1300px;cursor:pointer;opacity:0;transform:translateY(26px) scale(.97);transition:transform .34s cubic-bezier(.2,.9,.25,1.12),opacity .26s ease}
+.ar-remark-overlay .tk-cardflip.active{opacity:1;transform:translateY(0) scale(1)}
+.tk-flip{position:relative;width:100%;height:100%;transform-style:preserve-3d;transition:transform .72s cubic-bezier(.3,.8,.3,1)}.tk-cardflip.flipped .tk-flip{transform:rotateY(180deg)}
+.tk-face{position:absolute;inset:0;border-radius:14px;overflow:hidden;backface-visibility:hidden;-webkit-backface-visibility:hidden;box-shadow:0 34px 70px -30px rgba(0,0,0,.5),0 6px 16px rgba(0,0,0,.1)}
+.tk-face-back{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:radial-gradient(circle,rgba(255,255,255,.05) 1px,transparent 1.4px) 0 0/16px 16px,linear-gradient(165deg,#1b1b20,#121216);color:#fff}.tk-face-back::before{content:'';position:absolute;inset:12px;border:1px solid rgba(255,255,255,.2);border-radius:9px}.tk-face-back::after{content:'';position:absolute;inset:17px;border:1px solid rgba(255,255,255,.08);border-radius:7px}
+.tk-back-eyebrow{color:rgba(255,255,255,.42);font-size:7px;font-weight:800;letter-spacing:.4em;text-indent:.4em}.tk-back-venue{margin:0;color:#f2f2ef;font-family:var(--tk-font-serif);font-size:24px;letter-spacing:.18em;text-indent:.18em}.tk-back-diamond{width:5px;height:5px;background:var(--tk-stamp);transform:rotate(45deg)}.tk-back-hint{position:absolute;bottom:26px;color:rgba(255,255,255,.34);font-size:8px;font-weight:800;letter-spacing:.34em;text-indent:.34em}
+.tk-face-front{display:flex;flex-direction:column;background:#fbfbfa;transform:rotateY(180deg)}.tk-art{position:relative;height:55%;flex:none;overflow:hidden;background:#14161a}.tk-art img{width:100%;height:100%;object-fit:cover}.tk-art::after{content:'';position:absolute;inset:8px;border:1px solid rgba(255,255,255,.35);border-radius:6px}.tk-art-rarity{position:absolute;right:14px;top:14px;width:6px;height:6px;background:var(--tk-stamp);transform:rotate(45deg);box-shadow:0 0 0 3px rgba(255,255,255,.55)}
+.tk-sheen-layer{position:absolute;inset:0;pointer-events:none;background:linear-gradient(110deg,transparent 36%,rgba(255,255,255,.55) 47%,transparent 58%);transform:translateX(-135%)}.tk-cardflip.fin .tk-sheen-layer{animation:tk-sheen .9s ease .1s forwards}@keyframes tk-sheen{to{transform:translateX(135%)}}
+.tk-nameplate{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:10px 16px 0}.tk-nameplate b{font-size:14px;font-weight:900;letter-spacing:.2em;color:var(--tk-ink)}.tk-nameplate span{color:var(--tk-grey);font-size:8px;font-weight:800;letter-spacing:.3em}
+.tk-cardflip .tk-remark{flex:1;min-height:0;margin:8px 16px 0;color:var(--tk-ink-soft);font-family:var(--tk-font-serif);font-size:14.5px;line-height:1.72;white-space:pre-wrap;word-break:break-word;overflow:hidden}.tk-card-foot{display:flex;justify-content:space-between;padding:8px 16px 13px;font-family:var(--tk-font-mono);font-size:9px;letter-spacing:.2em}.tk-card-foot b{color:var(--tk-stamp)}.tk-card-foot span{color:var(--tk-grey)}
+.tk-letter{position:relative;width:min(362px,92vw);border:1px solid var(--tk-hairline);border-radius:3px;padding:20px 22px 16px;background:linear-gradient(180deg,rgba(0,0,0,.035) 0,transparent 1px) 0 33%/100% 1px no-repeat,linear-gradient(180deg,rgba(0,0,0,.03) 0,transparent 1px) 0 66%/100% 1px no-repeat,linear-gradient(180deg,var(--tk-paper-a),var(--tk-paper-b));box-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 34px 70px -30px rgba(0,0,0,.4),0 6px 16px rgba(0,0,0,.08);transform:translateY(26px) rotate(-.6deg) scale(.98);opacity:0;transition:transform .34s cubic-bezier(.2,.9,.25,1.12),opacity .26s ease;cursor:pointer}.ar-remark-overlay .tk-letter.active{transform:translateY(0) rotate(-.6deg) scale(1);opacity:1}.tk-letter-rule{margin:12px 0 14px}
+.tk-letter .tk-remark{min-height:140px;max-height:46vh;overflow-y:auto;margin:0;padding-right:4px;color:var(--tk-ink-soft);font-family:var(--tk-font-serif);font-size:16px;line-height:1.95;white-space:pre-wrap;word-break:break-word;scrollbar-width:thin}.tk-letter-seal{display:inline-block;width:20px;height:20px;margin-left:8px;border-radius:3px;background:var(--tk-stamp);color:#fff;font-family:var(--tk-font-serif);font-size:13px;font-weight:800;line-height:20px;text-align:center;vertical-align:-3px;transform:rotate(3deg) scale(1.7);opacity:0;mix-blend-mode:multiply}.tk-letter-seal.stamped{animation:tk-seal-in .3s cubic-bezier(.2,1.1,.3,1) forwards}@keyframes tk-seal-in{0%{transform:rotate(8deg) scale(1.7);opacity:0}100%{transform:rotate(3deg) scale(1);opacity:.92}}
+.tk-letter-foot{margin-top:12px;text-align:right;color:var(--tk-grey);font-family:var(--tk-font-mono);font-size:8px;letter-spacing:.26em}
+.tk-rcpt{position:relative;width:min(282px,84vw);padding-bottom:7px;opacity:0;transform:translateY(26px) rotate(.6deg);transition:transform .34s cubic-bezier(.2,.9,.25,1.12),opacity .26s ease;cursor:pointer;filter:drop-shadow(0 28px 50px rgba(0,0,0,.35))}.ar-remark-overlay .tk-rcpt.active{opacity:1;transform:translateY(0) rotate(.6deg)}.tk-rcpt-paper{position:relative;padding:18px 18px 14px;background:#fdfdfc}.tk-rcpt::after{content:'';position:absolute;left:0;right:0;bottom:0;height:7px;background:linear-gradient(135deg,#fdfdfc 50%,transparent 50%) 0 0/14px 14px repeat-x,linear-gradient(225deg,#fdfdfc 50%,transparent 50%) 7px 0/14px 14px repeat-x}
+.tk-rcpt .ln{margin:0;color:#232323;font-family:var(--tk-font-mono);font-size:12px;line-height:1.85;letter-spacing:.05em;white-space:pre-wrap;word-break:break-all}.tk-rcpt .ln.c{text-align:center}.tk-rcpt .ln.dim{color:var(--tk-grey)}.tk-rcpt .ln.bar{padding:6px 26px 2px}.tk-rcpt .ln.bar .tk-barcode{width:100%}
+.tk-rcpt-stamp{position:absolute;left:50%;top:46%;padding:7px 14px;border:2px dashed var(--tk-stamp);border-radius:6px;color:var(--tk-stamp);font-size:13px;font-weight:900;letter-spacing:.3em;text-indent:.3em;white-space:nowrap;transform:translate(-50%,-50%) rotate(-9deg) scale(1.7);opacity:0;mix-blend-mode:multiply;pointer-events:none}.tk-rcpt.fin .tk-rcpt-stamp{animation:tk-rstamp .32s cubic-bezier(.2,1.1,.3,1) forwards}@keyframes tk-rstamp{0%{transform:translate(-50%,-50%) rotate(-2deg) scale(1.7);opacity:0}100%{transform:translate(-50%,-50%) rotate(-9deg) scale(1);opacity:.9}}
 .ar-toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);z-index:300;padding:9px 17px;border-radius:999px;border:1px solid rgba(201,163,106,.38);background:#241b12;color:var(--ar-t1);font-size:12.5px;font-weight:700;letter-spacing:.02em;box-shadow:0 24px 60px -24px rgba(0,0,0,.78);animation:ar-rise .22s ease}
 .ar-sk-spine{flex:none;border-radius:3px 3px 1px 1px;background:linear-gradient(100deg,#241b13 38%,#32271c 50%,#241b13 62%);background-size:220% 100%;animation:ar-shimmer 1.4s ease infinite}
 @keyframes ar-shimmer{from{background-position:120% 0}to{background-position:-120% 0}}
@@ -337,7 +632,9 @@ const CSS = `
 .ar-empty h2{margin:14px 0 0;font-family:var(--ar-font-display);font-weight:600;font-size:20px;letter-spacing:.1em;color:var(--ar-accent)}
 .ar-empty p{margin:10px 0 0;font-size:13px;line-height:2;color:var(--ar-t3)}
 @media (prefers-reduced-motion: reduce){
-  .ar-exit,.ar-spine,.ar-dcard,.ar-pager,.ar-track,.ar-ebk,.ar-veil,.ar-panel,.ar-fpanel,.ar-fcand,.ar-panel-c,.ar-toast{animation:none!important;transition:none!important}
+  .ar-exit,.ar-spine,.ar-dcard,.ar-pager,.ar-track,.ar-ebk,.ar-veil,.ar-panel,.ar-fpanel,.ar-fcand,.ar-panel-c,.ar-toast,.ar-remark-overlay,.ar-remark-actions,.ar-ticket,.tk-pol,.tk-cardflip,.tk-flip,.tk-letter,.tk-rcpt,.tk-pol-photo img,.tk-pol-photo::after{animation:none!important;transition:none!important}
+  .tk-pol.fin,.ar-ticket.fin .ar-ticket-seal,.tk-cardflip.fin .tk-sheen-layer,.tk-letter-seal.stamped,.tk-rcpt.fin .tk-rcpt-stamp,.tk-remark .caret{animation:none!important}
+  .ar-ticket.fin .ar-ticket-seal{transform:rotate(-12deg) scale(1);opacity:.88}.tk-letter-seal.stamped{transform:rotate(3deg) scale(1);opacity:.92}.tk-rcpt.fin .tk-rcpt-stamp{transform:translate(-50%,-50%) rotate(-9deg) scale(1);opacity:.9}
 }
 `;
 
@@ -442,6 +739,108 @@ const fmtDate = (ts: number): string => {
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
 };
 
+type CharRemarkTemplateId = 'ticket' | 'pol' | 'card' | 'letter' | 'receipt';
+type CharRemarkTemplatePreference = CharRemarkTemplateId | 'auto';
+
+const CHAR_REMARK_TEMPLATES: Record<CharRemarkTemplateId, { max: number; label: string }> = {
+    ticket: { max: 60, label: '票根' },
+    pol: { max: 60, label: '拍立得' },
+    card: { max: 60, label: '卡牌' },
+    letter: { max: 320, label: '信笺' },
+    receipt: { max: Number.POSITIVE_INFINITY, label: '小票' },
+};
+
+const CHAR_REMARK_LONG_FALLBACK: Record<CharRemarkTemplateId, CharRemarkTemplateId> = {
+    pol: 'letter',
+    card: 'letter',
+    ticket: 'letter',
+    letter: 'receipt',
+    receipt: 'receipt',
+};
+
+const getAutoCharRemarkTemplate = (len: number): CharRemarkTemplateId => {
+    if (len <= 24) return 'ticket';
+    if (len <= 44) return 'pol';
+    if (len <= 60) return 'card';
+    if (len <= 320) return 'letter';
+    return 'receipt';
+};
+
+export function pickCharRemarkTemplate(
+    text: string,
+    preferred: CharRemarkTemplatePreference = 'auto',
+): { pick: CharRemarkTemplateId; len: number; label: string } {
+    const len = Array.from(text || '').length;
+    let pick: CharRemarkTemplateId = preferred && preferred !== 'auto'
+        ? preferred
+        : getAutoCharRemarkTemplate(len);
+    while (len > CHAR_REMARK_TEMPLATES[pick].max) {
+        const next = CHAR_REMARK_LONG_FALLBACK[pick];
+        if (next === pick) break;
+        pick = next;
+    }
+    return { pick, len, label: CHAR_REMARK_TEMPLATES[pick].label };
+}
+
+const CHAR_REMARK_AVATAR_FALLBACK = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 480 480'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%2329303c'/><stop offset='1' stop-color='%23454f60'/></linearGradient></defs><rect width='480' height='480' fill='url(%23g)'/><circle cx='240' cy='190' r='86' fill='%23e9e4d8'/><path d='M96 480c10-96 70-150 144-150s134 54 144 150z' fill='%23d7d0c0'/><circle cx='240' cy='190' r='118' fill='none' stroke='%23e9e4d8' stroke-opacity='.28' stroke-width='2'/></svg>`;
+
+type ReceiptRemarkRow = {
+    text: string;
+    className?: string;
+    barcode?: boolean;
+};
+
+const formatRemarkShortDate = (ts: number): string => {
+    const d = new Date(ts);
+    return `'${String(d.getFullYear()).slice(-2)} ${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const getCharRemarkInitial = (name: string): string => Array.from(name.trim())[0]?.toUpperCase() || 'T';
+
+const chunkRemarkText = (text: string, size: number): string[] => {
+    const chars = Array.from(text || '');
+    const rows: string[] = [];
+    for (let i = 0; i < chars.length; i += size) rows.push(chars.slice(i, i + size).join(''));
+    return rows;
+};
+
+const buildRemarkReceiptRows = (options: {
+    text: string;
+    wallName: string;
+    charName: string;
+    date: string;
+    visitNo: string;
+}): ReceiptRemarkRow[] => [
+    { text: 'AFTERGLOW MART', className: 'c' },
+    { text: `「${options.wallName}」`, className: 'c' },
+    { text: `${options.date}  №${options.visitNo}`, className: 'c dim' },
+    { text: '--------------------------------', className: 'dim' },
+    ...chunkRemarkText(options.text, 16).map(text => ({ text })),
+    { text: '--------------------------------', className: 'dim' },
+    { text: `GUEST: ${options.charName}        VISIT: ${options.visitNo}`, className: 'dim' },
+    { text: '', className: 'bar', barcode: true },
+    { text: '*** 谢谢光临 THANK YOU ***', className: 'c dim' },
+];
+
+function usePrefersReducedMotion(): boolean {
+    const [reduced, setReduced] = useState(false);
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+        const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const update = () => setReduced(media.matches);
+        update();
+        if (typeof media.addEventListener === 'function') {
+            media.addEventListener('change', update);
+            return () => media.removeEventListener('change', update);
+        }
+        media.addListener(update);
+        return () => media.removeListener(update);
+    }, []);
+
+    return reduced;
+}
+
 const stripHtml = (html: string): string => {
     return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
 };
@@ -539,6 +938,233 @@ const Avatar: React.FC<{ char: HallCharacter; hue: number; size?: number }> = ({
         {c.avatar ? <img src={c.avatar} alt="" /> : c.name[0]}
     </span>
 );
+
+export const CharRemarkPopup: React.FC<{
+    remark: { wall: CollectionWall; charName: string; text: string };
+    avatarUrl?: string;
+    pinning: boolean;
+    onClose: () => void;
+    onPin: () => void;
+}> = ({ remark, avatarUrl, pinning, onClose, onPin }) => {
+    const reduced = usePrefersReducedMotion();
+    const template = useMemo(() => pickCharRemarkTemplate(remark.text), [remark.text]);
+    const openedAt = useMemo(() => Date.now(), [remark.wall.id, remark.text]);
+    const wallName = remark.wall.name || '拾光墙';
+    const date = fmtDate(openedAt);
+    const shortDate = formatRemarkShortDate(openedAt);
+    const visitNo = String(Math.max(1, (remark.wall.charRemarks?.length || 0) + 1)).padStart(2, '0');
+    const charInitial = getCharRemarkInitial(remark.charName);
+    const receiptRows = useMemo(() => buildRemarkReceiptRows({
+        text: remark.text,
+        wallName,
+        charName: remark.charName,
+        date,
+        visitNo,
+    }), [date, remark.charName, remark.text, visitNo, wallName]);
+    const [visibleText, setVisibleText] = useState('');
+    const [visibleReceiptRows, setVisibleReceiptRows] = useState(0);
+    const [done, setDone] = useState(false);
+    const [cardFlipped, setCardFlipped] = useState(template.pick !== 'card');
+    const intervalRef = useRef<number | null>(null);
+    const startTimerRef = useRef<number | null>(null);
+    const flipTimerRef = useRef<number | null>(null);
+
+    const clearRevealTimers = useCallback(() => {
+        if (intervalRef.current !== null) {
+            window.clearInterval(intervalRef.current);
+            intervalRef.current = null;
+        }
+        if (startTimerRef.current !== null) {
+            window.clearTimeout(startTimerRef.current);
+            startTimerRef.current = null;
+        }
+        if (flipTimerRef.current !== null) {
+            window.clearTimeout(flipTimerRef.current);
+            flipTimerRef.current = null;
+        }
+    }, []);
+
+    const completeReveal = useCallback(() => {
+        clearRevealTimers();
+        setVisibleText(remark.text);
+        setVisibleReceiptRows(receiptRows.length);
+        setCardFlipped(true);
+        setDone(true);
+    }, [clearRevealTimers, receiptRows.length, remark.text]);
+
+    useEffect(() => {
+        clearRevealTimers();
+        setVisibleText('');
+        setVisibleReceiptRows(0);
+        setDone(false);
+        setCardFlipped(template.pick !== 'card');
+
+        if (template.pick === 'card') {
+            flipTimerRef.current = window.setTimeout(() => setCardFlipped(true), reduced ? 0 : 280);
+        }
+
+        startTimerRef.current = window.setTimeout(() => {
+            startTimerRef.current = null;
+            if (reduced) {
+                completeReveal();
+                return;
+            }
+            if (template.pick === 'receipt') {
+                let index = 0;
+                intervalRef.current = window.setInterval(() => {
+                    index += 1;
+                    setVisibleReceiptRows(index);
+                    if (index >= receiptRows.length) completeReveal();
+                }, 115);
+                return;
+            }
+
+            const chars = Array.from(remark.text);
+            if (chars.length === 0) {
+                completeReveal();
+                return;
+            }
+            const speed = Math.max(14, Math.min(36, Math.round(4200 / chars.length)));
+            let index = 0;
+            intervalRef.current = window.setInterval(() => {
+                index += 1;
+                setVisibleText(chars.slice(0, index).join(''));
+                if (index >= chars.length) completeReveal();
+            }, speed);
+        }, template.pick === 'card' && !reduced ? 780 : 120);
+
+        return clearRevealTimers;
+    }, [clearRevealTimers, completeReveal, receiptRows.length, reduced, remark.text, template.pick]);
+
+    const handleOverlayClick = (event: React.MouseEvent<HTMLDivElement>) => {
+        if (done && event.currentTarget === event.target) onClose();
+    };
+
+    const handleCardClick = (event: React.MouseEvent<HTMLDivElement>) => {
+        event.stopPropagation();
+        if (!done) completeReveal();
+    };
+
+    const renderRemarkText = (withSeal = false) => (
+        <>
+            {visibleText}
+            {!done && <span className="caret" aria-hidden="true" />}
+            {withSeal && done && <span className="tk-letter-seal stamped" aria-hidden="true">{charInitial}</span>}
+        </>
+    );
+
+    const classFor = (base: string, extra = '') => [
+        base,
+        'active',
+        template.pick === 'pol' ? 'dev' : '',
+        template.pick === 'card' && cardFlipped ? 'flipped' : '',
+        done ? 'fin' : '',
+        extra,
+    ].filter(Boolean).join(' ');
+
+    const sharedAvatar = avatarUrl || CHAR_REMARK_AVATAR_FALLBACK;
+
+    return (
+        <div
+            className={`ar-remark-overlay${template.pick === 'receipt' && template.len > 140 ? ' scrolly' : ''}`}
+            aria-modal="true"
+            role="dialog"
+            aria-label={`${remark.charName} 的留言`}
+            onClick={handleOverlayClick}
+        >
+            <div className="tk-card-slot" onClick={handleCardClick} data-wall-name={wallName}>
+                {template.pick === 'ticket' && (
+                    <article className={classFor('ar-ticket')} data-theme="ticket">
+                        <span className="ar-ticket-spine" aria-hidden="true">ARCHIVE OF AFTERGLOW</span>
+                        <div className="ar-ticket-body">
+                            <div className="ar-ticket-eyebrow"><b>VISITOR'S TICKET</b><span className="ar-ticket-no">№ {visitNo}</span></div>
+                            <p className="ar-ticket-venue">{wallName}<small>LIGHT WALL · ONE VISIT</small></p>
+                            <div className="ar-ticket-rule" aria-hidden="true" />
+                            <p className="tk-remark">{renderRemarkText()}</p>
+                            <span className="ar-ticket-seal" aria-hidden="true"><em>到访</em><small>VISITED</small></span>
+                        </div>
+                        <div className="ar-ticket-perf" aria-hidden="true" />
+                        <div className="ar-ticket-stub">
+                            <div className="ar-ticket-fields">
+                                <span className="ar-ticket-field"><b>DATE</b><span>{date}</span></span>
+                                <span className="ar-ticket-field"><b>GUEST</b><span>{remark.charName}</span></span>
+                                <span className="ar-ticket-field"><b>VISIT</b><span>{visitNo}</span></span>
+                            </div>
+                            <div className="ar-ticket-codewrap"><span className="tk-barcode" aria-hidden="true" /><small>{date.replace(/\./g, ' ')} {visitNo}</small></div>
+                        </div>
+                    </article>
+                )}
+
+                {template.pick === 'pol' && (
+                    <article className={classFor('tk-pol')} data-theme="pol">
+                        <div className="tk-pol-photo">
+                            <img className="tk-avatar-img" alt="角色头像" src={sharedAvatar} />
+                            <span className="tk-pol-date">{shortDate}</span>
+                        </div>
+                        <div className="tk-pol-cap">
+                            <p className="tk-remark">{renderRemarkText()}</p>
+                            <div className="tk-pol-meta"><span>{wallName}</span><span>№ {visitNo}</span></div>
+                        </div>
+                    </article>
+                )}
+
+                {template.pick === 'card' && (
+                    <article className={classFor('tk-cardflip')} data-theme="card">
+                        <div className="tk-flip">
+                            <div className="tk-face tk-face-back">
+                                <span className="tk-back-eyebrow">ARCHIVE OF AFTERGLOW</span>
+                                <p className="tk-back-venue">{wallName}</p>
+                                <span className="tk-back-diamond" aria-hidden="true" />
+                                <span className="tk-back-hint">TAP TO REVEAL</span>
+                            </div>
+                            <div className="tk-face tk-face-front">
+                                <div className="tk-art">
+                                    <img className="tk-avatar-img" alt="角色头像" src={sharedAvatar} />
+                                    <span className="tk-art-rarity" aria-hidden="true" />
+                                    <span className="tk-sheen-layer" aria-hidden="true" />
+                                </div>
+                                <div className="tk-nameplate"><b>{remark.charName}</b><span>VISITOR'S REMARK</span></div>
+                                <p className="tk-remark">{renderRemarkText()}</p>
+                                <div className="tk-card-foot"><b>VISIT {visitNo}</b><span>{date}</span></div>
+                            </div>
+                        </div>
+                    </article>
+                )}
+
+                {template.pick === 'letter' && (
+                    <article className={classFor('tk-letter')} data-theme="letter">
+                        <div className="tk-letter-head"><b>A NOTE FROM {remark.charName}</b><span>{date}</span></div>
+                        <div className="tk-letter-rule" aria-hidden="true" />
+                        <p className="tk-remark">{renderRemarkText(true)}</p>
+                        <div className="tk-letter-foot">AT {wallName} · № {visitNo}</div>
+                    </article>
+                )}
+
+                {template.pick === 'receipt' && (
+                    <article className={classFor('tk-rcpt')} data-theme="receipt">
+                        <div className="tk-rcpt-paper">
+                            <div className="tk-rcpt-lines">
+                                {receiptRows.slice(0, visibleReceiptRows).map((row, index) => (
+                                    <p className={`ln ${row.className || ''}`} key={`${row.text}-${index}`}>
+                                        {row.barcode ? <span className="tk-barcode" aria-hidden="true" /> : row.text}
+                                    </p>
+                                ))}
+                            </div>
+                            <span className="tk-rcpt-stamp" aria-hidden="true">已到访 VISITED</span>
+                        </div>
+                    </article>
+                )}
+            </div>
+
+            <div className={`ar-remark-actions${done ? ' show' : ''}`} onClick={(event) => event.stopPropagation()}>
+                <button type="button" className="ar-remark-pin" disabled={pinning} onClick={onPin}>
+                    {pinning ? '钉上中' : '钉到墙上'}
+                </button>
+                <button type="button" className="ar-remark-keep" onClick={onClose}>收下了</button>
+            </div>
+        </div>
+    );
+};
 
 const Chev: React.FC<{ flip?: boolean }> = ({ flip }) => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
@@ -716,49 +1342,460 @@ const getFreeformShape = (book: CollectionBook): string =>
         || '视觉碎片',
     ).trim();
 
-const truncateUiLabel = (value: string, max = 8): string => {
-    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
-    return normalized.length > max ? `${normalized.slice(0, max)}...` : normalized;
-};
-
 const WALL_PREVIEW_WIDTH = 375;
 const WALL_PREVIEW_LIMIT = 12;
 const WALL_PREVIEW_SLOT_EVENT = 'collection-wall-preview-slots';
 const wallPreviewMountedIds = new Set<string>();
+const WALL_CANVAS_WIDTH = 750;
+const WALL_CANVAS_BOTTOM_PADDING = 120;
+const WALL_CANVAS_TOP_PADDING = 92;
+const WALL_AUTO_GAP = 24;
+const WALL_AUTO_SIDE_PAD = 46;
+const DEFAULT_CARD_W = 330;
+const DEFAULT_CARD_H = 360;
+const DEFAULT_IMAGE_W = 300;
+const DEFAULT_IMAGE_H = 260;
+const DEFAULT_STICKER_MAX = 160;
+const DEFAULT_STICKER_MIN = 64;
+const DEFAULT_BOND_W = 330;
+const DEFAULT_BOND_H = 168;
+const DEFAULT_TEXT_W = 230;
+const DEFAULT_TEXT_H = 150;
+const DEFAULT_HTML_W = 300;
+const DEFAULT_HTML_H = 230;
+const CUSTOM_WALL_ASSET_MAX_BYTES = 10 * 1024 * 1024;
+const CUSTOM_WALL_ASSET_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const TRANSPARENT_WALL_ASSET_MIME_TYPES = new Set(['image/png', 'image/webp', 'image/gif']);
+const CUSTOM_WALL_FONT_MAX_BYTES = 8 * 1024 * 1024;
+const CUSTOM_WALL_FONT_EXTENSIONS = new Set(['ttf', 'otf', 'woff', 'woff2']);
+const CUSTOM_WALL_FONT_MIME_TYPES = new Set([
+    'font/ttf',
+    'font/otf',
+    'font/woff',
+    'font/woff2',
+    'application/font-sfnt',
+    'application/font-woff',
+    'application/x-font-ttf',
+    'application/x-font-otf',
+    'application/vnd.ms-opentype',
+    'application/octet-stream',
+    '',
+]);
+const CUSTOM_WALL_HTML_MAX_CHARS = 120_000;
+const WALL_TEXT_COLORS = ['#4d3438', '#76565b', '#9f4f64', '#6e5a8e', '#5e7a57', '#8a6332', '#ffffff', '#1f171a'] as const;
+const DEFAULT_LIGHT_WALL_BG = 'linear-gradient(160deg,#FFF6F2,#FBE9EE 60%,#F3E6F0)';
+const LEGACY_DARK_WALL_BG = '#17120e';
+const DEFAULT_CUSTOM_WALL_HTML = [
+    '<!doctype html>',
+    '<meta charset="utf-8">',
+    '<style>',
+    '  html,body{margin:0;height:100%}',
+    "  .c{box-sizing:border-box;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:18px;text-align:center;font-family:Georgia,'Noto Serif SC',serif;color:#7a4a57;background:linear-gradient(160deg,#fff,#ffe9ef 68%,#f6e6c9)}",
+    '  .c h2{margin:0;font-size:26px;letter-spacing:.04em}',
+    '  .c p{margin:0;font-size:13px;color:#a8758a;line-height:1.6}',
+    '  .ring{width:30px;height:30px;border:2px solid #e79;border-right-color:transparent;border-radius:999px;animation:spin 1.6s linear infinite}',
+    '  @keyframes spin{to{transform:rotate(360deg)}}',
+    '</style>',
+    '<div class="c"><div class="ring"></div><h2>你的卡片</h2><p>这是一张自定义 HTML 卡<br>可写任意排版 / 动效</p></div>',
+].join('\n');
+const WALL_BACKGROUND_SWATCHES = [
+    { name: '深褐', value: '#17120e' },
+    { name: '墨绿', value: '#1e2c24' },
+    { name: '暖藏蓝', value: '#202636' },
+    { name: '酒红', value: '#3b2028' },
+    { name: '暖灰', value: '#5a5147' },
+    { name: '纸白', value: '#efe7d6' },
+] as const;
 
-type WallBookEntry = {
+export type WallBookEntry = {
     id: string;
     type: 'book';
     item?: CollectionWallItem;
     book: CollectionBook;
 };
 
-type WallImageEntry = {
+export type WallImageEntry = {
     id: string;
     type: 'image';
     item: CollectionWallItem;
     asset: CollectionWallAsset;
 };
 
-type WallTextEntry = {
+export type WallStickerEntry = {
+    id: string;
+    type: 'sticker';
+    item: CollectionWallItem;
+    asset: CollectionWallAsset;
+};
+
+export type WallBondEntry = {
+    id: string;
+    type: 'bond';
+    item: CollectionWallItem;
+};
+
+export type WallHtmlEntry = {
+    id: string;
+    type: 'html';
+    item: CollectionWallItem;
+};
+
+export type WallTextEntry = {
     id: string;
     type: 'text';
     item: CollectionWallItem;
 };
 
-type WallZoneEntry = WallBookEntry | WallImageEntry | WallTextEntry;
+export type WallZoneEntry = WallBookEntry | WallImageEntry | WallStickerEntry | WallBondEntry | WallHtmlEntry | WallTextEntry;
+
+type CollectionWallAssetDraft = Omit<CollectionWallAsset, 'id' | 'createdAt'> & {
+    id?: string;
+    createdAt?: number;
+};
+
+const WALL_DECOR_PRESET_KIND = 'sully.collectionWall.decorPreset';
+const WALL_DECOR_PRESET_VERSION = 1;
+
+export type CollectionWallDecorPresetLayout = Pick<CollectionWallItem, 'x' | 'y' | 'w' | 'h' | 'rotation' | 'z' | 'order'>;
+
+export type CollectionWallDecorPresetAsset = {
+    key: string;
+    mime: string;
+    dataUrl: string;
+    width?: number;
+    height?: number;
+    bytes: number;
+    hash: string;
+    meta?: CollectionWallAsset['meta'];
+};
+
+export type CollectionWallDecorPresetItem = {
+    type: 'image' | 'sticker' | 'html' | 'text';
+    layout: CollectionWallDecorPresetLayout;
+    assetKey?: string;
+    fontAssetKey?: string;
+    html?: string;
+    text?: CollectionWallItem['text'];
+    name?: string;
+    createdAt?: number;
+};
+
+export type CollectionWallDecorPreset = {
+    kind: typeof WALL_DECOR_PRESET_KIND;
+    version: typeof WALL_DECOR_PRESET_VERSION;
+    exportedAt: number;
+    source?: {
+        wallId?: string;
+        wallName?: string;
+    };
+    canvas: {
+        width: typeof WALL_CANVAS_WIDTH;
+    };
+    decor: {
+        background: CollectionWall['background'];
+        backgroundAssetKey?: string;
+        avatarFrameAssetKey?: string;
+        assets: CollectionWallDecorPresetAsset[];
+        items: CollectionWallDecorPresetItem[];
+    };
+};
 
 const getAssetLabel = (asset: CollectionWallAsset, item?: CollectionWallItem): string => {
     const fromItem = String(item?.name || '').trim();
     const fromMeta = String(asset.meta?.name || '').trim();
     const fromPrompt = String(asset.meta?.prompt || '').trim();
-    return (fromItem || fromMeta || fromPrompt || '聊天生成图').slice(0, 40);
+    const fallback = asset.meta?.assetKind === 'font'
+        ? '上传字体'
+        : asset.origin === 'upload' ? '上传素材' : asset.origin === 'char' ? 'TA 添加的素材' : '聊天生成图';
+    return (fromItem || fromMeta || fromPrompt || fallback).slice(0, 40);
+};
+
+export const buildWallAssetEntry = (
+    item: CollectionWallItem,
+    asset?: CollectionWallAsset,
+): WallImageEntry | WallStickerEntry | null => {
+    if (!asset || !item.assetId || (item.type !== 'image' && item.type !== 'sticker')) return null;
+    return { id: item.id, type: item.type, item, asset };
 };
 
 const getTextLabel = (item: CollectionWallItem): string =>
     String(item.text?.content || item.name || '一张便签').trim().slice(0, 60);
 
-function useWallPreviewMountSlot(id: string, ref: React.RefObject<HTMLElement | null>): boolean {
+const getHtmlCardLabel = (item: CollectionWallItem): string =>
+    String(item.name || '自定义卡').trim().slice(0, 40) || '自定义卡';
+
+const normalizeWallHtml = (value: string): string =>
+    String(value || '').slice(0, CUSTOM_WALL_HTML_MAX_CHARS);
+
+const readBlobAsDataUrl = async (blob: Blob): Promise<string> => {
+    if (typeof FileReader !== 'undefined') {
+        return await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ''));
+            reader.onerror = () => reject(reader.error || new Error('读取资源失败'));
+            reader.readAsDataURL(blob);
+        });
+    }
+    const buffer = await blob.arrayBuffer();
+    const bufferCtor = (globalThis as any).Buffer;
+    if (bufferCtor) {
+        return `data:${blob.type || 'application/octet-stream'};base64,${bufferCtor.from(buffer).toString('base64')}`;
+    }
+    throw new Error('当前环境不支持导出资源');
+};
+
+const dataUrlToBlob = (dataUrl: string): Blob => {
+    const match = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(String(dataUrl || ''));
+    if (!match) throw new Error('预设素材格式无效');
+    const mime = match[1] || 'application/octet-stream';
+    const payload = match[3] || '';
+    const raw = match[2]
+        ? (typeof atob !== 'undefined'
+            ? atob(payload)
+            : (globalThis as any).Buffer.from(payload, 'base64').toString('binary'))
+        : decodeURIComponent(payload);
+    const bytes = new Uint8Array(raw.length);
+    for (let index = 0; index < raw.length; index += 1) {
+        bytes[index] = raw.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mime });
+};
+
+const getPresetItemLayout = (item: CollectionWallItem): CollectionWallDecorPresetLayout => ({
+    x: item.x,
+    y: item.y,
+    w: item.w,
+    h: item.h,
+    rotation: item.rotation,
+    z: item.z,
+    order: item.order,
+});
+
+const cloneWallBackgroundForPreset = (background?: CollectionWall['background']): CollectionWall['background'] => ({
+    type: background?.type || 'preset',
+    value: background?.value || DEFAULT_LIGHT_WALL_BG,
+    fit: background?.fit || 'cover',
+    dim: Number.isFinite(Number(background?.dim)) ? Number(background?.dim) : 0,
+});
+
+export const isCollectionWallDecorPresetItem = (
+    item: CollectionWallItem,
+    asset?: CollectionWallAsset,
+): boolean => {
+    if (item.type === 'image' || item.type === 'sticker') {
+        return item.author === 'user'
+            && Boolean(item.assetId)
+            && asset?.origin === 'upload'
+            && asset.meta?.assetKind !== 'font';
+    }
+    if (item.type === 'html' || (item.type === 'card' && Boolean(item.html) && !item.bookId)) {
+        return item.author === 'user' && Boolean(item.html);
+    }
+    if (item.type === 'text') {
+        return item.author === 'user';
+    }
+    return false;
+};
+
+export const parseCollectionWallDecorPreset = (value: unknown): CollectionWallDecorPreset => {
+    const preset = value as Partial<CollectionWallDecorPreset> | null;
+    if (!preset || typeof preset !== 'object') throw new Error('预设文件无效');
+    if (preset.kind !== WALL_DECOR_PRESET_KIND || preset.version !== WALL_DECOR_PRESET_VERSION) {
+        throw new Error('不是可识别的拾光墙风格预设');
+    }
+    if (!preset.decor || !Array.isArray(preset.decor.assets) || !Array.isArray(preset.decor.items)) {
+        throw new Error('预设内容不完整');
+    }
+    return preset as CollectionWallDecorPreset;
+};
+
+export async function buildCollectionWallDecorPreset(
+    wall: CollectionWall,
+    items: CollectionWallItem[],
+    assetsById: Map<string, CollectionWallAsset>,
+): Promise<CollectionWallDecorPreset> {
+    const packedAssets = new Map<string, CollectionWallDecorPresetAsset>();
+    const addAsset = async (asset?: CollectionWallAsset | null): Promise<string | undefined> => {
+        if (!asset?.id || !asset.blob) return undefined;
+        if (packedAssets.has(asset.id)) return asset.id;
+        packedAssets.set(asset.id, {
+            key: asset.id,
+            mime: asset.mime || asset.blob.type || 'application/octet-stream',
+            dataUrl: await readBlobAsDataUrl(asset.blob),
+            width: asset.width,
+            height: asset.height,
+            bytes: asset.bytes || asset.blob.size || 0,
+            hash: asset.hash,
+            meta: asset.meta ? { ...asset.meta } : undefined,
+        });
+        return asset.id;
+    };
+
+    const background = cloneWallBackgroundForPreset(wall.background);
+    const backgroundAssetKey = background.type === 'asset'
+        ? await addAsset(assetsById.get(background.value))
+        : undefined;
+    const avatarFrameId = items.find(item => item.type === 'bond' && item.bond?.avatarFrame)?.bond?.avatarFrame;
+    const avatarFrameAssetKey = avatarFrameId ? await addAsset(assetsById.get(avatarFrameId)) : undefined;
+    const decorItems: CollectionWallDecorPresetItem[] = [];
+
+    for (const source of items) {
+        const asset = source.assetId ? assetsById.get(source.assetId) : undefined;
+        if (!isCollectionWallDecorPresetItem(source, asset)) continue;
+
+        const item = normalizeWallItemForCanvas(source);
+        const base = {
+            layout: getPresetItemLayout(item),
+            name: item.name,
+            createdAt: item.createdAt,
+        };
+
+        if ((item.type === 'image' || item.type === 'sticker') && asset) {
+            const assetKey = await addAsset(asset);
+            if (!assetKey) continue;
+            decorItems.push({
+                ...base,
+                type: item.type,
+                assetKey,
+            });
+            continue;
+        }
+
+        if (item.type === 'html' || (item.type === 'card' && item.html && !item.bookId)) {
+            decorItems.push({
+                ...base,
+                type: 'html',
+                html: normalizeWallHtml(item.html || ''),
+            });
+            continue;
+        }
+
+        if (item.type === 'text') {
+            const fontAssetKey = item.text?.fontAssetId
+                ? await addAsset(assetsById.get(item.text.fontAssetId))
+                : undefined;
+            decorItems.push({
+                ...base,
+                type: 'text',
+                fontAssetKey,
+                text: item.text ? { ...item.text } : { content: '新便签', preset: 'big_plain' },
+            });
+        }
+    }
+
+    return {
+        kind: WALL_DECOR_PRESET_KIND,
+        version: WALL_DECOR_PRESET_VERSION,
+        exportedAt: Date.now(),
+        source: {
+            wallId: wall.id,
+            wallName: wall.name,
+        },
+        canvas: {
+            width: WALL_CANVAS_WIDTH,
+        },
+        decor: {
+            background,
+            backgroundAssetKey,
+            avatarFrameAssetKey,
+            assets: [...packedAssets.values()],
+            items: decorItems,
+        },
+    };
+}
+
+export const resolveCollectionWallPresetBackground = (
+    preset: CollectionWallDecorPreset,
+    assetIdByKey: Map<string, string>,
+    fallback: CollectionWall['background'],
+): CollectionWall['background'] => {
+    const background = cloneWallBackgroundForPreset(preset.decor.background);
+    if (background.type !== 'asset') return background;
+    const mappedAssetId = preset.decor.backgroundAssetKey
+        ? assetIdByKey.get(preset.decor.backgroundAssetKey)
+        : undefined;
+    if (!mappedAssetId) return cloneWallBackgroundForPreset(fallback);
+    return {
+        ...background,
+        value: mappedAssetId,
+        dim: 0,
+    };
+};
+
+export const createCollectionWallDecorItemsFromPreset = (
+    preset: CollectionWallDecorPreset,
+    assetIdByKey: Map<string, string>,
+    wallId: string,
+): CollectionWallItem[] => {
+    const now = Date.now();
+    return preset.decor.items
+        .map((source, index): CollectionWallItem | null => {
+            const layout: Partial<CollectionWallDecorPresetLayout> = source.layout || {};
+            const base: CollectionWallItem = {
+                id: createLocalItemId(),
+                wallId,
+                type: source.type,
+                author: 'user',
+                x: Number.isFinite(Number(layout.x)) ? Number(layout.x) : Math.round(WALL_CANVAS_WIDTH / 2 - DEFAULT_TEXT_W / 2),
+                y: Number.isFinite(Number(layout.y)) ? Number(layout.y) : WALL_CANVAS_TOP_PADDING + index * 8,
+                w: Number.isFinite(Number(layout.w)) && Number(layout.w) > 0 ? Number(layout.w) : DEFAULT_TEXT_W,
+                h: Number.isFinite(Number(layout.h)) && Number(layout.h) > 0 ? Number(layout.h) : DEFAULT_TEXT_H,
+                rotation: Number.isFinite(Number(layout.rotation)) ? Number(layout.rotation) : 0,
+                z: Number.isFinite(Number(layout.z)) ? Number(layout.z) : index + 1,
+                order: Number.isFinite(Number(layout.order)) ? Number(layout.order) : index,
+                name: source.name,
+                createdAt: source.createdAt || now + index,
+            };
+
+            if (source.type === 'image' || source.type === 'sticker') {
+                const assetId = source.assetKey ? assetIdByKey.get(source.assetKey) : undefined;
+                if (!assetId) return null;
+                return normalizeWallItemForCanvas({
+                    ...base,
+                    type: source.type,
+                    assetId,
+                    name: source.name || (source.type === 'sticker' ? '导入贴纸' : '导入图片'),
+                });
+            }
+
+            if (source.type === 'html') {
+                const html = normalizeWallHtml(source.html || '');
+                if (!html) return null;
+                return normalizeWallItemForCanvas({
+                    ...base,
+                    type: 'html',
+                    w: Number.isFinite(Number(layout.w)) && Number(layout.w) > 0 ? Number(layout.w) : DEFAULT_HTML_W,
+                    h: Number.isFinite(Number(layout.h)) && Number(layout.h) > 0 ? Number(layout.h) : DEFAULT_HTML_H,
+                    html,
+                    name: source.name || '导入 HTML 卡',
+                });
+            }
+
+            if (source.type === 'text') {
+                const fontAssetId = source.fontAssetKey ? assetIdByKey.get(source.fontAssetKey) : undefined;
+                return normalizeWallItemForCanvas({
+                    ...base,
+                    type: 'text',
+                    text: {
+                        content: String(source.text?.content || '新便签').slice(0, 160),
+                        preset: source.text?.preset || 'big_plain',
+                        color: source.text?.color,
+                        stroke: source.text?.stroke,
+                        fontAssetId,
+                        fontFamily: fontAssetId ? source.text?.fontFamily : undefined,
+                        fontSize: source.text?.fontSize,
+                        align: source.text?.align,
+                    },
+                    name: source.name || '导入文字',
+                });
+            }
+
+            return null;
+        })
+        .filter((item): item is CollectionWallItem => Boolean(item));
+};
+
+function useWallPreviewMountSlot<T extends HTMLElement>(id: string, ref: React.RefObject<T | null>): boolean {
     const [inRange, setInRange] = useState(false);
     const [mounted, setMounted] = useState(false);
 
@@ -812,87 +1849,6 @@ function useWallPreviewMountSlot(id: string, ref: React.RefObject<HTMLElement | 
     return mounted;
 }
 
-const WallHtmlPreview: React.FC<{
-    book: CollectionBook;
-    hostRef: React.RefObject<HTMLElement | null>;
-    width: number;
-}> = ({ book, hostRef, width }) => {
-    const html = String(book.cardData?.meta?.html || '');
-    const frameRef = useRef<HTMLIFrameElement>(null);
-    const frameChannel = React.useId().replace(/:/g, '_');
-    const shouldMount = useWallPreviewMountSlot(book.id, hostRef);
-    const [ready, setReady] = useState(false);
-    const [hasMeasured, setHasMeasured] = useState(false);
-    const [frameHeight, setFrameHeight] = useState(220);
-
-    useEffect(() => {
-        if (!shouldMount) {
-            setReady(false);
-            setHasMeasured(false);
-            setFrameHeight(220);
-        }
-    }, [shouldMount]);
-
-    useEffect(() => {
-        const handleMessage = (event: MessageEvent<{ type?: string; channel?: string; height?: number }>) => {
-            if (event.source !== frameRef.current?.contentWindow) return;
-            if (event.data?.type !== 'preview-height') return;
-            if (event.data.channel !== frameChannel) return;
-            const nextHeight = typeof event.data.height === 'number'
-                ? Math.max(160, event.data.height + STATUS_CARD_MEASURE_BUFFER_PX)
-                : 220;
-            setFrameHeight(nextHeight);
-            setHasMeasured(true);
-        };
-        window.addEventListener('message', handleMessage);
-        return () => window.removeEventListener('message', handleMessage);
-    }, [frameChannel]);
-
-    useEffect(() => {
-        if (!shouldMount || !ready || !html) return;
-        frameRef.current?.contentWindow?.postMessage(
-            {
-                type: 'preview-update',
-                channel: frameChannel,
-                html,
-                allowScripts: book.cardData?.meta?.allowScripts === true,
-                stageWidth: WALL_PREVIEW_WIDTH,
-            },
-            '*',
-        );
-    }, [book.cardData?.meta?.allowScripts, frameChannel, html, ready, shouldMount]);
-
-    if (!html || !shouldMount) return null;
-
-    const scale = Math.max(0.2, width / WALL_PREVIEW_WIDTH);
-    const fittedHeight = Math.ceil(frameHeight * scale);
-
-    return (
-        <span className="ar-frag-preview" style={{ height: fittedHeight || 120, opacity: hasMeasured ? 1 : 0, transition: 'opacity 200ms ease' }}>
-            <iframe
-                ref={frameRef}
-                srcDoc={STATUS_CARD_IFRAME_SHELL}
-                sandbox="allow-scripts"
-                title="Freeform creative card"
-                style={{
-                    width: WALL_PREVIEW_WIDTH,
-                    height: frameHeight,
-                    border: 'none',
-                    borderRadius: 0,
-                    background: 'transparent',
-                    colorScheme: 'light dark',
-                    overflow: 'hidden',
-                    display: 'block',
-                    transform: `scale(${scale})`,
-                    transformOrigin: 'top left',
-                    pointerEvents: 'none',
-                }}
-                onLoad={() => setReady(true)}
-            />
-        </span>
-    );
-};
-
 const useAssetObjectUrl = (asset: CollectionWallAsset | null): string => {
     const [url, setUrl] = useState('');
 
@@ -909,161 +1865,2107 @@ const useAssetObjectUrl = (asset: CollectionWallAsset | null): string => {
     return url;
 };
 
-const FreeformFragment: React.FC<{ book: CollectionBook; index: number; pulling: boolean; onPick: (book: CollectionBook) => void }> = ({ book, index, pulling, onPick }) => {
+const sanitizeWallAssetName = (value: string): string => {
+    const normalized = String(value || '')
+        .replace(/\.[a-z0-9]+$/i, '')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return (normalized || '上传素材').slice(0, 40);
+};
+
+const getFileExtension = (fileName: string): string => (
+    String(fileName || '').split('.').pop() || ''
+).trim().toLowerCase();
+
+const isTransparentWallAssetMime = (mime?: string): boolean =>
+    TRANSPARENT_WALL_ASSET_MIME_TYPES.has(String(mime || '').toLowerCase());
+
+export const wallAssetUsesTransparentCanvas = (asset: Pick<CollectionWallAsset, 'mime' | 'meta'>): boolean => {
+    if (typeof asset.meta?.hasTransparency === 'boolean') return asset.meta.hasTransparency;
+    return isTransparentWallAssetMime(asset.mime);
+};
+
+const isSupportedWallFontFile = (file: File): boolean => {
+    const extension = getFileExtension(file.name);
+    return CUSTOM_WALL_FONT_EXTENSIONS.has(extension) && CUSTOM_WALL_FONT_MIME_TYPES.has(file.type || '');
+};
+
+const getTextFontLabel = (asset?: CollectionWallAsset | null): string =>
+    String(asset?.meta?.name || asset?.meta?.uploadedFileName || '默认字体').trim().slice(0, 32) || '默认字体';
+
+const readImageDimensions = async (blob: Blob): Promise<{ width?: number; height?: number }> => {
+    if (typeof Image === 'undefined' || typeof URL === 'undefined') return {};
+    const url = URL.createObjectURL(blob);
+    try {
+        return await new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve({
+                width: image.naturalWidth || image.width || undefined,
+                height: image.naturalHeight || image.height || undefined,
+            });
+            image.onerror = () => reject(new Error('无法读取图片尺寸'));
+            image.src = url;
+        });
+    } finally {
+        URL.revokeObjectURL(url);
+    }
+};
+
+const readImageHasTransparency = async (blob: Blob): Promise<boolean | undefined> => {
+    if (
+        !isTransparentWallAssetMime(blob.type)
+        || typeof Image === 'undefined'
+        || typeof URL === 'undefined'
+        || typeof document === 'undefined'
+    ) {
+        return undefined;
+    }
+
+    const url = URL.createObjectURL(blob);
+    try {
+        const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const nextImage = new Image();
+            nextImage.onload = () => resolve(nextImage);
+            nextImage.onerror = () => reject(new Error('无法读取图片透明度'));
+            nextImage.src = url;
+        });
+        const width = image.naturalWidth || image.width || 0;
+        const height = image.naturalHeight || image.height || 0;
+        if (!width || !height) return undefined;
+
+        const maxPixels = 512 * 512;
+        const scale = Math.min(1, Math.sqrt(maxPixels / (width * height)));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        if (!context) return undefined;
+
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+        for (let index = 3; index < pixels.length; index += 4) {
+            if (pixels[index] < 255) return true;
+        }
+        return false;
+    } catch {
+        return undefined;
+    } finally {
+        URL.revokeObjectURL(url);
+    }
+};
+
+const buildUploadedWallAssetDraft = async (file: File): Promise<CollectionWallAssetDraft> => {
+    if (!CUSTOM_WALL_ASSET_MIME_TYPES.has(file.type)) {
+        throw new Error('只支持 PNG、JPG、WEBP、GIF 图片');
+    }
+    if (file.size > CUSTOM_WALL_ASSET_MAX_BYTES) {
+        throw new Error('图片不能超过 10MB');
+    }
+    const buffer = await file.arrayBuffer();
+    const [dimensions, hasTransparency] = await Promise.all([
+        readImageDimensions(file),
+        readImageHasTransparency(file),
+    ]);
+    const name = sanitizeWallAssetName(file.name);
+    return {
+        blob: file,
+        mime: file.type || 'image/png',
+        width: dimensions.width,
+        height: dimensions.height,
+        bytes: file.size,
+        hash: fnv1aBytes(buffer),
+        origin: 'upload',
+        meta: {
+            name,
+            uploadedFileName: file.name,
+            ...(typeof hasTransparency === 'boolean' ? { hasTransparency } : {}),
+            hiddenFromLibrary: false,
+        },
+    };
+};
+
+const buildUploadedWallFontDraft = async (file: File): Promise<CollectionWallAssetDraft> => {
+    if (!isSupportedWallFontFile(file)) {
+        throw new Error('只支持 TTF、OTF、WOFF、WOFF2 字体文件');
+    }
+    if (file.size > CUSTOM_WALL_FONT_MAX_BYTES) {
+        throw new Error('字体文件不能超过 8MB');
+    }
+    const buffer = await file.arrayBuffer();
+    const name = sanitizeWallAssetName(file.name);
+    return {
+        blob: file,
+        mime: file.type || `font/${getFileExtension(file.name) || 'ttf'}`,
+        bytes: file.size,
+        hash: fnv1aBytes(buffer),
+        origin: 'upload',
+        meta: {
+            assetKind: 'font',
+            name,
+            uploadedFileName: file.name,
+            hiddenFromLibrary: false,
+        },
+    };
+};
+
+const getFittedAssetSize = (
+    asset: CollectionWallAsset,
+    maxW: number,
+    maxH: number,
+    minW: number,
+    minH: number,
+    fallbackW: number,
+    fallbackH: number,
+): { w: number; h: number } => {
+    const sourceW = typeof asset.width === 'number' && asset.width > 0 ? asset.width : fallbackW;
+    const sourceH = typeof asset.height === 'number' && asset.height > 0 ? asset.height : fallbackH;
+    const scale = Math.min(maxW / sourceW, maxH / sourceH, 1);
+    const fittedW = Math.max(1, Math.round(sourceW * scale));
+    const fittedH = Math.max(1, Math.round(sourceH * scale));
+    const grow = Math.max(minW / fittedW, minH / fittedH, 1);
+    return {
+        w: Math.min(maxW, Math.round(fittedW * grow)),
+        h: Math.min(maxH, Math.round(fittedH * grow)),
+    };
+};
+
+export const getCollectionBookWallHtml = (book: CollectionBook): string =>
+    String(book.meta?.html || book.cardData?.meta?.html || '').trim();
+
+const getDefaultWallItemSize = (item: CollectionWallItem): { w: number; h: number } => {
+    if (item.type === 'image') return { w: DEFAULT_IMAGE_W, h: DEFAULT_IMAGE_H };
+    if (item.type === 'sticker') return { w: DEFAULT_STICKER_MAX, h: DEFAULT_STICKER_MAX };
+    if (item.type === 'bond') return { w: DEFAULT_BOND_W, h: DEFAULT_BOND_H };
+    if (item.type === 'text') return { w: DEFAULT_TEXT_W, h: DEFAULT_TEXT_H };
+    if (item.type === 'html' || item.html) return { w: DEFAULT_HTML_W, h: DEFAULT_HTML_H };
+    return { w: DEFAULT_CARD_W, h: DEFAULT_CARD_H };
+};
+
+const normalizeWallItemForCanvas = (item: CollectionWallItem): CollectionWallItem => {
+    const fallback = getDefaultWallItemSize(item);
+    const w = Number.isFinite(item.w) && item.w > 0 ? item.w : fallback.w;
+    const h = Number.isFinite(item.h) && item.h > 0 ? item.h : fallback.h;
+    const isBookCard = item.type === 'card' && !item.html;
+    return {
+        ...item,
+        w: isBookCard && h <= 240 ? Math.max(w, DEFAULT_CARD_W) : w,
+        h: isBookCard && h <= 240 ? DEFAULT_CARD_H : h,
+        rotation: Number.isFinite(item.rotation) ? item.rotation : 0,
+        z: Number.isFinite(item.z) ? item.z : 0,
+        order: Number.isFinite(item.order) ? item.order : 0,
+    };
+};
+
+export function autoArrangeWallItems(items: CollectionWallItem[]): CollectionWallItem[] {
+    const columnWidth = (WALL_CANVAS_WIDTH - WALL_AUTO_SIDE_PAD * 2 - WALL_AUTO_GAP) / 2;
+    const columns = [WALL_CANVAS_TOP_PADDING, WALL_CANVAS_TOP_PADDING];
+    return [...items]
+        .sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0))
+        .map((source, index) => {
+            const item = normalizeWallItemForCanvas(source);
+            const col = columns[0] <= columns[1] ? 0 : 1;
+            const w = Math.min(item.w, columnWidth);
+            const h = Math.max(item.h, getDefaultWallItemSize(item).h);
+            const x = WALL_AUTO_SIDE_PAD + col * (columnWidth + WALL_AUTO_GAP) + (columnWidth - w) / 2;
+            const y = columns[col];
+            columns[col] += h + WALL_AUTO_GAP;
+            const microTilt = ((hashOf(item.id || `${item.wallId}:${index}`) % 7) - 3) * 0.5;
+            return {
+                ...item,
+                x: Math.round(x),
+                y: Math.round(y),
+                w: Math.round(w),
+                h: Math.round(h),
+                rotation: Number((item.rotation || microTilt || 0).toFixed(2)),
+                z: item.z || index + 1,
+                order: index,
+            };
+        });
+}
+
+export function wallItemsOverlap(a: CollectionWallItem, b: CollectionWallItem): boolean {
+    if (a.x == null || a.y == null || b.x == null || b.y == null) return false;
+    return a.x < b.x + b.w
+        && a.x + a.w > b.x
+        && a.y < b.y + b.h
+        && a.y + a.h > b.y;
+}
+
+export const CollectionWallCardFrame: React.FC<{
+    book: CollectionBook;
+    width: number;
+    height: number;
+    forceMounted?: boolean;
+}> = ({ book, width, height, forceMounted }) => {
+    const hostRef = useRef<HTMLDivElement>(null);
+    const lazyMounted = useWallPreviewMountSlot(`card-${book.id}`, hostRef);
+    const mounted = typeof forceMounted === 'boolean' ? forceMounted : lazyMounted;
     const title = getCollectionDisplayTitle(book);
-    const shape = getFreeformShape(book);
-    const summary = getFreeformSummary(book);
-    const palette = FRAGMENT_PALETTES[hashOf(book.id + title) % FRAGMENT_PALETTES.length];
-    const rot = ((hashOf(book.id) % 7) - 3) * 0.45;
+    const html = getCollectionBookWallHtml(book);
+    const scale = Math.max(0.2, width / WALL_PREVIEW_WIDTH);
+    const frameHeight = Math.max(1, Math.ceil(height / scale));
+
     return (
-        <button
-            type="button"
-            className={`ar-frag${pulling ? ' pull' : ''}`}
+        <div
+            ref={hostRef}
+            className="ar-live-card"
+            data-testid="collection-wall-card-frame"
             style={{
-                '--rot': `${rot}deg`,
-                '--frag-a': palette[0],
-                '--frag-b': palette[1],
+                '--card-scale': scale,
+                '--frame-h': `${frameHeight}px`,
             } as React.CSSProperties}
-            title={title}
-            aria-label={`打开视觉碎片《${title}》`}
-            onClick={() => onPick(book)}
         >
-            <span className="ar-frag-cover" />
-            <span className="ar-frag-tape" />
-            <span className="ar-frag-rule" />
-            <span className="ar-frag-no">NO.{String(index + 1).padStart(2, '0')}</span>
-            <span className="ar-frag-body">
-                <span className="ar-frag-shape">{shape}</span>
-                <span className="ar-frag-summary">{summary || '一枚尚未命名的生活碎片。'}</span>
-                <span className="ar-frag-foot">
-                    <span>{fmtDate(book.collectedAt).slice(5)}</span>
-                    <span>LIGHT WALL</span>
-                </span>
-            </span>
-            <span className="ar-frag-pin" />
-        </button>
+            {!mounted && <div className="ar-live-card-placeholder">{title}</div>}
+            {mounted && html && (
+                <iframe
+                    className="ar-live-card-frame mounted"
+                    srcDoc={html}
+                    sandbox="allow-scripts"
+                    title={`拾光墙真渲染：${title}`}
+                    data-book-id={book.id}
+                />
+            )}
+            {mounted && !html && (
+                <div className="ar-live-card-missing">未实现：这条藏品缺少 meta.html</div>
+            )}
+        </div>
     );
 };
 
-const ImageFragment: React.FC<{ entry: WallImageEntry; index: number; onPick: (entry: WallImageEntry) => void }> = ({ entry, index, onPick }) => {
+export const CollectionWallHtmlFrame: React.FC<{
+    item: CollectionWallItem;
+}> = ({ item }) => {
+    const title = getHtmlCardLabel(item);
+    const html = String(item.html || '').trim();
+
+    return (
+        <div className="ar-html-card">
+            {html ? (
+                <iframe
+                    className="ar-html-frame"
+                    srcDoc={html}
+                    sandbox="allow-scripts"
+                    title={`拾光墙 HTML 卡：${title}`}
+                    loading="lazy"
+                />
+            ) : (
+                <div className="ticket-card">
+                    <b>{title}</b>
+                    <p>自由创作卡：在装修里点 HTML卡，即可粘贴或上传 HTML 渲染。</p>
+                    <small>FREEFORM · WALL CARD</small>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const WallImageLayer: React.FC<{ entry: WallImageEntry | WallStickerEntry }> = ({ entry }) => {
     const url = useAssetObjectUrl(entry.asset);
     const label = getAssetLabel(entry.asset, entry.item);
-    const rot = ((hashOf(entry.id) % 7) - 3) * 0.5;
+    const className = [
+        'ar-wall-img-item',
+        wallAssetUsesTransparentCanvas(entry.asset) ? 'transparent' : '',
+        entry.type === 'sticker' ? 'sticker' : '',
+    ].filter(Boolean).join(' ');
     return (
-        <button
-            type="button"
-            className="ar-imgfrag"
-            style={{ '--rot': `${rot}deg` } as React.CSSProperties}
-            title={label}
-            aria-label={`打开图片《${label}》`}
-            onClick={() => onPick(entry)}
-        >
-            <span className="ar-imgfrag-media">
-                {url && <img src={url} alt="" loading="lazy" />}
-            </span>
-            <span className="ar-imgfrag-tag">IMG {String(index + 1).padStart(2, '0')}</span>
-            <span className="ar-imgfrag-name">{label}</span>
-        </button>
+        <div className={className} title={label} onContextMenu={event => event.preventDefault()}>
+            {url && <img src={url} alt={label} loading="lazy" draggable={false} />}
+        </div>
     );
 };
 
-const TextFragment: React.FC<{ entry: WallTextEntry }> = ({ entry }) => {
-    const rot = ((hashOf(entry.id) % 7) - 3) * 0.48;
-    const label = getTextLabel(entry.item);
+const BondAvatar: React.FC<{
+    src?: string;
+    name: string;
+    role: 'you' | 'char';
+    fallback?: string;
+    frameUrl?: string;
+}> = ({ src, name, role, fallback, frameUrl }) => {
+    const initial = fallback || Array.from(name.trim())[0] || '·';
     return (
-        <article
-            className={`ar-textfrag${entry.item.author === 'char' ? ' char' : ''}`}
-            style={{ '--rot': `${rot}deg` } as React.CSSProperties}
-            aria-label={label}
-        >
-            <span className="ar-textfrag-dot" />
-            <span className="ar-textfrag-body">{label}</span>
-            <span className="ar-textfrag-foot">{entry.item.author === 'char' ? 'CHAR NOTE' : 'NOTE'}</span>
+        <span className={`bond-av ${role}`}>
+            <span className="bond-av-inner">
+                {src ? <img src={src} alt="" /> : initial}
+            </span>
+            {frameUrl && <img className="bond-av-frame" src={frameUrl} alt="" aria-hidden="true" />}
+        </span>
+    );
+};
+
+const BondWidgetLayer: React.FC<{
+    userName: string;
+    userAvatar?: string;
+    charName: string;
+    charAvatar?: string;
+    sinceAt?: number;
+    avatarFrameAsset?: CollectionWallAsset | null;
+}> = ({ userName, userAvatar, charName, charAvatar, sinceAt, avatarFrameAsset }) => {
+    const avatarFrameUrl = useAssetObjectUrl(avatarFrameAsset || null);
+    const togetherDays = Math.max(1, Math.floor((Date.now() - (sinceAt || Date.now())) / 86400000) + 1);
+    return (
+        <article className="ar-bond-widget" aria-label={`${userName} 和 ${charName} 的连接`}>
+            <div className="bond-row">
+                <BondAvatar src={userAvatar} name={userName} role="you" fallback="你" frameUrl={avatarFrameUrl} />
+                <span className="bond-amp" aria-hidden="true">
+                    <svg viewBox="0 0 132 40" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+                        <g stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" fill="none">
+                            <path d="M3 20H33" />
+                            <path d="M99 20H129" />
+                            <path d="M33 20C37 15 43 15 45 20" />
+                            <path d="M99 20C95 15 89 15 87 20" />
+                        </g>
+                        <g fill="currentColor">
+                            <circle cx="4" cy="20" r="1.4" />
+                            <circle cx="128" cy="20" r="1.4" />
+                            <ellipse cx="38" cy="16" rx="2.8" ry="1.3" transform="rotate(-22 38 16)" />
+                            <ellipse cx="94" cy="16" rx="2.8" ry="1.3" transform="rotate(22 94 16)" />
+                            <circle cx="33" cy="20" r="1.1" />
+                            <circle cx="99" cy="20" r="1.1" />
+                        </g>
+                    </svg>
+                    <span className="bond-word">together</span>
+                </span>
+                <BondAvatar src={charAvatar} name={charName} role="char" frameUrl={avatarFrameUrl} />
+            </div>
+            <div className="bond-names">你 与 {charName}</div>
+            <div className="bond-since"><i /><span>Through {togetherDays} dawns, still yours.</span><i /></div>
         </article>
     );
 };
 
-const LightWallZone: React.FC<{
-    wall: CollectionWall;
-    entries: WallZoneEntry[];
-    pullingId: string | null;
-    onPickBook: (book: CollectionBook) => void;
-    onPickImage: (entry: WallImageEntry) => void;
-    onEditWall?: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
-    onInviteChar?: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
-}> = ({ wall, entries, pullingId, onPickBook, onPickImage, onEditWall, onInviteChar }) => {
-    const [shapeFilter, setShapeFilter] = useState('');
-    const books = useMemo(() => entries
-        .filter((entry): entry is WallBookEntry => entry.type === 'book')
-        .map(entry => entry.book), [entries]);
-    const shapes = useMemo(() => (
-        Array.from(new Set(books.map(getFreeformShape).filter(Boolean))).slice(0, 10)
-    ), [books]);
-    const visibleEntries = shapeFilter
-        ? entries.filter(entry => entry.type === 'book' && getFreeformShape(entry.book) === shapeFilter)
-        : entries;
+const CharPinnedRemarkLayer: React.FC<{
+    entry: WallTextEntry;
+    charName?: string;
+    charAvatar?: string;
+}> = ({ entry, charName = 'TA', charAvatar }) => {
+    const text = String(entry.item.text?.content || entry.item.name || 'TA 的留言').trim().slice(0, 300);
+    const template = (entry.item.text?.remarkTemplate || pickCharRemarkTemplate(text).pick) as CollectionWallRemarkTemplate;
+    const date = fmtDate(entry.item.createdAt || Date.now());
+    const shortDate = date.slice(5);
+    const initial = getCharRemarkInitial(charName);
+    const avatar = charAvatar || CHAR_REMARK_AVATAR_FALLBACK;
+    const receiptLines = [
+        'AFTERGLOW',
+        shortDate,
+        '----------',
+        ...chunkRemarkText(text, 14).slice(0, 5),
+    ];
 
-    useEffect(() => {
-        if (shapeFilter && !shapes.includes(shapeFilter)) setShapeFilter('');
-    }, [shapeFilter, shapes]);
+    if (template === 'ticket') {
+        return (
+            <article className="ar-pinned-remark ticket" aria-label={text}>
+                <div className="hd"><b>VISITOR</b><span>{shortDate}</span></div>
+                <div className="txt">{text}</div>
+                <div className="foot">PINNED · {charName}</div>
+            </article>
+        );
+    }
+
+    if (template === 'pol') {
+        return (
+            <article className="ar-pinned-remark pol" aria-label={text}>
+                <div className="ar-pinned-pol-photo"><img src={avatar} alt="" /></div>
+                <div className="txt">{text}</div>
+                <div className="foot"><span>{charName}</span><span>{shortDate}</span></div>
+            </article>
+        );
+    }
+
+    if (template === 'card') {
+        return (
+            <article className="ar-pinned-remark card" aria-label={text}>
+                <div className="art"><img src={avatar} alt="" /></div>
+                <div className="name"><b>{charName}</b><span>REMARK</span></div>
+                <div className="txt">{text}</div>
+            </article>
+        );
+    }
+
+    if (template === 'receipt') {
+        return (
+            <article className="ar-pinned-remark receipt" aria-label={text}>
+                {receiptLines.map((line, index) => (
+                    <p className={`ln${index < 2 ? ' c' : ''}`} key={`${line}-${index}`}>{line}</p>
+                ))}
+                <span className="stamp">VISITED</span>
+            </article>
+        );
+    }
 
     return (
-        <section className="ar-wall">
-            <div className="ar-wall-top">
-                <div>
-                    <p className="ar-wall-kicker">VISUAL FRAGMENTS</p>
-                    <h3 className="ar-wall-title">{wall.name}{wall.hasUnseenCharItem ? ' · TA 来过' : ''}</h3>
-                    <p className="ar-wall-sub">自由创作收进这里，像一组生活边角的私印杂志。</p>
-                </div>
-                <div className="ar-wall-count">{entries.length}<span>PIECES</span></div>
+        <article className="ar-pinned-remark letter" aria-label={text}>
+            <div className="hd"><b>A NOTE</b><span>{shortDate}</span></div>
+            <div className="txt">{text}<span className="seal" aria-hidden="true">{initial}</span></div>
+        </article>
+    );
+};
+
+const WallAssetLibraryCard: React.FC<{
+    asset: CollectionWallAsset;
+    onUseSticker: (asset: CollectionWallAsset) => void;
+    onUseImage: (asset: CollectionWallAsset) => void;
+    onUseBackground: (asset: CollectionWallAsset) => void;
+    onUseAvatarFrame: (asset: CollectionWallAsset) => void;
+    onOpenActions: (asset: CollectionWallAsset) => void;
+    onRemove: (asset: CollectionWallAsset) => void;
+}> = ({ asset, onUseSticker, onUseImage, onUseBackground, onUseAvatarFrame, onOpenActions, onRemove }) => {
+    const url = useAssetObjectUrl(asset);
+    const label = getAssetLabel(asset);
+    return (
+        <article className="ar-asset-card" onContextMenu={event => event.preventDefault()}>
+            <button
+                type="button"
+                className="ar-asset-thumb"
+                onClick={() => onOpenActions(asset)}
+                onContextMenu={event => event.preventDefault()}
+                aria-label={`使用素材：${label}`}
+            >
+                {url && <img src={url} alt={label} loading="lazy" draggable={false} />}
+                <span className="ar-asset-use-chip">使用</span>
+            </button>
+            <b title={label}>{label}</b>
+            <div className="ar-asset-actions">
+                <button type="button" className="wide primary" onClick={() => onUseImage(asset)}><ImageSquare weight="bold" size={12} />添加到墙上</button>
+                <button type="button" onClick={() => onUseSticker(asset)}><Sticker weight="bold" size={12} />贴纸</button>
+                <button type="button" onClick={() => onUseBackground(asset)}><PaintBrush weight="bold" size={12} />墙纸</button>
+                <button type="button" onClick={() => onUseAvatarFrame(asset)}><ImageSquare weight="bold" size={12} />头像框</button>
+                <button type="button" onClick={() => onRemove(asset)}><Trash weight="bold" size={12} />移出</button>
             </div>
-            {onEditWall && !wall.id.startsWith('fallback-') && (
-                <div className="ar-wall-actions">
-                    <button type="button" className="ar-wall-act" onClick={() => onEditWall(wall, entries)}>装修</button>
-                    {onInviteChar && wall.allowCharDecorate && (
-                        <button type="button" className="ar-wall-act" onClick={() => onInviteChar(wall, entries)}>邀请 TA</button>
-                    )}
-                </div>
+        </article>
+    );
+};
+
+const WallAssetActionSheet: React.FC<{
+    asset: CollectionWallAsset;
+    onUseImage: (asset: CollectionWallAsset) => void;
+    onUseSticker: (asset: CollectionWallAsset) => void;
+    onUseBackground: (asset: CollectionWallAsset) => void;
+    onUseAvatarFrame: (asset: CollectionWallAsset) => void;
+    onRemove: (asset: CollectionWallAsset) => void;
+    onClose: () => void;
+}> = ({ asset, onUseImage, onUseSticker, onUseBackground, onUseAvatarFrame, onRemove, onClose }) => {
+    const url = useAssetObjectUrl(asset);
+    const label = getAssetLabel(asset);
+    const run = (action: (asset: CollectionWallAsset) => void) => {
+        onClose();
+        action(asset);
+    };
+
+    return (
+        <section className="ar-asset-sheet" aria-label={`素材操作：${label}`} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
+            <div className="ar-asset-sheet-preview" onContextMenu={event => event.preventDefault()}>
+                {url && <img src={url} alt={label} draggable={false} />}
+            </div>
+            <div className="ar-asset-sheet-copy">
+                <b>{label}</b>
+                <small>选择素材用途</small>
+            </div>
+            <div className="ar-asset-sheet-actions">
+                <button type="button" className="primary" onClick={() => run(onUseImage)}><ImageSquare weight="bold" size={15} />添加到墙上</button>
+                <button type="button" onClick={() => run(onUseSticker)}><Sticker weight="bold" size={15} />作为贴纸</button>
+                <button type="button" onClick={() => run(onUseBackground)}><PaintBrush weight="bold" size={15} />设为墙纸</button>
+                <button type="button" onClick={() => run(onUseAvatarFrame)}><ImageSquare weight="bold" size={15} />设为头像框</button>
+                <button type="button" className="danger" onClick={() => run(onRemove)}><Trash weight="bold" size={15} />移出素材库</button>
+                <button type="button" onClick={onClose}>取消</button>
+            </div>
+        </section>
+    );
+};
+
+const WallTextLayer: React.FC<{
+    entry: WallTextEntry;
+    charName?: string;
+    charAvatar?: string;
+    fontAsset?: CollectionWallAsset | null;
+    editing: boolean;
+    onCommit: (content: string) => void;
+}> = ({ entry, charName, charAvatar, fontAsset, editing, onCommit }) => {
+    const isCharNote = entry.item.author === 'char';
+    const label = isCharNote
+        ? String(entry.item.text?.content || entry.item.name || 'TA 的留言').trim().slice(0, 300)
+        : getTextLabel(entry.item);
+    const [draft, setDraft] = useState(label);
+    const fontUrl = useAssetObjectUrl(fontAsset || null);
+    const fontFaceName = `wall-text-font-${entry.item.id.replace(/[^a-z0-9_-]/gi, '-')}`;
+    const textStyle: React.CSSProperties = {
+        color: entry.item.text?.color || '#4d3438',
+        fontSize: `${clamp(Number(entry.item.text?.fontSize) || 28, 12, 72)}px`,
+        fontFamily: fontUrl
+            ? `"${fontFaceName}", var(--ar-font-hand)`
+            : (entry.item.text?.fontFamily || 'var(--ar-font-hand)'),
+        textAlign: entry.item.text?.align || 'center',
+        textShadow: entry.item.text?.stroke
+            ? '0 1px 0 rgba(255,255,255,.72), 0 -1px 0 rgba(255,255,255,.72), 1px 0 0 rgba(255,255,255,.72), -1px 0 0 rgba(255,255,255,.72), 0 8px 16px rgba(120,80,90,.18)'
+            : '0 8px 16px rgba(120,80,90,.16)',
+    };
+
+    useEffect(() => setDraft(label), [label]);
+
+    if (isCharNote) {
+        return (
+            <>
+                <CharPinnedRemarkLayer entry={entry} charName={charName} charAvatar={charAvatar} />
+                {editing && (
+                    <textarea
+                        className="ar-note-editor"
+                        autoFocus
+                        value={draft}
+                        maxLength={300}
+                        onChange={event => setDraft(event.target.value)}
+                        onBlur={() => onCommit(draft)}
+                        onPointerDown={event => event.stopPropagation()}
+                        onClick={event => event.stopPropagation()}
+                        onKeyDown={event => {
+                            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                                event.currentTarget.blur();
+                            }
+                        }}
+                    />
+                )}
+            </>
+        );
+    }
+
+    return (
+        <article className="ar-wall-text-item" aria-label={label}>
+            {fontUrl && <style>{`@font-face{font-family:"${fontFaceName}";src:url("${fontUrl}")}`}</style>}
+            <p style={textStyle}>{label}</p>
+            {editing && (
+                <textarea
+                    className="ar-note-editor"
+                    autoFocus
+                    value={draft}
+                    maxLength={160}
+                    onChange={event => setDraft(event.target.value)}
+                    onBlur={() => onCommit(draft)}
+                    onPointerDown={event => event.stopPropagation()}
+                    onClick={event => event.stopPropagation()}
+                    onKeyDown={event => {
+                        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                            event.currentTarget.blur();
+                        }
+                    }}
+                />
             )}
-            {shapes.length > 1 && (
-                <div className="ar-wall-chips" aria-label="按形态筛选视觉碎片">
-                    <button type="button" className={`ar-wchip${!shapeFilter ? ' on' : ''}`} onClick={() => setShapeFilter('')}>全部</button>
-                    {shapes.map(shape => (
+        </article>
+    );
+};
+
+type LightWallZoneData = {
+    wall: CollectionWall;
+    entries: WallZoneEntry[];
+};
+
+const getWallEntryTimestamp = (entry: WallZoneEntry): number => {
+    if (entry.type === 'book') return entry.book.collectedAt || entry.book.createdAt || 0;
+    if (entry.type === 'image' || entry.type === 'sticker') return entry.asset.createdAt || entry.item.createdAt || 0;
+    return entry.item.createdAt || 0;
+};
+
+const LightWallListCard: React.FC<{
+    wall: CollectionWall;
+    entries: WallZoneEntry[];
+    charName?: string;
+    onOpen: () => void;
+    onInvite?: () => void;
+    inviting?: boolean;
+}> = ({ wall, entries, charName, onOpen, onInvite, inviting }) => {
+    const latest = [...entries]
+        .sort((a, b) => getWallEntryTimestamp(b) - getWallEntryTimestamp(a))
+        .slice(0, 2);
+    const inviteLabel = inviting ? '等待回应' : `邀请 ${charName || 'TA'} 看`;
+
+    return (
+        <article className="ar-wall-card-wrap">
+            <div className="ar-wall-card">
+                <button type="button" className="ar-wall-card-main" onClick={onOpen} aria-label={`打开拾光墙「${wall.name}」`}>
+                    {wall.hasUnseenCharItem && <span className="ar-wall-seen" aria-label="TA 来过" />}
+                    <span className="ar-wall-card-copy">
+                        <h3>{wall.name}</h3>
+                        <p>{entries.length} 件</p>
+                        <span className="ar-wall-teasers">
+                            {latest.map(entry => (
+                                <span key={entry.id} className="ar-wall-teaser">
+                                    <i />
+                                    <span>{getWallEntryLabel(entry)}</span>
+                                </span>
+                            ))}
+                        </span>
+                    </span>
+                    <span className="ar-wall-card-count">
+                        {entries.length}
+                        <small>PIECES</small>
+                    </span>
+                </button>
+                {onInvite && (
+                    <button
+                        type="button"
+                        className="ar-wall-invite"
+                        onClick={onInvite}
+                        disabled={inviting}
+                    >
+                        {inviteLabel}
+                    </button>
+                )}
+            </div>
+        </article>
+    );
+};
+
+const LightWallShelf: React.FC<{
+    zones: LightWallZoneData[];
+    onOpenWall: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
+    charName?: string;
+    pullingId?: string | null;
+    onPickBook?: (book: CollectionBook) => void;
+    onPickImage?: (entry: WallImageEntry) => void;
+    onEditWall?: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
+    onInviteChar?: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
+    invitingWallId?: string | null;
+    onWallSeen?: () => void;
+}> = ({ zones, onOpenWall, onInviteChar, invitingWallId, charName }) => {
+    if (zones.length === 0) {
+        return <div className="ar-wall-empty-list">在聊天里点开一张自由创作卡，就能收进墙上。</div>;
+    }
+
+    return (
+        <div className="ar-wall-list">
+            {zones.map(zone => (
+                <LightWallListCard
+                    key={zone.wall.id}
+                    wall={zone.wall}
+                    entries={zone.entries}
+                    charName={charName}
+                    onOpen={() => onOpenWall(zone.wall, zone.entries)}
+                    onInvite={onInviteChar ? () => onInviteChar(zone.wall, zone.entries) : undefined}
+                    inviting={invitingWallId === zone.wall.id}
+                />
+            ))}
+        </div>
+    );
+};
+
+type WallDraftSnapshot = {
+    wall: CollectionWall;
+    items: CollectionWallItem[];
+};
+
+type WallScreenState = {
+    wall: CollectionWall;
+    entries: WallZoneEntry[];
+    charName: string;
+};
+
+function cloneWallSnapshot(wall: CollectionWall, items: CollectionWallItem[]): WallDraftSnapshot {
+    return {
+        wall: {
+            ...wall,
+            background: { ...wall.background },
+        },
+        items: items.map(item => ({
+            ...item,
+            text: item.text ? { ...item.text } : undefined,
+            bond: item.bond ? { ...item.bond } : undefined,
+        })),
+    };
+}
+
+export function buildDefaultBondWidgetItem(wall: CollectionWall, order = 0, z = 1): CollectionWallItem {
+    return normalizeWallItemForCanvas({
+        id: `wall-bond-${wall.id}`,
+        wallId: wall.id,
+        type: 'bond',
+        author: 'user',
+        x: Math.round((WALL_CANVAS_WIDTH - DEFAULT_BOND_W) / 2),
+        y: 30,
+        w: DEFAULT_BOND_W,
+        h: DEFAULT_BOND_H,
+        rotation: 0,
+        z,
+        order,
+        bond: { variant: 'default' },
+        name: '头像连接',
+        createdAt: wall.createdAt || Date.now(),
+    });
+}
+
+export function buildInitialWallItems(wall: CollectionWall, entries: WallZoneEntry[]): CollectionWallItem[] {
+    const realItems = entries
+        .map(entry => entry.item)
+        .filter((item): item is CollectionWallItem => Boolean(item))
+        .map(normalizeWallItemForCanvas);
+
+    const hasBondWidget = realItems.some(item => item.type === 'bond');
+    if (!hasBondWidget && !wall.defaultBondWidgetHidden && !wall.id.startsWith('fallback-')) {
+        realItems.unshift(buildDefaultBondWidgetItem(
+            wall,
+            0,
+            realItems.reduce((max, item) => Math.max(max, item.z || 0), 0) + 1,
+        ));
+    }
+
+    const looseItems = entries
+        .filter((entry): entry is WallBookEntry => entry.type === 'book' && !entry.item)
+        .map((entry, index): CollectionWallItem => normalizeWallItemForCanvas({
+            id: `loose-${entry.book.id}`,
+            wallId: wall.id,
+            type: 'card',
+            author: 'user',
+            x: null,
+            y: null,
+            w: DEFAULT_CARD_W,
+            h: DEFAULT_CARD_H,
+            rotation: 0,
+            z: realItems.length + index + 1,
+            order: realItems.length + index,
+            bookId: entry.book.id,
+            name: getCollectionDisplayTitle(entry.book),
+            createdAt: entry.book.collectedAt || entry.book.createdAt || Date.now(),
+        }));
+
+    if (realItems.some(item => item.x != null && item.y != null)) {
+        return relabelItems([...realItems, ...looseItems]);
+    }
+
+    if (wall.id.startsWith('fallback-') && looseItems.length > 0) {
+        return autoArrangeWallItems(looseItems);
+    }
+
+    return relabelItems([...realItems, ...looseItems]);
+}
+
+const useViewportSize = () => {
+    const read = () => ({
+        width: typeof window === 'undefined' ? WALL_CANVAS_WIDTH : window.innerWidth || WALL_CANVAS_WIDTH,
+        height: typeof window === 'undefined' ? 800 : window.innerHeight || 800,
+    });
+    const [size, setSize] = useState(read);
+    useEffect(() => {
+        const update = () => setSize(read());
+        window.addEventListener('resize', update);
+        return () => window.removeEventListener('resize', update);
+    }, []);
+    return size;
+};
+
+const FullScreenLightWall: React.FC<{
+    wall: CollectionWall;
+    entries: WallZoneEntry[];
+    libraryAssets: CollectionWallAsset[];
+    userName: string;
+    userAvatar?: string;
+    charName: string;
+    charAvatar?: string;
+    onClose: () => void;
+    onPickBook: (book: CollectionBook) => void;
+    onPickImage: (entry: WallImageEntry, wallName: string) => void;
+    onSaved: () => Promise<void> | void;
+    onAssetsChanged: () => Promise<void> | void;
+    say: (message: string) => void;
+}> = ({ wall, entries, libraryAssets, userName, userAvatar, charName, charAvatar, onClose, onPickBook, onPickImage, onSaved, onAssetsChanged, say }) => {
+    const viewport = useViewportSize();
+    const scale = Math.max(0.2, viewport.width / WALL_CANVAS_WIDTH);
+    const canvasRef = useRef<HTMLDivElement>(null);
+    const assetFileInputRef = useRef<HTMLInputElement>(null);
+    const textFontInputRef = useRef<HTMLInputElement>(null);
+    const htmlFileInputRef = useRef<HTMLInputElement>(null);
+    const decorPresetFileInputRef = useRef<HTMLInputElement>(null);
+    const saveTimerRef = useRef<number | null>(null);
+    const itemRefs = useRef(new Map<string, HTMLDivElement>());
+    const longPressTimerRef = useRef<number | null>(null);
+    const editStartSnapshotRef = useRef<WallDraftSnapshot | null>(null);
+    const [draftWall, setDraftWall] = useState<CollectionWall>(() => ({ ...wall, layoutMode: 'free' }));
+    const [draftItems, setDraftItems] = useState<CollectionWallItem[]>(() => buildInitialWallItems(wall, entries));
+    const [editing, setEditing] = useState(false);
+    const [preview, setPreview] = useState(false);
+    const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+    const [selectedTarget, setSelectedTarget] = useState<HTMLElement | null>(null);
+    const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
+    const [editingTextId, setEditingTextId] = useState<string | null>(null);
+    const [htmlEditor, setHtmlEditor] = useState<{ itemId?: string; draft: string } | null>(null);
+    const [libraryOpen, setLibraryOpen] = useState(false);
+    const [activeAssetActions, setActiveAssetActions] = useState<CollectionWallAsset | null>(null);
+    const [actionMenuOpen, setActionMenuOpen] = useState(false);
+    const [toolboxOpen, setToolboxOpen] = useState(false);
+    const [uploadingAsset, setUploadingAsset] = useState(false);
+    const [uploadingFont, setUploadingFont] = useState(false);
+    const [importingPreset, setImportingPreset] = useState(false);
+    const [past, setPast] = useState<WallDraftSnapshot[]>([]);
+    const [future, setFuture] = useState<WallDraftSnapshot[]>([]);
+
+    const entryByItemId = useMemo(() => new Map(entries.filter(entry => Boolean(entry.item)).map(entry => [entry.item!.id, entry])), [entries]);
+    const bookById = useMemo(() => new Map(entries.filter((entry): entry is WallBookEntry => entry.type === 'book').map(entry => [entry.book.id, entry.book])), [entries]);
+    const assetById = useMemo(() => {
+        const map = new Map(libraryAssets.map(asset => [asset.id, asset]));
+        entries.forEach((entry) => {
+            if (entry.type === 'image' || entry.type === 'sticker') {
+                map.set(entry.asset.id, entry.asset);
+            }
+        });
+        return map;
+    }, [entries, libraryAssets]);
+    const customLibraryAssets = useMemo(() => (
+        libraryAssets
+            .filter(asset => asset.origin === 'upload' && asset.meta?.assetKind !== 'font' && !asset.meta?.hiddenFromLibrary)
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    ), [libraryAssets]);
+    const selectedItem = useMemo(() => (
+        selectedItemId ? draftItems.find(item => item.id === selectedItemId) || null : null
+    ), [draftItems, selectedItemId]);
+    const selectedUserTextItem = selectedItem?.type === 'text' && selectedItem.author === 'user' ? selectedItem : null;
+    const selectedTextFontAsset = selectedUserTextItem?.text?.fontAssetId
+        ? assetById.get(selectedUserTextItem.text.fontAssetId) || null
+        : null;
+    const backgroundAsset = draftWall.background?.type === 'asset'
+        ? assetById.get(draftWall.background.value) || null
+        : null;
+    const backgroundAssetUrl = useAssetObjectUrl(backgroundAsset);
+    const wallBackgroundEffects = getWallBackgroundEffects(draftWall.background);
+    const isLegacyDefaultWallBackground = draftWall.background?.type !== 'asset'
+        && String(draftWall.background?.value || '').trim().toLowerCase() === LEGACY_DARK_WALL_BG;
+    const renderedWallBackgroundEffects = isLegacyDefaultWallBackground
+        ? { dim: 0.02, noiseOpacity: 0.03 }
+        : wallBackgroundEffects;
+    const wallBackgroundValue = backgroundAssetUrl
+        ? `url("${backgroundAssetUrl}") center / ${draftWall.background.fit === 'tile' ? 'auto repeat' : 'cover no-repeat'}`
+        : isLegacyDefaultWallBackground ? DEFAULT_LIGHT_WALL_BG : draftWall.background.value || DEFAULT_LIGHT_WALL_BG;
+    const canPersist = !wall.id.startsWith('fallback-');
+
+    useEffect(() => {
+        const nextItems = buildInitialWallItems(wall, entries);
+        setDraftWall({ ...wall, layoutMode: 'free' });
+        setDraftItems(nextItems);
+        setEditing(false);
+        setPreview(false);
+        setSelectedItemId(null);
+        setMenuPoint(null);
+        setEditingTextId(null);
+        setHtmlEditor(null);
+        setLibraryOpen(false);
+        setActiveAssetActions(null);
+        setActionMenuOpen(false);
+        setToolboxOpen(false);
+        setImportingPreset(false);
+        setPast([]);
+        setFuture([]);
+        editStartSnapshotRef.current = null;
+    }, [entries, wall]);
+
+    useLayoutEffect(() => {
+        setSelectedTarget(selectedItemId ? itemRefs.current.get(selectedItemId) || null : null);
+    }, [draftItems, editing, selectedItemId]);
+
+    useEffect(() => {
+        if (!wall.hasUnseenCharItem || wall.id.startsWith('fallback-')) return;
+        void DB.saveCollectionWall({
+            ...wall,
+            layoutMode: 'free',
+            hasUnseenCharItem: false,
+            charLastVisitAt: Date.now(),
+        }).then(onSaved).catch(error => {
+            console.error('[CollectionHall] clear wall unseen failed:', error);
+        });
+    }, [onSaved, wall]);
+
+    useEffect(() => () => {
+        if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
+        if (longPressTimerRef.current != null) window.clearTimeout(longPressTimerRef.current);
+    }, []);
+
+    const visibleItems = useMemo(() => draftItems.filter(item => item.x != null && item.y != null), [draftItems]);
+    const trayItems = useMemo(() => draftItems.filter(item => item.x == null), [draftItems]);
+    const canvasHeight = useMemo(() => {
+        const maxBottom = visibleItems.reduce((max, item) => Math.max(max, (item.y || 0) + item.h), 0);
+        const minHeight = Math.ceil(viewport.height / scale);
+        return Math.max(minHeight, maxBottom + WALL_CANVAS_BOTTOM_PADDING, 640);
+    }, [scale, viewport.height, visibleItems]);
+
+    const getEntryForItem = useCallback((item: CollectionWallItem): WallZoneEntry | null => {
+        const existing = entryByItemId.get(item.id);
+        if (existing) return existing;
+        if (item.type === 'html' || (item.type === 'card' && item.html && !item.bookId)) {
+            return { id: item.id, type: 'html', item };
+        }
+        if (item.type === 'card' && item.bookId) {
+            const book = bookById.get(item.bookId);
+            return book ? { id: item.id, type: 'book', item, book } : null;
+        }
+        if (item.type === 'image' || item.type === 'sticker') return buildWallAssetEntry(item, assetById.get(item.assetId || ''));
+        if (item.type === 'bond') return { id: item.id, type: 'bond', item };
+        if (item.type === 'text') return { id: item.id, type: 'text', item };
+        return null;
+    }, [assetById, bookById, entryByItemId]);
+
+    const persistDraft = useCallback(async (nextWall: CollectionWall, nextItems: CollectionWallItem[]): Promise<CollectionWallItem[]> => {
+        const normalizedItems = normalizeWallDraftItemsForSave(nextItems);
+        if (!canPersist) return normalizedItems;
+        const realItems = getPersistableWallItems(normalizedItems);
+        const persistedNow = new Set(realItems.map(item => item.id));
+        const storedItems = await DB.getCollectionWallItemsByWallId(wall.id);
+        const deletedIds = storedItems
+            .map(item => item.id)
+            .filter(id => !persistedNow.has(id));
+
+        await DB.saveCollectionWall({
+            ...nextWall,
+            layoutMode: 'free',
+            updatedAt: Date.now(),
+            background: {
+                ...nextWall.background,
+                dim: nextWall.background.type === 'asset' ? 0 : clamp(Number(nextWall.background.dim) || 0, 0, 0.6),
+            },
+        });
+        await Promise.all(deletedIds.map(id => DB.deleteCollectionWallItem(id)));
+        await Promise.all(realItems.map(item => DB.saveCollectionWallItem({ ...item, wallId: wall.id })));
+        return normalizedItems;
+    }, [canPersist, wall.id]);
+
+    const schedulePersist = useCallback((nextWall: CollectionWall, nextItems: CollectionWallItem[]) => {
+        if (!canPersist) return;
+        if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = window.setTimeout(() => {
+            saveTimerRef.current = null;
+            void persistDraft(nextWall, nextItems).catch(error => {
+                console.error('[CollectionHall] autosave wall failed:', error);
+                say('自动保存失败，可以点完成重试');
+            });
+        }, 800);
+    }, [canPersist, persistDraft, say]);
+
+    const pushHistory = useCallback((currentWall: CollectionWall, currentItems: CollectionWallItem[]) => {
+        setPast(prev => [...prev.slice(-49), cloneWallSnapshot(currentWall, currentItems)]);
+        setFuture([]);
+    }, []);
+
+    const applyDraft = useCallback((nextItems: CollectionWallItem[], nextWall = draftWall) => {
+        pushHistory(draftWall, draftItems);
+        setDraftWall(nextWall);
+        setDraftItems(nextItems);
+        schedulePersist(nextWall, nextItems);
+    }, [draftItems, draftWall, pushHistory, schedulePersist]);
+
+    const enterEditing = useCallback(() => {
+        if (!canPersist) {
+            say('这面临时墙不能装修');
+            return;
+        }
+        if (!editStartSnapshotRef.current) {
+            editStartSnapshotRef.current = cloneWallSnapshot(draftWall, draftItems);
+        }
+        setEditing(true);
+        setPreview(false);
+        setActionMenuOpen(false);
+        setToolboxOpen(false);
+    }, [canPersist, draftItems, draftWall, say]);
+
+    const flushPersist = useCallback(async () => {
+        if (saveTimerRef.current != null) {
+            window.clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = null;
+        }
+        const savedItems = await persistDraft(draftWall, draftItems);
+        setDraftItems(savedItems);
+        return savedItems;
+    }, [draftItems, draftWall, persistDraft]);
+
+    const finishEditing = useCallback(async () => {
+        try {
+            const savedItems = await flushPersist();
+            addCollectionWallPendingContext(wall.charId, `用户最近在「${draftWall.name}」装修了拾光墙，墙上现在有 ${savedItems.length} 件内容。下次对话可自然提及，不要刻意。`);
+            editStartSnapshotRef.current = cloneWallSnapshot(draftWall, savedItems);
+            setPast([]);
+            setFuture([]);
+            setEditing(false);
+            setSelectedItemId(null);
+            setMenuPoint(null);
+            setEditingTextId(null);
+            setHtmlEditor(null);
+            setLibraryOpen(false);
+            setActiveAssetActions(null);
+            setToolboxOpen(false);
+            await onSaved();
+            say('拾光墙已保存');
+        } catch (error) {
+            console.error('[CollectionHall] finish wall edit failed:', error);
+            say('保存失败，稍后再试');
+        }
+    }, [draftItems, draftWall, flushPersist, onSaved, say, wall.charId]);
+
+    const handleUploadLibraryAsset = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.currentTarget.files?.[0];
+        event.currentTarget.value = '';
+        if (!file || uploadingAsset) return;
+        setUploadingAsset(true);
+        try {
+            const draft = await buildUploadedWallAssetDraft(file);
+            const existingAssets = await DB.getCollectionWallAssetsByHash(draft.hash);
+            const existingUpload = existingAssets.find(asset => asset.origin === 'upload');
+            if (existingUpload) {
+                await DB.saveCollectionWallAsset({
+                    ...existingUpload,
+                    meta: {
+                        ...(existingUpload.meta || {}),
+                        name: existingUpload.meta?.name || draft.meta?.name,
+                        uploadedFileName: existingUpload.meta?.uploadedFileName || file.name,
+                        hiddenFromLibrary: false,
+                    },
+                });
+                say('素材已在库中');
+            } else {
+                await DB.saveCollectionWallAsset(draft);
+                say('已加入素材库');
+            }
+            await onAssetsChanged();
+        } catch (error: any) {
+            console.error('[CollectionHall] custom asset upload failed:', error);
+            say(error?.message || '上传失败，稍后再试');
+        } finally {
+            setUploadingAsset(false);
+        }
+    }, [onAssetsChanged, say, uploadingAsset]);
+
+    const addAssetToWall = useCallback((asset: CollectionWallAsset, itemType: 'image' | 'sticker') => {
+        const now = Date.now();
+        const size = itemType === 'sticker'
+            ? getFittedAssetSize(asset, DEFAULT_STICKER_MAX, DEFAULT_STICKER_MAX, DEFAULT_STICKER_MIN, DEFAULT_STICKER_MIN, DEFAULT_STICKER_MAX, DEFAULT_STICKER_MAX)
+            : getFittedAssetSize(asset, 320, 240, 140, 100, 320, 240);
+        const y = Math.max(WALL_CANVAS_TOP_PADDING, Math.round((viewport.height / scale) * 0.42 - size.h / 2));
+        const item: CollectionWallItem = {
+            id: createLocalItemId(),
+            wallId: wall.id,
+            type: itemType,
+            author: 'user',
+            x: clamp(Math.round(WALL_CANVAS_WIDTH / 2 - size.w / 2), 0, WALL_CANVAS_WIDTH - size.w),
+            y,
+            w: size.w,
+            h: size.h,
+            rotation: itemType === 'sticker' ? ((hashOf(asset.id + now) % 9) - 4) * 0.35 : 0,
+            z: draftItems.reduce((max, candidate) => Math.max(max, candidate.z || 0), 0) + 1,
+            order: draftItems.length,
+            assetId: asset.id,
+            name: getAssetLabel(asset),
+            createdAt: now,
+        };
+        applyDraft(relabelItems([...draftItems, item]), draftWall);
+        setSelectedItemId(item.id);
+        setLibraryOpen(false);
+        setActiveAssetActions(null);
+        say(itemType === 'sticker' ? '贴纸已放到墙上' : '图片已放到墙上');
+    }, [applyDraft, draftItems, draftWall, scale, say, viewport.height, wall.id]);
+
+    const handleSetAssetBackground = useCallback((asset: CollectionWallAsset) => {
+        applyDraft(draftItems, {
+            ...draftWall,
+            background: {
+                type: 'asset',
+                value: asset.id,
+                fit: 'cover',
+                dim: 0,
+            },
+        });
+        setLibraryOpen(false);
+        setActiveAssetActions(null);
+        say('已设为墙纸');
+    }, [applyDraft, draftItems, draftWall, say]);
+
+    const handleSetAvatarFrame = useCallback((asset: CollectionWallAsset) => {
+        const selectedBondItem = selectedItemId
+            ? draftItems.find(item => item.id === selectedItemId && item.type === 'bond')
+            : undefined;
+        const existingBondItem = selectedBondItem || draftItems.find(item => item.type === 'bond');
+        const maxZ = draftItems.reduce((max, candidate) => Math.max(max, candidate.z || 0), 0);
+        const bondItem = existingBondItem || buildDefaultBondWidgetItem(draftWall, draftItems.length, maxZ + 1);
+        const targetId = bondItem.id;
+        const nextItems = (existingBondItem ? draftItems : [bondItem, ...draftItems]).map(item => (
+            item.id === targetId
+                ? normalizeWallItemForCanvas({
+                    ...item,
+                    name: item.name || '头像连接',
+                    bond: {
+                        ...(item.bond || {}),
+                        variant: 'default',
+                        avatarFrame: asset.id,
+                    },
+                })
+                : item
+        ));
+        applyDraft(relabelItems(nextItems), { ...draftWall, defaultBondWidgetHidden: false });
+        setSelectedItemId(targetId);
+        setLibraryOpen(false);
+        setActiveAssetActions(null);
+        say('已设为头像框');
+    }, [applyDraft, draftItems, draftWall, say, selectedItemId]);
+
+    const handleRemoveLibraryAsset = useCallback(async (asset: CollectionWallAsset) => {
+        if (uploadingAsset) return;
+        setUploadingAsset(true);
+        try {
+            await flushPersist();
+            const result = await DB.deleteCollectionWallAsset(asset.id);
+            await onAssetsChanged();
+            setActiveAssetActions(null);
+            say(result === 'hidden' ? '已从素材库移出，墙上已使用的会保留' : '已从素材库移除');
+        } catch (error) {
+            console.error('[CollectionHall] remove custom asset failed:', error);
+            say('移出素材失败，稍后再试');
+        } finally {
+            setUploadingAsset(false);
+        }
+    }, [flushPersist, onAssetsChanged, say, uploadingAsset]);
+
+    const cancelEditing = useCallback(async () => {
+        const snapshot = editStartSnapshotRef.current;
+        if (!snapshot) {
+            setEditing(false);
+            setHtmlEditor(null);
+            setLibraryOpen(false);
+            setActiveAssetActions(null);
+            setToolboxOpen(false);
+            return;
+        }
+        if (saveTimerRef.current != null) {
+            window.clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = null;
+        }
+        try {
+            const storedItems = await DB.getCollectionWallItemsByWallId(wall.id);
+            const snapshotIds = new Set(snapshot.items.filter(item => !item.id.startsWith('loose-')).map(item => item.id));
+            await DB.saveCollectionWall(snapshot.wall);
+            await Promise.all(storedItems.filter(item => !snapshotIds.has(item.id)).map(item => DB.deleteCollectionWallItem(item.id)));
+            await Promise.all(snapshot.items.filter(item => !item.id.startsWith('loose-')).map(item => DB.saveCollectionWallItem({ ...item, wallId: wall.id })));
+            setDraftWall(snapshot.wall);
+            setDraftItems(snapshot.items);
+            setPast([]);
+            setFuture([]);
+            setEditing(false);
+            setSelectedItemId(null);
+            setMenuPoint(null);
+            setEditingTextId(null);
+            setHtmlEditor(null);
+            setLibraryOpen(false);
+            setActiveAssetActions(null);
+            setToolboxOpen(false);
+            onSaved();
+            say('已回到装修前');
+        } catch (error) {
+            console.error('[CollectionHall] cancel wall edit failed:', error);
+            say('回滚失败，请稍后再试');
+        }
+    }, [onSaved, say, wall.id]);
+
+    const undo = useCallback(() => {
+        const previous = past[past.length - 1];
+        if (!previous) return;
+        const current = cloneWallSnapshot(draftWall, draftItems);
+        const nextPast = past.slice(0, -1);
+        setPast(nextPast);
+        setFuture(prev => [current, ...prev].slice(0, 50));
+        setDraftWall(previous.wall);
+        setDraftItems(previous.items);
+        schedulePersist(previous.wall, previous.items);
+    }, [draftItems, draftWall, past, schedulePersist]);
+
+    const redo = useCallback(() => {
+        const next = future[0];
+        if (!next) return;
+        const current = cloneWallSnapshot(draftWall, draftItems);
+        setFuture(prev => prev.slice(1));
+        setPast(prev => [...prev.slice(-49), current]);
+        setDraftWall(next.wall);
+        setDraftItems(next.items);
+        schedulePersist(next.wall, next.items);
+    }, [draftItems, draftWall, future, schedulePersist]);
+
+    const arrangeAll = useCallback(() => {
+        applyDraft(relabelItems(materializePlacedLooseWallItems(autoArrangeWallItems(draftItems))), draftWall);
+        setSelectedItemId(null);
+        setMenuPoint(null);
+    }, [applyDraft, draftItems, draftWall]);
+
+    const updateItem = useCallback((id: string, patch: Partial<CollectionWallItem>) => {
+        const nextItems = draftItems.map(item => item.id === id ? normalizeWallItemForCanvas({ ...item, ...patch }) : item);
+        applyDraft(nextItems, draftWall);
+    }, [applyDraft, draftItems, draftWall]);
+
+    const updateTextStyle = useCallback((id: string, patch: Partial<NonNullable<CollectionWallItem['text']>>) => {
+        const source = draftItems.find(item => item.id === id);
+        if (!source || source.type !== 'text') return;
+        updateItem(id, {
+            text: {
+                content: source.text?.content || '新便签',
+                preset: source.text?.preset || 'big_plain',
+                ...source.text,
+                ...patch,
+            },
+        });
+    }, [draftItems, updateItem]);
+
+    const handleUploadTextFont = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.currentTarget.files?.[0];
+        event.currentTarget.value = '';
+        const targetId = selectedUserTextItem?.id;
+        if (!file || !targetId || uploadingFont) return;
+        setUploadingFont(true);
+        try {
+            const draft = await buildUploadedWallFontDraft(file);
+            const existingAssets = await DB.getCollectionWallAssetsByHash(draft.hash);
+            const existingFont = existingAssets.find(asset => asset.origin === 'upload' && asset.meta?.assetKind === 'font');
+            const asset = existingFont
+                ? await DB.saveCollectionWallAsset({
+                    ...existingFont,
+                    meta: {
+                        ...(existingFont.meta || {}),
+                        assetKind: 'font',
+                        name: existingFont.meta?.name || draft.meta?.name,
+                        uploadedFileName: existingFont.meta?.uploadedFileName || file.name,
+                        hiddenFromLibrary: false,
+                    },
+                })
+                : await DB.saveCollectionWallAsset(draft);
+            updateTextStyle(targetId, {
+                fontAssetId: asset.id,
+                fontFamily: `"${getTextFontLabel(asset)}", var(--ar-font-hand)`,
+            });
+            await onAssetsChanged();
+            say('字体已应用到文字便签');
+        } catch (error: any) {
+            console.error('[CollectionHall] text font upload failed:', error);
+            say(error?.message || '字体上传失败，稍后再试');
+        } finally {
+            setUploadingFont(false);
+        }
+    }, [onAssetsChanged, say, selectedUserTextItem?.id, updateTextStyle, uploadingFont]);
+
+    const handleExportDecorPreset = useCallback(async () => {
+        if (!canPersist) {
+            say('这面临时墙不能导出预设');
+            return;
+        }
+        try {
+            const preset = await buildCollectionWallDecorPreset(draftWall, draftItems, assetById);
+            const blob = new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            const safeWallName = String(draftWall.name || 'lightwall')
+                .replace(/[\\/:*?"<>|]+/g, '-')
+                .replace(/\s+/g, '-')
+                .slice(0, 32) || 'lightwall';
+            link.href = url;
+            link.download = `sully-lightwall-style-${safeWallName}-${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.setTimeout(() => URL.revokeObjectURL(url), 800);
+            say(`已导出风格预设：${preset.decor.items.length} 件装饰`);
+        } catch (error: any) {
+            console.error('[CollectionHall] export decor preset failed:', error);
+            say(error?.message || '导出预设失败，稍后再试');
+        }
+    }, [assetById, canPersist, draftItems, draftWall, say]);
+
+    const handleImportDecorPresetFile = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.currentTarget.files?.[0];
+        event.currentTarget.value = '';
+        if (!file || importingPreset) return;
+        if (!canPersist) {
+            say('这面临时墙不能导入预设');
+            return;
+        }
+
+        setImportingPreset(true);
+        try {
+            const preset = parseCollectionWallDecorPreset(JSON.parse(await file.text()));
+            const assetIdByKey = new Map<string, string>();
+
+            for (const packed of preset.decor.assets) {
+                if (!packed?.key || !packed.dataUrl) continue;
+                const blob = dataUrlToBlob(packed.dataUrl);
+                const buffer = await blob.arrayBuffer();
+                const hash = packed.hash || fnv1aBytes(buffer);
+                const meta = { ...(packed.meta || {}) };
+                const assetKind = meta.assetKind || 'image';
+                const existingAssets = await DB.getCollectionWallAssetsByHash(hash);
+                const existingUpload = existingAssets.find(asset => (
+                    asset.origin === 'upload'
+                    && (asset.meta?.assetKind || 'image') === assetKind
+                ));
+                const dimensions: { width?: number; height?: number } = packed.width || packed.height
+                    ? { width: packed.width, height: packed.height }
+                    : assetKind === 'font' ? {} : await readImageDimensions(blob).catch(() => ({}));
+                const asset = existingUpload
+                    ? await DB.saveCollectionWallAsset({
+                        ...existingUpload,
+                        meta: {
+                            ...(existingUpload.meta || {}),
+                            ...meta,
+                            name: existingUpload.meta?.name || meta.name || '导入素材',
+                            uploadedFileName: existingUpload.meta?.uploadedFileName || meta.uploadedFileName,
+                            hiddenFromLibrary: false,
+                        },
+                    })
+                    : await DB.saveCollectionWallAsset({
+                        blob,
+                        mime: packed.mime || blob.type || 'application/octet-stream',
+                        width: dimensions.width,
+                        height: dimensions.height,
+                        bytes: packed.bytes || blob.size,
+                        hash,
+                        origin: 'upload',
+                        meta: {
+                            ...meta,
+                            name: meta.name || (assetKind === 'font' ? '导入字体' : '导入素材'),
+                            hiddenFromLibrary: false,
+                        },
+                    });
+                assetIdByKey.set(packed.key, asset.id);
+            }
+
+            const importedDecorItems = createCollectionWallDecorItemsFromPreset(preset, assetIdByKey, wall.id);
+            const nextBackground = resolveCollectionWallPresetBackground(preset, assetIdByKey, draftWall.background);
+            const avatarFrameAssetId = preset.decor.avatarFrameAssetKey
+                ? assetIdByKey.get(preset.decor.avatarFrameAssetKey)
+                : undefined;
+            const keptItems = draftItems
+                .filter(item => !isCollectionWallDecorPresetItem(item, item.assetId ? assetById.get(item.assetId) : undefined))
+                .map(item => item.type === 'bond'
+                    ? normalizeWallItemForCanvas({
+                        ...item,
+                        bond: {
+                            ...(item.bond || {}),
+                            variant: 'default',
+                            avatarFrame: avatarFrameAssetId,
+                        },
+                    })
+                    : item);
+            const nextItems = relabelItems([...keptItems, ...importedDecorItems]);
+            applyDraft(nextItems, {
+                ...draftWall,
+                background: nextBackground,
+            });
+            setSelectedItemId(null);
+            setMenuPoint(null);
+            setEditingTextId(null);
+            setHtmlEditor(null);
+            setLibraryOpen(false);
+            setActiveAssetActions(null);
+            await onAssetsChanged();
+            say(`已导入风格预设：${importedDecorItems.length} 件装饰`);
+        } catch (error: any) {
+            console.error('[CollectionHall] import decor preset failed:', error);
+            say(error?.message || '导入预设失败，请检查文件');
+        } finally {
+            setImportingPreset(false);
+        }
+    }, [applyDraft, assetById, canPersist, draftItems, draftWall, importingPreset, onAssetsChanged, say, wall.id]);
+
+    const openHtmlEditor = useCallback((id?: string) => {
+        if (!editing) enterEditing();
+        const item = id ? draftItems.find(candidate => candidate.id === id) : undefined;
+        setHtmlEditor({
+            itemId: id,
+            draft: normalizeWallHtml(item?.html || DEFAULT_CUSTOM_WALL_HTML),
+        });
+        if (id) setSelectedItemId(id);
+        setMenuPoint(null);
+        setLibraryOpen(false);
+    }, [draftItems, editing, enterEditing]);
+
+    const handleHtmlFileUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.currentTarget.files?.[0];
+        event.currentTarget.value = '';
+        if (!file) return;
+        if (file.size > CUSTOM_WALL_HTML_MAX_CHARS * 2) {
+            say('HTML 文件太大了，先控制在 120KB 左右');
+            return;
+        }
+        try {
+            const text = await file.text();
+            setHtmlEditor(prev => prev ? { ...prev, draft: normalizeWallHtml(text) } : prev);
+            say('已读取 HTML 文件');
+        } catch (error) {
+            console.error('[CollectionHall] read html file failed:', error);
+            say('读取 HTML 文件失败');
+        }
+    }, [say]);
+
+    const commitHtmlCard = useCallback(() => {
+        if (!htmlEditor) return;
+        const html = normalizeWallHtml(htmlEditor.draft.trim());
+        if (!html) {
+            say('先粘贴或上传一段 HTML');
+            return;
+        }
+        const now = Date.now();
+        if (htmlEditor.itemId) {
+            const item = draftItems.find(candidate => candidate.id === htmlEditor.itemId);
+            if (!item) return;
+            updateItem(item.id, {
+                type: 'html',
+                bookId: undefined,
+                html,
+                name: item.name || '自定义卡',
+            });
+            setSelectedItemId(item.id);
+            say('HTML 卡已更新');
+        } else {
+            const item: CollectionWallItem = {
+                id: createLocalItemId(),
+                wallId: wall.id,
+                type: 'html',
+                author: 'user',
+                x: clamp(Math.round(WALL_CANVAS_WIDTH / 2 - DEFAULT_HTML_W / 2), 0, WALL_CANVAS_WIDTH - DEFAULT_HTML_W),
+                y: Math.max(WALL_CANVAS_TOP_PADDING, Math.round((viewport.height / scale) * 0.42 - DEFAULT_HTML_H / 2)),
+                w: DEFAULT_HTML_W,
+                h: DEFAULT_HTML_H,
+                rotation: ((hashOf(String(now)) % 7) - 3) * 0.35,
+                z: draftItems.reduce((max, candidate) => Math.max(max, candidate.z || 0), 0) + 1,
+                order: draftItems.length,
+                html,
+                name: '自定义卡',
+                createdAt: now,
+            };
+            applyDraft(relabelItems([...draftItems, item]), draftWall);
+            setSelectedItemId(item.id);
+            say('已插入 HTML 卡');
+        }
+        setHtmlEditor(null);
+    }, [applyDraft, draftItems, draftWall, htmlEditor, scale, say, updateItem, viewport.height, wall.id]);
+
+    const deleteItem = useCallback((id: string) => {
+        const deleted = draftItems.find(item => item.id === id);
+        const nextItems = relabelItems(draftItems.filter(item => item.id !== id));
+        const nextWall = deleted?.type === 'bond'
+            ? { ...draftWall, defaultBondWidgetHidden: true }
+            : draftWall;
+        applyDraft(nextItems, nextWall);
+        setSelectedItemId(null);
+        setMenuPoint(null);
+        if (editingTextId === id) setEditingTextId(null);
+        if (htmlEditor?.itemId === id) setHtmlEditor(null);
+    }, [applyDraft, draftItems, draftWall, editingTextId, htmlEditor?.itemId]);
+
+    const renameItem = useCallback((id: string) => {
+        const item = draftItems.find(candidate => candidate.id === id);
+        if (!item) return;
+        const nextName = window.prompt('给这件墙上物起名', item.name || getEditorItemLabel(item, entryByItemId));
+        if (nextName == null) return;
+        updateItem(id, { name: nextName.replace(/\s+/g, ' ').trim().slice(0, 32) || undefined });
+    }, [draftItems, entryByItemId, updateItem]);
+
+    const editSelectedItem = useCallback((id: string) => {
+        const item = draftItems.find(candidate => candidate.id === id);
+        if (!item) return;
+        setMenuPoint(null);
+        if (item.type === 'text') {
+            setEditingTextId(id);
+            return;
+        }
+        if (item.type === 'html' || (item.type === 'card' && item.html && !item.bookId)) {
+            openHtmlEditor(id);
+            return;
+        }
+        renameItem(id);
+    }, [draftItems, openHtmlEditor, renameItem]);
+
+    const bringToFront = useCallback((id: string) => {
+        const maxZ = draftItems.reduce((max, item) => Math.max(max, item.z || 0), 0);
+        updateItem(id, { z: maxZ + 1 });
+        setMenuPoint(null);
+    }, [draftItems, updateItem]);
+
+    const sendToBack = useCallback((id: string) => {
+        const minZ = draftItems.reduce((min, item) => Math.min(min, item.z || 0), 0);
+        updateItem(id, { z: minZ - 1 });
+        setMenuPoint(null);
+    }, [draftItems, updateItem]);
+
+    const rotateItemBy = useCallback((id: string, delta: number) => {
+        const item = draftItems.find(candidate => candidate.id === id);
+        if (!item) return;
+        updateItem(id, { rotation: Number(((item.rotation || 0) + delta).toFixed(2)) });
+        setMenuPoint(null);
+    }, [draftItems, updateItem]);
+
+    const screenToCanvas = useCallback((clientX: number, clientY: number) => {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return { x: 0, y: 0 };
+        return {
+            x: (clientX - rect.left) / scale,
+            y: (clientY - rect.top) / scale,
+        };
+    }, [scale]);
+
+    const addTextAt = useCallback((clientX: number, clientY: number) => {
+        const point = screenToCanvas(clientX, clientY);
+        const now = Date.now();
+        const item: CollectionWallItem = {
+            id: createLocalItemId(),
+            wallId: wall.id,
+            type: 'text',
+            author: 'user',
+            x: clamp(Math.round(point.x - DEFAULT_TEXT_W / 2), 0, WALL_CANVAS_WIDTH - DEFAULT_TEXT_W),
+            y: Math.max(0, Math.round(point.y - DEFAULT_TEXT_H / 2)),
+            w: DEFAULT_TEXT_W,
+            h: DEFAULT_TEXT_H,
+            rotation: ((hashOf(String(now)) % 7) - 3) * 0.5,
+            z: draftItems.reduce((max, item) => Math.max(max, item.z || 0), 0) + 1,
+            order: draftItems.length,
+            text: {
+                content: '新便签',
+                preset: 'big_plain',
+                color: '#4d3438',
+                fontSize: 28,
+                align: 'center',
+            },
+            name: '文字便签',
+            createdAt: now,
+        };
+        applyDraft(relabelItems([...draftItems, item]), draftWall);
+        setSelectedItemId(item.id);
+        setEditingTextId(item.id);
+    }, [applyDraft, draftItems, draftWall, screenToCanvas, wall.id]);
+
+    const commitText = useCallback((id: string, content: string) => {
+        const source = draftItems.find(item => item.id === id);
+        const maxLength = source?.author === 'char' ? 300 : 160;
+        const normalized = content.trim().slice(0, maxLength);
+        updateItem(id, {
+            text: {
+                content: normalized || '新便签',
+                preset: source?.text?.preset || (source?.author === 'char' ? 'char_note' : 'big_plain'),
+                color: source?.text?.color,
+                stroke: source?.text?.stroke,
+                fontAssetId: source?.text?.fontAssetId,
+                fontFamily: source?.text?.fontFamily,
+                fontSize: source?.text?.fontSize,
+                align: source?.text?.align,
+                remarkTemplate: source?.text?.remarkTemplate,
+            },
+        });
+        setEditingTextId(null);
+    }, [draftItems, updateItem]);
+
+    const startTrayDrag = useCallback((item: CollectionWallItem, event: React.PointerEvent<HTMLButtonElement>) => {
+        if (!editing) return;
+        event.preventDefault();
+        const pointerId = event.pointerId;
+        const start = { x: event.clientX, y: event.clientY };
+        let moved = false;
+        const handleMove = (moveEvent: PointerEvent) => {
+            if (moveEvent.pointerId !== pointerId) return;
+            if (Math.abs(moveEvent.clientX - start.x) + Math.abs(moveEvent.clientY - start.y) > 8) moved = true;
+        };
+        const handleUp = (upEvent: PointerEvent) => {
+            if (upEvent.pointerId !== pointerId) return;
+            window.removeEventListener('pointermove', handleMove);
+            window.removeEventListener('pointerup', handleUp);
+            if (!moved) return;
+            const point = screenToCanvas(upEvent.clientX, upEvent.clientY);
+            const nextId = isLooseWallItem(item) ? createLocalItemId() : item.id;
+            const nextItems = draftItems.map(candidate => candidate.id === item.id
+                ? normalizeWallItemForCanvas({
+                    ...candidate,
+                    id: nextId,
+                    x: clamp(Math.round(point.x - candidate.w / 2), 0, WALL_CANVAS_WIDTH - candidate.w),
+                    y: Math.max(0, Math.round(point.y - candidate.h / 2)),
+                    z: draftItems.reduce((max, current) => Math.max(max, current.z || 0), 0) + 1,
+                })
+                : candidate);
+            applyDraft(relabelItems(nextItems), draftWall);
+            setSelectedItemId(nextId);
+        };
+        window.addEventListener('pointermove', handleMove);
+        window.addEventListener('pointerup', handleUp);
+    }, [applyDraft, draftItems, draftWall, editing, screenToCanvas]);
+
+    const clearLongPress = useCallback(() => {
+        if (longPressTimerRef.current != null) {
+            window.clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+    }, []);
+
+    const startItemLongPress = useCallback((item: CollectionWallItem, event: React.PointerEvent<HTMLDivElement>) => {
+        clearLongPress();
+        const point = { x: event.clientX, y: event.clientY };
+        longPressTimerRef.current = window.setTimeout(() => {
+            enterEditing();
+            setSelectedItemId(item.id);
+            setMenuPoint(point);
+        }, 520);
+    }, [clearLongPress, enterEditing]);
+
+    const renderItem = (item: CollectionWallItem) => {
+        const entry = getEntryForItem(item);
+        if (!entry) return null;
+        const selected = selectedItemId === item.id;
+        const style = {
+            '--x': `${item.x || 0}px`,
+            '--y': `${item.y || 0}px`,
+            '--r': `${item.rotation || 0}deg`,
+            '--z': item.z || 1,
+            '--item-w': `${item.w}px`,
+            '--item-h': `${item.h}px`,
+        } as React.CSSProperties;
+
+        return (
+            <div
+                key={item.id}
+                ref={node => {
+                    if (node) itemRefs.current.set(item.id, node);
+                    else itemRefs.current.delete(item.id);
+                }}
+                className={`ar-wall-free-item${editing ? ' editing' : ''}${selected ? ' selected' : ''}`}
+                style={style}
+                data-wall-item-id={item.id}
+                onPointerDown={event => {
+                    if (editing) {
+                        setSelectedItemId(item.id);
+                        setMenuPoint(null);
+                    }
+                    startItemLongPress(item, event);
+                }}
+                onPointerMove={clearLongPress}
+                onPointerUp={clearLongPress}
+                onPointerCancel={clearLongPress}
+                onContextMenu={event => {
+                    event.preventDefault();
+                    enterEditing();
+                    setSelectedItemId(item.id);
+                    setMenuPoint({ x: event.clientX, y: event.clientY });
+                }}
+                onDoubleClick={event => {
+                    if (!editing) return;
+                    if (entry.type === 'text') {
+                        event.stopPropagation();
+                        setEditingTextId(item.id);
+                    }
+                    if (entry.type === 'html') {
+                        event.stopPropagation();
+                        openHtmlEditor(item.id);
+                    }
+                }}
+                onClick={() => {
+                    if (editing) return;
+                    if (entry.type === 'book') onPickBook(entry.book);
+                    if (entry.type === 'image') onPickImage(entry, draftWall.name);
+                }}
+            >
+                {entry.type === 'book' && (
+                    <CollectionWallCardFrame book={entry.book} width={item.w} height={item.h} />
+                )}
+                {entry.type === 'html' && <CollectionWallHtmlFrame item={item} />}
+                {(entry.type === 'image' || entry.type === 'sticker') && <WallImageLayer entry={entry} />}
+                {entry.type === 'bond' && (
+                    <BondWidgetLayer
+                        userName={userName}
+                        userAvatar={userAvatar}
+                        charName={charName}
+                        charAvatar={charAvatar}
+                        sinceAt={item.createdAt}
+                        avatarFrameAsset={item.bond?.avatarFrame ? assetById.get(item.bond.avatarFrame) || null : null}
+                    />
+                )}
+                {entry.type === 'text' && (
+                    <WallTextLayer
+                        entry={{ ...entry, item }}
+                        charName={charName}
+                        charAvatar={charAvatar}
+                        fontAsset={item.text?.fontAssetId ? assetById.get(item.text.fontAssetId) || null : null}
+                        editing={editingTextId === item.id}
+                        onCommit={content => commitText(item.id, content)}
+                    />
+                )}
+            </div>
+        );
+    };
+
+    return (
+        <div
+            className={`ar-full-wall${editing ? ' editing' : ''}${preview ? ' preview' : ''}`}
+            onClick={() => {
+                if (preview) setPreview(false);
+                if (actionMenuOpen) setActionMenuOpen(false);
+                if (activeAssetActions) setActiveAssetActions(null);
+            }}
+            style={{
+                '--wall-bg': wallBackgroundValue,
+                '--wall-dim': renderedWallBackgroundEffects.dim,
+                '--wall-noise-opacity': renderedWallBackgroundEffects.noiseOpacity,
+                '--wall-scale': scale,
+            } as React.CSSProperties}
+        >
+            <div className="ar-full-bg" />
+            {!preview && (
+                <>
+                    <button type="button" className="ar-full-exit" aria-label="退出拾光墙" onClick={editing ? cancelEditing : onClose}>‹</button>
+                    <div className={`ar-full-actions${actionMenuOpen ? ' open' : ''}`}>
                         <button
                             type="button"
-                            key={shape}
-                            className={`ar-wchip${shapeFilter === shape ? ' on' : ''}`}
-                            onClick={() => setShapeFilter(shape)}
+                            className="ar-full-action"
+                            aria-expanded={actionMenuOpen}
+                            aria-controls="ar-full-action-menu"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                setActionMenuOpen(prev => !prev);
+                            }}
                         >
-                            {shape}
+                            <PaintBrush weight="bold" size={15} />布置
+                        </button>
+                        {actionMenuOpen && (
+                            <div id="ar-full-action-menu" className="ar-full-action-menu" onClick={event => event.stopPropagation()}>
+                                <button
+                                    type="button"
+                                    className="ar-full-menu-action primary"
+                                    onClick={() => {
+                                        enterEditing();
+                                        setActionMenuOpen(false);
+                                    }}
+                                >
+                                    装修
+                                </button>
+                                <button
+                                    type="button"
+                                    className="ar-full-menu-action"
+                                    onClick={() => {
+                                        setPreview(true);
+                                        setActionMenuOpen(false);
+                                    }}
+                                >
+                                    预览
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </>
+            )}
+            {editing && trayItems.length > 0 && (
+                <div className="ar-tray" aria-label="待安置内容">
+                    {trayItems.map(item => (
+                        <button
+                            key={item.id}
+                            type="button"
+                            className="ar-tray-item"
+                            onPointerDown={event => startTrayDrag(item, event)}
+                        >
+                            {getEditorItemLabel(item, entryByItemId)}
                         </button>
                     ))}
                 </div>
             )}
-            {visibleEntries.length > 0 ? (
-                <div className="ar-wall-grid">
-                    {visibleEntries.map((entry, index) => {
-                        if (entry.type === 'image') {
-                            return <ImageFragment key={entry.id} entry={entry} index={index} onPick={onPickImage} />;
-                        }
-                        if (entry.type === 'text') {
-                            return <TextFragment key={entry.id} entry={entry} />;
-                        }
-                        return (
-                            <FreeformFragment
-                                key={entry.id}
-                                book={entry.book}
-                                index={index}
-                                pulling={pullingId === entry.book.id}
-                                onPick={onPickBook}
-                            />
-                        );
-                    })}
+            <div
+                className="ar-full-stage-wrap"
+                style={{ height: `${canvasHeight * scale}px` }}
+                onDoubleClick={event => {
+                    if (!editing) return;
+                    if ((event.target as HTMLElement).closest('.ar-wall-free-item')) return;
+                    addTextAt(event.clientX, event.clientY);
+                }}
+            >
+                <div
+                    ref={canvasRef}
+                    className="ar-full-canvas"
+                    style={{ height: canvasHeight }}
+                >
+                    {visibleItems.length > 0 ? visibleItems.map(renderItem) : (
+                        <div className="ar-wall-empty-canvas">这面墙还没有安置内容。</div>
+                    )}
                 </div>
-            ) : (
-                <div className="ar-frag-empty">这个形态下暂时还没有碎片。</div>
+            </div>
+            {editing && selectedTarget && (
+                <Moveable
+                    target={selectedTarget}
+                    draggable
+                    resizable
+                    rotatable
+                    snappable
+                    snapDirections={{ top: true, left: true, bottom: true, right: true, center: true, middle: true }}
+                    elementSnapDirections={{ top: true, left: true, bottom: true, right: true, center: true, middle: true }}
+                    bounds={{ left: 0, top: 0, right: WALL_CANVAS_WIDTH, bottom: canvasHeight }}
+                    throttleDrag={0}
+                    throttleResize={0}
+                    throttleRotate={0}
+                    onDrag={({ target, transform }: any) => {
+                        target.style.transform = transform;
+                    }}
+                    onDragEnd={({ target, lastEvent }: any) => {
+                        target.classList.remove('dragging');
+                        const item = draftItems.find(candidate => candidate.id === selectedItemId);
+                        const translate = lastEvent?.beforeTranslate;
+                        if (!item || !translate) return;
+                        updateItem(item.id, {
+                            x: clamp(Math.round(translate[0]), 0, WALL_CANVAS_WIDTH - item.w),
+                            y: Math.max(0, Math.round(translate[1])),
+                        });
+                    }}
+                    onDragStart={({ target }: any) => {
+                        target.classList.add('dragging');
+                    }}
+                    onResize={({ target, width, height, drag }: any) => {
+                        target.style.width = `${width}px`;
+                        target.style.height = `${height}px`;
+                        target.style.transform = drag.transform;
+                    }}
+                    onResizeEnd={({ lastEvent }: any) => {
+                        const item = draftItems.find(candidate => candidate.id === selectedItemId);
+                        if (!item || !lastEvent) return;
+                        updateItem(item.id, {
+                            w: Math.round(lastEvent.width),
+                            h: Math.round(lastEvent.height),
+                            x: clamp(Math.round(lastEvent.drag.beforeTranslate[0]), 0, WALL_CANVAS_WIDTH - lastEvent.width),
+                            y: Math.max(0, Math.round(lastEvent.drag.beforeTranslate[1])),
+                        });
+                    }}
+                    onRotate={({ target, drag }: any) => {
+                        target.style.transform = drag.transform;
+                    }}
+                    onRotateEnd={({ lastEvent }: any) => {
+                        const item = draftItems.find(candidate => candidate.id === selectedItemId);
+                        if (!item || !lastEvent) return;
+                        const nextRotation = Number(lastEvent.beforeRotate ?? lastEvent.rotate ?? item.rotation ?? 0);
+                        updateItem(item.id, { rotation: Number(nextRotation.toFixed(2)) });
+                    }}
+                />
             )}
-        </section>
+            {editing && selectedItem && (
+                <div className="ar-selection-actions" onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
+                    <button type="button" aria-label="向左旋转" title="向左旋转" onClick={() => rotateItemBy(selectedItem.id, -15)}><ArrowCounterClockwise weight="bold" size={14} />左转</button>
+                    <button type="button" aria-label="向右旋转" title="向右旋转" onClick={() => rotateItemBy(selectedItem.id, 15)}><ArrowClockwise weight="bold" size={14} />右转</button>
+                    <button type="button" onClick={() => editSelectedItem(selectedItem.id)}>编辑</button>
+                    <button type="button" onClick={() => bringToFront(selectedItem.id)}>置顶</button>
+                    <button type="button" className="danger" onClick={() => deleteItem(selectedItem.id)}>删除</button>
+                </div>
+            )}
+            {editing && selectedUserTextItem && (
+                <section className="ar-text-style-panel" aria-label="文字样式" onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
+                    <div className="ar-text-style-head">
+                        <span>
+                            <b>文字样式</b>
+                            <small>{getTextFontLabel(selectedTextFontAsset)}</small>
+                        </span>
+                        <button type="button" onClick={() => textFontInputRef.current?.click()} disabled={uploadingFont}>
+                            <UploadSimple weight="bold" size={13} />{uploadingFont ? '处理中' : '上传字体'}
+                        </button>
+                        <input
+                            ref={textFontInputRef}
+                            type="file"
+                            hidden
+                            accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2,application/vnd.ms-opentype"
+                            onChange={handleUploadTextFont}
+                        />
+                    </div>
+                    <div className="ar-text-color-row">
+                        {WALL_TEXT_COLORS.map(color => (
+                            <button
+                                key={color}
+                                type="button"
+                                className={(selectedUserTextItem.text?.color || '#4d3438').toLowerCase() === color.toLowerCase() ? 'on' : ''}
+                                style={{ '--text-color': color } as React.CSSProperties}
+                                aria-label={`文字颜色 ${color}`}
+                                onClick={() => updateTextStyle(selectedUserTextItem.id, { color })}
+                            />
+                        ))}
+                        <label className="ar-text-color-picker">
+                            <span>自选</span>
+                            <input
+                                type="color"
+                                value={selectedUserTextItem.text?.color || '#4d3438'}
+                                onChange={event => updateTextStyle(selectedUserTextItem.id, { color: event.target.value })}
+                            />
+                        </label>
+                    </div>
+                    <label className="ar-text-range">
+                        <span>字号 {clamp(Number(selectedUserTextItem.text?.fontSize) || 28, 12, 72)}px</span>
+                        <input
+                            type="range"
+                            min="12"
+                            max="72"
+                            value={clamp(Number(selectedUserTextItem.text?.fontSize) || 28, 12, 72)}
+                            onChange={event => updateTextStyle(selectedUserTextItem.id, { fontSize: Number(event.target.value) })}
+                        />
+                    </label>
+                    <div className="ar-text-style-actions">
+                        {(['left', 'center', 'right'] as const).map(align => (
+                            <button
+                                key={align}
+                                type="button"
+                                className={(selectedUserTextItem.text?.align || 'center') === align ? 'on' : ''}
+                                onClick={() => updateTextStyle(selectedUserTextItem.id, { align })}
+                            >
+                                {align === 'left' ? '左' : align === 'right' ? '右' : '中'}
+                            </button>
+                        ))}
+                        <label className="ar-text-stroke">
+                            <input
+                                type="checkbox"
+                                checked={Boolean(selectedUserTextItem.text?.stroke)}
+                                onChange={event => updateTextStyle(selectedUserTextItem.id, { stroke: event.target.checked })}
+                            />
+                            描边
+                        </label>
+                        {selectedUserTextItem.text?.fontAssetId && (
+                            <button type="button" onClick={() => updateTextStyle(selectedUserTextItem.id, { fontAssetId: undefined, fontFamily: undefined })}>默认字体</button>
+                        )}
+                    </div>
+                </section>
+            )}
+            {editing && selectedItemId && menuPoint && (
+                <div
+                    className="ar-wall-item-menu"
+                    style={{ left: Math.min(menuPoint.x, viewport.width - 330), top: Math.max(56, menuPoint.y - 48) }}
+                >
+                    <button type="button" data-menu="edit" onClick={() => editSelectedItem(selectedItemId)}>编辑</button>
+                    <button type="button" onClick={() => bringToFront(selectedItemId)}>置顶</button>
+                    <button type="button" onClick={() => sendToBack(selectedItemId)}>置底</button>
+                    <button type="button" onClick={() => renameItem(selectedItemId)}>起名</button>
+                    <button type="button" data-menu="delete" onClick={() => deleteItem(selectedItemId)}>删除</button>
+                </div>
+            )}
+            {editing && libraryOpen && !preview && (
+                <section className="ar-asset-drawer" aria-label="拾光墙素材库">
+                    <div className="ar-asset-drawer-hd">
+                        <div>
+                            <h3>素材库</h3>
+                            <p>{customLibraryAssets.length} 件自定义素材</p>
+                        </div>
+                        <button
+                            type="button"
+                            className="ar-asset-upload"
+                            disabled={uploadingAsset}
+                            onClick={() => assetFileInputRef.current?.click()}
+                        >
+                            <UploadSimple weight="bold" size={14} />{uploadingAsset ? '处理中' : '上传'}
+                        </button>
+                        <input
+                            ref={assetFileInputRef}
+                            type="file"
+                            hidden
+                            accept="image/png,image/jpeg,image/webp,image/gif"
+                            onChange={handleUploadLibraryAsset}
+                        />
+                    </div>
+                    {customLibraryAssets.length === 0 ? (
+                        <div className="ar-asset-empty">还没有自定义素材。</div>
+                    ) : (
+                        <div className="ar-asset-grid">
+                            {customLibraryAssets.map(asset => (
+                                <WallAssetLibraryCard
+                                    key={asset.id}
+                                    asset={asset}
+                                    onUseSticker={(nextAsset) => addAssetToWall(nextAsset, 'sticker')}
+                                    onUseImage={(nextAsset) => addAssetToWall(nextAsset, 'image')}
+                                    onUseBackground={handleSetAssetBackground}
+                                    onUseAvatarFrame={handleSetAvatarFrame}
+                                    onOpenActions={setActiveAssetActions}
+                                    onRemove={handleRemoveLibraryAsset}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </section>
+            )}
+            {editing && activeAssetActions && !preview && (
+                <WallAssetActionSheet
+                    asset={activeAssetActions}
+                    onUseImage={(asset) => addAssetToWall(asset, 'image')}
+                    onUseSticker={(asset) => addAssetToWall(asset, 'sticker')}
+                    onUseBackground={handleSetAssetBackground}
+                    onUseAvatarFrame={handleSetAvatarFrame}
+                    onRemove={handleRemoveLibraryAsset}
+                    onClose={() => setActiveAssetActions(null)}
+                />
+            )}
+            {editing && htmlEditor && !preview && (
+                <section
+                    className="html-modal open"
+                    aria-label="自定义 HTML 卡"
+                    onMouseDown={event => event.stopPropagation()}
+                    onPointerDown={event => event.stopPropagation()}
+                >
+                    <div className="html-panel">
+                        <div className="html-panel-hd">
+                            <h3>自定义 HTML 卡</h3>
+                            <button type="button" className="html-x" aria-label="关闭" onClick={() => setHtmlEditor(null)}>×</button>
+                        </div>
+                        <p className="html-hint">粘贴或上传一段 HTML，会作为一张卡片渲染到墙上。</p>
+                        <button type="button" className="html-upload" onClick={() => htmlFileInputRef.current?.click()}>
+                            <UploadSimple weight="bold" size={14} />上传 HTML
+                        </button>
+                        <input
+                            ref={htmlFileInputRef}
+                            type="file"
+                            hidden
+                            accept=".html,.htm,text/html"
+                            onChange={handleHtmlFileUpload}
+                        />
+                        <textarea
+                            className="html-input"
+                            value={htmlEditor.draft}
+                            maxLength={CUSTOM_WALL_HTML_MAX_CHARS}
+                            spellCheck={false}
+                            onChange={event => setHtmlEditor(prev => prev ? { ...prev, draft: event.target.value } : prev)}
+                        />
+                        <div className="html-actions">
+                            {htmlEditor.itemId && (
+                                <button
+                                    type="button"
+                                    className="danger"
+                                    onClick={() => {
+                                        const itemId = htmlEditor?.itemId;
+                                        if (!itemId) return;
+                                        deleteItem(itemId);
+                                        setHtmlEditor(null);
+                                        say('HTML 卡已删除');
+                                    }}
+                                >
+                                    删除这张 HTML 卡
+                                </button>
+                            )}
+                            <button type="button" onClick={() => setHtmlEditor(null)}>取消</button>
+                            <button type="button" className="primary" onClick={commitHtmlCard}>插入 / 更新</button>
+                        </div>
+                    </div>
+                </section>
+            )}
+            {editing && (
+                <input
+                    ref={decorPresetFileInputRef}
+                    type="file"
+                    hidden
+                    accept=".json,application/json"
+                    onChange={handleImportDecorPresetFile}
+                />
+            )}
+            {editing && (
+                <div className={`ar-edit-toolbar${toolboxOpen ? ' open' : ' collapsed'}`}>
+                    <button type="button" className="ar-edit-done" onClick={finishEditing}><Check weight="bold" size={15} />完成</button>
+                    <button
+                        type="button"
+                        className="ar-edit-toggle"
+                        aria-expanded={toolboxOpen}
+                        onClick={() => setToolboxOpen(prev => !prev)}
+                    >
+                        <PaintBrush weight="bold" size={15} />{toolboxOpen ? '收起' : '工具'}
+                    </button>
+                    {toolboxOpen && (
+                        <span className="ar-edit-tools">
+                            <button type="button" onClick={() => addTextAt(viewport.width / 2, viewport.height * 0.42)}><PencilSimple weight="bold" size={15} />便签</button>
+                            <button type="button" onClick={() => openHtmlEditor()}><PencilSimple weight="bold" size={15} />HTML卡</button>
+                            <button type="button" onClick={() => setLibraryOpen(prev => !prev)}><ImageSquare weight="bold" size={15} />素材库</button>
+                            <button type="button" onClick={handleExportDecorPreset}><PaperPlaneTilt weight="bold" size={15} />导出预设</button>
+                            <button type="button" disabled={importingPreset} onClick={() => decorPresetFileInputRef.current?.click()}><UploadSimple weight="bold" size={15} />{importingPreset ? '导入中' : '导入预设'}</button>
+                            <button type="button" onClick={arrangeAll}>整理</button>
+                        </span>
+                    )}
+                    <button type="button" aria-label="撤销" title="撤销" disabled={past.length === 0} onClick={undo}><ArrowCounterClockwise weight="bold" size={17} /></button>
+                    <button type="button" aria-label="重做" title="重做" disabled={future.length === 0} onClick={redo}><ArrowClockwise weight="bold" size={17} /></button>
+                    <button type="button" onClick={cancelEditing}><X weight="bold" size={15} />取消</button>
+                </div>
+            )}
+            <span className="ar-preview-hint">点击任意处退出预览</span>
+        </div>
     );
 };
 
@@ -1194,74 +4096,246 @@ const createLocalItemId = (): string => {
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
+export function getWallBackgroundEffects(background?: CollectionWall['background']): { dim: number; noiseOpacity: number } {
+    if (background?.type === 'asset') return { dim: 0, noiseOpacity: 0 };
+    const rawDim = Number(background?.dim);
+    return {
+        dim: clamp(Number.isFinite(rawDim) ? rawDim : 0.18, 0, 0.6),
+        noiseOpacity: 0.035,
+    };
+}
+
 const relabelItems = (items: CollectionWallItem[]): CollectionWallItem[] =>
     items.map((item, index) => ({ ...item, order: index, z: item.z || index + 1 }));
 
-const autoArrangeWallItems = (items: CollectionWallItem[]): CollectionWallItem[] => {
-    const gutter = 18;
-    const colW = (750 - 32 - gutter) / 2;
-    const colX = [16, 16 + colW + gutter];
-    const colY = [24, 24];
-    return relabelItems(items).map((item, index) => {
-        const col = colY[0] <= colY[1] ? 0 : 1;
-        const baseW = item.type === 'card' ? 375 : item.type === 'image' ? 320 : 220;
-        const baseH = item.type === 'card' ? 220 : item.type === 'image' ? 240 : 150;
-        const scale = colW / baseW;
-        const h = Math.round(baseH * scale);
-        const next = {
-            ...item,
-            x: Math.round(colX[col]),
-            y: Math.round(colY[col]),
-            w: Math.round(colW),
-            h,
-            rotation: ((hashOf(item.id + index) % 7) - 3) * 0.35,
-            z: index + 1,
-        };
-        colY[col] += h + gutter;
-        return next;
-    });
-};
+const isLooseWallItem = (item: CollectionWallItem): boolean => item.id.startsWith('loose-');
+
+export const materializePlacedLooseWallItems = (items: CollectionWallItem[]): CollectionWallItem[] =>
+    items.map(item => (
+        isLooseWallItem(item) && item.x != null && item.y != null
+            ? { ...item, id: createLocalItemId() }
+            : item
+    ));
+
+export const normalizeWallDraftItemsForSave = (items: CollectionWallItem[]): CollectionWallItem[] =>
+    relabelItems(materializePlacedLooseWallItems(items));
+
+export const getPersistableWallItems = (items: CollectionWallItem[]): CollectionWallItem[] =>
+    normalizeWallDraftItemsForSave(items).filter(item => !isLooseWallItem(item));
 
 const getEditorItemLabel = (item: CollectionWallItem, entryByItemId: Map<string, WallZoneEntry>): string => {
     const entry = entryByItemId.get(item.id);
     if (entry?.type === 'book') return getCollectionDisplayTitle(entry.book);
-    if (entry?.type === 'image') return getAssetLabel(entry.asset, item);
+    if (entry?.type === 'image' || entry?.type === 'sticker') return getAssetLabel(entry.asset, item);
+    if (entry?.type === 'bond' || item.type === 'bond') return item.name || '头像连接';
+    if (entry?.type === 'html' || item.type === 'html' || item.html) return getHtmlCardLabel(item);
     if (item.type === 'text') return getTextLabel(item);
     return item.name || item.type;
 };
 
 const getEditorItemKind = (item: CollectionWallItem): string => {
+    if (item.type === 'html' || item.html) return '自制 HTML 卡';
     if (item.type === 'card') return '视觉碎片';
     if (item.type === 'image') return '图片素材';
+    if (item.type === 'bond') return '头像连接组件';
     if (item.type === 'text') return item.author === 'char' ? 'TA 的便签' : '文字便签';
-    if (item.type === 'html') return '自制 HTML';
     return '贴纸';
 };
 
 const getWallEntryLabel = (entry: WallZoneEntry): string => {
     if (entry.type === 'book') return getFreeformShape(entry.book) || getCollectionDisplayTitle(entry.book);
-    if (entry.type === 'image') return getAssetLabel(entry.asset, entry.item);
+    if (entry.type === 'image' || entry.type === 'sticker') return getAssetLabel(entry.asset, entry.item);
+    if (entry.type === 'bond') return entry.item.name || '头像连接';
+    if (entry.type === 'html') return getHtmlCardLabel(entry.item);
     return getTextLabel(entry.item);
+};
+
+const describeWallPosition = (item?: CollectionWallItem): string => {
+    if (!item || item.x == null || item.y == null) return '未安置';
+    const centerX = item.x + item.w / 2;
+    const centerY = item.y + item.h / 2;
+    const horizontal = centerX < WALL_CANVAS_WIDTH / 3 ? '左' : centerX > WALL_CANVAS_WIDTH * 2 / 3 ? '右' : '中';
+    const vertical = centerY < 260 ? '上' : centerY > 620 ? '下' : '中';
+    if (horizontal === '中' && vertical === '中') return '正中';
+    if (horizontal === '中') return `中${vertical}`;
+    if (vertical === '中') return `${horizontal}中`;
+    return `${horizontal}${vertical}`;
+};
+
+const describeWallItemSize = (item?: CollectionWallItem): string => {
+    if (!item) return '中';
+    const area = item.w * item.h;
+    if (area >= 95000) return '大';
+    if (area <= 42000) return '小';
+    return '中';
+};
+
+const describeWallBackground = (wall: CollectionWall): string => {
+    const value = String(wall.background?.value || '').toLowerCase();
+    const swatch = WALL_BACKGROUND_SWATCHES.find(item => item.value.toLowerCase() === value);
+    const dim = getWallBackgroundEffects(wall.background).dim;
+    const dimText = dim <= 0.02 ? '未压暗' : `压暗 ${Math.round(dim * 100)}%`;
+    if (wall.background?.type === 'asset') return `自定义图片壁纸，${dimText}`;
+    return `${swatch?.name || wall.background?.value || '自定义背景'}，${dimText}`;
+};
+
+const getWallEntrySource = (entry: WallZoneEntry): string | undefined => {
+    if (entry.type === 'book') {
+        const ts = entry.book.sourceMessageTimestamp || entry.book.collectedAt || entry.book.createdAt;
+        return ts ? `${fmtDate(ts).slice(5)} 的对话` : undefined;
+    }
+    if (entry.type === 'image' || entry.type === 'sticker') {
+        if (entry.asset.origin === 'chat_gen') return '聊天里生成';
+        if (entry.asset.origin === 'char') return 'TA 添加';
+        return '用户上传';
+    }
+    if (entry.type === 'bond') return '墙头装饰';
+    if (entry.type === 'html') return '自制 HTML 卡';
+    return entry.item.author === 'char' ? 'TA 留下的便签' : '用户便签';
+};
+
+const toManifestItem = (entry: WallZoneEntry): CollectionWallManifestItem => {
+    if (entry.type === 'bond') {
+        return {
+            type: 'html',
+            label: entry.item.name || '头像连接',
+            from: '墙头装饰',
+            pos: describeWallPosition(entry.item),
+            size: describeWallItemSize(entry.item),
+        };
+    }
+    const baseLabel = getWallEntryLabel(entry);
+    const item = entry.type === 'book' ? entry.item : entry.item;
+    const type = entry.type === 'book' ? 'card' : entry.type;
+    const label = entry.type === 'text'
+        ? `${entry.item.author === 'char' ? 'TA 的便签' : '用户便签'}：${baseLabel}`
+        : baseLabel;
+    return {
+        type,
+        label,
+        from: getWallEntrySource(entry),
+        pos: describeWallPosition(item),
+        size: describeWallItemSize(item),
+    };
+};
+
+const buildRecentChanges = (entries: WallZoneEntry[]): string[] =>
+    [...entries]
+        .sort((a, b) => getWallEntryTimestamp(b) - getWallEntryTimestamp(a))
+        .slice(0, 3)
+        .map(entry => `新贴了「${getWallEntryLabel(entry).slice(0, 18)}」`);
+
+const buildRecentChatTopic = (messages: Message[]): string | undefined => {
+    const snippets = messages
+        .filter(message => message.role === 'user' || message.role === 'assistant')
+        .slice(-6)
+        .map(message => String(message.content || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .map(text => text.slice(0, 42));
+    return snippets.length > 0 ? snippets.join(' / ').slice(0, 180) : undefined;
+};
+
+const buildWallManifest = (
+    wall: CollectionWall,
+    entries: WallZoneEntry[],
+    messages: Message[],
+): CollectionWallManifest => ({
+    wallName: wall.name || '未分类',
+    background: describeWallBackground(wall),
+    items: entries.filter(entry => entry.type !== 'bond').map(toManifestItem),
+    recentChanges: buildRecentChanges(entries.filter(entry => entry.type !== 'bond')),
+    charPreviousRemarks: (wall.charRemarks || []).slice(-8).map(remark => remark.text),
+    recentChatTopic: buildRecentChatTopic(messages),
+});
+
+const getRecentAnchorItem = (entries: WallZoneEntry[]): CollectionWallItem | null => {
+    const entry = [...entries]
+        .filter(candidate => candidate.type !== 'bond' && Boolean(candidate.item) && candidate.item?.author !== 'char')
+        .sort((a, b) => getWallEntryTimestamp(b) - getWallEntryTimestamp(a))[0];
+    return entry?.item || null;
+};
+
+const cleanHistoryApiMessages = (messages: { role: string; content: any }[]): ChatCompletionMessage[] =>
+    messages.map((message) => {
+        if (typeof message.content !== 'string') return message as ChatCompletionMessage;
+        let content = message.content;
+        const biRe = /%%\s*BILINGUAL\s*%%/i;
+        if (biRe.test(content)) {
+            content = content.substring(0, content.search(biRe)).trim();
+        }
+        if (content.includes('<翻译>')) {
+            content = content.replace(/<翻译>\s*<原文>([\s\S]*?)<\/原文>\s*<译文>[\s\S]*?<\/译文>\s*<\/翻译>/g, '$1').trim();
+        }
+        return { ...message, content } as ChatCompletionMessage;
+    });
+
+const buildCharWallVisitMessages = async (options: {
+    char: CharacterProfile;
+    userProfile: UserProfile;
+    groups: GroupProfile[];
+    realtimeConfig?: RealtimeConfig;
+    apiConfig: APIConfig;
+    wall: CollectionWall;
+    entries: WallZoneEntry[];
+}): Promise<{ messages: ChatCompletionMessage[]; manifest: CollectionWallManifest; history: Message[] }> => {
+    const limit = options.char.contextLimit || 500;
+    const [history, emojis, categories, characterGoals] = await Promise.all([
+        DB.getMessagesByCharId(options.char.id),
+        DB.getEmojis(),
+        DB.getEmojiCategories(),
+        loadCharacterGoals(options.char.id).catch(error => {
+            console.warn('[CollectionHall] goals load failed:', error);
+            return [] as Awaited<ReturnType<typeof loadCharacterGoals>>;
+        }),
+    ]);
+    const contextHistory = history.slice(-limit);
+    const embeddingApiKey = getEmbeddingConfig().apiKey || undefined;
+    const baseSystemPrompt = await ChatPrompts.buildSystemPrompt(
+        options.char,
+        options.userProfile,
+        options.groups,
+        emojis,
+        categories,
+        contextHistory,
+        options.realtimeConfig,
+        options.apiConfig,
+        embeddingApiKey,
+        characterGoals,
+    );
+    const manifest = buildWallManifest(options.wall, options.entries, contextHistory);
+    const { apiMessages } = ChatPrompts.buildMessageHistory(contextHistory, limit, options.char, options.userProfile, emojis);
+    const systemPrompt = `${baseSystemPrompt}\n\n${buildCollectionWallVisitSystemPrompt({
+        userName: options.userProfile.name,
+        wallName: options.wall.name,
+    })}`;
+
+    return {
+        messages: [
+            { role: 'system', content: systemPrompt },
+            ...cleanHistoryApiMessages(apiMessages),
+            { role: 'user', content: buildCollectionWallVisitUserPrompt(manifest) },
+        ],
+        manifest,
+        history: contextHistory,
+    };
 };
 
 const WallEditor: React.FC<{
     wall: CollectionWall;
     entries: WallZoneEntry[];
     onClose: () => void;
-    onSaved: () => void;
+    onSaved: () => Promise<void> | void;
     onDirtyChange?: (dirty: boolean) => void;
     say: (message: string) => void;
 }> = ({ wall, entries, onClose, onSaved, onDirtyChange, say }) => {
-    const [draftWall, setDraftWall] = useState<CollectionWall>(wall);
+    const [draftWall, setDraftWall] = useState<CollectionWall>({ ...wall, layoutMode: 'free' });
     const [draftItems, setDraftItems] = useState<CollectionWallItem[]>(() => relabelItems(entries.map(entry => entry.item).filter((item): item is CollectionWallItem => Boolean(item))));
     const [textDraft, setTextDraft] = useState('');
-    const [selectedId, setSelectedId] = useState('');
     const [saving, setSaving] = useState(false);
     const entryByItemId = useMemo(() => new Map(entries.filter(entry => Boolean(entry.item)).map(entry => [entry.item!.id, entry])), [entries]);
-    const selectedItem = draftItems.find(item => item.id === selectedId) || null;
     const initialDraftSnapshotRef = useRef('');
     if (!initialDraftSnapshotRef.current) {
-        initialDraftSnapshotRef.current = serializeWallEditorDraft(wall, draftItems, '');
+        initialDraftSnapshotRef.current = serializeWallEditorDraft({ ...wall, layoutMode: 'free' }, draftItems, '');
     }
     const hasUnsavedChanges = hasWallEditorDraftChanges(initialDraftSnapshotRef.current, draftWall, draftItems, textDraft);
 
@@ -1307,10 +4381,6 @@ const WallEditor: React.FC<{
         setDraftWall(prev => ({ ...prev, ...patch }));
     };
 
-    const patchItem = (id: string, patch: Partial<CollectionWallItem>) => {
-        setDraftItems(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
-    };
-
     const moveItem = (id: string, delta: number) => {
         setDraftItems(prev => {
             const next = [...prev];
@@ -1337,7 +4407,7 @@ const WallEditor: React.FC<{
                 wallId: wall.id,
                 type: 'text',
                 author: 'user',
-                x: draftWall.layoutMode === 'free' ? null : null,
+                x: null,
                 y: null,
                 w: 220,
                 h: 150,
@@ -1353,18 +4423,11 @@ const WallEditor: React.FC<{
     };
 
     const deleteItem = (id: string) => {
+        const deleted = draftItems.find(item => item.id === id);
+        if (deleted?.type === 'bond') {
+            setDraftWall(prev => ({ ...prev, defaultBondWidgetHidden: true }));
+        }
         setDraftItems(prev => relabelItems(prev.filter(item => item.id !== id)));
-        if (selectedId === id) setSelectedId('');
-    };
-
-    const arrange = () => {
-        setDraftWall(prev => ({ ...prev, layoutMode: 'free' }));
-        setDraftItems(prev => autoArrangeWallItems(prev));
-    };
-
-    const adjustSelected = (patch: Partial<CollectionWallItem>) => {
-        if (!selectedItem) return;
-        patchItem(selectedItem.id, patch);
     };
 
     const handleSave = async () => {
@@ -1382,9 +4445,10 @@ const WallEditor: React.FC<{
             await DB.saveCollectionWall({
                 ...draftWall,
                 name,
+                layoutMode: 'free',
                 background: {
                     ...draftWall.background,
-                    dim: clamp(Number(draftWall.background.dim) || 0, 0, 0.6),
+                    dim: draftWall.background.type === 'asset' ? 0 : clamp(Number(draftWall.background.dim) || 0, 0, 0.6),
                 },
                 changeCountSinceVisit: (draftWall.changeCountSinceVisit || 0) + 1,
             });
@@ -1393,7 +4457,7 @@ const WallEditor: React.FC<{
             addCollectionWallPendingContext(wall.charId, `用户最近在「${name}」整理了拾光墙，墙上现在有 ${draftItems.length} 件内容。下次对话可自然提及，不要刻意。`);
             initialDraftSnapshotRef.current = serializeWallEditorDraft(draftWall, draftItems, textDraft);
             say('拾光墙已保存');
-            onSaved();
+            await onSaved();
             onClose();
         } catch (error) {
             console.error('[CollectionHall] wall editor save failed:', error);
@@ -1408,91 +4472,67 @@ const WallEditor: React.FC<{
             <div className="ar-editor" onClick={(event) => event.stopPropagation()}>
                 <div className="ar-editor-hd">
                     <div>
-                        <h3>装修拾光墙</h3>
-                        <p>{draftItems.length} 件内容 · {draftWall.layoutMode === 'free' ? '自由画布' : 'Flow 排列'}</p>
+                        <h3>装修「{draftWall.name || wall.name}」</h3>
+                        <p>{draftItems.length} 件 · 顺序排列</p>
                     </div>
                     <button type="button" className="ar-ebk-x" aria-label="关闭" onClick={requestClose}><X weight="bold" /></button>
                 </div>
                 <div className="ar-editor-body">
-                    <div className="ar-editor-grid">
-                        <label className="ar-field">
-                            <span>墙名</span>
-                            <input value={draftWall.name} maxLength={12} onChange={event => updateWall({ name: event.target.value.slice(0, 12) })} />
-                        </label>
-                        <label className="ar-field">
-                            <span>布局</span>
-                            <select value={draftWall.layoutMode} onChange={event => updateWall({ layoutMode: event.target.value as CollectionWall['layoutMode'] })}>
-                                <option value="flow">flow 排列</option>
-                                <option value="free">free 画布</option>
-                            </select>
-                        </label>
-                        <label className="ar-field">
-                            <span>背景色</span>
-                            <input type="color" value={draftWall.background.value || '#17120e'} onChange={event => updateWall({ background: { ...draftWall.background, type: 'color', value: event.target.value } })} />
-                        </label>
-                        <label className="ar-field">
-                            <span>压暗 {Math.round((draftWall.background.dim || 0) * 100)}%</span>
-                            <input type="range" min="0" max="0.6" step="0.05" value={draftWall.background.dim || 0} onChange={event => updateWall({ background: { ...draftWall.background, dim: Number(event.target.value) } })} />
-                        </label>
-                    </div>
-                    <div className="ar-editor-row">
-                        <label className="ar-editor-chip">
-                            <input type="checkbox" checked={draftWall.allowCharDecorate} onChange={event => updateWall({ allowCharDecorate: event.target.checked })} />
-                            允许 TA 布置
-                        </label>
-                        <button type="button" className="ar-wall-act" onClick={arrange}>一键整理</button>
-                    </div>
-                    <div className="ar-editor-grid" style={{ marginTop: 13 }}>
-                        <label className="ar-field" style={{ gridColumn: '1 / -1' }}>
-                            <span>新增文字便签</span>
-                            <textarea value={textDraft} maxLength={120} onChange={event => setTextDraft(event.target.value)} placeholder="写一张贴在墙上的小纸条..." />
-                        </label>
-                    </div>
-                    <div className="ar-editor-tools">
-                        <button type="button" onClick={addTextItem}>插入便签</button>
-                        <button type="button" onClick={() => setDraftItems(prev => relabelItems([...prev].sort((a, b) => (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0))))}>按位置转 flow</button>
-                    </div>
+                    <section className="ar-editor-section">
+                        <p className="ar-editor-sec-title">墙信息</p>
+                        <div className="ar-editor-grid">
+                            <label className="ar-field">
+                                <span>名称</span>
+                                <input value={draftWall.name} maxLength={12} onChange={event => updateWall({ name: event.target.value.slice(0, 12) })} />
+                            </label>
+                            <label className="ar-field">
+                                <span>排列</span>
+                                <input value="顺序排列" readOnly />
+                            </label>
+                        </div>
+                    </section>
 
-                    {draftWall.layoutMode === 'free' ? (
-                        <>
-                            <div className="ar-editor-canvas" style={{ background: draftWall.background.type === 'color' ? draftWall.background.value : undefined }}>
-                                <div style={{ position: 'absolute', inset: 0, background: `rgba(0,0,0,${draftWall.background.dim || 0})`, pointerEvents: 'none' }} />
-                                {draftItems.map(item => {
-                                    const x = typeof item.x === 'number' ? item.x : 24 + (item.order % 2) * 250;
-                                    const y = typeof item.y === 'number' ? item.y : 24 + Math.floor(item.order / 2) * 180;
-                                    const w = item.w || 220;
-                                    const h = item.h || 150;
-                                    return (
+                    <section className="ar-editor-section">
+                        <p className="ar-editor-sec-title">外观</p>
+                        <div className="ar-editor-grid">
+                            <label className="ar-field">
+                                <span>背景</span>
+                                <span className="ar-swatch-row">
+                                    {WALL_BACKGROUND_SWATCHES.map(swatch => (
                                         <button
                                             type="button"
-                                            key={item.id}
-                                            className={`ar-editor-freeitem${selectedId === item.id ? ' on' : ''}`}
-                                            style={{
-                                                left: `${(x / 750) * 100}%`,
-                                                top: `${(y / 620) * 100}%`,
-                                                width: `${(w / 750) * 100}%`,
-                                                height: `${(h / 620) * 100}%`,
-                                                '--rot': `${item.rotation || 0}deg`,
-                                            } as React.CSSProperties}
-                                            onClick={() => setSelectedId(item.id)}
-                                        >
-                                            {getEditorItemLabel(item, entryByItemId)}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                            {selectedItem && (
-                                <div className="ar-editor-tools">
-                                    <button type="button" onClick={() => adjustSelected({ x: clamp((selectedItem.x ?? 0) - 24, 0, 720) })}>左移</button>
-                                    <button type="button" onClick={() => adjustSelected({ x: clamp((selectedItem.x ?? 0) + 24, 0, 720) })}>右移</button>
-                                    <button type="button" onClick={() => adjustSelected({ y: clamp((selectedItem.y ?? 0) - 24, 0, 900) })}>上移</button>
-                                    <button type="button" onClick={() => adjustSelected({ y: clamp((selectedItem.y ?? 0) + 24, 0, 900) })}>下移</button>
-                                    <button type="button" onClick={() => adjustSelected({ rotation: clamp((selectedItem.rotation || 0) - 2, -18, 18) })}>逆旋</button>
-                                    <button type="button" onClick={() => adjustSelected({ rotation: clamp((selectedItem.rotation || 0) + 2, -18, 18) })}>顺旋</button>
-                                </div>
-                            )}
-                        </>
-                    ) : (
+                                            key={swatch.value}
+                                            className={`ar-swatch${(draftWall.background.value || '#17120e').toLowerCase() === swatch.value ? ' on' : ''}`}
+                                            style={{ '--sw': swatch.value } as React.CSSProperties}
+                                            aria-label={swatch.name}
+                                            title={swatch.name}
+                                            onClick={() => updateWall({ background: { ...draftWall.background, type: 'color', value: swatch.value } })}
+                                        />
+                                    ))}
+                                </span>
+                            </label>
+                            <label className="ar-field">
+                                <span>压暗 {Math.round((draftWall.background.dim || 0) * 100)}%</span>
+                                <input type="range" min="0" max="0.6" step="0.05" value={draftWall.background.dim || 0} onChange={event => updateWall({ background: { ...draftWall.background, dim: Number(event.target.value) } })} />
+                            </label>
+                        </div>
+                        <div className="ar-editor-row">
+                            <label className="ar-editor-chip">
+                                <input type="checkbox" checked={draftWall.allowCharDecorate} onChange={event => updateWall({ allowCharDecorate: event.target.checked })} />
+                                允许 TA 布置
+                            </label>
+                        </div>
+                    </section>
+
+                    <section className="ar-editor-section">
+                        <p className="ar-editor-sec-title">内容</p>
+                        <div className="ar-note-compose">
+                            <label className="ar-field">
+                                <span>新增文字便签</span>
+                                <textarea className="ar-note-input" value={textDraft} maxLength={120} onChange={event => setTextDraft(event.target.value)} placeholder="写一张贴在墙上的小纸条..." />
+                            </label>
+                            <button type="button" onClick={addTextItem}>插入便签</button>
+                        </div>
                         <div className="ar-editor-list">
                             {draftItems.map((item, index) => (
                                 <div key={item.id} className="ar-editor-item">
@@ -1501,14 +4541,14 @@ const WallEditor: React.FC<{
                                         <small>{String(index + 1).padStart(2, '0')} · {getEditorItemKind(item)}</small>
                                     </span>
                                     <span className="ar-editor-mini">
-                                        <button type="button" onClick={() => moveItem(item.id, -1)}>上移</button>
-                                        <button type="button" onClick={() => moveItem(item.id, 1)}>下移</button>
-                                        {item.type !== 'card' && <button type="button" onClick={() => deleteItem(item.id)}>删除</button>}
+                                        <button type="button" aria-label="上移" title="上移" onClick={() => moveItem(item.id, -1)}><ArrowUp weight="bold" size={16} /></button>
+                                        <button type="button" aria-label="下移" title="下移" onClick={() => moveItem(item.id, 1)}><ArrowDown weight="bold" size={16} /></button>
+                                        {item.type !== 'card' && <button type="button" className="text" onClick={() => deleteItem(item.id)}>删除</button>}
                                     </span>
                                 </div>
                             ))}
                         </div>
-                    )}
+                    </section>
                 </div>
                 <div className="ar-editor-ft">
                     <button type="button" onClick={requestClose} disabled={saving}>取消</button>
@@ -1552,12 +4592,103 @@ const ForwardCoverPreview: React.FC<{
     );
 };
 
+type ArchiveSectionTab = 'bookcase' | 'keepsakes' | 'walls';
+
+const CharacterArchivePage: React.FC<{
+    char: HallCharacter;
+    hue: number;
+    afterglow: CollectionBook[];
+    heartTalks: CollectionBook[];
+    freeform: CollectionBook[];
+    wallZones: LightWallZoneData[];
+    pullingId: string | null;
+    onPickBook: (book: CollectionBook) => void;
+    onPickImage: (entry: WallImageEntry, wallName: string) => void;
+    onOpenWall: (wall: CollectionWall, entries: WallZoneEntry[], charName: string) => void;
+    onEditWall: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
+    onInviteChar: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
+    invitingWallId?: string | null;
+    onWallSeen: () => void;
+}> = ({
+    char,
+    hue,
+    afterglow,
+    heartTalks,
+    freeform,
+    wallZones,
+    pullingId,
+    onPickBook,
+    onPickImage,
+    onOpenWall,
+    onEditWall,
+    onInviteChar,
+    invitingWallId,
+    onWallSeen,
+}) => {
+    const [activeTab, setActiveTab] = useState<ArchiveSectionTab>(() => (
+        afterglow.length > 0 ? 'bookcase' : heartTalks.length > 0 ? 'keepsakes' : 'walls'
+    ));
+
+    return (
+        <div className="ar-page">
+            <div className="ar-char-hd">
+                <Avatar char={char} hue={hue} size={36} />
+                <div>
+                    <h2 className="ar-char-name">{char.name}</h2>
+                    <p className="ar-char-meta">
+                        {afterglow.length > 0 && `${afterglow.length} 本番外`}
+                        {afterglow.length > 0 && heartTalks.length > 0 && ' · '}
+                        {heartTalks.length > 0 && `${heartTalks.length} 张谈心`}
+                        {(afterglow.length > 0 || heartTalks.length > 0) && freeform.length > 0 && ' · '}
+                        {freeform.length > 0 && `${freeform.length} 枚碎片`}
+                    </p>
+                </div>
+            </div>
+
+            <nav className="ar-seg" aria-label={`${char.name} 的典藏分区`}>
+                <button type="button" className={activeTab === 'bookcase' ? 'on' : ''} onClick={() => setActiveTab('bookcase')}>书柜</button>
+                <button type="button" className={activeTab === 'keepsakes' ? 'on' : ''} onClick={() => setActiveTab('keepsakes')}>妆匣</button>
+                <button type="button" className={activeTab === 'walls' ? 'on' : ''} onClick={() => setActiveTab('walls')}>拾光墙</button>
+            </nav>
+
+            {activeTab === 'bookcase' && (
+                afterglow.length > 0 ? (
+                    <BookCabinet char={char} books={afterglow} pullingId={pullingId} onPick={onPickBook} />
+                ) : (
+                    <div className="ar-section-empty">这只书柜还在等第一本番外。</div>
+                )
+            )}
+            {activeTab === 'keepsakes' && (
+                heartTalks.length > 0 ? (
+                    <KeepsakeBox books={heartTalks} pullingId={pullingId} onPick={onPickBook} />
+                ) : (
+                    <div className="ar-section-empty">妆匣里还没有谈心卡。</div>
+                )
+            )}
+            {activeTab === 'walls' && (
+                <LightWallShelf
+                    zones={wallZones}
+                    onOpenWall={(wall, entries) => onOpenWall(wall, entries, char.name)}
+                    charName={char.name}
+                    pullingId={pullingId}
+                    onPickBook={onPickBook}
+                    onPickImage={(entry) => onPickImage(entry, wallZones.find(zone => zone.entries.some(item => item.id === entry.id))?.wall.name || '拾光墙')}
+                    onEditWall={onEditWall}
+                    onInviteChar={onInviteChar}
+                    invitingWallId={invitingWallId}
+                    onWallSeen={onWallSeen}
+                />
+            )}
+        </div>
+    );
+};
+
 /* ============================================================
    Main App
    ============================================================ */
 
 const CollectionHallApp: React.FC = () => {
-    const { characters, openApp, closeApp } = useOS();
+    const { characters, openApp, closeApp, apiConfig, userProfile, groups, realtimeConfig } = useOS();
     const [books, setBooks] = useState<CollectionBook[]>([]);
     const [walls, setWalls] = useState<CollectionWall[]>([]);
     const [wallItems, setWallItems] = useState<CollectionWallItem[]>([]);
@@ -1567,6 +4698,7 @@ const CollectionHallApp: React.FC = () => {
     const [drag, setDrag] = useState(0);
     const [selected, setSelected] = useState<CollectionBook | null>(null);
     const [selectedImage, setSelectedImage] = useState<{ entry: WallImageEntry; wallName: string } | null>(null);
+    const [activeWall, setActiveWall] = useState<WallScreenState | null>(null);
     const [editingWall, setEditingWall] = useState<{ wall: CollectionWall; entries: WallZoneEntry[] } | null>(null);
     const [pullingId, setPullingId] = useState<string | null>(null);
     const [editing, setEditing] = useState<{ book: CollectionBook; draft: string } | null>(null);
@@ -1574,6 +4706,14 @@ const CollectionHallApp: React.FC = () => {
     const [forwardFor, setForwardFor] = useState<CollectionBook | null>(null);
     const [confirmDel, setConfirmDel] = useState<CollectionBook | null>(null);
     const [wallEditorDirty, setWallEditorDirty] = useState(false);
+    const [invitingWallId, setInvitingWallId] = useState<string | null>(null);
+    const [charWallRemark, setCharWallRemark] = useState<{
+        wall: CollectionWall;
+        entries: WallZoneEntry[];
+        charName: string;
+        text: string;
+    } | null>(null);
+    const [pinningRemark, setPinningRemark] = useState(false);
     const [toast, setToast] = useState<{ key: number; msg: string } | null>(null);
     const touch = useRef({ x: 0, y: 0, axis: '' as 'h' | 'v' | '', on: false });
 
@@ -1583,14 +4723,39 @@ const CollectionHallApp: React.FC = () => {
         try {
             const next = await DB.getAllCollectionBooks();
             setBooks(next);
-            const nextWalls = await DB.getAllCollectionWalls();
-            setWalls(nextWalls);
+            let nextWalls = await DB.getAllCollectionWalls();
             const itemLists = await Promise.all(nextWalls.map(wall => DB.getCollectionWallItemsByWallId(wall.id)));
-            const nextWallItems = itemLists.flat();
+            let nextWallItems = itemLists.flat();
+            const migratedWalls: CollectionWall[] = [];
+            const migratedItems: CollectionWallItem[] = [];
+            for (const wall of nextWalls) {
+                if (wall.layoutMode === 'free') continue;
+                const itemsForWall = nextWallItems.filter(item => item.wallId === wall.id);
+                const arranged = autoArrangeWallItems(itemsForWall);
+                const nextWall = { ...wall, layoutMode: 'free' as const, updatedAt: Date.now() };
+                await DB.saveCollectionWall(nextWall);
+                await Promise.all(arranged.map(item => DB.saveCollectionWallItem(item)));
+                migratedWalls.push(nextWall);
+                migratedItems.push(...arranged);
+            }
+            if (migratedWalls.length > 0) {
+                const wallById = new Map(migratedWalls.map(wall => [wall.id, wall]));
+                const itemById = new Map(migratedItems.map(item => [item.id, item]));
+                nextWalls = nextWalls.map(wall => wallById.get(wall.id) || wall);
+                nextWallItems = nextWallItems.map(item => itemById.get(item.id) || item);
+            }
+            setWalls(nextWalls);
+            const cannedCharNotes = nextWallItems.filter(item => (
+                item.type === 'text'
+                && item.author === 'char'
+                && /我看过了。先把这句压在这里，等你下次来。/.test(String(item.text?.content || ''))
+            ));
+            if (cannedCharNotes.length > 0) {
+                await Promise.all(cannedCharNotes.map(item => DB.deleteCollectionWallItem(item.id)));
+                nextWallItems = nextWallItems.filter(item => !cannedCharNotes.some(note => note.id === item.id));
+            }
             setWallItems(nextWallItems);
-            const assetIds = Array.from(new Set(nextWallItems.map(item => item.assetId).filter((id): id is string => Boolean(id))));
-            const assets = await Promise.all(assetIds.map(id => DB.getCollectionWallAssetById(id)));
-            setWallAssets(assets.filter((asset): asset is CollectionWallAsset => Boolean(asset)));
+            setWallAssets(await DB.getAllCollectionWallAssets());
         } finally {
             setLoading(false);
         }
@@ -1639,6 +4804,10 @@ const CollectionHallApp: React.FC = () => {
                     .filter(item => item.wallId === wall.id)
                     .sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0))
                     .reduce<WallZoneEntry[]>((acc, item) => {
+                        if (item.type === 'html' || (item.type === 'card' && item.html && !item.bookId)) {
+                            if (item.html) acc.push({ id: item.id, type: 'html', item });
+                            return acc;
+                        }
                         if (item.type === 'card' && item.bookId) {
                             const book = bookById.get(item.bookId);
                             if (book?.kind !== 'freeform') return acc;
@@ -1646,10 +4815,13 @@ const CollectionHallApp: React.FC = () => {
                             acc.push({ id: item.id, type: 'book', item, book });
                             return acc;
                         }
-                        if (item.type === 'image' && item.assetId) {
-                            const asset = assetById.get(item.assetId);
-                            if (!asset) return acc;
-                            acc.push({ id: item.id, type: 'image', item, asset });
+                        if ((item.type === 'image' || item.type === 'sticker') && item.assetId) {
+                            const entry = buildWallAssetEntry(item, assetById.get(item.assetId));
+                            if (entry) acc.push(entry);
+                            return acc;
+                        }
+                        if (item.type === 'bond') {
+                            acc.push({ id: item.id, type: 'bond', item });
                             return acc;
                         }
                         if (item.type === 'text' && item.text?.content) {
@@ -1659,7 +4831,7 @@ const CollectionHallApp: React.FC = () => {
                         return acc;
                     }, []);
                 return { wall, entries };
-            }).filter(zone => zone.entries.length > 0);
+            });
             const looseFreeform = freeform.filter(book => !wallBookIds.has(book.id));
             if (looseFreeform.length > 0) {
                 const fallbackWall = charWalls.find(wall => wall.isDefault) || charWalls[0] || {
@@ -1667,10 +4839,11 @@ const CollectionHallApp: React.FC = () => {
                     charId,
                     name: '未分类',
                     isDefault: true,
-                    layoutMode: 'flow',
+                    layoutMode: 'free',
                     background: { type: 'color', value: '#17120e', fit: 'cover', dim: 0.18 },
                     allowCharDecorate: true,
                     changeCountSinceVisit: 0,
+                    charRemarks: [],
                     hasUnseenCharItem: false,
                     sortOrder: 0,
                     createdAt: 0,
@@ -1705,36 +4878,87 @@ const CollectionHallApp: React.FC = () => {
             say('这面墙暂时不让 TA 布置');
             return;
         }
-        const anchor = entries.find(entry => entry.type !== 'text') || entries[0];
-        if (!anchor) {
-            say('先贴一点东西，再邀请 TA 来看');
+        const char = charById.get(wall.charId);
+        if (!char) {
+            say('找不到这面墙对应的角色');
             return;
         }
-        const label = getWallEntryLabel(anchor).slice(0, 18);
-        const content = `${label}我看过了。先把这句压在这里，等你下次来。`;
-        const items = await DB.getCollectionWallItemsByWallId(wall.id);
+        if (!apiConfig?.baseUrl || !apiConfig?.model) {
+            say('先配置主 API');
+            return;
+        }
+        setInvitingWallId(wall.id);
         try {
+            const { messages, manifest } = await buildCharWallVisitMessages({
+                char,
+                userProfile,
+                groups,
+                realtimeConfig,
+                apiConfig,
+                wall,
+                entries,
+            });
+            const result = await requestCharWallNote({
+                apiConfig,
+                messages,
+                charName,
+            });
+            if (result.action !== 'note') {
+                say('TA 看了看，没说什么');
+                return;
+            }
+            const now = Date.now();
+            await DB.saveCollectionWall({
+                ...wall,
+                charRemarks: [...(wall.charRemarks || []), { text: result.content, ts: now }].slice(-30),
+                charLastVisitManifest: JSON.stringify(manifest),
+                hasUnseenCharItem: false,
+                charLastVisitAt: now,
+                changeCountSinceVisit: 0,
+            });
+            setCharWallRemark({ wall, entries, charName, text: result.content });
+            await loadBooks();
+        } catch (error) {
+            console.error('[CollectionHall] char note failed:', error);
+            say('TA 看了看，没说什么');
+        } finally {
+            setInvitingWallId(null);
+        }
+    }, [apiConfig, charById, groups, loadBooks, realtimeConfig, say, userProfile]);
+
+    const handlePinCharRemark = useCallback(async () => {
+        if (!charWallRemark || pinningRemark) return;
+        setPinningRemark(true);
+        try {
+            const latestWall = await DB.getCollectionWallById(charWallRemark.wall.id);
+            const wall = latestWall || charWallRemark.wall;
+            const items = await DB.getCollectionWallItemsByWallId(wall.id);
             const noteItem = buildCharWallNoteItem({
                 wallId: wall.id,
                 layoutMode: wall.layoutMode,
                 items,
-                content,
-                charName,
+                content: charWallRemark.text,
+                charName: charWallRemark.charName,
+                anchorItem: getRecentAnchorItem(charWallRemark.entries),
+                remarkTemplate: pickCharRemarkTemplate(charWallRemark.text).pick,
             });
             await DB.saveCollectionWallItem(noteItem);
             await DB.saveCollectionWall({
                 ...wall,
-                hasUnseenCharItem: true,
+                hasUnseenCharItem: false,
                 charLastVisitAt: Date.now(),
                 changeCountSinceVisit: 0,
             });
-            say('TA 留了一张便签');
+            setCharWallRemark(null);
+            say('已钉到拾光墙');
             await loadBooks();
         } catch (error) {
-            console.error('[CollectionHall] char note failed:', error);
-            say('TA 这次没能留下便签');
+            console.error('[CollectionHall] pin char remark failed:', error);
+            say('钉到墙上失败，稍后再试');
+        } finally {
+            setPinningRemark(false);
         }
-    }, [loadBooks, say]);
+    }, [charWallRemark, loadBooks, pinningRemark, say]);
 
     const pick = (book: CollectionBook) => {
         if (pullingId) return;
@@ -1887,43 +5111,45 @@ const CollectionHallApp: React.FC = () => {
                             }}
                         >
                             {sections.map(({ char, hue, afterglow, heartTalks, freeform, wallZones }) => (
-                                <div className="ar-page" key={char.id}>
-                                    <div className="ar-char-hd">
-                                        <Avatar char={char} hue={hue} size={36} />
-                                        <div>
-                                            <h2 className="ar-char-name">{char.name}</h2>
-                                            <p className="ar-char-meta">
-                                                {afterglow.length > 0 && `${afterglow.length} 本番外`}
-                                                {afterglow.length > 0 && heartTalks.length > 0 && ' · '}
-                                                {heartTalks.length > 0 && `${heartTalks.length} 张谈心`}
-                                                {(afterglow.length > 0 || heartTalks.length > 0) && freeform.length > 0 && ' · '}
-                                                {freeform.length > 0 && `${freeform.length} 枚碎片`}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    {afterglow.length > 0 && (
-                                        <BookCabinet char={char} books={afterglow} pullingId={pullingId} onPick={pick} />
-                                    )}
-                                    {heartTalks.length > 0 && (
-                                        <KeepsakeBox books={heartTalks} pullingId={pullingId} onPick={pick} />
-                                    )}
-                                    {wallZones.map(zone => (
-                                        <LightWallZone
-                                            key={zone.wall.id}
-                                            wall={zone.wall}
-                                            entries={zone.entries}
-                                            pullingId={pullingId}
-                                            onPickBook={pick}
-                                            onPickImage={entry => setSelectedImage({ entry, wallName: zone.wall.name })}
-                                            onEditWall={(wall, entries) => setEditingWall({ wall, entries })}
-                                            onInviteChar={(wall, entries) => void handleInviteChar(wall, entries, char.name)}
-                                        />
-                                    ))}
-                                </div>
+                                <CharacterArchivePage
+                                    key={char.id}
+                                    char={char}
+                                    hue={hue}
+                                    afterglow={afterglow}
+                                    heartTalks={heartTalks}
+                                    freeform={freeform}
+                                    wallZones={wallZones}
+                                    pullingId={pullingId}
+                                    onPickBook={pick}
+                                    onPickImage={(entry, wallName) => setSelectedImage({ entry, wallName })}
+                                    onOpenWall={(wall, entries, charName) => setActiveWall({ wall, entries, charName })}
+                                    onEditWall={(wall, entries) => setEditingWall({ wall, entries })}
+                                    onInviteChar={(wall, entries) => void handleInviteChar(wall, entries, char.name)}
+                                    invitingWallId={invitingWallId}
+                                    onWallSeen={() => void loadBooks()}
+                                />
                             ))}
                         </div>
                     </div>
                 </>
+            )}
+
+            {activeWall && (
+                <FullScreenLightWall
+                    wall={activeWall.wall}
+                    entries={activeWall.entries}
+                    libraryAssets={wallAssets}
+                    userName={userProfile?.name || '你'}
+                    userAvatar={userProfile?.avatar}
+                    charName={activeWall.charName}
+                    charAvatar={charById.get(activeWall.wall.charId)?.avatar}
+                    onClose={() => setActiveWall(null)}
+                    onPickBook={book => setSelected(book)}
+                    onPickImage={(entry, wallName) => setSelectedImage({ entry, wallName })}
+                    onSaved={loadBooks}
+                    onAssetsChanged={loadBooks}
+                    say={say}
+                />
             )}
 
             {selected && (
@@ -1961,7 +5187,7 @@ const CollectionHallApp: React.FC = () => {
                     wall={editingWall.wall}
                     entries={editingWall.entries}
                     onClose={() => setEditingWall(null)}
-                    onSaved={() => void loadBooks()}
+                    onSaved={loadBooks}
                     onDirtyChange={setWallEditorDirty}
                     say={say}
                 />
@@ -2045,6 +5271,16 @@ const CollectionHallApp: React.FC = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {charWallRemark && (
+                <CharRemarkPopup
+                    remark={charWallRemark}
+                    avatarUrl={charById.get(charWallRemark.wall.charId)?.avatar}
+                    pinning={pinningRemark}
+                    onClose={() => setCharWallRemark(null)}
+                    onPin={handlePinCharRemark}
+                />
             )}
 
             {toast && <div className="ar-toast" key={toast.key}>{toast.msg}</div>}

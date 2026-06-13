@@ -47,11 +47,24 @@ const sortWalls = (walls: CollectionWall[]): CollectionWall[] =>
 const sortItems = (items: CollectionWallItem[]): CollectionWallItem[] =>
     items.sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0));
 
+const sortAssets = (assets: CollectionWallAsset[]): CollectionWallAsset[] =>
+    assets.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
 const getStore = async (storeName: string, mode: IDBTransactionMode) => {
     const db = await openDB();
     if (!db.objectStoreNames.contains(storeName)) return null;
     const tx = db.transaction(storeName, mode);
     return { tx, store: tx.objectStore(storeName) };
+};
+
+const getAllCollectionWallItems = async (): Promise<CollectionWallItem[]> => {
+    const opened = await getStore(STORE_COLLECTION_WALL_ITEMS, 'readonly');
+    if (!opened) return [];
+    return new Promise((resolve, reject) => {
+        const request = opened.store.getAll();
+        request.onsuccess = () => resolve(sortItems((request.result || []) as CollectionWallItem[]));
+        request.onerror = () => reject(request.error);
+    });
 };
 
 export const getAllCollectionWalls = async (): Promise<CollectionWall[]> => {
@@ -99,9 +112,15 @@ export const saveCollectionWall = async (input: CollectionWallInput): Promise<Co
         id: input.id || createId('wall'),
         name: normalizeWallName(input.name),
         background: input.background || { type: 'color', value: '#17120e', fit: 'cover', dim: 0.18 },
-        layoutMode: input.layoutMode || 'flow',
+        layoutMode: input.layoutMode || 'free',
         allowCharDecorate: input.allowCharDecorate !== false,
         changeCountSinceVisit: Number.isFinite(input.changeCountSinceVisit) ? input.changeCountSinceVisit : 0,
+        charRemarks: Array.isArray(input.charRemarks)
+            ? input.charRemarks
+                .filter(remark => remark && typeof remark.text === 'string' && remark.text.trim())
+                .map(remark => ({ text: remark.text.trim().slice(0, 300), ts: Number.isFinite(remark.ts) ? remark.ts : now }))
+                .slice(-30)
+            : [],
         hasUnseenCharItem: Boolean(input.hasUnseenCharItem),
         sortOrder: Number.isFinite(input.sortOrder) ? input.sortOrder : 0,
         isDefault: Boolean(input.isDefault),
@@ -127,7 +146,7 @@ export const getOrCreateDefaultCollectionWall = async (charId: string): Promise<
         charId,
         name: DEFAULT_WALL_NAME,
         isDefault: true,
-        layoutMode: 'flow',
+        layoutMode: 'free',
         background: { type: 'color', value: '#17120e', fit: 'cover', dim: 0.18 },
         allowCharDecorate: true,
         changeCountSinceVisit: 0,
@@ -180,7 +199,7 @@ export const saveCollectionWallItem = async (input: CollectionWallItemInput): Pr
         x: typeof input.x === 'number' ? input.x : null,
         y: typeof input.y === 'number' ? input.y : null,
         w: Number.isFinite(input.w) ? input.w : 375,
-        h: Number.isFinite(input.h) ? input.h : 220,
+        h: Number.isFinite(input.h) ? input.h : 360,
         rotation: Number.isFinite(input.rotation) ? input.rotation : 0,
         z: Number.isFinite(input.z) ? input.z : 0,
         order: Number.isFinite(input.order) ? input.order : 0,
@@ -240,7 +259,7 @@ export const addCollectionBookToWall = async (book: CollectionBook, wallId: stri
         x: null,
         y: null,
         w: 375,
-        h: 220,
+        h: 360,
         rotation: 0,
         z: maxZ + 1,
         order: wallItems.length,
@@ -307,6 +326,16 @@ export const getCollectionWallAssetById = async (id: string): Promise<Collection
     });
 };
 
+export const getAllCollectionWallAssets = async (): Promise<CollectionWallAsset[]> => {
+    const opened = await getStore(STORE_COLLECTION_WALL_ASSETS, 'readonly');
+    if (!opened) return [];
+    return new Promise((resolve, reject) => {
+        const request = opened.store.getAll();
+        request.onsuccess = () => resolve(sortAssets((request.result || []) as CollectionWallAsset[]));
+        request.onerror = () => reject(request.error);
+    });
+};
+
 export const getCollectionWallAssetsByHash = async (hash: string): Promise<CollectionWallAsset[]> => {
     const db = await openDB();
     if (!db.objectStoreNames.contains(STORE_COLLECTION_WALL_ASSETS)) return [];
@@ -322,6 +351,41 @@ export const getCollectionWallAssetsByHash = async (hash: string): Promise<Colle
             resolve(assets.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
         };
         request.onerror = () => reject(request.error);
+    });
+};
+
+export type CollectionWallAssetDeleteResult = 'deleted' | 'hidden' | 'missing';
+
+export const deleteCollectionWallAsset = async (id: string): Promise<CollectionWallAssetDeleteResult> => {
+    const asset = await getCollectionWallAssetById(id);
+    if (!asset) return 'missing';
+
+    const [items, walls] = await Promise.all([
+        getAllCollectionWallItems(),
+        getAllCollectionWalls(),
+    ]);
+    const usedByItem = items.some(item => item.assetId === id);
+    const usedByBondFrame = items.some(item => item.bond?.avatarFrame === id);
+    const usedByTextFont = items.some(item => item.text?.fontAssetId === id);
+    const usedByBackground = walls.some(wall => wall.background?.type === 'asset' && wall.background.value === id);
+
+    if (usedByItem || usedByBondFrame || usedByTextFont || usedByBackground) {
+        await saveCollectionWallAsset({
+            ...asset,
+            meta: {
+                ...(asset.meta || {}),
+                hiddenFromLibrary: true,
+            },
+        });
+        return 'hidden';
+    }
+
+    const opened = await getStore(STORE_COLLECTION_WALL_ASSETS, 'readwrite');
+    if (!opened) return 'missing';
+    return new Promise((resolve, reject) => {
+        opened.store.delete(id);
+        opened.tx.oncomplete = () => resolve('deleted');
+        opened.tx.onerror = () => reject(opened.tx.error);
     });
 };
 

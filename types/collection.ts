@@ -88,21 +88,34 @@ export interface CollectionWall {
     changeCountSinceVisit: number;
     charLastVisitManifest?: string;
     charLastVisitAt?: number;
+    charRemarks?: { text: string; ts: number }[];
     hasUnseenCharItem: boolean;
+    defaultBondWidgetHidden?: boolean;
     sortOrder: number;
     createdAt: number;
     updatedAt: number;
 }
 
-export type CollectionWallItemType = 'card' | 'image' | 'sticker' | 'text' | 'html';
+export type CollectionWallItemType = 'card' | 'image' | 'sticker' | 'text' | 'bond' | 'html';
 export type CollectionWallItemAuthor = 'user' | 'char';
 export type CollectionWallTextPreset = 'sticky_note' | 'big_plain' | 'typewriter' | 'handwriting' | 'char_note';
+export type CollectionWallRemarkTemplate = 'ticket' | 'pol' | 'card' | 'letter' | 'receipt';
 
 export interface CollectionWallTextData {
     content: string;
     preset: CollectionWallTextPreset;
     color?: string;
     stroke?: boolean;
+    fontAssetId?: string;
+    fontFamily?: string;
+    fontSize?: number;
+    align?: 'left' | 'center' | 'right';
+    remarkTemplate?: CollectionWallRemarkTemplate;
+}
+
+export interface CollectionWallBondData {
+    variant?: 'default';
+    avatarFrame?: string;
 }
 
 export interface CollectionWallItem {
@@ -119,12 +132,24 @@ export interface CollectionWallItem {
     order: number;
     bookId?: string;
     assetId?: string;
+    html?: string;
     text?: CollectionWallTextData;
+    bond?: CollectionWallBondData;
     name?: string;
     createdAt: number;
 }
 
 export type CollectionWallAssetOrigin = 'upload' | 'chat_gen' | 'char';
+
+export interface CollectionWallAssetMeta {
+    assetKind?: 'image' | 'font';
+    prompt?: string;
+    sourceMessageId?: number | string;
+    name?: string;
+    uploadedFileName?: string;
+    hasTransparency?: boolean;
+    hiddenFromLibrary?: boolean;
+}
 
 export interface CollectionWallAsset {
     id: string;
@@ -135,7 +160,7 @@ export interface CollectionWallAsset {
     bytes: number;
     hash: string;
     origin: CollectionWallAssetOrigin;
-    meta?: { prompt?: string; sourceMessageId?: number | string; name?: string };
+    meta?: CollectionWallAssetMeta;
     createdAt: number;
 }
 
