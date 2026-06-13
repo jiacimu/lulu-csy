@@ -15,8 +15,9 @@ export { formatCollectionKindLabel };
 
 export function inferCollectionBookKind(cardData: StatusCardData): CollectionBookKind {
     const mode = String(cardData.meta?.afterglowMode || cardData.meta?.mode || '').toLowerCase();
+    const source = String(cardData.meta?.source || '').toLowerCase();
     if (mode === 'hearttalk' || mode === 'heart_talk') return 'heart_talk';
-    if (mode === 'fanfic' || mode === 'afterglow' || cardData.meta?.afterglowCover || cardData.meta?.afterglowTags) return 'afterglow';
+    if (mode === 'fanfic' || mode === 'afterglow' || source === 'afterglow' || cardData.meta?.afterglowCover || cardData.meta?.afterglowTags) return 'afterglow';
     if (cardData.cardType === 'freeform' && typeof cardData.meta?.html === 'string') return 'freeform';
     return 'afterglow';
 }

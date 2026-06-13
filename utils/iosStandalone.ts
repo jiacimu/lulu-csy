@@ -1,23 +1,15 @@
 let hasInstalledIOSStandaloneWorkaround = false;
 let stableStandaloneHeight = 0;
-let stableCandidate = 0;
-let stableCandidateAt = 0;
-let stableCandidateCount = 0;
-let lastStandaloneAppHeight = 0;
-let hasActiveTextEntry = false;
+let stableStandaloneHeightCoversScreen = false;
+let cachedTopInset: number | null = null;
+let cachedBottomInset: number | null = null;
 let lastStandaloneState: boolean | null = null;
-let lastRestoreAt = Number.NEGATIVE_INFINITY;
-let lastViewportEventAt = Number.NEGATIVE_INFINITY;
-let lastInteractionAt = Number.NEGATIVE_INFINITY;
-let interactionRepairArmed = false;
 
-const KEYBOARD_INSET_THRESHOLD = 100;
-const REAL_VIEWPORT_GAP_THRESHOLD = 8;
-const REAL_VIEWPORT_KEYBOARD_CLOSED_TOLERANCE = 8;
-const STABLE_GROWTH_MIN_SPAN = 150;
-const STABLE_SHRINK_MIN_SPAN = 500;
-const MAX_PINCH_SCALE_FOR_SCROLL_RESET = 1.01;
-const SETTLE_DELAYS = [0, 100, 250, 600, 1200] as const;
+const KEYBOARD_INSET_THRESHOLD = 120;
+const FALLBACK_TOP_INSET = 44;
+const SCREEN_CANVAS_GAP_THRESHOLD = 40;
+const LARGE_VIEWPORT_PROMOTION_TOLERANCE = 8;
+const SAFE_AREA_RETRY_DELAYS_MS = [120, 500, 1500, 3000] as const;
 
 export const IOS_STANDALONE_CHANGE_EVENT = 'sully:ios-standalone-change';
 
@@ -26,48 +18,74 @@ type CapacitorGlobal = {
   getPlatform?: () => string;
   isNativePlatform?: () => boolean;
 };
-type SafeAreaEdge = 'top' | 'right' | 'bottom' | 'left';
 
-const safeAreaCache: Partial<Record<SafeAreaEdge, number>> = {};
+function readSafeAreaInsets(): { top: number; bottom: number } {
+  if (typeof document === 'undefined' || !document.body) {
+    return { top: cachedTopInset ?? 0, bottom: cachedBottomInset ?? 0 };
+  }
 
-function now(): number {
-  return typeof performance !== 'undefined' ? performance.now() : Date.now();
-}
-
-function isDocumentHidden(): boolean {
-  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
-}
-
-function invalidateSafeAreaCache(): void {
-  Object.keys(safeAreaCache).forEach(edge => {
-    delete safeAreaCache[edge as SafeAreaEdge];
-  });
-}
-
-function readSafeAreaInset(edge: SafeAreaEdge): number {
-  if (safeAreaCache[edge] !== undefined) return safeAreaCache[edge] ?? 0;
-  if (typeof document === 'undefined' || !document.body) return 0;
+  if (cachedTopInset !== null && cachedBottomInset !== null) {
+    return { top: cachedTopInset, bottom: cachedBottomInset };
+  }
 
   const probe = document.createElement('div');
   probe.style.position = 'fixed';
   probe.style.visibility = 'hidden';
   probe.style.pointerEvents = 'none';
   probe.style.opacity = '0';
-  probe.style.setProperty(`padding-${edge}`, `env(safe-area-inset-${edge})`);
+  probe.style.paddingTop = 'env(safe-area-inset-top)';
+  probe.style.paddingBottom = 'env(safe-area-inset-bottom)';
   document.body.appendChild(probe);
 
   const computed = window.getComputedStyle(probe);
-  const inset = parseFloat(computed.getPropertyValue(`padding-${edge}`)) || 0;
+  const top = Math.round(
+    parseFloat(computed.paddingTop || computed.getPropertyValue('padding-top')) || 0,
+  );
+  const bottom = Math.round(
+    parseFloat(computed.paddingBottom || computed.getPropertyValue('padding-bottom')) || 0,
+  );
 
   document.body.removeChild(probe);
-  safeAreaCache[edge] = Math.round(inset);
-  return safeAreaCache[edge] ?? 0;
+
+  if (cachedTopInset === null && top > 0) cachedTopInset = top;
+  if (cachedBottomInset === null && bottom > 0) cachedBottomInset = bottom;
+
+  return { top: cachedTopInset ?? top, bottom: cachedBottomInset ?? bottom };
+}
+
+function measureViewportUnit(unit: 'lvh'): number | null {
+  if (typeof document === 'undefined' || !document.body) return null;
+
+  const probe = document.createElement('div');
+  probe.style.position = 'fixed';
+  probe.style.visibility = 'hidden';
+  probe.style.pointerEvents = 'none';
+  probe.style.opacity = '0';
+  probe.style.width = '0';
+  probe.style.height = `100${unit}`;
+  document.body.appendChild(probe);
+
+  const rectHeight = probe.getBoundingClientRect().height;
+  const computedHeight = parseFloat(window.getComputedStyle(probe).height || '0') || 0;
+  document.body.removeChild(probe);
+
+  const height = Math.round(rectHeight || computedHeight);
+  return Number.isFinite(height) && height > 0 ? height : null;
+}
+
+function readStandaloneLargeViewportHeight(): number {
+  if (typeof window === 'undefined') return 0;
+
+  const cssLargeViewportHeight = measureViewportUnit('lvh') ?? 0;
+  const screenHeight = Math.round(window.screen?.height || 0);
+  return Math.max(cssLargeViewportHeight, screenHeight);
 }
 
 export function isIOSDevice(): boolean {
   if (typeof navigator === 'undefined') return false;
   const userAgent = navigator.userAgent || '';
-  return /iPad|iPhone|iPod/i.test(userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return /iPad|iPhone|iPod/i.test(userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
 function isCapacitorIOS(): boolean {
@@ -82,12 +100,9 @@ function isCapacitorIOS(): boolean {
 
 export function isStandaloneDisplayMode(): boolean {
   if (typeof window === 'undefined') return false;
-
-  const isElementFullscreen = typeof document !== 'undefined' && Boolean(document.fullscreenElement);
   return Boolean(
-    window.matchMedia?.('(display-mode: standalone)').matches ||
-    (!isElementFullscreen && window.matchMedia?.('(display-mode: fullscreen)').matches) ||
-    (window.navigator as NavigatorWithStandalone).standalone,
+    window.matchMedia?.('(display-mode: standalone)').matches
+    || (window.navigator as NavigatorWithStandalone).standalone,
   );
 }
 
@@ -120,6 +135,11 @@ function removeRootStyleProperty(name: string): void {
   }
 }
 
+function invalidateSafeAreaCache(): void {
+  cachedTopInset = null;
+  cachedBottomInset = null;
+}
+
 function syncIOSStandaloneState(): boolean {
   const useStandaloneFixes = isIOSStandaloneWebApp();
   toggleClass(document.documentElement, 'ios-standalone', useStandaloneFixes);
@@ -142,249 +162,86 @@ function isTextEntryElement(target: EventTarget | null): target is HTMLElement {
   return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 }
 
-function clearKeyboardArtifacts(): void {
-  toggleClass(document.documentElement, 'keyboard-open', false);
-  toggleClass(document.body, 'keyboard-open', false);
-  toggleClass(document.body, 'ios-keyboard-open', false);
-  setRootStyleProperty('--keyboard-inset', '0px');
-  removeRootStyleProperty('--effective-safe-bottom');
-}
-
-function syncRealViewportHeight(options: {
-  shouldApply: boolean;
-  innerHeight: number;
-  visualViewportHeight: number;
-  layoutViewportHeight: number;
-  isKeyboardOpen: boolean;
-}): void {
-  const { shouldApply, innerHeight, visualViewportHeight, layoutViewportHeight, isKeyboardOpen } = options;
-
-  if (!shouldApply) {
-    removeRootStyleProperty('--real-vh');
-    return;
+function setKeyboardOpen(isOpen: boolean): void {
+  toggleClass(document.documentElement, 'keyboard-open', isOpen);
+  toggleClass(document.body, 'keyboard-open', isOpen);
+  toggleClass(document.body, 'ios-keyboard-open', isOpen);
+  if (isOpen) {
+    setRootStyleProperty('--effective-safe-bottom', '0px');
+  } else {
+    removeRootStyleProperty('--effective-safe-bottom');
   }
-
-  const layoutGap = innerHeight - layoutViewportHeight;
-  const visualMatchesScreen = Math.abs(visualViewportHeight - innerHeight) <= REAL_VIEWPORT_KEYBOARD_CLOSED_TOLERANCE;
-
-  if (!isKeyboardOpen && visualMatchesScreen && layoutGap > REAL_VIEWPORT_GAP_THRESHOLD && innerHeight > 0) {
-    setRootStyleProperty('--real-vh', `${innerHeight}px`);
-    return;
-  }
-
-  if (!isKeyboardOpen && layoutGap <= REAL_VIEWPORT_GAP_THRESHOLD) {
-    removeRootStyleProperty('--real-vh');
-  }
-}
-
-function getScreenHeightLimit(): number {
-  const width = Math.round(window.screen?.width || 0);
-  const height = Math.round(window.screen?.height || 0);
-  const longSide = Math.max(width, height);
-  return longSide > 0 ? longSide + 2 : 0;
-}
-
-function clampStandaloneStableHeight(rawHeight: number): number {
-  if (!Number.isFinite(rawHeight) || rawHeight <= 0) return 0;
-  const screenHeightLimit = getScreenHeightLimit();
-  if (screenHeightLimit <= 0) return Math.round(rawHeight);
-  return Math.round(Math.min(rawHeight, screenHeightLimit));
-}
-
-function resetStableCandidate(): void {
-  stableCandidate = 0;
-  stableCandidateAt = 0;
-  stableCandidateCount = 0;
-}
-
-function hasRestoreAnchor(): boolean {
-  return Number.isFinite(lastRestoreAt);
-}
-
-function isViewportTrustedSinceRestore(): boolean {
-  return !hasRestoreAnchor() || lastViewportEventAt > lastRestoreAt;
-}
-
-function hasInteractionSinceRestore(): boolean {
-  return hasRestoreAnchor() && lastInteractionAt > lastRestoreAt;
-}
-
-function offerStableCandidate(height: number, timestamp: number): void {
-  const viewportTrusted = isViewportTrustedSinceRestore();
-  const interactedAfterRestore = hasInteractionSinceRestore();
-  const shrinking = stableStandaloneHeight > 0 && height < stableStandaloneHeight;
-  const untrustedRestore = hasRestoreAnchor() && !viewportTrusted && !interactedAfterRestore;
-
-  if (untrustedRestore) return;
-  if (shrinking && (!viewportTrusted || !interactedAfterRestore)) return;
-
-  const minSpan = shrinking ? STABLE_SHRINK_MIN_SPAN : STABLE_GROWTH_MIN_SPAN;
-  if (height !== stableCandidate) {
-    stableCandidate = height;
-    stableCandidateAt = timestamp;
-    stableCandidateCount = 1;
-    return;
-  }
-
-  stableCandidateCount += 1;
-  if (stableCandidateCount >= 2 && timestamp - stableCandidateAt >= minSpan) {
-    if (!stableStandaloneHeight || height > stableStandaloneHeight || shrinking) {
-      stableStandaloneHeight = height;
-    }
-  }
-}
-
-function findScrollableAncestor(target: HTMLElement): HTMLElement | null {
-  let current = target.parentElement;
-  while (current && current !== document.body && current !== document.documentElement) {
-    const computed = window.getComputedStyle(current);
-    const overflowY = computed.overflowY || computed.getPropertyValue('overflow-y');
-    const canScroll = /auto|scroll|overlay/i.test(overflowY);
-    if (canScroll && current.scrollHeight > current.clientHeight) return current;
-    current = current.parentElement;
-  }
-  return null;
-}
-
-function resetStrayScroll(options: { force?: boolean } = {}): void {
-  if (!isIOSDevice()) return;
-
-  const visualViewport = window.visualViewport;
-  if (visualViewport && visualViewport.scale > MAX_PINCH_SCALE_FOR_SCROLL_RESET) return;
-  if (isTextEntryElement(document.activeElement)) return;
-
-  const scrollingElement = document.scrollingElement || document.documentElement;
-  const hasStrayScroll = (window.scrollY || 0) > 0 || (scrollingElement.scrollTop || 0) > 0;
-  if (!options.force && !hasStrayScroll) return;
-
-  try {
-    window.scrollTo(0, 0);
-  } catch {
-    // Some test and embedded WebView environments expose scrollTo but do not implement it.
-  }
-  scrollingElement.scrollTop = 0;
-  document.documentElement.scrollTop = 0;
-  if (document.body) document.body.scrollTop = 0;
 }
 
 function setViewportVars(): void {
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
 
-  const shouldStabilizeHeight = syncIOSStandaloneState();
-  const timestamp = now();
-  const innerHeight = Math.round(window.innerHeight || 0);
-  const visualViewport = window.visualViewport;
-  const viewportHeight = Math.round(visualViewport?.height || innerHeight);
-  const viewportOffsetTop = Math.round(visualViewport?.offsetTop || 0);
-  const layoutViewportHeight = Math.round(document.documentElement.clientHeight || 0);
+  const shouldUseStandaloneFixes = syncIOSStandaloneState();
+  const innerHeight = Math.round(window.innerHeight || document.documentElement.clientHeight || 0);
+  const viewportHeight = Math.round(window.visualViewport?.height || innerHeight);
+  const viewportOffsetTop = Math.round(window.visualViewport?.offsetTop || 0);
+  const layoutHeight = Math.round(document.documentElement.clientHeight || innerHeight);
   const visualViewportBottom = viewportHeight + viewportOffsetTop;
-  const rawLayoutAppHeight = Math.max(innerHeight, layoutViewportHeight) || visualViewportBottom;
-  const layoutAppHeight = Math.round(rawLayoutAppHeight);
-  const keyboardBaselineHeight = stableStandaloneHeight || stableCandidate || layoutAppHeight;
-  const obscuredHeight = Math.max(0, keyboardBaselineHeight - visualViewportBottom);
-  const hasFocusedTextEntry = hasActiveTextEntry || isTextEntryElement(document.activeElement);
-  const viewportTrusted = isViewportTrustedSinceRestore();
-  const isKeyboardOpen = hasFocusedTextEntry && viewportTrusted && obscuredHeight >= KEYBOARD_INSET_THRESHOLD;
+  const nextViewportHeight = Math.max(innerHeight, layoutHeight, visualViewportBottom);
+  const screenWidth = Math.round(window.screen?.width || 0);
+  const screenHeight = Math.round(window.screen?.height || 0);
+  const isPortrait = screenHeight > 0 && screenWidth > 0
+    ? screenHeight >= screenWidth
+    : innerHeight >= Math.round(window.innerWidth || 0);
+  const safeInsets = shouldUseStandaloneFixes ? readSafeAreaInsets() : { top: 0, bottom: 0 };
+  const topSafeInset = shouldUseStandaloneFixes
+    ? (safeInsets.top > 0 ? safeInsets.top : FALLBACK_TOP_INSET)
+    : 0;
+  const bottomSafeInset = shouldUseStandaloneFixes ? safeInsets.bottom : 0;
+  const obscuredHeight = Math.max(0, innerHeight - visualViewportBottom);
+  const isKeyboardOpen = shouldUseStandaloneFixes
+    && isTextEntryElement(document.activeElement)
+    && obscuredHeight > KEYBOARD_INSET_THRESHOLD;
   const keyboardInset = isKeyboardOpen ? obscuredHeight : 0;
-  const topSafeInset = readSafeAreaInset('top');
-  const bottomSafeInset = readSafeAreaInset('bottom');
-  const standaloneBottomSafeInset = shouldStabilizeHeight ? bottomSafeInset : 0;
+  const largeViewportHeight = shouldUseStandaloneFixes && !isKeyboardOpen && isPortrait
+    ? readStandaloneLargeViewportHeight()
+    : 0;
+  const screenGap = screenHeight > 0 ? screenHeight - nextViewportHeight : 0;
+  const shouldPromoteToLargeViewport = largeViewportHeight > nextViewportHeight + LARGE_VIEWPORT_PROMOTION_TOLERANCE
+    && (
+      screenGap > SCREEN_CANVAS_GAP_THRESHOLD
+      || largeViewportHeight - nextViewportHeight > SCREEN_CANVAS_GAP_THRESHOLD
+    );
+  const resolvedViewportHeight = shouldPromoteToLargeViewport ? largeViewportHeight : nextViewportHeight;
+  const resolvedViewportCoversScreen = shouldPromoteToLargeViewport
+    || (
+      screenHeight > 0
+      && Math.abs(resolvedViewportHeight - screenHeight) <= LARGE_VIEWPORT_PROMOTION_TOLERANCE
+    );
 
-  if (shouldStabilizeHeight) {
-    if (!isKeyboardOpen && !isDocumentHidden() && layoutAppHeight > 0) {
-      offerStableCandidate(clampStandaloneStableHeight(layoutAppHeight), timestamp);
+  if (shouldUseStandaloneFixes) {
+    if (!isKeyboardOpen || !stableStandaloneHeight) {
+      stableStandaloneHeight = resolvedViewportHeight;
+      stableStandaloneHeightCoversScreen = resolvedViewportCoversScreen;
     }
   } else {
     stableStandaloneHeight = 0;
-    lastStandaloneAppHeight = 0;
-    resetStableCandidate();
+    stableStandaloneHeightCoversScreen = false;
   }
 
-  const standaloneAppHeight = stableStandaloneHeight || (isKeyboardOpen ? stableCandidate : 0) || layoutAppHeight;
-  const untrustedRestore = shouldStabilizeHeight && hasRestoreAnchor() && !viewportTrusted && !hasInteractionSinceRestore();
-  const guardedStandaloneAppHeight = untrustedRestore
-    && lastStandaloneAppHeight > 0
-    && standaloneAppHeight > 0
-    && standaloneAppHeight < lastStandaloneAppHeight
-    ? lastStandaloneAppHeight
-    : standaloneAppHeight;
-  const appHeight = shouldStabilizeHeight
-    ? guardedStandaloneAppHeight
-    : layoutAppHeight;
+  const appHeight = shouldUseStandaloneFixes
+    ? (stableStandaloneHeight || nextViewportHeight) + (stableStandaloneHeightCoversScreen ? 0 : bottomSafeInset)
+    : nextViewportHeight;
 
-  toggleClass(document.documentElement, 'keyboard-open', isKeyboardOpen);
-  toggleClass(document.body, 'keyboard-open', isKeyboardOpen);
-  toggleClass(document.body, 'ios-keyboard-open', isKeyboardOpen);
   setRootStyleProperty('--app-height', `${appHeight}px`);
-  syncRealViewportHeight({
-    shouldApply: shouldStabilizeHeight,
-    innerHeight,
-    visualViewportHeight: viewportHeight,
-    layoutViewportHeight,
-    isKeyboardOpen,
-  });
-  if (shouldStabilizeHeight && appHeight > 0) {
-    lastStandaloneAppHeight = appHeight;
-  }
   setRootStyleProperty('--visual-viewport-height', `${viewportHeight}px`);
   setRootStyleProperty('--keyboard-inset', `${keyboardInset}px`);
-  setRootStyleProperty('--standalone-safe-area-bottom', `${standaloneBottomSafeInset}px`);
+  setRootStyleProperty('--standalone-safe-area-top', `${topSafeInset}px`);
+  setRootStyleProperty('--standalone-safe-area-bottom', `${bottomSafeInset}px`);
   setRootStyleProperty('--hardware-safe-top', `${topSafeInset}px`);
   setRootStyleProperty('--hardware-safe-bottom', `${bottomSafeInset}px`);
+  removeRootStyleProperty('--real-vh');
 
-  if (isKeyboardOpen) {
-    setRootStyleProperty('--effective-safe-bottom', '0px');
+  if (shouldUseStandaloneFixes) {
+    setKeyboardOpen(isKeyboardOpen);
   } else {
-    removeRootStyleProperty('--effective-safe-bottom');
+    setKeyboardOpen(false);
   }
-
-  if (shouldStabilizeHeight) {
-    setRootStyleProperty('--safe-top', `${topSafeInset}px`);
-    setRootStyleProperty('--safe-bottom', `${bottomSafeInset}px`);
-  } else {
-    removeRootStyleProperty('--safe-top');
-    removeRootStyleProperty('--safe-bottom');
-  }
-
-  if (!isKeyboardOpen) {
-    resetStrayScroll();
-  }
-}
-
-function markViewportEvent(): void {
-  if (!isDocumentHidden()) {
-    lastViewportEventAt = now();
-  }
-}
-
-function markUserInteraction(): void {
-  lastInteractionAt = now();
-}
-
-function handleUserInteraction(): void {
-  markUserInteraction();
-  if (interactionRepairArmed) {
-    interactionRepairArmed = false;
-    setViewportVars();
-    resetStrayScroll();
-  }
-}
-
-function armFirstInteractionRepair(): void {
-  interactionRepairArmed = true;
-}
-
-function scheduleSettle(options: { includeImmediate?: boolean } = {}): void {
-  const includeImmediate = options.includeImmediate ?? true;
-  SETTLE_DELAYS.forEach(delay => {
-    if (!includeImmediate && delay === 0) return;
-    window.setTimeout(() => {
-      if (isDocumentHidden()) return;
-      setViewportVars();
-      resetStrayScroll();
-    }, delay);
-  });
-  armFirstInteractionRepair();
 }
 
 export function installIOSStandaloneWorkaround(): void {
@@ -394,37 +251,13 @@ export function installIOSStandaloneWorkaround(): void {
   hasInstalledIOSStandaloneWorkaround = true;
 
   const handleViewportChange = () => {
-    if (isDocumentHidden()) return;
-    markViewportEvent();
     setViewportVars();
   };
 
-  const handlePageShow = () => {
-    lastRestoreAt = now();
-    scheduleSettle();
-  };
-
-  const handleVisibilityChange = () => {
-    if (document.visibilityState !== 'visible') {
-      hasActiveTextEntry = false;
-      const active = document.activeElement;
-      if (isTextEntryElement(active)) {
-        active.blur();
-      }
-      clearKeyboardArtifacts();
-      return;
-    }
-
-    lastRestoreAt = now();
-    scheduleSettle();
-  };
-
-  const handleOrientationChange = () => {
+  const handleSafeAreaChange = () => {
     stableStandaloneHeight = 0;
-    lastStandaloneAppHeight = 0;
-    resetStableCandidate();
     invalidateSafeAreaCache();
-    scheduleSettle({ includeImmediate: false });
+    setViewportVars();
   };
 
   const handleDisplayModeChange = () => {
@@ -433,16 +266,13 @@ export function installIOSStandaloneWorkaround(): void {
   };
 
   const handleFocusIn = (event: FocusEvent) => {
-    if (!isIOSDevice()) return;
-    const target = event.target;
-    if (!isTextEntryElement(target)) return;
-    hasActiveTextEntry = true;
+    if (!isTextEntryElement(event.target)) return;
     setViewportVars();
 
+    const target = event.target;
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         if (document.activeElement !== target) return;
-        if (!findScrollableAncestor(target)) return;
         try {
           target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         } catch {
@@ -454,37 +284,31 @@ export function installIOSStandaloneWorkaround(): void {
 
   const handleFocusOut = () => {
     window.setTimeout(() => {
-      if (!isIOSDevice() || !isTextEntryElement(document.activeElement)) {
-        hasActiveTextEntry = false;
-        clearKeyboardArtifacts();
-      }
-
-      if (!isDocumentHidden()) {
-        setViewportVars();
-        resetStrayScroll({ force: true });
-      }
+      setViewportVars();
     }, 180);
   };
 
-  window.addEventListener('resize', handleViewportChange);
-  window.addEventListener('orientationchange', handleOrientationChange);
-  window.addEventListener('pageshow', handlePageShow);
-  window.addEventListener('touchstart', handleUserInteraction, { capture: true, passive: true });
-  window.addEventListener('wheel', handleUserInteraction, { capture: true, passive: true });
-  window.addEventListener('keydown', handleUserInteraction, true);
-  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('resize', handleSafeAreaChange);
+  window.addEventListener('orientationchange', handleSafeAreaChange);
+  window.addEventListener('pageshow', handleDisplayModeChange);
   window.visualViewport?.addEventListener('resize', handleViewportChange);
   window.visualViewport?.addEventListener('scroll', handleViewportChange);
-
-  const standaloneQuery = window.matchMedia?.('(display-mode: standalone)');
-  const fullscreenQuery = window.matchMedia?.('(display-mode: fullscreen)');
-  [standaloneQuery, fullscreenQuery].forEach(query => {
-    query?.addEventListener?.('change', handleDisplayModeChange);
-    query?.addListener?.(handleDisplayModeChange);
-  });
-
+  document.addEventListener('visibilitychange', handleViewportChange);
   document.addEventListener('focusin', handleFocusIn);
   document.addEventListener('focusout', handleFocusOut);
 
+  const standaloneQuery = window.matchMedia?.('(display-mode: standalone)');
+  standaloneQuery?.addEventListener?.('change', handleDisplayModeChange);
+  standaloneQuery?.addListener?.(handleDisplayModeChange);
+
   setViewportVars();
+
+  if (isIOSStandaloneWebApp()) {
+    for (const delay of SAFE_AREA_RETRY_DELAYS_MS) {
+      window.setTimeout(() => {
+        if (cachedTopInset !== null && cachedBottomInset !== null) return;
+        setViewportVars();
+      }, delay);
+    }
+  }
 }

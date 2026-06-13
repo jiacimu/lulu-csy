@@ -58,6 +58,21 @@ const AgentSettings: React.FC = () => {
         if (Notification.permission === 'denied') return '已拒绝';
         return '未决定';
     })();
+    const isNativePush = pushInfo.channel === 'native-fcm';
+    const pushChannelLabel = (() => {
+        if (pushInfo.channel === 'native-fcm') return '原生 FCM';
+        if (pushInfo.channel === 'web-push') return 'Web Push';
+        return '不可用';
+    })();
+    const pushPermissionLabel = pushInfo.permission || permissionLabel;
+    const pushRegisteredLabel = (() => {
+        if (pushInfo.registered) return '已注册';
+        if (pushInfo.offlineCapable) return '已订阅';
+        if (pushInfo.needsResubscribe) return '需要重新初始化';
+        return '未注册';
+    })();
+    const tokenPreviewLabel = pushInfo.tokenPreview || (isNativePush ? '暂无' : '不适用');
+    const deviceIdPreviewLabel = pushInfo.deviceIdPreview || (isNativePush ? '暂无' : '不适用');
 
     const handleResubscribe = async () => {
         if (pushBusy) return;
@@ -250,7 +265,7 @@ const AgentSettings: React.FC = () => {
                             <span className="text-sm font-bold text-[#7faa95]">🔔 系统通知</span>
                         </div>
                         <p className="text-[10px] text-[#a89b91] leading-relaxed max-w-[240px]">
-                            Web 端优先使用 Web Push；如果页面还活着，只是短时间切到后台，会用浏览器通知兜底。
+                            Android App 优先使用原生 FCM；Web/PWA 继续使用 Web Push。短时间切到后台时仍保留本地通知兜底。
                         </p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer shrink-0">
@@ -290,26 +305,31 @@ const AgentSettings: React.FC = () => {
 
                 <div className="mt-4 rounded-2xl bg-white/45 border border-white/40 p-3 space-y-2">
                     <div className="flex items-center justify-between gap-3">
-                        <span className="text-[11px] font-bold text-[#7faa95]">Web Push 状态</span>
+                        <span className="text-[11px] font-bold text-[#7faa95]">推送状态</span>
                         <button
                             type="button"
                             onClick={handleResubscribe}
                             disabled={pushBusy}
                             className="px-3 py-1.5 rounded-xl text-[10px] font-bold bg-[#7faa95] text-white disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 transition-transform"
                         >
-                            {pushBusy ? '重新初始化中...' : '重新初始化 Web Push'}
+                            {pushBusy ? '重新初始化中...' : '重新初始化推送'}
                         </button>
                     </div>
 
                     <div className="grid grid-cols-[72px_1fr] gap-x-2 gap-y-1 text-[10px] leading-relaxed">
                         <span className="text-[#8b7e74] font-bold">通知权限</span>
-                        <span className="text-[#a89b91] break-all">{permissionLabel}</span>
+                        <span className="text-[#a89b91] break-all">{pushPermissionLabel}</span>
+
+                        <span className="text-[#8b7e74] font-bold">推送通道</span>
+                        <span className="text-[#a89b91] break-all">{pushChannelLabel}</span>
 
                         <span className="text-[#8b7e74] font-bold">订阅状态</span>
                         <span className="text-[#a89b91] break-all">{pushInfo.status || '未初始化'}</span>
 
-                        <span className="text-[#8b7e74] font-bold">推送通道</span>
-                        <span className="text-[#a89b91] break-all">{pushInfo.provider || '未知'}</span>
+                        <span className="text-[#8b7e74] font-bold">注册状态</span>
+                        <span className={pushInfo.registered || pushInfo.offlineCapable ? 'text-[#6f9f84] font-bold' : 'text-[#c4929f] font-bold'}>
+                            {pushRegisteredLabel}
+                        </span>
 
                         <span className="text-[#8b7e74] font-bold">离线能力</span>
                         <span className={pushInfo.offlineCapable ? 'text-[#6f9f84] font-bold' : 'text-[#c4929f] font-bold'}>
@@ -317,8 +337,8 @@ const AgentSettings: React.FC = () => {
                         </span>
 
                         <span className="text-[#8b7e74] font-bold">短后台兜底</span>
-                        <span className={permissionLabel === '已允许' ? 'text-[#6f9f84] font-bold' : 'text-[#c4929f] font-bold'}>
-                            {permissionLabel === '已允许' ? '页面存活时可用' : '需要允许通知'}
+                        <span className={pushPermissionLabel === '已允许' ? 'text-[#6f9f84] font-bold' : 'text-[#c4929f] font-bold'}>
+                            {pushPermissionLabel === '已允许' ? '页面存活时可用' : '需要允许通知'}
                         </span>
 
                         <span className="text-[#8b7e74] font-bold">修复建议</span>
@@ -326,15 +346,24 @@ const AgentSettings: React.FC = () => {
                             {pushInfo.needsResubscribe ? '需要重新初始化或更换支持的浏览器' : '暂无'}
                         </span>
 
-                        <span className="text-[#8b7e74] font-bold">订阅端点</span>
+                        <span className="text-[#8b7e74] font-bold">端点/Token</span>
                         <span className="text-[#a89b91] break-all">{pushInfo.endpoint || '暂无'}</span>
+
+                        <span className="text-[#8b7e74] font-bold">Token</span>
+                        <span className="text-[#a89b91] break-all">{tokenPreviewLabel}</span>
+
+                        <span className="text-[#8b7e74] font-bold">Device ID</span>
+                        <span className="text-[#a89b91] break-all">{deviceIdPreviewLabel}</span>
+
+                        <span className="text-[#8b7e74] font-bold">App ID</span>
+                        <span className="text-[#a89b91] break-all">{pushInfo.appId || '暂无'}</span>
 
                         <span className="text-[#8b7e74] font-bold">错误信息</span>
                         <span className="text-[#a89b91] break-all">{pushInfo.error || '暂无'}</span>
                     </div>
 
                     <p className="text-[10px] text-[#a89b91] leading-relaxed">
-                        如果这里一直不是“推送通知已就绪”，那你现在收到的大概率只是浏览器开着时的前台消息同步，不是真正的离线推送。
+                        如果这里一直没有离线能力，说明当前环境只能依赖页面存活时的本地通知兜底，无法保证真正离线送达。
                     </p>
                 </div>
             </section>

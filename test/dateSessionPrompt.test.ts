@@ -118,6 +118,39 @@ describe('date session prompt assembly', () => {
             dateStatusBarEnabled: false,
         }, [statusMessage])).toBe('');
     });
+
+    it('follows the Date status bar switch in system output rules', () => {
+        const baseInput = {
+            char,
+            userProfile,
+            allMsgs: [],
+            currentUserInput: '我们现在去哪？',
+            turnDirectives: {
+                userName: userProfile.name,
+                directorNote: '',
+                photoPromptBlock: '',
+                bilingualNote: '',
+                lo: 105,
+                hi: 195,
+                rotationPicks: [],
+                stallNudge: '',
+            },
+        };
+
+        const disabledSystemMessage = buildDateSessionPromptMessages(baseInput)[0].content;
+        expect(disabledSystemMessage).not.toContain('<status>');
+        expect(disabledSystemMessage).not.toContain('</status>');
+        expect(disabledSystemMessage).not.toContain('状态栏格式');
+        expect(disabledSystemMessage).not.toContain('status_bar_protocol');
+
+        const enabledSystemMessage = buildDateSessionPromptMessages({
+            ...baseInput,
+            statusPromptBlock: '### 线下状态栏随文生成\n本角色已启用线下状态栏。',
+        })[0].content;
+        expect(enabledSystemMessage).toContain('4. 可选 <status>...</status>');
+        expect(enabledSystemMessage).toContain('状态栏格式');
+        expect(enabledSystemMessage).toContain('### 线下状态栏随文生成');
+    });
 });
 
 describe('date recap bridge sync ordering', () => {

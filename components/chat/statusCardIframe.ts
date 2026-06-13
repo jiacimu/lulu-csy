@@ -5,6 +5,69 @@ export const STATUS_CARD_MAX_VIEWPORT_HEIGHT = 'calc(100vh - 120px)';
 export const STATUS_CARD_VIEWPORT_WIDTH_PADDING_PX = 48;
 export const STATUS_CARD_MEASURE_BUFFER_PX = 8;
 
+const FREEFORM_SUMMARY_COMPAT_CODE = `
+(function () {
+    function cleanText(value) {
+        return String(value || '').replace(/\\s+/g, ' ').trim();
+    }
+
+    function readNodeText(selector) {
+        try {
+            var node = document.querySelector(selector);
+            return node ? cleanText(node.getAttribute('content') || node.textContent || '') : '';
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function getFreeformSummaryCompat(fallback) {
+        var fallbackText = typeof fallback === 'string' ? cleanText(fallback) : '';
+        var summary = readNodeText('[data-freeform-summary]')
+            || readNodeText('meta[name="freeform-summary"]')
+            || readNodeText('meta[name="description"]');
+
+        if (summary) return summary.slice(0, 240);
+
+        try {
+            var root = document.getElementById('root') || document.body || document.documentElement;
+            summary = cleanText(root ? root.textContent : '');
+        } catch (error) {
+            summary = '';
+        }
+
+        return (summary || fallbackText).slice(0, 240);
+    }
+
+    if (typeof window.getFreeformSummary !== 'function') {
+        window.getFreeformSummary = getFreeformSummaryCompat;
+    }
+})();
+`;
+
+export const FREEFORM_HTML_COMPAT_SCRIPT = `<script data-freeform-compat="summary">\n${FREEFORM_SUMMARY_COMPAT_CODE}\n<\/script>`;
+
+export function injectFreeformCompatScript(html: string): string {
+    const source = String(html || '');
+    if (!source.trim()) return '';
+    if (/data-freeform-compat=["']summary["']/i.test(source)) return source;
+
+    if (/<head\b[^>]*>/i.test(source)) {
+        return source.replace(/<head\b[^>]*>/i, match => `${match}\n${FREEFORM_HTML_COMPAT_SCRIPT}`);
+    }
+
+    if (/<body\b[^>]*>/i.test(source)) {
+        return source.replace(/<body\b[^>]*>/i, match => `${match}\n${FREEFORM_HTML_COMPAT_SCRIPT}`);
+    }
+
+    const doctypeMatch = source.match(/^\s*<!doctype[^>]*>/i);
+    if (doctypeMatch) {
+        const insertAt = doctypeMatch[0].length;
+        return `${source.slice(0, insertAt)}\n${FREEFORM_HTML_COMPAT_SCRIPT}${source.slice(insertAt)}`;
+    }
+
+    return `${FREEFORM_HTML_COMPAT_SCRIPT}\n${source}`;
+}
+
 export const STATUS_CARD_IFRAME_SHELL = `<!DOCTYPE html>
 <html>
 <head>
@@ -53,6 +116,8 @@ body {
 <div id="root"></div>
 <script>
 (function () {
+${FREEFORM_SUMMARY_COMPAT_CODE}
+
     var root = document.getElementById('root');
     var styles = document.getElementById('styles');
     var activeChannel = null;

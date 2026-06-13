@@ -23,6 +23,12 @@ import {
     stripAppearanceThemeForLocalStorage,
 } from '../utils/appearancePresets';
 import { getImageGenerationDraftConfig } from '../utils/runtimeConfig';
+import {
+    consumePendingNativePushClick,
+    ensureNativePushClickBridge,
+    NATIVE_PUSH_NOTIFICATION_CLICK_EVENT,
+    type NativePushClickDetail,
+} from '../utils/nativePushBridge';
 
 // Sub-contexts
 import { NotificationProvider,useNotification,NotificationContextType } from './NotificationContext';
@@ -376,6 +382,15 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     useEffect(() => { activeCharIdRef.current = activeCharacterId; }, [activeCharacterId]);
     useEffect(() => { charactersRef.current = characters; }, [characters]);
 
+    const openChatFromNotification = useCallback((charId: string) => {
+        const normalizedCharId = charId.trim();
+        if (!normalizedCharId) return;
+
+        setActiveCharacterId(normalizedCharId);
+        appCtx.openApp(AppID.Chat);
+        setUnreadMessages(prev => ({ ...prev, [normalizedCharId]: 0 }));
+    }, [appCtx.openApp, setActiveCharacterId, setUnreadMessages]);
+
     // --- Helper to inject custom font ---
     const applyCustomFont = (fontData: string | undefined) => {
         let style = document.getElementById('custom-font-style');
@@ -719,16 +734,39 @@ const OSDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
         if (!navigator.serviceWorker) return;
         const handler = (event: MessageEvent) => {
             if (event.data?.type === 'NOTIFICATION_CLICK' && event.data.charId) {
-                const charId = event.data.charId;
-                setActiveCharacterId(charId);
-                appCtx.openApp(AppID.Chat);
-                // 清除该角色的未读标记
-                setUnreadMessages(prev => ({ ...prev, [charId]: 0 }));
+                openChatFromNotification(event.data.charId);
             }
         };
         navigator.serviceWorker.addEventListener('message', handler);
         return () => navigator.serviceWorker.removeEventListener('message', handler);
+    }, [openChatFromNotification]);
+
+    // --- Capacitor Android: 原生通知点击 → 切换角色 + 打开聊天 ---
+    useEffect(() => {
+        ensureNativePushClickBridge().catch((error) => {
+            console.warn('[Push] Native notification click bridge failed:', error);
+        });
     }, []);
+
+    useEffect(() => {
+        if (!isDataLoaded) return;
+
+        const pendingClick = consumePendingNativePushClick();
+        if (pendingClick?.charId) {
+            openChatFromNotification(pendingClick.charId);
+        }
+
+        const handler = (event: Event) => {
+            const detail = (event as CustomEvent<NativePushClickDetail>).detail;
+            if (detail?.charId) {
+                consumePendingNativePushClick();
+                openChatFromNotification(detail.charId);
+            }
+        };
+
+        window.addEventListener(NATIVE_PUSH_NOTIFICATION_CLICK_EVENT, handler);
+        return () => window.removeEventListener(NATIVE_PUSH_NOTIFICATION_CLICK_EVENT, handler);
+    }, [isDataLoaded, characterIdsKey, openChatFromNotification]);
 
     // --- URL 参数: 从通知新窗口打开时自动导航 ---
     useEffect(() => {

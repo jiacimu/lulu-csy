@@ -1111,10 +1111,14 @@ export const buildCotLive = (
     perspectiveLabel: string,
     perspectiveReminder: string,
     includeTimeAwareness = true,
+    includeStatusBar = false,
 ) => {
     const timeAwarenessLine = includeTimeAwareness
         ? 'd. 现在几点了？读取 <runtime_context> 中提供的 current_time，不要自行猜测时间。让时间自然影响光线、氛围和行为合理性。'
         : 'd. 该角色已关闭线下时间感知；不要自行猜测现实时间、当前时段或距离上次互动多久。';
+    const finalFormatCheck = includeStatusBar
+        ? '如果人称、情绪标签、动作台词分行、篇幅、状态栏格式都没问题，就发。'
+        : '如果人称、情绪标签、动作台词分行、篇幅都没问题，就发。';
 
     return `
 <cot_protocol_live>
@@ -1195,7 +1199,7 @@ c. 确认动作和台词分行，不在同一行混写。
 Step 8 — 最后检查
 ${charName}，请出于本心自检你的言行。
 如果这段话不像你本人会做出的反应，就重写。
-如果人称、情绪标签、动作台词分行、篇幅、状态栏格式都没问题，就发。
+${finalFormatCheck}
 
 ---
 ## [CLOSURE-PROTOCOL]
@@ -1403,9 +1407,16 @@ export const buildDateSystemRulesModule = ({
     const softDevotionBlock = char.softDevotionChatMode === true
         ? `\n\n<soft_devotion_rules>\n${buildSoftDevotionChatModePrompt(charName, userName, userProfile.healthGender).trim()}\n</soft_devotion_rules>`
         : '';
-    const statusProtocol = statusPromptBlock?.trim()
-        ? `<status_bar_protocol>\n${statusPromptBlock.trim()}\n</status_bar_protocol>`
-        : `<status_bar_protocol>\ndisabled\n</status_bar_protocol>`;
+    const normalizedStatusPromptBlock = statusPromptBlock?.trim() || '';
+    const hasStatusProtocol = normalizedStatusPromptBlock.length > 0;
+    const statusProtocol = hasStatusProtocol ? `\n\n${normalizedStatusPromptBlock}` : '';
+    const statusOutputStep = hasStatusProtocol ? '\n4. 可选 <status>...</status>' : '';
+    const statusInternalRule = hasStatusProtocol
+        ? '- <thinking>、<inner_whispers>、<status> 内部不需要 [emotion] 标签。'
+        : '- <thinking>、<inner_whispers> 内部不需要 [emotion] 标签。';
+    const innerWhisperPlacementRule = hasStatusProtocol
+        ? '- 如果输出 <inner_whispers>，必须放在正文剧情行之后、<status> 之前。\n- 如果输出 <status>，必须放在最后。'
+        : '- 如果输出 <inner_whispers>，必须放在正文剧情行之后。';
 
     // --- Worldbook position groups ---
     const allWbs = char.mountedWorldbooks || [];
@@ -1497,20 +1508,18 @@ ${buildInnerWhisperInstruction(userName, charGender).trim()}
 
 1. <thinking>...</thinking>
 2. 正文剧情行
-3. 可选 <inner_whispers>...</inner_whispers>
-4. 可选 <status>...</status>
+3. 可选 <inner_whispers>...</inner_whispers>${statusOutputStep}
 
 硬性规则：
 - 第一个非空字符必须是 <thinking>。
 - <thinking> 必须闭合，且每轮最多一个。
 - 正文剧情行必须逐行使用 [emotion] 标签。
-- <thinking>、<inner_whispers>、<status> 内部不需要 [emotion] 标签。
+${statusInternalRule}
 - 动作/叙述和台词不得混在同一正文行。
 - 每轮最多一个 <inner_whispers>。
-- 如果输出 <inner_whispers>，必须放在正文剧情行之后、<status> 之前。
-- 如果输出 <status>，必须放在最后。
+${innerWhisperPlacementRule}
 
-${statusProtocol.replace(/^<status_bar_protocol>\n/, '').replace(/\n<\/status_bar_protocol>$/, '')}
+${statusProtocol}
 
 <CRITICAL_OUTPUT_FORMAT_LIVE>
 正文格式规则（违反将导致系统崩溃）：
@@ -1522,7 +1531,7 @@ ${statusProtocol.replace(/^<status_bar_protocol>\n/, '').replace(/\n<\/status_ba
 </CRITICAL_OUTPUT_FORMAT_LIVE>
 </output_contract>
 ${bottomWorldbooksBlock ? `\n${bottomWorldbooksBlock}\n` : ''}
-${buildCotLive(charName, userName, perspectiveLabel, perspectiveReminder, char.dateTimeAwarenessEnabled !== false).trim()}`;
+${buildCotLive(charName, userName, perspectiveLabel, perspectiveReminder, char.dateTimeAwarenessEnabled !== false, hasStatusProtocol).trim()}`;
 };
 
 // ====== Composite builders for DateApp ======

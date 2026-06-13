@@ -195,11 +195,12 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
         expect(body.messages[2].content).toContain('请基于上方主聊天完整上下文镜像执行本任务');
     });
 
-    it('stores the freeform text tier from the v2.1 choice line', async () => {
+    it('stores the freeform text tier, palette, and interaction from the v2.3 choice line', async () => {
         const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99);
-        const freeformHtml = '<!DOCTYPE html><html><head><style>body{margin:0;background:transparent;font-family:-apple-system,"Noto Sans SC","Helvetica Neue",sans-serif}.screen{height:160px;width:100%;background:#111;color:#fff}</style></head><body><div class="screen">22:15 未接来电 ×3</div></body></html>';
+        window.localStorage.setItem('aetheros_freeform_recent_palettes_char-1', JSON.stringify(['月色清冷', '月色清冷', '奶茶莫兰迪']));
+        const freeformHtml = '<!DOCTYPE html><html><head><style>body{margin:0;background:transparent;font-family:-apple-system,"Noto Sans SC","Helvetica Neue",sans-serif}.screen{height:160px;width:100%;background:#182028;color:#edf1ed}</style></head><body><div class="screen">22:15 未接来电 ×3</div></body></html>';
         mockFetchContent([
-            '候选：登机牌 / 锁屏通知 / 药袋贴纸 → 选B·沉默卡（夜里通知）',
+            '候选：登机牌 / 锁屏通知 / 药袋贴纸 → 选B·沉默卡·月色清冷·lockscreen（夜里通知）',
             '```html',
             freeformHtml,
             '```',
@@ -217,12 +218,20 @@ describe('MindSnapshotExtractor.generateInnerVoice', () => {
 
         expect(promptText).toContain('## 二、决定文字');
         expect(promptText).toContain('自由文案禁止覆盖载体的功能区');
-        expect(promptText).toContain('你会被放入前端提供的手机竖屏舞台中');
-        expect(promptText).toContain('舞台宽度约 360px，高度建议 220px~680px');
-        expect(promptText).toContain('档位只能是这三个词之一');
+        expect(promptText).toContain('用户审美档案：月色清冷');
+        expect(promptText).toContain('色彩档案');
+        expect(promptText).toContain('上限 480px');
+        expect(promptText).toContain('## 四、动效与互动');
+        expect(promptText).toContain('## 五、技术约束（必须全部遵守）');
+        expect(promptText).toContain('prefers-reduced-motion');
+        expect(promptText).toContain('色彩档位只能是');
+        expect(promptText).toContain('互动词只能是');
         expect(result?.meta?.freeformCandidates).toEqual(['登机牌', '锁屏通知', '药袋贴纸']);
         expect(result?.meta?.freeformShape).toBe('锁屏通知');
         expect(result?.meta?.freeformTextTier).toBe('沉默卡');
+        expect(result?.meta?.freeformPalette).toBe('月色清冷');
+        expect(result?.meta?.freeformInteraction).toBe('lockscreen');
+        expect(result?.meta?.freeformAestheticHint).toBe('用户审美档案：月色清冷');
 
         randomSpy.mockRestore();
     });

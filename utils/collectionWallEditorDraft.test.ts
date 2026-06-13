@@ -43,4 +43,27 @@ describe('collection wall editor draft snapshots', () => {
         expect(hasWallEditorDraftChanges(initial, wall, [{ ...item, order: 1 }])).toBe(true);
         expect(hasWallEditorDraftChanges(initial, wall, [item], '还没插入的便签')).toBe(true);
     });
+
+    it('tracks custom HTML cards and bond avatar frames in draft snapshots', () => {
+        const htmlItem: CollectionWallItem = {
+            ...item,
+            id: 'html-a',
+            type: 'html',
+            html: '<main>旧卡</main>',
+            text: undefined,
+            name: '自定义卡',
+        };
+        const bondItem: CollectionWallItem = {
+            ...item,
+            id: 'bond-a',
+            type: 'bond',
+            text: undefined,
+            bond: { variant: 'default', avatarFrame: 'wallasset-frame' },
+            name: '头像连接',
+        };
+        const initial = serializeWallEditorDraft(wall, [htmlItem, bondItem]);
+
+        expect(hasWallEditorDraftChanges(initial, wall, [{ ...htmlItem, html: '<main>新卡</main>' }, bondItem])).toBe(true);
+        expect(hasWallEditorDraftChanges(initial, wall, [htmlItem, { ...bondItem, bond: { variant: 'default' } }])).toBe(true);
+    });
 });

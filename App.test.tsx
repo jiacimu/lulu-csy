@@ -3,8 +3,7 @@
 import { cleanup,render } from '@testing-library/react';
 import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import App from './App';
-
-let isIOSStandalone = true;
+import { isIOSStandaloneWebApp } from './utils/iosStandalone';
 
 vi.mock('./components/PhoneShell', async () => {
   const React = await import('react');
@@ -55,14 +54,13 @@ vi.mock('./utils/systemFullscreen', () => ({
 }));
 
 vi.mock('./utils/iosStandalone', () => ({
-  IOS_STANDALONE_CHANGE_EVENT: 'sully:ios-standalone-change',
-  isIOSStandaloneWebApp: vi.fn(() => isIOSStandalone),
+  isIOSStandaloneWebApp: vi.fn(() => false),
 }));
 
-describe('App viewport shell layout', () => {
+describe('App fullscreen shell layout', () => {
   beforeEach(() => {
-    isIOSStandalone = true;
     window.history.replaceState({}, '', '/');
+    vi.mocked(isIOSStandaloneWebApp).mockReturnValue(false);
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       value: vi.fn(() => ({
@@ -83,14 +81,16 @@ describe('App viewport shell layout', () => {
     vi.clearAllMocks();
   });
 
-  it('pins the app canvas to all viewport edges without using real-vh inline height', () => {
+  it('uses the fixed app shell outside iOS standalone', () => {
     const { container } = render(<App />);
 
-    const appRoot = container.querySelector('.sully-app-root') as HTMLElement | null;
+    const appRoot = container.firstElementChild as HTMLElement | null;
 
     expect(appRoot).not.toBeNull();
     expect(appRoot?.classList.contains('fixed')).toBe(true);
     expect(appRoot?.classList.contains('inset-0')).toBe(true);
+    expect(appRoot?.classList.contains('sully-app-root')).toBe(true);
+    expect(appRoot?.classList.contains('h-screen')).toBe(false);
     expect(appRoot?.style.height).toBe('');
     expect(appRoot?.getAttribute('style') ?? '').not.toContain('--real-vh');
 
@@ -100,16 +100,22 @@ describe('App viewport shell layout', () => {
     expect(appCanvas?.classList.contains('inset-0')).toBe(true);
   });
 
-  it('keeps the same pinned root outside iOS standalone mode', () => {
-    isIOSStandalone = false;
+  it('uses the SullyOS-style app-height shell in iOS standalone', () => {
+    vi.mocked(isIOSStandaloneWebApp).mockReturnValue(true);
+
     const { container } = render(<App />);
 
-    const appRoot = container.querySelector('.sully-app-root') as HTMLElement | null;
+    const appRoot = container.firstElementChild as HTMLElement | null;
+    const appCanvas = appRoot?.firstElementChild as HTMLElement | null;
 
-    expect(appRoot).not.toBeNull();
     expect(appRoot?.classList.contains('fixed')).toBe(true);
     expect(appRoot?.classList.contains('inset-0')).toBe(true);
-    expect(appRoot?.classList.contains('relative')).toBe(false);
-    expect(appRoot?.style.height).toBe('');
+    expect(appRoot?.classList.contains('sully-app-root')).toBe(true);
+    expect(appRoot?.classList.contains('h-screen')).toBe(false);
+    expect(appRoot?.style.height).toBe('var(--app-height, 100lvh)');
+    expect(appRoot?.style.minHeight).toBe('var(--app-height, 100lvh)');
+    expect(appRoot?.getAttribute('style') ?? '').not.toContain('--real-vh');
+    expect(appCanvas?.classList.contains('absolute')).toBe(true);
+    expect(appCanvas?.classList.contains('fixed')).toBe(false);
   });
 });

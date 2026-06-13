@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatAI } from './useChatAI';
 import { DB } from '../utils/db';
 import { ChatPrompts } from '../utils/chatPrompts';
+import { ChatParser } from '../utils/chatParser';
 import { safeFetchJson,safeResponseJson } from '../utils/safeApi';
 import { VectorMemoryExtractor } from '../utils/vectorMemoryExtractor';
 import { MindSnapshotExtractor } from '../utils/mindSnapshotExtractor';
@@ -64,6 +65,10 @@ vi.mock('../utils/mindSnapshotExtractor', () => ({
     MindSnapshotExtractor: {
         senseBefore: vi.fn(() => Promise.resolve(null)),
         generateInnerVoice: vi.fn(() => Promise.resolve(null)),
+        generateFreeformCard: vi.fn(() => Promise.resolve(null)),
+        generateCreativeCard: vi.fn(() => Promise.resolve(null)),
+        generateCustomCard: vi.fn(() => Promise.resolve(null)),
+        generateAfterglowCard: vi.fn(() => Promise.resolve(null)),
     },
 }));
 
@@ -136,6 +141,7 @@ vi.mock('../utils/playbackContextRuntime', () => ({
 
 const mockedDB = vi.mocked(DB);
 const mockedChatPrompts = vi.mocked(ChatPrompts);
+const mockedChatParser = vi.mocked(ChatParser);
 const mockedSafeFetchJson = vi.mocked(safeFetchJson);
 const mockedSafeResponseJson = vi.mocked(safeResponseJson);
 const mockedGetEmbeddingConfig = vi.mocked(getEmbeddingConfig);
@@ -160,9 +166,16 @@ describe('useChatAI context loading', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.unstubAllGlobals();
+        mockedDB.saveMessage.mockResolvedValue(42 as any);
+        mockedChatParser.chunkText.mockImplementation((content: string) => [content]);
         mockedGetEmbeddingConfig.mockReturnValue({ apiKey: '' } as any);
         mockedGetSecondaryApiConfig.mockReturnValue(null as any);
         mockedSelectSecondaryApiConfig.mockReturnValue(null as any);
+        mockedMindSnapshotExtractor.generateInnerVoice.mockResolvedValue(null as any);
+        mockedMindSnapshotExtractor.generateFreeformCard.mockResolvedValue(null as any);
+        mockedMindSnapshotExtractor.generateCreativeCard.mockResolvedValue(null as any);
+        mockedMindSnapshotExtractor.generateCustomCard.mockResolvedValue(null as any);
+        mockedMindSnapshotExtractor.generateAfterglowCard.mockResolvedValue(null as any);
         mockedSafeResponseJson.mockImplementation((response: Response) => response.json());
         mockedDB.getRecentMessagesByCharId.mockResolvedValue([makeMessage(2, 'full db context')]);
         mockedSafeFetchJson.mockResolvedValue({
@@ -170,6 +183,52 @@ describe('useChatAI context loading', () => {
             usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
         } as any);
     });
+
+    afterEach(() => {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+    });
+
+    const runMixedReply = async (randomValue: number) => {
+        vi.useFakeTimers();
+        const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(randomValue);
+        mockedSelectSecondaryApiConfig.mockReturnValue({
+            baseUrl: 'https://secondary.example.test',
+            apiKey: 'sk-secondary',
+            model: 'secondary-model',
+        } as any);
+
+        const char = {
+            id: 'char-1',
+            name: 'Sully',
+            avatar: '',
+            description: '',
+            systemPrompt: '',
+            memories: [],
+            contextLimit: 777,
+            statusBarMode: 'mixed',
+        } as CharacterProfile;
+
+        const rendered = renderHook(() => useChatAI({
+            char,
+            userProfile: { name: 'Tester', avatar: '' } as any,
+            apiConfig: { baseUrl: 'https://example.test', apiKey: 'sk-test', model: 'test-model' },
+            groups: [],
+            emojis: [],
+            categories: [],
+            addToast: vi.fn(),
+            setMessages: vi.fn(),
+        }));
+
+        await act(async () => {
+            const pending = rendered.result.current.triggerAI([makeMessage(1, '混合模式')]);
+            await vi.advanceTimersByTimeAsync(2000);
+            await pending;
+        });
+        randomSpy.mockRestore();
+
+        return rendered;
+    };
 
     it('loads AI context from DB using the character context limit', async () => {
         const setMessages = vi.fn();
@@ -489,6 +548,112 @@ describe('useChatAI context loading', () => {
         expect(mockedMindSnapshotExtractor.generateInnerVoice).not.toHaveBeenCalled();
         expect(mockedVectorMemoryExtractor.maybeExtract).not.toHaveBeenCalled();
         expect(mockedEventExtractor.extract).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        [0.1, 'classic'],
+        [0.3, 'freeform'],
+        [0.6, 'afterglow'],
+        [0.9, 'story_phone'],
+    ])('records mixed status mode for random=%s', async (randomValue, expectedMode) => {
+        await runMixedReply(randomValue);
+
+        expect(mockedDB.updateMessageMetadata).toHaveBeenCalledWith(42, expect.objectContaining({
+            mixedStatusMode: expectedMode,
+            mixedStatusPickedAt: expect.any(Number),
+        }));
+    });
+
+    it('runs classic inner voice generation when mixed mode picks classic', async () => {
+        await runMixedReply(0.1);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2000);
+        });
+
+        expect(mockedMindSnapshotExtractor.generateInnerVoice).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'char-1' }),
+            expect.stringContaining('assistant reply'),
+            expect.any(Array),
+            expect.objectContaining({ model: 'secondary-model' }),
+            expect.any(Function),
+            true,
+            '',
+            expect.objectContaining({ contextLimit: 777 }),
+        );
+    });
+
+    it('runs freeform card generation and binds the card when mixed mode picks freeform', async () => {
+        const card = {
+            cardType: 'freeform',
+            body: '锁屏通知',
+            meta: { html: '<html><body>锁屏通知</body></html>' },
+            style: {},
+        };
+        mockedMindSnapshotExtractor.generateFreeformCard.mockImplementation(() => Promise.resolve(card as any));
+
+        await runMixedReply(0.3);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2000);
+        });
+
+        expect(mockedMindSnapshotExtractor.generateFreeformCard).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'char-1' }),
+            expect.stringContaining('assistant reply'),
+            expect.any(Array),
+            expect.objectContaining({ model: 'secondary-model' }),
+            expect.any(Function),
+            expect.objectContaining({ contextLimit: 777 }),
+        );
+        expect(mockedDB.updateMessageMetadata).toHaveBeenCalledWith(42, expect.objectContaining({
+            statusCardData: card,
+            statusCardSource: 'freeform',
+            hasStatusCard: true,
+        }));
+    });
+
+    it('binds mixed metadata and status cards to the final assistant bubble in a split reply', async () => {
+        const card = {
+            cardType: 'freeform',
+            body: '第二条气泡的锁屏通知',
+            meta: { html: '<html><body>第二条气泡的锁屏通知</body></html>' },
+            style: {},
+        };
+        mockedDB.saveMessage
+            .mockResolvedValueOnce(42 as any)
+            .mockResolvedValueOnce(43 as any);
+        mockedChatParser.chunkText.mockReturnValueOnce(['first bubble', 'second bubble']);
+        mockedMindSnapshotExtractor.generateFreeformCard.mockResolvedValue(card as any);
+
+        await runMixedReply(0.3);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2000);
+        });
+
+        expect(mockedDB.updateMessageMetadata).toHaveBeenCalledWith(43, expect.objectContaining({
+            mixedStatusMode: 'freeform',
+            mixedStatusPickedAt: expect.any(Number),
+        }));
+        expect(mockedDB.updateMessageMetadata).toHaveBeenCalledWith(43, expect.objectContaining({
+            statusCardData: card,
+            statusCardSource: 'freeform',
+            hasStatusCard: true,
+        }));
+    });
+
+    it('does not run secondary card generation when mixed mode picks story phone', async () => {
+        await runMixedReply(0.9);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2000);
+        });
+
+        expect(mockedMindSnapshotExtractor.generateInnerVoice).not.toHaveBeenCalled();
+        expect(mockedMindSnapshotExtractor.generateFreeformCard).not.toHaveBeenCalled();
+        expect(mockedMindSnapshotExtractor.generateCreativeCard).not.toHaveBeenCalled();
+        expect(mockedMindSnapshotExtractor.generateCustomCard).not.toHaveBeenCalled();
     });
 
     it('keeps trailing chat instructions inside multimodal user content', async () => {

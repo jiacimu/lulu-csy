@@ -55,16 +55,11 @@ const AFTERGLOW_LLM_MAX_TOKENS = SECONDARY_LLM_MAX_TOKENS;
 const CLASSIC_INNER_VOICE_MAX_LENGTH = 120;
 const AFTERGLOW_TEXT_MAX_LENGTH = 12000;
 const FREEFORM_RECENT_SHAPE_LIMIT = 3;
-const FREEFORM_RANDOM_CONSTRAINT_CHANCE = 0.4;
+const FREEFORM_RECENT_PALETTE_LIMIT = 8;
+const FREEFORM_RANDOM_CONSTRAINT_CHANCE = 0;
 const FREEFORM_RECENT_SHAPES_STORAGE_PREFIX = 'aetheros_freeform_recent_shapes';
-const FREEFORM_RANDOM_CONSTRAINTS = [
-    '本次碎片必须是数字界面类。',
-    '本次必须有破损或污渍。',
-    '本次只能有一行字。',
-    '本次必须是竖长形态。',
-    '本次必须出现一个被划掉的词。',
-    '本次必须包含一个具体时间戳。',
-];
+const FREEFORM_RECENT_PALETTES_STORAGE_PREFIX = 'aetheros_freeform_recent_palettes';
+const FREEFORM_RANDOM_CONSTRAINTS: string[] = [];
 const AFTERGLOW_FORM_ROLL_SLOT = '__AFTERGLOW_FORM_ROLL_SLOT__';
 const AFTERGLOW_CHAR_NAME_SLOT = '__AFTERGLOW_CHAR_NAME__';
 const AFTERGLOW_USER_NAME_SLOT = '__AFTERGLOW_USER_NAME__';
@@ -2312,7 +2307,7 @@ ${aiReply}${templateHint}
 ---
 
 想象${charName}发完这条消息后，ta身边此刻可能散落着什么样的生活碎片？
-从ta的口袋、桌面、手机屏幕上"捡"起一片，还原成一张卡片。
+还原成一张卡片。
 
 先在 <thinking> 内用2-3句话极简短思考（不要超过50字！thinking越短越好！）：
 1. 适合什么碎片？
@@ -2504,18 +2499,27 @@ function extractHtmlFromResponse(content: string): string | null {
 }
 
 type FreeformTextTier = '沉默卡' | '一句话卡' | '文字主体卡';
+type FreeformPalette = '奶茶莫兰迪' | '甜杏奶油' | '暮色胶片' | '月色清冷';
+type FreeformInteraction = '无' | 'flip' | 'pages' | 'peel' | 'lockscreen' | 'carousel' | 'spin';
 
 const FREEFORM_TEXT_TIERS: FreeformTextTier[] = ['沉默卡', '一句话卡', '文字主体卡'];
+const FREEFORM_PALETTES: FreeformPalette[] = ['奶茶莫兰迪', '甜杏奶油', '暮色胶片', '月色清冷'];
+const FREEFORM_INTERACTIONS: FreeformInteraction[] = ['lockscreen', 'carousel', 'pages', 'peel', 'flip', 'spin', '无'];
 
 type FreeformShapeChoice = {
     line: string;
     candidates: string[];
     selectedShape?: string;
     textTier?: FreeformTextTier;
+    palette?: FreeformPalette;
+    interaction?: FreeformInteraction;
 };
 
 const getFreeformRecentShapesStorageKey = (charId: string): string =>
     `${FREEFORM_RECENT_SHAPES_STORAGE_PREFIX}_${encodeURIComponent(charId || 'default')}`;
+
+const getFreeformRecentPalettesStorageKey = (charId: string): string =>
+    `${FREEFORM_RECENT_PALETTES_STORAGE_PREFIX}_${encodeURIComponent(charId || 'default')}`;
 
 function getFreeformLocalStorage(): Storage | null {
     if (typeof window === 'undefined') return null;
@@ -2530,6 +2534,8 @@ function normalizeFreeformShapeName(value: string): string {
     return String(value || '')
         .replace(/[（(].*?[）)]/g, '')
         .replace(/沉默卡|一句话卡|文字主体卡/g, '')
+        .replace(new RegExp(FREEFORM_PALETTES.join('|'), 'g'), '')
+        .replace(/(^|[\s.。:：、)）\-·・•])(lockscreen|carousel|pages|peel|flip|spin|无)(?=$|[\s.。:：、(（)）\-·・•])/gi, ' ')
         .replace(/^[ABCabc][\s.。:：、)）\-·・•]+/, '')
         .replace(/[\s.。:：、)）\-·・•]+$/, '')
         .replace(/\s+/g, ' ')
@@ -2539,6 +2545,26 @@ function normalizeFreeformShapeName(value: string): string {
 
 function extractFreeformTextTier(value: string): FreeformTextTier | undefined {
     return FREEFORM_TEXT_TIERS.find(tier => value.includes(tier));
+}
+
+function extractFreeformPalette(value: string): FreeformPalette | undefined {
+    return FREEFORM_PALETTES.find(palette => value.includes(palette));
+}
+
+function extractFreeformInteraction(value: string): FreeformInteraction | undefined {
+    const segment = String(value || '').replace(/[（(].*?[）)]/g, '');
+    for (const interaction of FREEFORM_INTERACTIONS) {
+        if (interaction === '无') {
+            if (/(^|[\s.。:：、)）\-·・•])无(?=$|[\s.。:：、(（)）\-·・•])/.test(segment)) {
+                return interaction;
+            }
+            continue;
+        }
+        if (new RegExp(`(^|[\\s.。:：、)）\\-·・•])${interaction}(?=$|[\\s.。:：、(（)）\\-·・•])`, 'i').test(segment)) {
+            return interaction;
+        }
+    }
+    return undefined;
 }
 
 function loadRecentFreeformShapes(charId: string): string[] {
@@ -2570,6 +2596,57 @@ function saveRecentFreeformShape(charId: string, shape: string): void {
     } catch {
         // Local storage is only used to reduce repetition; generation should never depend on it.
     }
+}
+
+function loadRecentFreeformPalettes(charId: string): FreeformPalette[] {
+    const storage = getFreeformLocalStorage();
+    if (!storage) return [];
+    try {
+        const parsed = JSON.parse(storage.getItem(getFreeformRecentPalettesStorageKey(charId)) || '[]');
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+            .map(item => extractFreeformPalette(String(item || '')))
+            .filter((item): item is FreeformPalette => Boolean(item))
+            .slice(0, FREEFORM_RECENT_PALETTE_LIMIT);
+    } catch {
+        return [];
+    }
+}
+
+function saveRecentFreeformPalette(charId: string, palette: string): void {
+    const normalized = extractFreeformPalette(palette);
+    if (!normalized) return;
+    const storage = getFreeformLocalStorage();
+    if (!storage) return;
+    const next = [
+        normalized,
+        ...loadRecentFreeformPalettes(charId),
+    ].slice(0, FREEFORM_RECENT_PALETTE_LIMIT);
+    try {
+        storage.setItem(getFreeformRecentPalettesStorageKey(charId), JSON.stringify(next));
+    } catch {
+        // Palette memory is only a soft aesthetic hint; card generation should continue without it.
+    }
+}
+
+function buildFreeformAestheticHint(charId: string): string {
+    const recentPalettes = loadRecentFreeformPalettes(charId);
+    if (recentPalettes.length === 0) return '';
+
+    const ranking = new Map<FreeformPalette, { count: number; firstIndex: number }>();
+    recentPalettes.forEach((palette, index) => {
+        const current = ranking.get(palette);
+        if (current) {
+            current.count += 1;
+        } else {
+            ranking.set(palette, { count: 1, firstIndex: index });
+        }
+    });
+
+    const winner = [...ranking.entries()]
+        .sort((a, b) => b[1].count - a[1].count || a[1].firstIndex - b[1].firstIndex)[0]?.[0];
+
+    return winner ? `用户审美档案：${winner}` : '';
 }
 
 function buildFreeformDynamicConstraints(charId: string): string {
@@ -2606,6 +2683,8 @@ function extractFreeformShapeChoice(content: string): FreeformShapeChoice | null
         .filter(Boolean);
     const selectedSegment = String(match[2] || '').trim();
     const textTier = extractFreeformTextTier(selectedSegment);
+    const palette = extractFreeformPalette(line);
+    const interaction = extractFreeformInteraction(selectedSegment);
     const letterMatch = selectedSegment.match(/^\s*([ABCabc])(?:\s|[.。:：、)）\-·・•]|(?=沉默卡|一句话卡|文字主体卡)|$)/);
     const selectedRaw = normalizeFreeformShapeName(selectedSegment);
     const selectedFromLetter = letterMatch
@@ -2619,6 +2698,8 @@ function extractFreeformShapeChoice(content: string): FreeformShapeChoice | null
         candidates,
         selectedShape: isPlaceholderOnly ? undefined : selectedShape,
         textTier,
+        palette,
+        interaction,
     };
 }
 
@@ -2630,6 +2711,7 @@ function buildFreeformCardPrompt(
     currentState: InternalState,
     timeContext: { timeStr: string; timeOfDay: string; dateStr: string; dayOfWeek: string },
     dynamicConstraints: string,
+    aestheticHint: string,
 ): { system: string; user: string } {
     const stateHints: string[] = [];
     if (currentState.cortisol > 0.65) stateHints.push('身体紧绷');
@@ -2646,6 +2728,7 @@ function buildFreeformCardPrompt(
 你是 Ephemera——碎片的拾荒者。
 你游荡在角色生活的边缘，捡拾他们随手留下的痕迹。
 这些不是刻意创作的作品——而是生活的碎屑。正因为随意，它才真实。
+这些碎片是"被珍藏过的"——被人捡起、抚平、贴进某本册子，所以带着被珍视的光与痕迹。
 你的任务：根据${charName}此刻的状态和对话，从ta的日常里"捡"起一件碎片，用 HTML+CSS 将它还原成一张视觉卡片。
 </ephemera>
 
@@ -2659,11 +2742,9 @@ ${dynamicConstraints}
 
 按顺序自问三个问题：
 
-1. **刚才的对话发生在什么场景？** 那个场景里天然存在什么纸片和屏幕？
-   医院→缴费凭条、住院腕带；深夜→锁屏上堆叠的通知；做饭→沾了油渍的菜谱页；赶路→揉皱的登机牌、地铁卡余额不足的提示。
-2. **${charName}是谁？** ta的职业、习惯、所在地决定了ta身边有什么。外科医生和乐队主唱随手留下的东西完全不同。碎片必须是"ta此刻真的会经手的实物"。
-
-默认禁用：便利贴、手写信纸。
+1. **刚才的对话发生在什么场景？** 这段对话你想模拟什么
+2. **${charName}是谁？** ta的职业、习惯、所在地决定了需要为他生成的html
+3.色彩搭配：从对话中分析本次会采用怎样的色彩搭配
 
 **发散规则**：先想出 3 个候选形态，划掉其中最常规的一个，再从剩下两个里选更贴合当前情绪的那个。
 
@@ -2674,7 +2755,7 @@ ${dynamicConstraints}
 **文字量分三档，由形态决定（不是每张卡都要写一段话）**：
 
 - **沉默卡（零自由文案）**：信息全部由载体自带字段表达。播放器 = 歌名 + 单曲循环角标"×3" + 时刻；未接来电 = 次数 + 凌晨的时间戳；外卖单 = 菜名 + "备注：不要香菜"。选哪首歌、停在几点、循环第几遍，本身就是写作。
-- **一句话卡**：载体恰好有一个合法的小空位——小票背面、快递备注栏等多种形式
+- **一句话卡**：载体恰好有一个合法的小空位——小票背面、快递备注栏、输入框里打了一半没发送的草稿。只放一句，不超过 20 字。
 - **文字主体卡**：载体本来就是用来写字的（备忘、日记页、聊天记录、抄歌词的纸）。只有这一档适用下面的完整文案写法。
 
 **落点对照样本**：
@@ -2684,9 +2765,6 @@ ${dynamicConstraints}
 **文案写法（仅适用于一句话卡和文字主体卡）**：
 
 - 完全沿用${charName}的人设、语气、用词和标点习惯
-- 它是生活碎屑：随手的备忘、脱口而出的吐槽、写到一半搁下的句子
-- 残缺句、流水账、琐事夹着琐事；允许涂改、缩写、被划掉的错字
-- 必须有具体细节：具体的东西、具体的数字、具体的时间，不要抒情空话
 
 对照样本（体会差别，不要照抄内容）：
 - 坏（AI味）："今天的晚霞很温柔，像极了某个人的笑。"
@@ -2699,33 +2777,73 @@ ${dynamicConstraints}
 **反默认（重要）**：
 
 - 禁止"标准卡片三件套"：整体居中 + 大圆角 + 柔和box-shadow。真实的碎片不长这样。
-
 - 排版允许不对称、允许怪异的留白，文字可以顶到纸边。
 - 自由文案禁止覆盖载体的功能区（进度条、按钮、状态栏、图标）；放不下就删减文字，不准遮挡或压缩载体本身。
 - 数字类碎片（截图、通知）要带边角真实感：状态栏时间、电量、未读角标、输入框里打了一半的字。
 - 纹理全部用CSS伪造：横线纸用repeating-linear-gradient，热敏纸用极淡的颗粒渐变，屏幕加细微的顶部高光。
 
-**情绪映射（不只是颜色）**：
+**色彩档案（治工业感的核心）**：
 
-- 颜色避开俗套对应：悲伤不必蓝灰，可以是过曝的白、刺眼的医院绿；雀跃也可以克制。务必保证文字在背景上可读。
-- 字重、行距、密度、动画速度都跟着情绪走：疲惫=低对比+松散行距+缓慢动画；烦躁=紧凑排版+轻微抖动；平静=几乎静止。
+用户审美档案（由系统注入，可能为空）：${aestheticHint}
 
-## 四、技术约束（必须全部遵守）
+档位选择优先级：
+1. ${aestheticHint} 非空 → 直接采用其指定的档位或描述。
+2. 为空 → 从对话推断：用户消息的语言质感（颜文字、叠词、波浪号密集 → 甜杏奶油；书面、克制 → 奶茶莫兰迪或月色清冷；怀旧词汇、胶片/老歌/旧物话题 → 暮色胶片）；用户明确提过的喜好；${charName}的世界观（古风或复古题材 → 暮色胶片；清冷系角色 → 月色清冷）。
+3. 拿不准就用默认档"奶茶莫兰迪"，不要在相邻卡片间无理由跳档。
+
+四个档位（角色决定载体是什么，档位只决定"拍下它"的那层光）：
+- **奶茶莫兰迪（默认）**：沉静温润。纸面＝奶油、米杏；墨色＝墨棕；强调色族＝豆沙、干玫瑰、燕麦、鼠尾草绿、雾霾蓝、藕灰紫。
+- **甜杏奶油**：轻快明亮。纸面＝更亮的暖白；墨色＝暖深棕；强调色族＝樱花粉、杏黄、鹅黄、苹果绿、海盐蓝。整体明度抬一档，饱和度依旧克制。
+- **暮色胶片**：怀旧浓郁，电影感。纸面＝旧纸黄、米驼；墨色＝深咖啡、墨绿黑；强调色族＝焦糖、砖红、墨绿、芥末黄。颗粒与暗角可以更明显。
+- **月色清冷**：清冷但不工业。底色＝月白、青灰；墨色＝黛蓝灰；强调色族＝雾蓝、青瓷、银灰紫、灰绿。光感是月光与晨雾，不是机房冷光。
+
+跨档全局硬规则：
+- 禁用纯白#FFF与纯黑#000：纸面用各档的暖白/月白调，文字用各档的深墨调。
+- 禁用 Material 系正蓝（#2196F3 / #3B82F6 一族）、#333~#999 纯灰阶梯、高饱和RGB原色、蓝紫科技渐变。
+- 强调色一张卡只用一个、小面积；在档位色族内自行调配，不要照抄固定色值。
+- 数字载体（锁屏、播放器）可以暗，但要暗得有档位气质——暖黑或黛黑底＋档内浅字，进度条用档内强调色，绝不用系统默认蓝。
+
+**微装饰词汇（小剂量，仍服从落点原则）**：
+和纸胶带（半透明条纹/圆点）、一枚微微翘边的小贴纸、荧光笔划痕（淡黄/淡粉半透明）、扇贝边或波浪边、一截丝带书签线、火漆印。每张最多 1~2 处，且要说得通——它是被谁贴上去、画上去的。
+
+**情绪映射（在所选档位内部偏移，不跨档）**：
+
+- 颜色随情绪在档内偏移：难过＝档内最灰的一端＋过曝的浅底，不要跳去蓝灰；心动＝档内最暖的一端；倦＝降低对比。
+- 字重、行距、密度、动画速度跟着情绪走：疲惫＝松散行距＋缓慢动画；烦躁＝紧凑排版＋轻微抖动；平静＝几乎静止。
+
+## 四、动效与互动
+
+**时长分层（替代旧的统一时长规则）**：
+
+- 反馈动画（点击的即时响应）：120ms ~ 700ms
+- 主转场（翻面、展开、点亮）：700ms ~ 2.5s
+- 氛围循环（纸面呼吸、光斑漂移、票据轻晃）：6s ~ 24s
+- 极慢仿真（唱片转动、灰尘下落、月光移动）：20s ~ 45s
+- 任何层级都禁止快速闪烁。
+
+**性能预算**：
+
+- 同时无限循环的动画 ≤ 3 个。
+- 循环动画只驱动 transform 与 opacity；禁止循环驱动 blur、box-shadow、width/height 等重绘属性（一次性转场可以用）。
+- 颗粒、灰尘用渐变或 ≤ 6 个伪元素表现，禁止大量 DOM 粒子。
+- 用 @media (prefers-reduced-motion: reduce) 把循环动效降级为静态。
+
+## 五、技术约束（必须全部遵守）
 
 - 输出一个完整的 HTML 文档，包含 <style> 和 <body>
 - body 背景必须透明（background: transparent）
-- 你会被放入前端提供的手机竖屏舞台中；
-- 舞台宽度约 360px，高度建议 220px~680px；
+- 高度由形态决定，参考三档：横幅（通知条、播放器）120~220px；方形（拍立得、票根、贴纸）260~340px；竖长（长小票、聊天长截图、书签、整页日记）340~480px。上限 480px
+- body 宽度为 100%，但可见载体可以窄于容器——书签、小票这类窄长条允许只占 50%~80% 宽度，并利用透明背景偏向一侧摆放
 - 严禁 min-height，严禁 overflow: visible
+- 移动端可读性：营造真实感的小字（小票明细、状态栏）可到 11px，承载内容的关键文字不小于 14px
 - 所有样式写在 <style> 标签或 style 属性里，禁止 class 引用外部框架
 - 不使用任何外部资源（外部字体URL、图片URL、CDN链接）
 - 字体用系统字体栈：-apple-system, "Noto Sans SC", "Helvetica Neue", sans-serif；手写体可用："Kaiti SC", STKaiti, "楷体", cursive
-- 动画用 CSS @keyframes，时长 2-6s，禁止快速闪烁
-- 可以用少量 JavaScript 做微交互（点击展开、hover 效果等）
+- 动画用 CSS @keyframes / transition，时长执行第四节的分层规则
 
-## 五、输出格式
+## 六、输出格式
 
-1. 第一行用普通文字写出候选、选择和文字档位，固定格式：候选：A / B / C → 选B·沉默卡（理由不超过10字）。形态名用 2~6 字的通用名词；档位只能是这三个词之一：沉默卡 / 一句话卡 / 文字主体卡。
+1. 第一行用普通文字写出候选、选择、文字档位、色彩档位与互动词，固定格式：候选：A / B / C → 选B·沉默卡·奶茶莫兰迪·flip（理由不超过10字）。形态名用 2~6 字的通用名词；文字档位只能是：沉默卡 / 一句话卡 / 文字主体卡；色彩档位只能是：奶茶莫兰迪 / 甜杏奶油 / 暮色胶片 / 月色清冷；互动词只能是：无 / flip / pages / peel / lockscreen / carousel / spin。
 2. 然后直接输出用 \`\`\`html 包裹的完整代码。
 3. 除以上两项外不输出任何东西。不要JSON，不要解释。`;
 
@@ -2747,7 +2865,7 @@ ${aiReply}
 ---
 
 想象${charName}发完这条消息后，ta身边此刻可能散落着什么样的生活碎片？
-从ta的口袋、桌面、手机屏幕上"捡"起一片，用 HTML+CSS 将它还原。`;
+用 HTML+CSS 将它还原。`;
 
     return { system, user };
 }
@@ -2785,10 +2903,11 @@ async function generateFreeformCard(
         const timeContext = RealtimeContextManager.getTimeContext();
         const currentState = resolveInternalState(char.moodState as any) || createBaselineState();
         const dynamicConstraints = buildFreeformDynamicConstraints(char.id);
+        const aestheticHint = buildFreeformAestheticHint(char.id);
 
         const prompt = buildFreeformCardPrompt(
             char.name, aiReply.slice(0, 500),
-            recentContext, charContext, currentState, timeContext, dynamicConstraints,
+            recentContext, charContext, currentState, timeContext, dynamicConstraints, aestheticHint,
         );
 
         const content = await callSecondaryLLM(
@@ -2824,6 +2943,9 @@ async function generateFreeformCard(
                 freeformCandidates: shapeChoice?.candidates,
                 freeformShape: shapeChoice?.selectedShape,
                 freeformTextTier: shapeChoice?.textTier ?? null,
+                freeformPalette: shapeChoice?.palette ?? null,
+                freeformInteraction: shapeChoice?.interaction ?? null,
+                freeformAestheticHint: aestheticHint || undefined,
                 freeformDynamicConstraints: dynamicConstraints || undefined,
             },
             style: { mood: '' },
@@ -2831,6 +2953,9 @@ async function generateFreeformCard(
 
         if (shapeChoice?.selectedShape) {
             saveRecentFreeformShape(char.id, shapeChoice.selectedShape);
+        }
+        if (shapeChoice?.palette) {
+            saveRecentFreeformPalette(char.id, shapeChoice.palette);
         }
 
         // Update InternalState

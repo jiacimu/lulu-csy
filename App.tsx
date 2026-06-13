@@ -7,6 +7,7 @@ import FeaturePreviewPage from './components/FeaturePreviewPage';
 import { startKeepAlive,startBackendHeartbeat } from './utils/keepAlive';
 import { installGlobalAutofillSuppression } from './utils/autofillSuppression';
 import { isFullscreenEnabled,requestSystemFullscreenForMobileRestore } from './utils/systemFullscreen';
+import { isIOSStandaloneWebApp } from './utils/iosStandalone';
 
 const EDITABLE_SELECTION_SELECTOR = 'input:not([readonly]), textarea:not([readonly]), select, [contenteditable="true"], [data-allow-text-selection="true"]';
 
@@ -75,12 +76,16 @@ const SullyOSApp: React.FC = () => {
     };
   }, []);
 
+  const useIOSStandaloneShell = typeof window !== 'undefined' && isIOSStandaloneWebApp();
+  const shellClassName = 'fixed inset-0 sully-app-root w-full bg-transparent overflow-hidden';
+  const shellStyle: React.CSSProperties | undefined = useIOSStandaloneShell
+    ? { height: 'var(--app-height, 100lvh)', minHeight: 'var(--app-height, 100lvh)' }
+    : undefined;
+
   return (
-    <div
-      className="fixed inset-0 sully-app-root w-full bg-black overflow-hidden"
-    >
+    <div className={shellClassName} style={shellStyle}>
       <div
-        className="absolute inset-0 w-full h-full z-0 bg-black"
+        className="absolute inset-0 w-full h-full z-0 bg-transparent"
         style={{ transform: 'translateZ(0)' }}
       >
         <VirtualTimeProvider>

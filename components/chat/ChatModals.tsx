@@ -220,6 +220,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     const [userNaiAppearanceTagsDraft, setUserNaiAppearanceTagsDraft] = useState(userProfile.naiAppearanceTags || '');
     const [userNaiAppearanceNegativeDraft, setUserNaiAppearanceNegativeDraft] = useState(userProfile.naiAppearanceNegativeTags || '');
     const [userAppearancePromptDraft, setUserAppearancePromptDraft] = useState(userProfile.photoAppearancePrompt || '');
+    const [isPhotoStyleDrawerOpen, setIsPhotoStyleDrawerOpen] = useState(false);
     const HISTORY_PAGE_SIZE = 50;
     const realPhotoStylePresets = photoStylePresets.filter(style => style.id !== NO_PHOTO_STYLE_PRESET_ID);
     const manualPhotoStyleOptions = [
@@ -263,6 +264,14 @@ const ChatModals: React.FC<ChatModalsProps> = ({
         || (userProfile.naiAppearanceNegativeTags || '').trim()
         || (userProfile.photoAppearancePrompt || '').trim(),
     );
+    const photoStylePresetIds = new Set(photoStylePresets.map(style => style.id));
+    const boundPhotoStyleCount = activeCharacter.boundPhotoStylePresetIds && activeCharacter.boundPhotoStylePresetIds.length > 0
+        ? activeCharacter.boundPhotoStylePresetIds.filter(id => photoStylePresetIds.has(id)).length
+        : photoStylePresets.length;
+    const defaultPhotoStyleForSettings = photoStylePresets.find(style => style.id === activeCharacter.defaultPhotoStylePresetId)
+        || (activeCharacter.defaultPhotoStylePresetId ? undefined : realPhotoStylePresets[0])
+        || photoStylePresets[0];
+    const defaultPhotoStyleLabel = defaultPhotoStyleForSettings?.name || '未设置';
 
     useEffect(() => {
         setNaiAppearanceTagsDraft(activeCharacter.naiAppearanceTags || '');
@@ -779,6 +788,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                 { id: 'custom', title: '自定义模板', desc: '自己写提示词和正则，完全自由' },
                                 { id: 'story_phone', title: '查手机', desc: '头像旁出现手机入口，按剧情随机查看一个 App' },
                                 { id: 'afterglow', title: '番外篇', desc: '每轮回复后自动生成，星星入口可手动加梗' },
+                                { id: 'mixed', title: '惊喜模式', desc: '每轮随机惊喜：心声 / 自由创作 / 番外 / 查手机' },
                             ].map(opt => {
                                 const isActive = (statusBarMode || 'classic') === opt.id;
                                 return (
@@ -992,35 +1002,52 @@ const ChatModals: React.FC<ChatModalsProps> = ({
 
                         {photoStylePresets.length > 0 && (
                             <div className="mt-4 rounded-2xl bg-slate-50/80 border border-slate-100 p-3">
-                                <div className="text-[11px] font-bold text-slate-500 mb-2">角色风格预设</div>
-                                <div className="space-y-2">
-                                    {photoStylePresets.map(style => {
-                                        const boundIds = activeCharacter.boundPhotoStylePresetIds;
-                                        const isBound = !boundIds || boundIds.length === 0 || boundIds.includes(style.id);
-                                        const isDefault = activeCharacter.defaultPhotoStylePresetId === style.id
-                                            || (!activeCharacter.defaultPhotoStylePresetId && style.id === realPhotoStylePresets[0]?.id);
-                                        return (
-                                            <div key={style.id} className="flex items-center gap-2 rounded-xl bg-white border border-slate-100 px-3 py-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => onToggleBoundPhotoStyle?.(style.id)}
-                                                    className={`w-5 h-5 rounded-md border flex items-center justify-center ${isBound ? 'bg-primary border-primary text-white' : 'bg-white border-slate-200 text-transparent'}`}
-                                                >
-                                                    ✓
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => onSetDefaultPhotoStyle?.(style.id)}
-                                                    className="min-w-0 flex-1 text-left"
-                                                >
-                                                    <div className={`text-xs font-bold truncate ${isDefault ? 'text-primary' : 'text-slate-600'}`}>{style.name}</div>
-                                                    <div className="text-[9px] text-slate-400 truncate">{style.id}</div>
-                                                </button>
-                                                {isDefault && <span className="rounded-full bg-primary/10 px-2 py-1 text-[9px] font-bold text-primary">默认</span>}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsPhotoStyleDrawerOpen(prev => !prev)}
+                                    className="flex w-full items-center justify-between gap-3 text-left"
+                                    aria-expanded={isPhotoStyleDrawerOpen}
+                                >
+                                    <div className="min-w-0">
+                                        <div className="text-[11px] font-bold text-slate-500">角色风格预设</div>
+                                        <p className="mt-1 truncate text-[10px] text-slate-400">
+                                            已启用 {boundPhotoStyleCount}/{photoStylePresets.length} · 默认：{defaultPhotoStyleLabel}
+                                        </p>
+                                    </div>
+                                    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-sm font-bold text-slate-400 shadow-sm transition-transform ${isPhotoStyleDrawerOpen ? 'rotate-180' : ''}`}>
+                                        ⌄
+                                    </span>
+                                </button>
+                                {isPhotoStyleDrawerOpen && (
+                                    <div className="mt-3 max-h-[34vh] space-y-2 overflow-y-auto pr-1 no-scrollbar">
+                                        {photoStylePresets.map(style => {
+                                            const boundIds = activeCharacter.boundPhotoStylePresetIds;
+                                            const isBound = !boundIds || boundIds.length === 0 || boundIds.includes(style.id);
+                                            const isDefault = activeCharacter.defaultPhotoStylePresetId === style.id
+                                                || (!activeCharacter.defaultPhotoStylePresetId && style.id === realPhotoStylePresets[0]?.id);
+                                            return (
+                                                <div key={style.id} className="flex items-center gap-2 rounded-xl bg-white border border-slate-100 px-3 py-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onToggleBoundPhotoStyle?.(style.id)}
+                                                        className={`w-5 h-5 rounded-md border flex items-center justify-center ${isBound ? 'bg-primary border-primary text-white' : 'bg-white border-slate-200 text-transparent'}`}
+                                                    >
+                                                        ✓
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onSetDefaultPhotoStyle?.(style.id)}
+                                                        className="min-w-0 flex-1 text-left"
+                                                    >
+                                                        <div className={`text-xs font-bold truncate ${isDefault ? 'text-primary' : 'text-slate-600'}`}>{style.name}</div>
+                                                        <div className="text-[9px] text-slate-400 truncate">{style.id}</div>
+                                                    </button>
+                                                    {isDefault && <span className="rounded-full bg-primary/10 px-2 py-1 text-[9px] font-bold text-primary">默认</span>}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                             </div>
                         )}
 

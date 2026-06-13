@@ -611,6 +611,7 @@ interface MessageItemProps {
     getStatusCardCollectionState?: (message: Message, card: StatusCardData) => 'idle' | 'collected' | 'loading';
     onToggleStatusCardCollection?: (message: Message, card: StatusCardData) => void | Promise<void>;
     onOpenStoryPhone?: (message: Message) => void;
+    onRevealSurpriseStatus?: (message: Message) => void;
     onUserAvatarAction?: (message: Message) => void;
     isUserAvatarActionLoading?: boolean;
     // Thinking chain visibility
@@ -652,6 +653,7 @@ const MessageItem = React.memo(({
     getStatusCardCollectionState,
     onToggleStatusCardCollection,
     onOpenStoryPhone,
+    onRevealSurpriseStatus,
     onUserAvatarAction,
     isUserAvatarActionLoading,
     showThinking,
@@ -930,7 +932,7 @@ const MessageItem = React.memo(({
         const isUserActionAvatar = !isCharAvatar && isUser && !!onUserAvatarAction;
         return (
         <div
-            className={`relative w-9 h-9 shrink-0 z-0 ${(isCharAvatar && canShowCharAvatarBadge && hasAnyVoice) || isUserActionAvatar ? 'cursor-pointer' : ''}`}
+            className={`relative w-9 h-9 shrink-0 z-0 ${(isCharAvatar && canShowCharAvatarBadge && (hasAnyVoice || onOpenStoryPhone || onRequestAfterglow || onRevealSurpriseStatus)) || isUserActionAvatar ? 'cursor-pointer' : ''}`}
             onClick={isCharAvatar ? handleAvatarClick : isUserActionAvatar ? (event) => {
                 event.stopPropagation();
                 if (!selectionMode) onUserAvatarAction?.(m);
@@ -956,12 +958,12 @@ const MessageItem = React.memo(({
                     }}
                 />
             )}
-            {isCharAvatar && canShowCharAvatarBadge && !showInnerVoice && (hasAnyVoice || onRequestAfterglow || onOpenStoryPhone || (!hasAnyVoice && onRetryInnerVoice)) && (
-                <div className="absolute -top-1 -right-1 z-20 flex items-center gap-0.5">
+            {isCharAvatar && canShowCharAvatarBadge && !showInnerVoice && (hasAnyVoice || onRequestAfterglow || onOpenStoryPhone || onRevealSurpriseStatus || (!hasAnyVoice && onRetryInnerVoice)) && (
+                <div className="absolute -top-1.5 -right-1.5 z-20 flex items-center gap-0.5">
                     {onOpenStoryPhone ? (
                         <button
                             type="button"
-                            className="flex h-4 w-4 items-center justify-center bg-transparent p-0 text-red-500 drop-shadow-[0_1px_1px_rgba(255,255,255,0.85)] transition-transform active:scale-90"
+                            className="flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 p-0 text-white shadow-[0_1px_3px_rgba(190,18,60,0.38)] ring-1 ring-white/90 transition-transform active:scale-90"
                             aria-label={`查看${charName}的手机`}
                             title={`查看${charName}的手机`}
                             onClick={(e) => {
@@ -969,7 +971,7 @@ const MessageItem = React.memo(({
                                 onOpenStoryPhone(m);
                             }}
                         >
-                            <DeviceMobileCamera className="h-2.5 w-2.5" weight="bold" />
+                            <DeviceMobileCamera className="h-3 w-3" weight="fill" />
                         </button>
                     ) : onRequestAfterglow ? (
                         <button
@@ -998,6 +1000,19 @@ const MessageItem = React.memo(({
                                 ? <span style={{ fontSize: '10px', lineHeight: 1 }}>🎴</span>
                                 : <svg viewBox="0 0 24 24" fill="#c44d4d" className="h-2.5 w-2.5"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg>
                             }
+                        </button>
+                    ) : onRevealSurpriseStatus ? (
+                        <button
+                            type="button"
+                            className="flex h-4 w-4 translate-x-1 -translate-y-1 items-center justify-center rounded-full bg-teal-500 p-0 text-[10px] font-black leading-none text-white shadow-[0_1px_3px_rgba(13,148,136,0.42)] ring-1 ring-white/90 transition-transform active:scale-90"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onRevealSurpriseStatus(m);
+                            }}
+                            title="揭晓惊喜模式"
+                            aria-label="揭晓惊喜模式"
+                        >
+                            ?
                         </button>
                     ) : !hasAnyVoice && onRetryInnerVoice ? (
                         <button
@@ -2277,12 +2292,15 @@ const MessageItem = React.memo(({
         prev.getStatusCardCollectionState === next.getStatusCardCollectionState &&
         prev.onToggleStatusCardCollection === next.onToggleStatusCardCollection &&
         prev.onOpenStoryPhone === next.onOpenStoryPhone &&
+        prev.onRevealSurpriseStatus === next.onRevealSurpriseStatus &&
         prev.onUserAvatarAction === next.onUserAvatarAction &&
         prev.isUserAvatarActionLoading === next.isUserAvatarActionLoading &&
         prev.showThinking === next.showThinking &&
         prev.msg.metadata?.thinking === next.msg.metadata?.thinking &&
         prev.msg.metadata?.statusCardData === next.msg.metadata?.statusCardData &&
         prev.msg.metadata?.storyPhoneConsumed === next.msg.metadata?.storyPhoneConsumed &&
+        prev.msg.metadata?.mixedStatusMode === next.msg.metadata?.mixedStatusMode &&
+        prev.msg.metadata?.mixedStatusPickedAt === next.msg.metadata?.mixedStatusPickedAt &&
         prev.msg.metadata?.source === next.msg.metadata?.source &&
         prev.msg.metadata?.platform === next.msg.metadata?.platform &&
         prev.msg.metadata?.rank === next.msg.metadata?.rank &&

@@ -67,9 +67,11 @@ import {
     getSavedVibeEncoding,
     parseNaiv4VibeFile,
 } from '../utils/vibeReferences';
+import { assertCollectionWallImageBlobCanBeSaved, getCollectionWallImageSaveErrorMessage } from '../utils/collectionWallAssetErrors';
 import { prepareGeneratedImageStorage,resolveOriginalImageUrl } from '../utils/generatedImageStorage';
 import type { SecondaryFullContextOptions } from '../utils/mindSnapshotExtractor';
-import type { StatusCardData } from '../types/statusCard';
+import { resolveChatStatusMode } from '../utils/statusMode';
+import type { StatusBarMode,StatusCardData } from '../types/statusCard';
 import { buildLifeProfileContextSnapshot } from '../utils/lifeProfileContextSnapshot';
 import { formatMemoryArchiveLine,selectMessagesForMemoryArchive } from '../utils/archiveMessageSelector';
 import {
@@ -110,6 +112,7 @@ import {
     buildCollectionBookInput,
     buildFreeformCollectionBookInput,
     buildCollectionSourceKey,
+    inferCollectionBookKind,
 } from '../utils/collectionBooks';
 import { fnv1aBytes } from '../utils/fnv1a';
 import { PaperPlaneTilt, Plus, Smiley, Trash, X } from '@phosphor-icons/react';
@@ -152,13 +155,25 @@ const QUICK_SONG_COVER_STYLE_PRESET: PhotoStylePreset = {
 };
 
 function isCollectableFreeformStatusCard(card?: StatusCardData): card is StatusCardData {
-    return Boolean(card?.cardType === 'freeform' && typeof card.meta?.html === 'string' && card.meta.html.trim());
+    return Boolean(
+        card?.cardType === 'freeform'
+        && inferCollectionBookKind(card) === 'freeform'
+        && typeof card.meta?.html === 'string'
+        && card.meta.html.trim()
+    );
 }
 
 function buildCollectionInputForStatusCard(charId: string, card: StatusCardData, sourceMessage: Message) {
-    return isCollectableFreeformStatusCard(card)
+    return inferCollectionBookKind(card) === 'freeform'
         ? buildFreeformCollectionBookInput(charId, card, sourceMessage)
         : buildCollectionBookInput(charId, card, sourceMessage);
+}
+
+function orderFreeformPickerWalls(walls: CollectionWall[], preferredWallId: string): CollectionWall[] {
+    if (!preferredWallId) return walls;
+    const preferredWall = walls.find(wall => wall.id === preferredWallId);
+    if (!preferredWall) return walls;
+    return [preferredWall, ...walls.filter(wall => wall.id !== preferredWallId)];
 }
 
 type FreeformWallPickerState = {
@@ -191,6 +206,21 @@ type ImageWallPickerState = {
     createDraft: string;
     isSaving: boolean;
 };
+
+async function fetchImageBlobForCollectionWall(imageUrl: string): Promise<Blob> {
+    let response: Response;
+    try {
+        response = await fetch(imageUrl);
+    } catch {
+        throw new Error('读取原图失败，图片链接可能已失效或被浏览器拦截');
+    }
+    if (!response.ok) {
+        throw new Error(`读取原图失败，服务器返回 ${response.status}`);
+    }
+    const blob = await response.blob();
+    assertCollectionWallImageBlobCanBeSaved(blob);
+    return blob;
+}
 
 function getLastUsedFreeformWallId(charId: string): string {
     try {
@@ -415,6 +445,22 @@ function compareMessageDisplayOrder(a: Message, b: Message): number {
 
 function isPendingGeneratedImageMessage(message: Message | undefined): boolean {
     return message?.type === 'image' && message.metadata?.status === 'generating';
+}
+
+function findAssistantStatusSourceMessage(messages: Message[], targetMessage: Message | undefined): Message | undefined {
+    if (!targetMessage || targetMessage.role !== 'assistant') return targetMessage;
+    const targetIndex = messages.findIndex(message => message.id === targetMessage.id);
+    if (targetIndex < 0) return targetMessage;
+
+    for (let i = targetIndex; i >= 0; i -= 1) {
+        const candidate = messages[i];
+        if (candidate.role !== 'assistant') break;
+        if (candidate.metadata?.mixedStatusMode || candidate.metadata?.statusCardData) {
+            return candidate;
+        }
+    }
+
+    return targetMessage;
 }
 
 function matchesCharacterId(character: { id: string; charInstanceId?: string }, id?: string | null): boolean {
@@ -1684,6 +1730,21 @@ const Chat: React.FC = () => {
             }
         }
     }, [activeCharacterId, char?.hideBeforeMessageId, char?.hideSystemLogs, mergePendingGeneratedImageMessages]);
+
+    const handleRevealSurpriseStatus = useCallback(async (message: Message) => {
+        try {
+            const [freshMessage] = await DB.getMessagesByIds([message.id]);
+            await reloadMessages(visibleCountRef.current);
+            if (freshMessage?.metadata?.mixedStatusMode) {
+                addToast('惊喜入口已刷新', 'success');
+                return;
+            }
+            addToast('惊喜模式正在揭晓中，稍等一下再点头像角标', 'info');
+        } catch (error) {
+            console.error('[SurpriseMode] refresh failed:', error);
+            addToast('惊喜入口刷新失败，请稍后再试', 'error');
+        }
+    }, [addToast, reloadMessages]);
 
     useEffect(() => {
         const rawTargetMessageId = appParams?.targetMessageId;
@@ -4142,7 +4203,7 @@ const Chat: React.FC = () => {
                 charId: freeformWallPicker.input.charId,
                 name,
                 isDefault: false,
-                layoutMode: 'flow',
+                layoutMode: 'free',
                 background: { type: 'color', value: '#17120e', fit: 'cover', dim: 0.18 },
                 allowCharDecorate: true,
                 changeCountSinceVisit: 0,
@@ -4183,27 +4244,31 @@ const Chat: React.FC = () => {
         charId: string,
         wall: CollectionWall | null,
     ) => {
-        const existingAssets = await DB.getCollectionWallAssetsByHash(assetInput.hash);
-        const asset = existingAssets[0] || await DB.saveCollectionWallAsset(assetInput);
-        const targetWall = wall || (await DB.getOrCreateDefaultCollectionWall(charId));
-        const items = await DB.getCollectionWallItemsByWallId(targetWall.id);
-        const maxZ = items.reduce((max, item) => Math.max(max, item.z || 0), 0);
-        await DB.saveCollectionWallItem({
-            wallId: targetWall.id,
-            type: 'image',
-            author: 'user',
-            x: null,
-            y: null,
-            w: 320,
-            h: 240,
-            rotation: 0,
-            z: maxZ + 1,
-            order: items.length,
-            assetId: asset.id,
-            name: asset.meta?.name || '聊天生成图',
-        });
-        setLastUsedFreeformWallId(charId, targetWall.id);
-        addToast(`图片已收进「${targetWall.name}」`, 'success');
+        try {
+            const existingAssets = await DB.getCollectionWallAssetsByHash(assetInput.hash);
+            const asset = existingAssets[0] || await DB.saveCollectionWallAsset(assetInput);
+            const targetWall = wall || (await DB.getOrCreateDefaultCollectionWall(charId));
+            const items = await DB.getCollectionWallItemsByWallId(targetWall.id);
+            const maxZ = items.reduce((max, item) => Math.max(max, item.z || 0), 0);
+            await DB.saveCollectionWallItem({
+                wallId: targetWall.id,
+                type: 'image',
+                author: 'user',
+                x: null,
+                y: null,
+                w: 320,
+                h: 240,
+                rotation: 0,
+                z: maxZ + 1,
+                order: items.length,
+                assetId: asset.id,
+                name: asset.meta?.name || '聊天生成图',
+            });
+            setLastUsedFreeformWallId(charId, targetWall.id);
+            addToast(`图片已收进「${targetWall.name}」`, 'success');
+        } catch (error) {
+            throw new Error(getCollectionWallImageSaveErrorMessage(error));
+        }
     }, [addToast]);
 
     const buildImageWallAsset = useCallback(async (message: Message): Promise<ImageWallAssetInput> => {
@@ -4213,9 +4278,7 @@ const Chat: React.FC = () => {
             : undefined;
         const imageUrl = await resolveOriginalImageUrl(originalAssetId, fallbackUrl);
         if (!imageUrl) throw new Error('图片地址为空');
-        const response = await fetch(imageUrl);
-        if (!response.ok) throw new Error(`读取图片失败: ${response.status}`);
-        const blob = await response.blob();
+        const blob = await fetchImageBlobForCollectionWall(imageUrl);
         const buffer = await blob.arrayBuffer();
         const hash = fnv1aBytes(buffer);
         const prompt = String(message.metadata?.prompt || message.metadata?.positivePrompt || message.metadata?.directorPrompt || '').trim();
@@ -4277,7 +4340,7 @@ const Chat: React.FC = () => {
             await saveImageAssetToWall(asset, charId, null);
         } catch (error: any) {
             console.error('[CollectionHall] image collect failed:', error);
-            addToast(error?.message || '图片收藏失败，可以稍后再试', 'error');
+            addToast(getCollectionWallImageSaveErrorMessage(error), 'error');
         }
     }, [addToast, buildImageWallAsset, char?.id, openImageWallPicker, saveImageAssetToWall, selectedMessage]);
 
@@ -4291,7 +4354,7 @@ const Chat: React.FC = () => {
             setImageWallPicker(null);
         } catch (error) {
             console.error('[CollectionHall] image wall save failed:', error);
-            addToast('图片上墙失败，可以稍后再试', 'error');
+            addToast(getCollectionWallImageSaveErrorMessage(error), 'error');
             setImageWallPicker(prev => prev ? { ...prev, isSaving: false } : prev);
         }
     }, [addToast, char?.id, imageWallPicker, saveImageAssetToWall]);
@@ -4311,7 +4374,7 @@ const Chat: React.FC = () => {
                 charId,
                 name,
                 isDefault: false,
-                layoutMode: 'flow',
+                layoutMode: 'free',
                 background: { type: 'color', value: '#17120e', fit: 'cover', dim: 0.18 },
                 allowCharDecorate: true,
                 changeCountSinceVisit: 0,
@@ -4322,7 +4385,7 @@ const Chat: React.FC = () => {
             setImageWallPicker(null);
         } catch (error) {
             console.error('[CollectionHall] image wall create failed:', error);
-            addToast('新建拾光墙失败，可以稍后再试', 'error');
+            addToast(getCollectionWallImageSaveErrorMessage(error), 'error');
             setImageWallPicker(prev => prev ? { ...prev, isSaving: false } : prev);
         }
     }, [addToast, char?.id, imageWallPicker, saveImageAssetToWall]);
@@ -4381,13 +4444,8 @@ const Chat: React.FC = () => {
             if (input.kind === 'freeform') {
                 const walls = await DB.getCollectionWallsByCharId(charId);
                 const lastWallId = getLastUsedFreeformWallId(charId);
-                const lastWall = walls.find(wall => wall.id === lastWallId);
-                if (lastWall) {
-                    await saveFreeformCollectionToWall(input, key, lastWall);
-                    return;
-                }
                 if (walls.length > 0) {
-                    await openFreeformWallPicker(input, key, sourceMessage, walls);
+                    await openFreeformWallPicker(input, key, sourceMessage, orderFreeformPickerWalls(walls, lastWallId));
                     return;
                 }
                 await saveFreeformCollectionToWall(input, key, null);
@@ -4617,7 +4675,6 @@ const Chat: React.FC = () => {
     }, [displayMessages]);
 
     useEffect(() => {
-        if ((char?.statusBarMode || 'classic') !== 'afterglow') return;
         if (isTyping || selectionMode) return;
         if (typeof lastAssistantId !== 'number' || lastAssistantId <= 0) return;
         if (afterglowCards[lastAssistantId] || afterglowLoadingIds.has(lastAssistantId)) return;
@@ -4625,6 +4682,8 @@ const Chat: React.FC = () => {
 
         const sourceMessage = displayMessages.find(message => message.id === lastAssistantId);
         if (!sourceMessage || sourceMessage.role !== 'assistant' || sourceMessage.metadata?.streamingPreview) return;
+        const statusSourceMessage = findAssistantStatusSourceMessage(displayMessages, sourceMessage);
+        if (resolveChatStatusMode((char?.statusBarMode || 'classic') as StatusBarMode, statusSourceMessage) !== 'afterglow') return;
 
         autoAfterglowRequestedIdsRef.current.add(lastAssistantId);
         void handleGenerateAfterglow(sourceMessage, undefined, { userInitiated: false, silent: true })
@@ -5573,14 +5632,18 @@ const Chat: React.FC = () => {
                     const showTs = effectiveShowTimestamp && (!prevMsg || (m.timestamp - prevMsg.timestamp) >= timestampInterval);
                     // Inner voice: only show on the last assistant message
                     const isLastAssistant = m.role === 'assistant' && m.id === lastAssistantId;
-                    const statusMode = char.statusBarMode || 'classic';
+                    const configuredStatusMode = (char.statusBarMode || 'classic') as StatusBarMode;
+                    const statusSourceMessage = isLastAssistant ? findAssistantStatusSourceMessage(displayMessages, m) : m;
+                    const statusMode = resolveChatStatusMode(configuredStatusMode, statusSourceMessage);
+                    const isMixedConfigured = configuredStatusMode === 'mixed';
                     const hasStatusCardMode = statusMode === 'creative' || statusMode === 'custom' || statusMode === 'freeform';
-                    const boundStatusCard = m.role === 'assistant' ? (m.metadata?.statusCardData as StatusCardData | undefined) : undefined;
+                    const boundStatusCard = m.role === 'assistant' ? (statusSourceMessage?.metadata?.statusCardData as StatusCardData | undefined) : undefined;
                     const visibleStatusCard = m.role === 'assistant'
-                        ? (isLastAssistant && hasStatusCardMode ? (boundStatusCard || char.lastStatusCard) : boundStatusCard)
+                        ? (isLastAssistant && hasStatusCardMode ? (boundStatusCard || (isMixedConfigured ? undefined : char.lastStatusCard)) : boundStatusCard)
                         : undefined;
                     const canCollectStatusCard = isCollectableFreeformStatusCard(visibleStatusCard);
                     const isUserActionTarget = Boolean(userActionSelectorTarget?.userMessageIds.has(m.id)) && !selectionMode && !isTyping;
+                    const canRetryMindSnapshot = statusMode !== 'off' && statusMode !== 'story_phone' && statusMode !== 'afterglow' && statusMode !== 'mixed';
                     return (
                         <div
                             key={m.id || i}
@@ -5619,7 +5682,7 @@ const Chat: React.FC = () => {
                                 onToggleVoiceText={toggleVoiceText}
                                 innerVoice={isLastAssistant && statusMode === 'classic' ? (char.moodState as any)?.innerVoice : undefined}
                                 statusCardData={visibleStatusCard}
-                                onRetryInnerVoice={isLastAssistant && statusMode !== 'off' && statusMode !== 'story_phone' && statusMode !== 'afterglow' ? retryMindSnapshot : undefined}
+                                onRetryInnerVoice={isLastAssistant && canRetryMindSnapshot ? retryMindSnapshot : undefined}
                                 afterglowCardData={isLastAssistant && statusMode === 'afterglow' ? afterglowCards[m.id] : undefined}
                                 isAfterglowLoading={isLastAssistant && statusMode === 'afterglow' ? afterglowLoadingIds.has(m.id) : false}
                                 onRequestAfterglow={isLastAssistant && statusMode === 'afterglow' ? handleGenerateAfterglow : undefined}
@@ -5628,6 +5691,7 @@ const Chat: React.FC = () => {
                                 getStatusCardCollectionState={canCollectStatusCard ? getAfterglowCollectionState : undefined}
                                 onToggleStatusCardCollection={canCollectStatusCard ? handleToggleAfterglowCollection : undefined}
                                 onOpenStoryPhone={isLastAssistant && statusMode === 'story_phone' && !m.metadata?.storyPhoneConsumed && !selectionMode ? handleOpenStoryPhone : undefined}
+                                onRevealSurpriseStatus={isLastAssistant && isMixedConfigured && statusMode === 'mixed' && !selectionMode ? handleRevealSurpriseStatus : undefined}
                                 onUserAvatarAction={isUserActionTarget ? handleUserAvatarAction : undefined}
                                 isUserAvatarActionLoading={userActionSelectorLoadingId === m.id}
                                 showThinking={THINKING_CHAIN_UI_ENABLED && char.showThinking !== false}
@@ -5864,9 +5928,9 @@ const Chat: React.FC = () => {
                     >
                         <div className="flex items-start justify-between gap-3 border-b border-[#eadfd2] px-4 py-4">
                             <div>
-                                <div className="text-[10px] font-black tracking-[0.24em] text-[#9b6d55]">LIGHT WALL</div>
+                                <div className="text-[10px] font-black tracking-[0.24em] text-[#9b6d55]">拾光墙</div>
                                 <h3 className="mt-1 text-[18px] font-semibold tracking-[0.04em] text-[#2f2923]">收进哪面拾光墙？</h3>
-                                <p className="mt-1 text-[12px] leading-relaxed text-[#8c7d70]">选一次后会记住，下次直接收入同一面墙。</p>
+                                <p className="mt-1 text-[12px] leading-relaxed text-[#8c7d70]">选已有墙，或临时新建一面；上次选择会优先显示。</p>
                             </div>
                             <button
                                 type="button"
@@ -5895,7 +5959,7 @@ const Chat: React.FC = () => {
                                             )}
                                         </div>
                                         <div className="mt-5 flex items-end justify-between">
-                                            <span className="text-[10px] font-semibold tracking-[0.14em] text-[#a29588]">FLOW</span>
+                                            <span className="text-[10px] font-semibold tracking-[0.14em] text-[#a29588]">顺序排列</span>
                                             <span className="font-serif text-2xl leading-none text-[#9d3f52]">{freeformWallPicker.itemCounts[wall.id] || 0}</span>
                                         </div>
                                     </button>

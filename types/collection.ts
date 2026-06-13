@@ -142,10 +142,11 @@ export interface CollectionWallItem {
 export type CollectionWallAssetOrigin = 'upload' | 'chat_gen' | 'char';
 
 export interface CollectionWallAssetMeta {
-    assetKind?: 'image' | 'font';
+    assetKind?: 'image' | 'font' | 'char_invite_avatar';
     prompt?: string;
     sourceMessageId?: number | string;
     name?: string;
+    charId?: string;
     uploadedFileName?: string;
     hasTransparency?: boolean;
     hiddenFromLibrary?: boolean;

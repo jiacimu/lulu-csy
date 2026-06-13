@@ -1268,7 +1268,7 @@
 /* ── Responsive — Compact ── */
 @media (max-width: 380px) {
     .hs-header {
-        padding: 10px 16px;
+        padding: max(10px, var(--hs-safe-top)) 16px 10px;
     }
 
     .hs-header-title {

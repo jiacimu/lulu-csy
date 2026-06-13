@@ -1,4 +1,6 @@
 
+import type { MixedStatusMode, StatusCardData } from './statusCard';
+
 export interface MemoryFragment {
     id: string;
     date: string;
@@ -109,6 +111,15 @@ export interface ChatTheme {
 
 export type MessageType = 'text' | 'image' | 'emoji' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'collection_forward' | 'xhs_card' | 'canva_card' | 'score_card' | 'music_card' | 'mcd_card' | 'html_card' | 'news_card' | 'moments' | 'voice' | 'call_log' | 'soul_reflection';
 
+export interface MessageMetadata extends Record<string, any> {
+    mixedStatusMode?: MixedStatusMode;
+    mixedStatusPickedAt?: number;
+    statusCardData?: StatusCardData;
+    statusCardSource?: string;
+    hasStatusCard?: boolean;
+    storyPhoneConsumed?: boolean;
+}
+
 export interface Message {
     id: number;
     charId: string;
@@ -118,7 +129,7 @@ export interface Message {
     type: MessageType;
     content: string;
     timestamp: number;
-    metadata?: any;
+    metadata?: MessageMetadata;
     replyTo?: {
         id: number;
         content: string;

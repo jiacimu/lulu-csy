@@ -26,15 +26,33 @@ vi.mock('../utils/db', () => ({
         clearMessages: vi.fn(() => Promise.resolve()),
         resolveCharacterContentId: vi.fn((charId: string) => Promise.resolve(charId)),
         saveGalleryImage: vi.fn(() => Promise.resolve()),
+        findCollectionBookBySource: vi.fn(() => Promise.resolve(null)),
+        getCollectionWallsByCharId: vi.fn(() => Promise.resolve([])),
+        getCollectionWallItemsByWallId: vi.fn(() => Promise.resolve([])),
+        saveCollectionBook: vi.fn((input: any) => Promise.resolve({ ...input, id: 'book-1', createdAt: Date.now(), collectedAt: Date.now() })),
+        addCollectionBookToWall: vi.fn(() => Promise.resolve({ id: 'wallitem-1' })),
+        getOrCreateDefaultCollectionWall: vi.fn(() => Promise.resolve({ id: 'wall-default', name: '未分类', charId: 'char-1' })),
+        saveCollectionWall: vi.fn((input: any) => Promise.resolve({ ...input, id: 'wall-new', createdAt: Date.now(), updatedAt: Date.now() })),
     },
 }));
 
 vi.mock('../components/chat/MessageItem', () => ({
     default: (props: any) => {
         return (
-            <button type="button" data-testid={`message-item-${props.msg.id}`} onClick={() => props.onLongPress(props.msg)}>
-                {props.msg.content || 'Message Item'}
-            </button>
+            <div>
+                <button type="button" data-testid={`message-item-${props.msg.id}`} onClick={() => props.onLongPress(props.msg)}>
+                    {props.msg.content || 'Message Item'}
+                </button>
+                {props.onToggleStatusCardCollection && props.statusCardData && (
+                    <button
+                        type="button"
+                        data-testid={`collect-status-${props.msg.id}`}
+                        onClick={() => props.onToggleStatusCardCollection(props.msg, props.statusCardData)}
+                    >
+                        收藏视觉碎片
+                    </button>
+                )}
+            </div>
         );
     },
 }));
@@ -476,6 +494,56 @@ describe('Chat active character fallback', () => {
         fireEvent.click(screen.getByRole('button', { name: '打开回神' }));
 
         expect(screen.getByPlaceholderText('和Sully说...')).toBeInTheDocument();
+    });
+
+    it('still opens the wall picker for freeform cards when a last-used wall is remembered', async () => {
+        localStorage.setItem('collection_freeform_last_wall_char-1', 'wall-last');
+        mockedUseOS.mockReturnValue(buildOsContext({
+            characters: [{
+                id: 'char-1',
+                name: 'Sully',
+                avatar: 'sully.png',
+                statusBarMode: 'freeform',
+            }],
+            activeCharacterId: 'char-1',
+        }));
+        mockedDB.getRecentMessageWindow.mockResolvedValue({
+            messages: [{
+                id: 2,
+                charId: 'char-1',
+                role: 'assistant',
+                type: 'text',
+                content: '我给你留了一张便利店小票。',
+                timestamp: 2000,
+                metadata: {
+                    statusCardData: {
+                        cardType: 'freeform',
+                        body: '便利店小票',
+                        meta: {
+                            html: '<!doctype html><html><body>receipt</body></html>',
+                            freeformShape: '便利店小票',
+                        },
+                        style: {},
+                    },
+                },
+            } as Message],
+            hasMore: false,
+        });
+        mockedDB.getCollectionWallsByCharId.mockResolvedValue([
+            { id: 'wall-other', name: '照片墙', charId: 'char-1', isDefault: false, sortOrder: 0 },
+            { id: 'wall-last', name: '深夜歌单', charId: 'char-1', isDefault: false, sortOrder: 1 },
+        ] as any);
+
+        render(<Chat />);
+
+        await waitFor(() => {
+            expect(screen.getByTestId('collect-status-2')).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByTestId('collect-status-2'));
+
+        expect(await screen.findByText('收进哪面拾光墙？')).toBeInTheDocument();
+        expect(screen.getByText('深夜歌单')).toBeInTheDocument();
+        expect(mockedDB.saveCollectionBook).not.toHaveBeenCalled();
     });
 
     it('clears the selected message after choosing reply and allows another quote target', async () => {

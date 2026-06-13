@@ -8,6 +8,7 @@
  *   4. freeform — 自由 HTML 卡片
  *   5. story_phone — 剧情查手机入口
  *   6. afterglow — 余韵长文入口
+ *   7. mixed — 惊喜模式：每轮随机进入经典心声/自由创作/番外篇/查手机
  */
 
 /** AI 输出的统一卡片数据结构 */
@@ -96,7 +97,10 @@ export interface CustomStatusTemplate {
 }
 
 /** 状态栏模式类型 */
-export type StatusBarMode = 'off' | 'classic' | 'creative' | 'custom' | 'freeform' | 'story_phone' | 'afterglow';
+export type StatusBarMode = 'off' | 'classic' | 'creative' | 'custom' | 'freeform' | 'story_phone' | 'afterglow' | 'mixed';
+
+/** 惊喜模式每轮实际抽中的状态类型 */
+export type MixedStatusMode = Extract<StatusBarMode, 'classic' | 'freeform' | 'afterglow' | 'story_phone'>;
 
 /** 可用的骨架类型 ID 列表 */
 export const SKELETON_TYPES = [

@@ -19,6 +19,7 @@ const serializeItem = (item: CollectionWallItem) => ({
     order: Number.isFinite(item.order) ? item.order : 0,
     bookId: normalizeOptional(item.bookId),
     assetId: normalizeOptional(item.assetId),
+    html: normalizeOptional(item.html),
     name: normalizeOptional(item.name),
     text: item.text
         ? {
@@ -26,6 +27,13 @@ const serializeItem = (item: CollectionWallItem) => ({
             preset: item.text.preset,
             color: normalizeOptional(item.text.color),
             stroke: Boolean(item.text.stroke),
+            remarkTemplate: normalizeOptional(item.text.remarkTemplate),
+        }
+        : undefined,
+    bond: item.bond
+        ? {
+            variant: normalizeOptional(item.bond.variant),
+            avatarFrame: normalizeOptional(item.bond.avatarFrame),
         }
         : undefined,
 });
@@ -47,6 +55,7 @@ export function serializeWallEditorDraft(
                 dim: Number.isFinite(wall.background.dim) ? wall.background.dim : 0,
             },
             allowCharDecorate: wall.allowCharDecorate !== false,
+            defaultBondWidgetHidden: Boolean(wall.defaultBondWidgetHidden),
         },
         items: items.map(serializeItem),
         textDraft,

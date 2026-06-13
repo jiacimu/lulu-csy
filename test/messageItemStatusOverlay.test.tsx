@@ -88,6 +88,47 @@ afterEach(() => {
 });
 
 describe('MessageItem status overlay', () => {
+    it('shows the story phone avatar entry when the resolved mode is story phone', () => {
+        const onOpenStoryPhone = vi.fn();
+        renderMessageItem({ onOpenStoryPhone });
+
+        fireEvent.click(screen.getByLabelText('查看Marcus的手机'));
+
+        expect(onOpenStoryPhone).toHaveBeenCalledWith(baseMessage);
+    });
+
+    it('shows the afterglow avatar entry when the resolved mode is afterglow', () => {
+        renderMessageItem({
+            onRequestAfterglow: vi.fn(),
+            isAfterglowLoading: true,
+        });
+
+        expect(screen.getByRole('button', { name: '生成番外篇' })).toBeDisabled();
+    });
+
+    it('shows the freeform status card entry when the resolved mode is freeform', () => {
+        renderMessageItem({
+            statusCardData: {
+                cardType: 'freeform',
+                body: '锁屏通知',
+                meta: { html: '<html><body>锁屏通知</body></html>' },
+                style: {},
+            } satisfies StatusCardData,
+        });
+
+        expect(screen.getByLabelText('打开状态卡片')).toBeInTheDocument();
+    });
+
+    it('shows a surprise fallback entry without reusing the afterglow star', () => {
+        const onRevealSurpriseStatus = vi.fn();
+        renderMessageItem({ onRevealSurpriseStatus });
+
+        expect(screen.queryByRole('button', { name: '生成番外篇' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByLabelText('揭晓惊喜模式'));
+
+        expect(onRevealSurpriseStatus).toHaveBeenCalledWith(baseMessage);
+    });
+
     it('keeps status card overlays open past 8 seconds and closes only when the backdrop is clicked', async () => {
         vi.useFakeTimers();
 

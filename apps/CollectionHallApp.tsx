@@ -14,8 +14,10 @@ import {
     buildCharWallNoteItem,
     buildCollectionWallVisitSystemPrompt,
     buildCollectionWallVisitUserPrompt,
+    isDuplicateCharWallRemark,
     requestCharWallNote,
     type ChatCompletionMessage,
+    type CollectionWallVisitTrigger,
     type CollectionWallManifest,
     type CollectionWallManifestItem,
 } from '../utils/collectionWallCoCreation';
@@ -25,6 +27,7 @@ import { loadCharacterGoals } from '../utils/goalService';
 import { getEmbeddingConfig } from '../utils/runtimeConfig';
 import { getGalleryImageDisplayUrl } from '../utils/generatedImageStorage';
 import { fnv1aBytes } from '../utils/fnv1a';
+import { injectFreeformCompatScript } from '../components/chat/statusCardIframe';
 const StatusCardRenderer = React.lazy(() => import('../components/chat/StatusCardRenderer'));
 
 /* ============================================================
@@ -420,6 +423,33 @@ const CSS = `
 .ar-edit-tools{display:flex;gap:8px}
 .ar-preview-hint{position:fixed;left:50%;bottom:24px;z-index:5;display:none;transform:translateX(-50%);padding:9px 15px;border:1px solid rgba(247,202,214,.7);border-radius:999px;background:rgba(255,255,255,.88);color:var(--wall-rose-ink);font-size:12px;font-weight:800;letter-spacing:.04em;box-shadow:0 12px 26px -18px rgba(120,80,90,.6);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);pointer-events:none}
 .ar-full-wall.preview .ar-preview-hint{display:inline-flex}
+.ar-char-orb-wrap{position:fixed;left:0;top:0;z-index:11;width:64px;height:64px;touch-action:none;will-change:transform}
+.ar-char-orb-wrap.dragging{z-index:14}
+.ar-char-orb{position:relative;display:flex;align-items:center;justify-content:center;width:64px;height:64px;border:0;border-radius:999px;background:transparent;padding:0;cursor:grab;filter:drop-shadow(0 16px 18px rgba(120,74,86,.24));touch-action:none}
+.ar-char-orb:active{cursor:grabbing;transform:scale(.96)}
+.ar-char-orb-glow{position:absolute;inset:3px;border-radius:999px;background:radial-gradient(circle at 35% 24%,rgba(255,255,255,.9),rgba(255,219,230,.48) 42%,rgba(226,113,141,.34) 72%,rgba(226,113,141,0));box-shadow:0 0 0 1px rgba(255,255,255,.68),0 0 24px rgba(226,113,141,.28)}
+.ar-char-orb.visited .ar-char-orb-glow{animation:ar-char-orb-pulse 2.4s ease-in-out infinite}
+.ar-char-orb.waiting .ar-char-orb-glow{animation:ar-char-orb-pulse 1s ease-in-out infinite}
+@keyframes ar-char-orb-pulse{0%,100%{transform:scale(.98);opacity:.78}50%{transform:scale(1.08);opacity:1}}
+.ar-char-orb-avatar{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:999px;overflow:hidden;background:linear-gradient(145deg,#fff7f0,#f6dfe8);box-shadow:inset 0 0 0 2px rgba(255,255,255,.85),inset 0 -8px 14px rgba(206,116,143,.18)}
+.ar-char-orb-avatar img{display:block;width:100%;height:100%;object-fit:cover;-webkit-user-drag:none;user-select:none}
+.ar-char-orb-avatar b{color:var(--wall-rose-ink);font-family:var(--ar-font-display);font-size:25px}
+.ar-char-orb-dot{position:absolute;right:5px;top:6px;z-index:2;width:13px;height:13px;border-radius:999px;background:linear-gradient(180deg,#fff5a8,#efbf5d);box-shadow:0 0 0 3px rgba(255,255,255,.9),0 0 16px rgba(239,191,93,.7)}
+.ar-char-orb-panel{position:absolute;width:min(286px,calc(100vw - 28px));border:1px solid rgba(247,202,214,.72);border-radius:22px;background:rgba(255,255,255,.92);color:var(--wall-ink);box-shadow:0 26px 58px -30px rgba(120,80,90,.72),inset 0 1px 0 rgba(255,255,255,.95);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);padding:13px;touch-action:auto}
+.ar-char-orb-panel.left{right:0}.ar-char-orb-panel.right{left:0}.ar-char-orb-panel.above{bottom:76px}.ar-char-orb-panel.below{top:76px}
+.ar-char-orb-head{display:flex;align-items:center;gap:10px;min-width:0}
+.ar-char-orb-mini{flex:none;display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:999px;overflow:hidden;background:linear-gradient(145deg,#fff7f0,#f1d9e2);box-shadow:inset 0 0 0 1px rgba(226,113,141,.16)}
+.ar-char-orb-mini img{width:100%;height:100%;object-fit:cover}.ar-char-orb-mini b{font-family:var(--ar-font-display);font-size:19px;color:var(--wall-rose-ink)}
+.ar-char-orb-head b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:900;color:var(--wall-ink-strong)}
+.ar-char-orb-head small{display:block;margin-top:3px;font-size:10px;font-weight:800;letter-spacing:.08em;color:var(--wall-ink-soft)}
+.ar-char-orb-speech{min-height:76px;margin-top:11px;border:1px solid rgba(247,202,214,.56);border-radius:16px;background:linear-gradient(180deg,rgba(255,246,248,.9),rgba(255,255,255,.76));padding:12px 13px;color:var(--wall-ink-strong);font-size:13px;line-height:1.72;white-space:pre-wrap;word-break:break-word}
+.ar-char-orb-speech .muted{color:var(--wall-ink-soft)}
+.ar-char-orb-speech i{display:inline-block;width:7px;height:1.2em;margin-left:2px;vertical-align:-.2em;background:var(--wall-rose);animation:ar-char-orb-caret .78s steps(1) infinite}
+@keyframes ar-char-orb-caret{50%{opacity:0}}
+.ar-char-orb-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}
+.ar-char-orb-actions button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:0;height:34px;border:1px solid rgba(231,140,160,.35);border-radius:999px;background:rgba(255,255,255,.78);color:var(--wall-rose-ink);padding:0 12px;font-size:11px;font-weight:900;cursor:pointer}
+.ar-char-orb-actions button.primary{flex:1 1 100%;border-color:transparent;background:linear-gradient(180deg,var(--wall-rose-hi),var(--wall-rose));color:#fff;box-shadow:0 12px 22px -14px rgba(228,124,151,.85)}
+.ar-char-orb-actions button:disabled{opacity:.55;cursor:wait}
 .ar-full-wall .moveable-control-box{--moveable-color:rgba(228,124,151,.95)!important}
 .ar-full-wall .moveable-line{background:rgba(228,124,151,.95)!important}
 .ar-full-wall .moveable-control{border:1.5px solid rgba(228,124,151,.95)!important;background:#fff!important}
@@ -1406,6 +1436,44 @@ const WALL_BACKGROUND_SWATCHES = [
     { name: '暖灰', value: '#5a5147' },
     { name: '纸白', value: '#efe7d6' },
 ] as const;
+export const COLLECTION_WALL_CHAR_INVITE_AVATAR_KIND = 'char_invite_avatar';
+const CHAR_INVITE_ORB_SIZE = 64;
+const CHAR_INVITE_ORB_PAD = 14;
+
+export const getCharInviteOrbStorageKey = (charId: string): string => `collection_wall_char_invite_orb_${charId || 'unknown'}`;
+
+export const getDefaultCharInviteOrbPosition = (viewport: { width: number; height: number }): { x: number; y: number } => ({
+    x: Math.max(CHAR_INVITE_ORB_PAD, (viewport.width || 375) - CHAR_INVITE_ORB_SIZE - CHAR_INVITE_ORB_PAD),
+    y: Math.max(CHAR_INVITE_ORB_PAD, (viewport.height || 720) - CHAR_INVITE_ORB_SIZE - 112),
+});
+
+export const clampCharInviteOrbPosition = (
+    position: { x: number; y: number },
+    viewport: { width: number; height: number },
+): { x: number; y: number } => ({
+    x: Math.min(
+        Math.max(CHAR_INVITE_ORB_PAD, Number(position.x) || CHAR_INVITE_ORB_PAD),
+        Math.max(CHAR_INVITE_ORB_PAD, (viewport.width || 375) - CHAR_INVITE_ORB_SIZE - CHAR_INVITE_ORB_PAD),
+    ),
+    y: Math.min(
+        Math.max(CHAR_INVITE_ORB_PAD, Number(position.y) || CHAR_INVITE_ORB_PAD),
+        Math.max(CHAR_INVITE_ORB_PAD, (viewport.height || 720) - CHAR_INVITE_ORB_SIZE - CHAR_INVITE_ORB_PAD),
+    ),
+});
+
+export const isCharInviteAvatarAsset = (asset: CollectionWallAsset, charId?: string): boolean => (
+    asset.meta?.assetKind === COLLECTION_WALL_CHAR_INVITE_AVATAR_KIND
+    && (!charId || asset.meta?.charId === charId)
+);
+
+export const getCharInviteAvatarAsset = (
+    assets: CollectionWallAsset[],
+    charId: string,
+): CollectionWallAsset | null => (
+    [...assets]
+        .filter(asset => isCharInviteAvatarAsset(asset, charId))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0] || null
+);
 
 export type WallBookEntry = {
     id: string;
@@ -2104,6 +2172,7 @@ export const CollectionWallCardFrame: React.FC<{
     const mounted = typeof forceMounted === 'boolean' ? forceMounted : lazyMounted;
     const title = getCollectionDisplayTitle(book);
     const html = getCollectionBookWallHtml(book);
+    const srcDoc = html ? injectFreeformCompatScript(html) : '';
     const scale = Math.max(0.2, width / WALL_PREVIEW_WIDTH);
     const frameHeight = Math.max(1, Math.ceil(height / scale));
 
@@ -2121,7 +2190,7 @@ export const CollectionWallCardFrame: React.FC<{
             {mounted && html && (
                 <iframe
                     className="ar-live-card-frame mounted"
-                    srcDoc={html}
+                    srcDoc={srcDoc}
                     sandbox="allow-scripts"
                     title={`拾光墙真渲染：${title}`}
                     data-book-id={book.id}
@@ -2139,13 +2208,14 @@ export const CollectionWallHtmlFrame: React.FC<{
 }> = ({ item }) => {
     const title = getHtmlCardLabel(item);
     const html = String(item.html || '').trim();
+    const srcDoc = html ? injectFreeformCompatScript(html) : '';
 
     return (
         <div className="ar-html-card">
             {html ? (
                 <iframe
                     className="ar-html-frame"
-                    srcDoc={html}
+                    srcDoc={srcDoc}
                     sandbox="allow-scripts"
                     title={`拾光墙 HTML 卡：${title}`}
                     loading="lazy"
@@ -2467,15 +2537,11 @@ const getWallEntryTimestamp = (entry: WallZoneEntry): number => {
 const LightWallListCard: React.FC<{
     wall: CollectionWall;
     entries: WallZoneEntry[];
-    charName?: string;
     onOpen: () => void;
-    onInvite?: () => void;
-    inviting?: boolean;
-}> = ({ wall, entries, charName, onOpen, onInvite, inviting }) => {
+}> = ({ wall, entries, onOpen }) => {
     const latest = [...entries]
         .sort((a, b) => getWallEntryTimestamp(b) - getWallEntryTimestamp(a))
         .slice(0, 2);
-    const inviteLabel = inviting ? '等待回应' : `邀请 ${charName || 'TA'} 看`;
 
     return (
         <article className="ar-wall-card-wrap">
@@ -2499,16 +2565,6 @@ const LightWallListCard: React.FC<{
                         <small>PIECES</small>
                     </span>
                 </button>
-                {onInvite && (
-                    <button
-                        type="button"
-                        className="ar-wall-invite"
-                        onClick={onInvite}
-                        disabled={inviting}
-                    >
-                        {inviteLabel}
-                    </button>
-                )}
             </div>
         </article>
     );
@@ -2517,15 +2573,7 @@ const LightWallListCard: React.FC<{
 const LightWallShelf: React.FC<{
     zones: LightWallZoneData[];
     onOpenWall: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
-    charName?: string;
-    pullingId?: string | null;
-    onPickBook?: (book: CollectionBook) => void;
-    onPickImage?: (entry: WallImageEntry) => void;
-    onEditWall?: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
-    onInviteChar?: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
-    invitingWallId?: string | null;
-    onWallSeen?: () => void;
-}> = ({ zones, onOpenWall, onInviteChar, invitingWallId, charName }) => {
+}> = ({ zones, onOpenWall }) => {
     if (zones.length === 0) {
         return <div className="ar-wall-empty-list">在聊天里点开一张自由创作卡，就能收进墙上。</div>;
     }
@@ -2537,10 +2585,7 @@ const LightWallShelf: React.FC<{
                     key={zone.wall.id}
                     wall={zone.wall}
                     entries={zone.entries}
-                    charName={charName}
                     onOpen={() => onOpenWall(zone.wall, zone.entries)}
-                    onInvite={onInviteChar ? () => onInviteChar(zone.wall, zone.entries) : undefined}
-                    inviting={invitingWallId === zone.wall.id}
                 />
             ))}
         </div>
@@ -2741,6 +2786,277 @@ const useViewportSize = () => {
     return size;
 };
 
+type CharWallOrbReply = {
+    wall: CollectionWall;
+    entries: WallZoneEntry[];
+    charName: string;
+    text: string;
+};
+
+export const CharInviteOrb: React.FC<{
+    wall: CollectionWall;
+    entries: WallZoneEntry[];
+    charName: string;
+    charAvatar?: string;
+    inviteAvatarAsset?: CollectionWallAsset | null;
+    inviting: boolean;
+    uploading: boolean;
+    pinning: boolean;
+    onRequestRemark: (trigger: CollectionWallVisitTrigger) => Promise<CharWallOrbReply | null>;
+    onUploadAvatar: (file: File) => Promise<void>;
+    onPinRemark: (reply: CharWallOrbReply) => Promise<void>;
+}> = ({
+    wall,
+    entries,
+    charName,
+    charAvatar,
+    inviteAvatarAsset,
+    inviting,
+    uploading,
+    pinning,
+    onRequestRemark,
+    onUploadAvatar,
+    onPinRemark,
+}) => {
+    const viewport = useViewportSize();
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const dragRef = useRef<{
+        pointerId: number;
+        startX: number;
+        startY: number;
+        originX: number;
+        originY: number;
+        moved: boolean;
+    } | null>(null);
+    const storageKey = getCharInviteOrbStorageKey(wall.charId);
+    const inviteAvatarUrl = useAssetObjectUrl(inviteAvatarAsset || null);
+    const latestSavedRemark = useMemo(() => {
+        const remarks = wall.charRemarks || [];
+        return String(remarks[remarks.length - 1]?.text || '').trim();
+    }, [wall.charRemarks]);
+    const [panelOpen, setPanelOpen] = useState(false);
+    const [position, setPosition] = useState(() => {
+        const fallback = getDefaultCharInviteOrbPosition(viewport);
+        try {
+            const stored = JSON.parse(localStorage.getItem(storageKey) || 'null');
+            if (stored && typeof stored.x === 'number' && typeof stored.y === 'number') {
+                return clampCharInviteOrbPosition(stored, viewport);
+            }
+        } catch {
+            // ignore malformed localStorage
+        }
+        return clampCharInviteOrbPosition(fallback, viewport);
+    });
+    const [replyText, setReplyText] = useState(latestSavedRemark);
+    const [visibleReply, setVisibleReply] = useState(latestSavedRemark);
+    const [typing, setTyping] = useState(false);
+    const [localVisited, setLocalVisited] = useState(false);
+    const [dragging, setDragging] = useState(false);
+
+    const hasVisited = localVisited || Boolean(wall.charLastVisitAt || latestSavedRemark || replyText);
+    const canPin = Boolean(replyText.trim()) && !typing && !inviting;
+    const panelSide = position.x < viewport.width / 2 ? 'right' : 'left';
+    const panelVertical = position.y < 230 ? 'below' : 'above';
+    const avatarFallback = charName.trim().slice(0, 1) || 'T';
+    const avatarSrc = inviteAvatarUrl || charAvatar || '';
+
+    useEffect(() => {
+        const next = clampCharInviteOrbPosition(position, viewport);
+        if (next.x !== position.x || next.y !== position.y) {
+            setPosition(next);
+        }
+    }, [position, viewport]);
+
+    useEffect(() => {
+        const fallback = getDefaultCharInviteOrbPosition(viewport);
+        try {
+            const stored = JSON.parse(localStorage.getItem(storageKey) || 'null');
+            setPosition(clampCharInviteOrbPosition(
+                stored && typeof stored.x === 'number' && typeof stored.y === 'number' ? stored : fallback,
+                viewport,
+            ));
+        } catch {
+            setPosition(clampCharInviteOrbPosition(fallback, viewport));
+        }
+        setPanelOpen(false);
+        setLocalVisited(false);
+    }, [storageKey]);
+
+    useEffect(() => {
+        if (!latestSavedRemark) return;
+        setReplyText(latestSavedRemark);
+    }, [latestSavedRemark]);
+
+    useEffect(() => {
+        if (!replyText.trim()) {
+            setVisibleReply('');
+            setTyping(false);
+            return undefined;
+        }
+        const chars = Array.from(replyText);
+        let index = 0;
+        setVisibleReply('');
+        setTyping(true);
+        const speed = Math.max(18, Math.min(42, Math.round(3600 / Math.max(chars.length, 1))));
+        const timer = window.setInterval(() => {
+            index += 1;
+            setVisibleReply(chars.slice(0, index).join(''));
+            if (index >= chars.length) {
+                window.clearInterval(timer);
+                setTyping(false);
+            }
+        }, speed);
+        return () => window.clearInterval(timer);
+    }, [replyText]);
+
+    const savePosition = useCallback((nextPosition: { x: number; y: number }) => {
+        try {
+            localStorage.setItem(storageKey, JSON.stringify(nextPosition));
+        } catch {
+            // best effort only
+        }
+    }, [storageKey]);
+
+    const handlePointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        dragRef.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            originX: position.x,
+            originY: position.y,
+            moved: false,
+        };
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+    }, [position]);
+
+    const handlePointerMove = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        const dx = event.clientX - drag.startX;
+        const dy = event.clientY - drag.startY;
+        if (Math.abs(dx) + Math.abs(dy) > 5) {
+            drag.moved = true;
+            setDragging(true);
+            setPanelOpen(false);
+        }
+        if (!drag.moved) return;
+        setPosition(clampCharInviteOrbPosition({ x: drag.originX + dx, y: drag.originY + dy }, viewport));
+    }, [viewport]);
+
+    const handlePointerUp = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        dragRef.current = null;
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+        const next = clampCharInviteOrbPosition(position, viewport);
+        setPosition(next);
+        if (drag.moved) {
+            savePosition(next);
+            window.setTimeout(() => setDragging(false), 0);
+            return;
+        }
+        setDragging(false);
+        setPanelOpen(prev => !prev);
+    }, [position, savePosition, viewport]);
+
+    const requestRemark = useCallback(async () => {
+        const trigger: CollectionWallVisitTrigger = hasVisited ? 'poke' : 'invite';
+        const result = await onRequestRemark(trigger);
+        if (!result) return;
+        setLocalVisited(true);
+        setReplyText(result.text);
+        setPanelOpen(true);
+    }, [hasVisited, onRequestRemark]);
+
+    const handleUploadChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.currentTarget.files?.[0];
+        event.currentTarget.value = '';
+        if (!file) return;
+        await onUploadAvatar(file);
+    }, [onUploadAvatar]);
+
+    const handlePin = useCallback(async () => {
+        const text = replyText.trim();
+        if (!text) return;
+        await onPinRemark({ wall, entries, charName, text });
+    }, [charName, entries, onPinRemark, replyText, wall]);
+
+    return (
+        <div
+            className={`ar-char-orb-wrap${panelOpen ? ' open' : ''}${dragging ? ' dragging' : ''}`}
+            style={{ transform: `translate3d(${position.x}px,${position.y}px,0)` }}
+            onClick={event => event.stopPropagation()}
+        >
+            <button
+                type="button"
+                className={`ar-char-orb${hasVisited ? ' visited' : ''}${inviting ? ' waiting' : ''}`}
+                aria-label={`${charName} 的拾光墙邀请球`}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={() => {
+                    dragRef.current = null;
+                    setDragging(false);
+                }}
+            >
+                <span className="ar-char-orb-glow" aria-hidden="true" />
+                <span className="ar-char-orb-avatar">
+                    {avatarSrc ? <img src={avatarSrc} alt="" draggable={false} /> : <b>{avatarFallback}</b>}
+                </span>
+                {hasVisited && <span className="ar-char-orb-dot" aria-hidden="true" />}
+            </button>
+            {panelOpen && (
+                <section className={`ar-char-orb-panel ${panelSide} ${panelVertical}`} aria-label={`${charName} 的观墙回应`}>
+                    <div className="ar-char-orb-head">
+                        <span className="ar-char-orb-mini">
+                            {avatarSrc ? <img src={avatarSrc} alt="" draggable={false} /> : <b>{avatarFallback}</b>}
+                        </span>
+                        <span>
+                            <b>{charName}</b>
+                            <small>{hasVisited ? '正在墙前陪你看' : '还在门口等你邀请'}</small>
+                        </span>
+                    </div>
+                    <div className={`ar-char-orb-speech${typing ? ' typing' : ''}`}>
+                        {inviting ? (
+                            <span className="muted">他正在看这面墙...</span>
+                        ) : visibleReply ? (
+                            <>
+                                {visibleReply}
+                                {typing && <i aria-hidden="true" />}
+                            </>
+                        ) : (
+                            <span className="muted">邀请他来之后，就能戳一戳听他说。</span>
+                        )}
+                    </div>
+                    <div className="ar-char-orb-actions">
+                        <button type="button" className="primary" disabled={inviting} onClick={requestRemark}>
+                            <PaperPlaneTilt weight="bold" size={14} />{inviting ? '听他说...' : hasVisited ? '戳一戳，听听他说' : '邀请他来'}
+                        </button>
+                        <button type="button" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
+                            <UploadSimple weight="bold" size={14} />{uploading ? '处理中' : '更换小人'}
+                        </button>
+                        {canPin && (
+                            <button type="button" disabled={pinning} onClick={handlePin}>
+                                <Check weight="bold" size={14} />{pinning ? '钉上去...' : '钉到墙上'}
+                            </button>
+                        )}
+                    </div>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        hidden
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        onChange={handleUploadChange}
+                    />
+                </section>
+            )}
+        </div>
+    );
+};
+
 const FullScreenLightWall: React.FC<{
     wall: CollectionWall;
     entries: WallZoneEntry[];
@@ -2749,13 +3065,17 @@ const FullScreenLightWall: React.FC<{
     userAvatar?: string;
     charName: string;
     charAvatar?: string;
+    inviting: boolean;
+    pinningRemark: boolean;
     onClose: () => void;
     onPickBook: (book: CollectionBook) => void;
     onPickImage: (entry: WallImageEntry, wallName: string) => void;
+    onInviteChar: (wall: CollectionWall, entries: WallZoneEntry[], charName: string, trigger: CollectionWallVisitTrigger) => Promise<CharWallOrbReply | null>;
+    onPinCharRemark: (reply: CharWallOrbReply) => Promise<void>;
     onSaved: () => Promise<unknown> | void;
     onAssetsChanged: () => Promise<unknown> | void;
     say: (message: string) => void;
-}> = ({ wall, entries, libraryAssets, userName, userAvatar, charName, charAvatar, onClose, onPickBook, onPickImage, onSaved, onAssetsChanged, say }) => {
+}> = ({ wall, entries, libraryAssets, userName, userAvatar, charName, charAvatar, inviting, pinningRemark, onClose, onPickBook, onPickImage, onInviteChar, onPinCharRemark, onSaved, onAssetsChanged, say }) => {
     const viewport = useViewportSize();
     const scale = Math.max(0.2, viewport.width / WALL_CANVAS_WIDTH);
     const canvasRef = useRef<HTMLDivElement>(null);
@@ -2783,6 +3103,7 @@ const FullScreenLightWall: React.FC<{
     const [actionMenuOpen, setActionMenuOpen] = useState(false);
     const [toolboxOpen, setToolboxOpen] = useState(false);
     const [uploadingAsset, setUploadingAsset] = useState(false);
+    const [uploadingInviteAvatar, setUploadingInviteAvatar] = useState(false);
     const [uploadingFont, setUploadingFont] = useState(false);
     const [importingPreset, setImportingPreset] = useState(false);
     const [savingWallDraft, setSavingWallDraft] = useState(false);
@@ -2802,7 +3123,12 @@ const FullScreenLightWall: React.FC<{
     }, [entries, libraryAssets]);
     const customLibraryAssets = useMemo(() => (
         libraryAssets
-            .filter(asset => asset.origin === 'upload' && asset.meta?.assetKind !== 'font' && !asset.meta?.hiddenFromLibrary)
+            .filter(asset => (
+                asset.origin === 'upload'
+                && asset.meta?.assetKind !== 'font'
+                && asset.meta?.assetKind !== COLLECTION_WALL_CHAR_INVITE_AVATAR_KIND
+                && !asset.meta?.hiddenFromLibrary
+            ))
             .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     ), [libraryAssets]);
     const selectedItem = useMemo(() => (
@@ -2826,6 +3152,7 @@ const FullScreenLightWall: React.FC<{
         ? `url("${backgroundAssetUrl}") center / ${draftWall.background.fit === 'tile' ? 'auto repeat' : 'cover no-repeat'}`
         : isLegacyDefaultWallBackground ? DEFAULT_LIGHT_WALL_BG : draftWall.background.value || DEFAULT_LIGHT_WALL_BG;
     const canPersist = !wall.id.startsWith('fallback-');
+    const inviteAvatarAsset = useMemo(() => getCharInviteAvatarAsset(libraryAssets, wall.charId), [libraryAssets, wall.charId]);
 
     useEffect(() => {
         const nextItems = buildInitialWallItems(wall, entries);
@@ -2841,6 +3168,7 @@ const FullScreenLightWall: React.FC<{
         setActiveAssetActions(null);
         setActionMenuOpen(false);
         setToolboxOpen(false);
+        setUploadingInviteAvatar(false);
         setImportingPreset(false);
         setSavingWallDraft(false);
         setPast([]);
@@ -3038,34 +3366,75 @@ const FullScreenLightWall: React.FC<{
         }
     }, [onAssetsChanged, say, uploadingAsset]);
 
+    const handleUploadInviteAvatar = useCallback(async (file: File) => {
+        if (uploadingInviteAvatar) return;
+        setUploadingInviteAvatar(true);
+        try {
+            const draft = await buildUploadedWallAssetDraft(file);
+            const latestAssets = await DB.getAllCollectionWallAssets();
+            const existing = getCharInviteAvatarAsset(latestAssets, wall.charId);
+            await DB.saveCollectionWallAsset({
+                id: existing?.id,
+                createdAt: existing?.createdAt,
+                ...draft,
+                meta: {
+                    ...(draft.meta || {}),
+                    assetKind: COLLECTION_WALL_CHAR_INVITE_AVATAR_KIND,
+                    charId: wall.charId,
+                    name: `${charName || 'TA'} 的Q版小人`,
+                    uploadedFileName: file.name,
+                    hiddenFromLibrary: true,
+                },
+            });
+            await onAssetsChanged();
+            say('小人换好了');
+        } catch (error: any) {
+            console.error('[CollectionHall] invite avatar upload failed:', error);
+            say(error?.message || '上传失败，稍后再试');
+        } finally {
+            setUploadingInviteAvatar(false);
+        }
+    }, [charName, onAssetsChanged, say, uploadingInviteAvatar, wall.charId]);
+
     const addAssetToWall = useCallback((asset: CollectionWallAsset, itemType: 'image' | 'sticker') => {
         const now = Date.now();
         const size = itemType === 'sticker'
             ? getFittedAssetSize(asset, DEFAULT_STICKER_MAX, DEFAULT_STICKER_MAX, DEFAULT_STICKER_MIN, DEFAULT_STICKER_MIN, DEFAULT_STICKER_MAX, DEFAULT_STICKER_MAX)
             : getFittedAssetSize(asset, 320, 240, 140, 100, 320, 240);
         const y = Math.max(WALL_CANVAS_TOP_PADDING, Math.round((viewport.height / scale) * 0.42 - size.h / 2));
+        const rotation = itemType === 'sticker' ? ((hashOf(asset.id + now) % 9) - 4) * 0.35 : 0;
         const item: CollectionWallItem = {
             id: createLocalItemId(),
             wallId: wall.id,
             type: itemType,
             author: 'user',
-            x: clamp(Math.round(WALL_CANVAS_WIDTH / 2 - size.w / 2), 0, WALL_CANVAS_WIDTH - size.w),
+            x: Math.round(WALL_CANVAS_WIDTH / 2 - size.w / 2),
             y,
             w: size.w,
             h: size.h,
-            rotation: itemType === 'sticker' ? ((hashOf(asset.id + now) % 9) - 4) * 0.35 : 0,
+            rotation,
             z: draftItems.reduce((max, candidate) => Math.max(max, candidate.z || 0), 0) + 1,
             order: draftItems.length,
             assetId: asset.id,
             name: getAssetLabel(asset),
             createdAt: now,
         };
-        applyDraft(relabelItems([...draftItems, item]), draftWall);
+        const normalizedItem = {
+            ...item,
+            ...normalizeWallItemFrameForCanvas(item, {
+                x: item.x,
+                y: item.y,
+                w: item.w,
+                h: item.h,
+                rotation,
+            }, { canvasHeight }),
+        };
+        applyDraft(relabelItems([...draftItems, normalizedItem]), draftWall);
         setSelectedItemId(item.id);
         setLibraryOpen(false);
         setActiveAssetActions(null);
         say(itemType === 'sticker' ? '贴纸已放到墙上' : '图片已放到墙上');
-    }, [applyDraft, draftItems, draftWall, scale, say, viewport.height, wall.id]);
+    }, [applyDraft, canvasHeight, draftItems, draftWall, scale, say, viewport.height, wall.id]);
 
     const handleSetAssetBackground = useCallback((asset: CollectionWallAsset) => {
         applyDraft(draftItems, {
@@ -3193,9 +3562,15 @@ const FullScreenLightWall: React.FC<{
     }, [applyDraft, draftItems, draftWall]);
 
     const updateItem = useCallback((id: string, patch: Partial<CollectionWallItem>) => {
-        const nextItems = draftItems.map(item => item.id === id ? normalizeWallItemForCanvas({ ...item, ...patch }) : item);
+        const nextItems = draftItems.map(item => item.id === id
+            ? normalizeWallItemForCanvas({
+                ...item,
+                ...patch,
+                ...normalizeWallItemFrameForCanvas(item, patch, { canvasHeight }),
+            })
+            : item);
         applyDraft(nextItems, draftWall);
-    }, [applyDraft, draftItems, draftWall]);
+    }, [applyDraft, canvasHeight, draftItems, draftWall]);
 
     const updateTextStyle = useCallback((id: string, patch: Partial<NonNullable<CollectionWallItem['text']>>) => {
         const source = draftItems.find(item => item.id === id);
@@ -3423,7 +3798,7 @@ const FullScreenLightWall: React.FC<{
                 wallId: wall.id,
                 type: 'html',
                 author: 'user',
-                x: clamp(Math.round(WALL_CANVAS_WIDTH / 2 - DEFAULT_HTML_W / 2), 0, WALL_CANVAS_WIDTH - DEFAULT_HTML_W),
+                x: Math.round(WALL_CANVAS_WIDTH / 2 - DEFAULT_HTML_W / 2),
                 y: Math.max(WALL_CANVAS_TOP_PADDING, Math.round((viewport.height / scale) * 0.42 - DEFAULT_HTML_H / 2)),
                 w: DEFAULT_HTML_W,
                 h: DEFAULT_HTML_H,
@@ -3434,12 +3809,22 @@ const FullScreenLightWall: React.FC<{
                 name: '自定义卡',
                 createdAt: now,
             };
-            applyDraft(relabelItems([...draftItems, item]), draftWall);
+            const normalizedItem = {
+                ...item,
+                ...normalizeWallItemFrameForCanvas(item, {
+                    x: item.x,
+                    y: item.y,
+                    w: item.w,
+                    h: item.h,
+                    rotation: item.rotation,
+                }, { canvasHeight }),
+            };
+            applyDraft(relabelItems([...draftItems, normalizedItem]), draftWall);
             setSelectedItemId(item.id);
             say('已插入 HTML 卡');
         }
         setHtmlEditor(null);
-    }, [applyDraft, draftItems, draftWall, htmlEditor, scale, say, updateItem, viewport.height, wall.id]);
+    }, [applyDraft, canvasHeight, draftItems, draftWall, htmlEditor, scale, say, updateItem, viewport.height, wall.id]);
 
     const deleteItem = useCallback((id: string) => {
         const deleted = draftItems.find(item => item.id === id);
@@ -3499,10 +3884,7 @@ const FullScreenLightWall: React.FC<{
     const screenToCanvas = useCallback((clientX: number, clientY: number) => {
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return { x: 0, y: 0 };
-        return {
-            x: (clientX - rect.left) / scale,
-            y: (clientY - rect.top) / scale,
-        };
+        return clientPointToWallCanvasPoint(clientX, clientY, rect, scale);
     }, [scale]);
 
     const addTextAt = useCallback((clientX: number, clientY: number) => {
@@ -3513,7 +3895,7 @@ const FullScreenLightWall: React.FC<{
             wallId: wall.id,
             type: 'text',
             author: 'user',
-            x: clamp(Math.round(point.x - DEFAULT_TEXT_W / 2), 0, WALL_CANVAS_WIDTH - DEFAULT_TEXT_W),
+            x: Math.round(point.x - DEFAULT_TEXT_W / 2),
             y: Math.max(0, Math.round(point.y - DEFAULT_TEXT_H / 2)),
             w: DEFAULT_TEXT_W,
             h: DEFAULT_TEXT_H,
@@ -3530,10 +3912,20 @@ const FullScreenLightWall: React.FC<{
             name: '文字便签',
             createdAt: now,
         };
-        applyDraft(relabelItems([...draftItems, item]), draftWall);
+        const normalizedItem = {
+            ...item,
+            ...normalizeWallItemFrameForCanvas(item, {
+                x: item.x,
+                y: item.y,
+                w: item.w,
+                h: item.h,
+                rotation: item.rotation,
+            }, { canvasHeight }),
+        };
+        applyDraft(relabelItems([...draftItems, normalizedItem]), draftWall);
         setSelectedItemId(item.id);
         setEditingTextId(item.id);
-    }, [applyDraft, draftItems, draftWall, screenToCanvas, wall.id]);
+    }, [applyDraft, canvasHeight, draftItems, draftWall, screenToCanvas, wall.id]);
 
     const commitText = useCallback((id: string, content: string) => {
         const source = draftItems.find(item => item.id === id);
@@ -3576,8 +3968,10 @@ const FullScreenLightWall: React.FC<{
                 ? normalizeWallItemForCanvas({
                     ...candidate,
                     id: nextId,
-                    x: clamp(Math.round(point.x - candidate.w / 2), 0, WALL_CANVAS_WIDTH - candidate.w),
-                    y: Math.max(0, Math.round(point.y - candidate.h / 2)),
+                    ...normalizeWallItemFrameForCanvas(candidate, {
+                        x: point.x - candidate.w / 2,
+                        y: point.y - candidate.h / 2,
+                    }, { canvasHeight }),
                     z: draftItems.reduce((max, current) => Math.max(max, current.z || 0), 0) + 1,
                 })
                 : candidate);
@@ -3586,7 +3980,7 @@ const FullScreenLightWall: React.FC<{
         };
         window.addEventListener('pointermove', handleMove);
         window.addEventListener('pointerup', handleUp);
-    }, [applyDraft, draftItems, draftWall, editing, screenToCanvas]);
+    }, [applyDraft, canvasHeight, draftItems, draftWall, editing, screenToCanvas]);
 
     const clearLongPress = useCallback(() => {
         if (longPressTimerRef.current != null) {
@@ -3749,6 +4143,21 @@ const FullScreenLightWall: React.FC<{
                     </div>
                 </>
             )}
+            {!preview && !editing && (
+                <CharInviteOrb
+                    wall={draftWall}
+                    entries={entries}
+                    charName={charName}
+                    charAvatar={charAvatar}
+                    inviteAvatarAsset={inviteAvatarAsset}
+                    inviting={inviting}
+                    uploading={uploadingInviteAvatar}
+                    pinning={pinningRemark}
+                    onRequestRemark={(trigger) => onInviteChar(draftWall, entries, charName, trigger)}
+                    onUploadAvatar={handleUploadInviteAvatar}
+                    onPinRemark={onPinCharRemark}
+                />
+            )}
             {editing && trayItems.length > 0 && (
                 <div className="ar-tray" aria-label="待安置内容">
                     {trayItems.map(item => (
@@ -3803,27 +4212,31 @@ const FullScreenLightWall: React.FC<{
                         const item = draftItems.find(candidate => candidate.id === selectedItemId);
                         const translate = lastEvent?.beforeTranslate;
                         if (!item || !translate) return;
-                        updateItem(item.id, {
-                            x: clamp(Math.round(translate[0]), 0, WALL_CANVAS_WIDTH - item.w),
-                            y: Math.max(0, Math.round(translate[1])),
-                        });
+                        updateItem(item.id, { x: translate[0], y: translate[1] });
                     }}
-                    onDragStart={({ target }: any) => {
+                    onDragStart={({ target, set }: any) => {
                         target.classList.add('dragging');
+                        const item = draftItems.find(candidate => candidate.id === selectedItemId);
+                        if (item) set?.(getMoveableStartTranslate(item));
+                    }}
+                    onResizeStart={({ dragStart }: any) => {
+                        const item = draftItems.find(candidate => candidate.id === selectedItemId);
+                        if (item) dragStart?.set?.(getMoveableStartTranslate(item));
                     }}
                     onResize={({ target, width, height, drag }: any) => {
                         target.style.width = `${width}px`;
                         target.style.height = `${height}px`;
-                        target.style.transform = drag.transform;
+                        if (drag?.transform) target.style.transform = drag.transform;
                     }}
                     onResizeEnd={({ lastEvent }: any) => {
                         const item = draftItems.find(candidate => candidate.id === selectedItemId);
-                        if (!item || !lastEvent) return;
+                        const translate = lastEvent?.drag?.beforeTranslate;
+                        if (!item || !lastEvent || !translate) return;
                         updateItem(item.id, {
-                            w: Math.round(lastEvent.width),
-                            h: Math.round(lastEvent.height),
-                            x: clamp(Math.round(lastEvent.drag.beforeTranslate[0]), 0, WALL_CANVAS_WIDTH - lastEvent.width),
-                            y: Math.max(0, Math.round(lastEvent.drag.beforeTranslate[1])),
+                            w: lastEvent.width,
+                            h: lastEvent.height,
+                            x: translate[0],
+                            y: translate[1],
                         });
                     }}
                     onRotate={({ target, drag }: any) => {
@@ -4206,6 +4619,67 @@ const createLocalItemId = (): string => {
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
+type WallCanvasRect = Pick<DOMRect, 'left' | 'top'>;
+type WallItemFramePatch = Partial<Pick<CollectionWallItem, 'x' | 'y' | 'w' | 'h' | 'rotation'>>;
+
+export const clientPointToWallCanvasPoint = (
+    clientX: number,
+    clientY: number,
+    rect: WallCanvasRect,
+    scale: number,
+): { x: number; y: number } => {
+    const safeScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+    return {
+        x: (clientX - rect.left) / safeScale,
+        y: (clientY - rect.top) / safeScale,
+    };
+};
+
+export const getMoveableStartTranslate = (item: CollectionWallItem): [number, number] => [
+    Number.isFinite(item.x) && item.x != null ? item.x : 0,
+    Number.isFinite(item.y) && item.y != null ? item.y : 0,
+];
+
+export const normalizeWallItemFrameForCanvas = (
+    item: CollectionWallItem,
+    patch: WallItemFramePatch,
+    options: { canvasHeight?: number } = {},
+): WallItemFramePatch => {
+    const fallback = getDefaultWallItemSize(item);
+    const currentW = Number.isFinite(item.w) && item.w > 0 ? item.w : fallback.w;
+    const currentH = Number.isFinite(item.h) && item.h > 0 ? item.h : fallback.h;
+    const rawW = patch.w ?? item.w;
+    const rawH = patch.h ?? item.h;
+    const w = clamp(Number.isFinite(rawW) && rawW > 0 ? Math.round(rawW) : currentW, 1, WALL_CANVAS_WIDTH);
+    const h = Math.max(1, Number.isFinite(rawH) && rawH > 0 ? Math.round(rawH) : currentH);
+    const maxX = Math.max(0, WALL_CANVAS_WIDTH - w);
+    const maxY = Number.isFinite(options.canvasHeight)
+        ? Math.max(0, Number(options.canvasHeight) - h)
+        : Number.POSITIVE_INFINITY;
+    const next: WallItemFramePatch = {};
+
+    if (Object.prototype.hasOwnProperty.call(patch, 'w')) next.w = w;
+    if (Object.prototype.hasOwnProperty.call(patch, 'h')) next.h = h;
+    if (Object.prototype.hasOwnProperty.call(patch, 'x')) {
+        next.x = typeof patch.x === 'number' && Number.isFinite(patch.x)
+            ? clamp(Math.round(patch.x), 0, maxX)
+            : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'y')) {
+        next.y = typeof patch.y === 'number' && Number.isFinite(patch.y)
+            ? Math.min(maxY, Math.max(0, Math.round(patch.y)))
+            : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'rotation')) {
+        const rotation = typeof patch.rotation === 'number' && Number.isFinite(patch.rotation)
+            ? patch.rotation
+            : item.rotation || 0;
+        next.rotation = Number(rotation.toFixed(2));
+    }
+
+    return next;
+};
+
 export function getWallBackgroundEffects(background?: CollectionWall['background']): { dim: number; noiseOpacity: number } {
     if (background?.type === 'asset') return { dim: 0, noiseOpacity: 0 };
     const rawDim = Number(background?.dim);
@@ -4387,6 +4861,7 @@ const buildCharWallVisitMessages = async (options: {
     apiConfig: APIConfig;
     wall: CollectionWall;
     entries: WallZoneEntry[];
+    trigger: CollectionWallVisitTrigger;
 }): Promise<{ messages: ChatCompletionMessage[]; manifest: CollectionWallManifest; history: Message[] }> => {
     const limit = options.char.contextLimit || 500;
     const [history, emojis, categories, characterGoals] = await Promise.all([
@@ -4417,6 +4892,7 @@ const buildCharWallVisitMessages = async (options: {
     const systemPrompt = `${baseSystemPrompt}\n\n${buildCollectionWallVisitSystemPrompt({
         userName: options.userProfile.name,
         wallName: options.wall.name,
+        trigger: options.trigger,
     })}`;
 
     return {
@@ -4708,12 +5184,7 @@ const CharacterArchivePage: React.FC<{
     wallZones: LightWallZoneData[];
     pullingId: string | null;
     onPickBook: (book: CollectionBook) => void;
-    onPickImage: (entry: WallImageEntry, wallName: string) => void;
     onOpenWall: (wall: CollectionWall, entries: WallZoneEntry[], charName: string) => void;
-    onEditWall: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
-    onInviteChar: (wall: CollectionWall, entries: WallZoneEntry[]) => void;
-    invitingWallId?: string | null;
-    onWallSeen: () => void;
 }> = ({
     char,
     hue,
@@ -4723,12 +5194,7 @@ const CharacterArchivePage: React.FC<{
     wallZones,
     pullingId,
     onPickBook,
-    onPickImage,
     onOpenWall,
-    onEditWall,
-    onInviteChar,
-    invitingWallId,
-    onWallSeen,
 }) => {
     const [activeTab, setActiveTab] = useState<ArchiveSectionTab>(() => (
         afterglow.length > 0 ? 'bookcase' : heartTalks.length > 0 ? 'keepsakes' : 'walls'
@@ -4774,14 +5240,6 @@ const CharacterArchivePage: React.FC<{
                 <LightWallShelf
                     zones={wallZones}
                     onOpenWall={(wall, entries) => onOpenWall(wall, entries, char.name)}
-                    charName={char.name}
-                    pullingId={pullingId}
-                    onPickBook={onPickBook}
-                    onPickImage={(entry) => onPickImage(entry, wallZones.find(zone => zone.entries.some(item => item.id === entry.id))?.wall.name || '拾光墙')}
-                    onEditWall={onEditWall}
-                    onInviteChar={onInviteChar}
-                    invitingWallId={invitingWallId}
-                    onWallSeen={onWallSeen}
                 />
             )}
         </div>
@@ -4967,30 +5425,42 @@ const CollectionHallApp: React.FC = () => {
 
     const charOf = (b: CollectionBook) => charById.get(b.charId);
 
-    const handleInviteChar = useCallback(async (wall: CollectionWall, entries: WallZoneEntry[], charName: string) => {
+    const handleInviteChar = useCallback(async (
+        wall: CollectionWall,
+        entries: WallZoneEntry[],
+        charName: string,
+        trigger: CollectionWallVisitTrigger = 'invite',
+    ): Promise<CharWallOrbReply | null> => {
         if (!wall.allowCharDecorate) {
             say('这面墙暂时不让 TA 布置');
-            return;
+            return null;
+        }
+        if (wall.id.startsWith('fallback-')) {
+            say('先把这面墙保存一下，再邀请 TA 来');
+            return null;
         }
         const char = charById.get(wall.charId);
         if (!char) {
             say('找不到这面墙对应的角色');
-            return;
+            return null;
         }
         if (!apiConfig?.baseUrl || !apiConfig?.model) {
             say('先配置主 API');
-            return;
+            return null;
         }
         setInvitingWallId(wall.id);
         try {
+            const latestWall = await DB.getCollectionWallById(wall.id);
+            const wallForPrompt = latestWall || wall;
             const { messages, manifest } = await buildCharWallVisitMessages({
                 char,
                 userProfile,
                 groups,
                 realtimeConfig,
                 apiConfig,
-                wall,
+                wall: wallForPrompt,
                 entries,
+                trigger,
             });
             const result = await requestCharWallNote({
                 apiConfig,
@@ -4999,12 +5469,16 @@ const CollectionHallApp: React.FC = () => {
             });
             if (result.action !== 'note') {
                 say('TA 看了看，没说什么');
-                return;
+                return null;
             }
             const now = Date.now();
-            const latestWall = await DB.getCollectionWallById(wall.id);
-            const wallForPatch = latestWall || wall;
-            await DB.saveCollectionWall({
+            const wallForPatch = await DB.getCollectionWallById(wall.id) || wallForPrompt;
+            const previousRemarks = (wallForPatch.charRemarks || []).map(remark => remark.text);
+            if (isDuplicateCharWallRemark(result.content, previousRemarks.slice(-10))) {
+                say('TA 刚才已经说过类似的话了，戳他换个角度再试试');
+                return null;
+            }
+            const updatedWall = await DB.saveCollectionWall({
                 ...wallForPatch,
                 charRemarks: [...(wallForPatch.charRemarks || []), { text: result.content, ts: now }].slice(-30),
                 charLastVisitManifest: JSON.stringify(manifest),
@@ -5012,31 +5486,38 @@ const CollectionHallApp: React.FC = () => {
                 charLastVisitAt: now,
                 changeCountSinceVisit: 0,
             });
-            setCharWallRemark({ wall, entries, charName, text: result.content });
-            await loadBooks();
+            const snapshot = await loadBooks();
+            const freshWall = snapshot.walls.find(candidate => candidate.id === updatedWall.id) || updatedWall;
+            const built = buildWallZoneEntriesFromItems(freshWall, snapshot.wallItems, snapshot.books, snapshot.wallAssets);
+            setActiveWall(current => {
+                if (!current || current.wall.id !== updatedWall.id) return current;
+                return { ...current, wall: freshWall, entries: built.entries };
+            });
+            return { wall: freshWall, entries: built.entries, charName, text: result.content };
         } catch (error) {
             console.error('[CollectionHall] char note failed:', error);
             say('TA 看了看，没说什么');
+            return null;
         } finally {
             setInvitingWallId(null);
         }
     }, [apiConfig, charById, groups, loadBooks, realtimeConfig, say, userProfile]);
 
-    const handlePinCharRemark = useCallback(async () => {
-        if (!charWallRemark || pinningRemark) return;
+    const pinWallRemark = useCallback(async (reply: CharWallOrbReply) => {
+        if (pinningRemark) return;
         setPinningRemark(true);
         try {
-            const latestWall = await DB.getCollectionWallById(charWallRemark.wall.id);
-            const wall = latestWall || charWallRemark.wall;
+            const latestWall = await DB.getCollectionWallById(reply.wall.id);
+            const wall = latestWall || reply.wall;
             const items = await DB.getCollectionWallItemsByWallId(wall.id);
             const noteItem = buildCharWallNoteItem({
                 wallId: wall.id,
                 layoutMode: wall.layoutMode,
                 items,
-                content: charWallRemark.text,
-                charName: charWallRemark.charName,
-                anchorItem: getRecentAnchorItem(charWallRemark.entries),
-                remarkTemplate: pickCharRemarkTemplate(charWallRemark.text).pick,
+                content: reply.text,
+                charName: reply.charName,
+                anchorItem: getRecentAnchorItem(reply.entries),
+                remarkTemplate: pickCharRemarkTemplate(reply.text).pick,
             });
             await DB.saveCollectionWallItem(noteItem);
             await DB.saveCollectionWall({
@@ -5045,16 +5526,27 @@ const CollectionHallApp: React.FC = () => {
                 charLastVisitAt: Date.now(),
                 changeCountSinceVisit: 0,
             });
-            setCharWallRemark(null);
             say('已钉到拾光墙');
-            await loadBooks();
+            const snapshot = await loadBooks();
+            setActiveWall(current => {
+                if (!current || current.wall.id !== wall.id) return current;
+                const freshWall = snapshot.walls.find(candidate => candidate.id === wall.id) || wall;
+                const built = buildWallZoneEntriesFromItems(freshWall, snapshot.wallItems, snapshot.books, snapshot.wallAssets);
+                return { ...current, wall: freshWall, entries: built.entries };
+            });
         } catch (error) {
             console.error('[CollectionHall] pin char remark failed:', error);
             say('钉到墙上失败，稍后再试');
         } finally {
             setPinningRemark(false);
         }
-    }, [charWallRemark, loadBooks, pinningRemark, say]);
+    }, [loadBooks, pinningRemark, say]);
+
+    const handlePinCharRemark = useCallback(async () => {
+        if (!charWallRemark || pinningRemark) return;
+        await pinWallRemark(charWallRemark);
+        setCharWallRemark(null);
+    }, [charWallRemark, pinWallRemark, pinningRemark]);
 
     const pick = (book: CollectionBook) => {
         if (pullingId) return;
@@ -5217,12 +5709,7 @@ const CollectionHallApp: React.FC = () => {
                                     wallZones={wallZones}
                                     pullingId={pullingId}
                                     onPickBook={pick}
-                                    onPickImage={(entry, wallName) => setSelectedImage({ entry, wallName })}
                                     onOpenWall={(wall, entries, charName) => setActiveWall({ wall, entries, charName })}
-                                    onEditWall={(wall, entries) => setEditingWall({ wall, entries })}
-                                    onInviteChar={(wall, entries) => void handleInviteChar(wall, entries, char.name)}
-                                    invitingWallId={invitingWallId}
-                                    onWallSeen={() => void loadBooks()}
                                 />
                             ))}
                         </div>
@@ -5239,9 +5726,13 @@ const CollectionHallApp: React.FC = () => {
                     userAvatar={userProfile?.avatar}
                     charName={activeWall.charName}
                     charAvatar={charById.get(activeWall.wall.charId)?.avatar}
+                    inviting={invitingWallId === activeWall.wall.id}
+                    pinningRemark={pinningRemark}
                     onClose={() => setActiveWall(null)}
                     onPickBook={book => setSelected(book)}
                     onPickImage={(entry, wallName) => setSelectedImage({ entry, wallName })}
+                    onInviteChar={handleInviteChar}
+                    onPinCharRemark={pinWallRemark}
                     onSaved={refreshActiveWallAfterSave}
                     onAssetsChanged={loadBooks}
                     say={say}

@@ -5,6 +5,12 @@
  */
 
 import { buildBackendHeaders,getBackendUrl } from './backendClient';
+import {
+    getNativePushDebugInfo,
+    isCapacitorAndroid,
+    registerNativePush,
+    unregisterNativePush,
+} from './nativePushBridge';
 import { safeTimeoutSignal } from './safeTimeout';
 
 let _pushStatus = '未初始化';
@@ -13,10 +19,17 @@ let _pushError = '';
 let _pushProvider = '未知';
 let _pushOfflineCapable = false;
 let _pushNeedsResubscribe = false;
+let _pushChannel: PushChannel = 'unknown';
+let _pushPermission = '';
+let _pushRegistered = false;
+let _pushTokenPreview = '';
+let _pushDeviceIdPreview = '';
+let _pushAppId = '';
 
 class PushFeatureUnavailableError extends Error {}
 
 type PushSyncResult = 'synced' | 'disabled' | 'invalid';
+export type PushChannel = 'native-fcm' | 'web-push' | 'unavailable' | 'unknown';
 
 export interface PushDebugInfo {
     status: string;
@@ -25,6 +38,12 @@ export interface PushDebugInfo {
     provider: string;
     offlineCapable: boolean;
     needsResubscribe: boolean;
+    channel: PushChannel;
+    permission: string;
+    registered: boolean;
+    tokenPreview: string;
+    deviceIdPreview: string;
+    appId: string;
 }
 
 export function classifyPushEndpoint(endpoint: string): string {
@@ -67,9 +86,19 @@ function setPushDebugInfo(patch: Partial<PushDebugInfo>): void {
     if (patch.provider !== undefined) _pushProvider = patch.provider;
     if (patch.offlineCapable !== undefined) _pushOfflineCapable = patch.offlineCapable;
     if (patch.needsResubscribe !== undefined) _pushNeedsResubscribe = patch.needsResubscribe;
+    if (patch.channel !== undefined) _pushChannel = patch.channel;
+    if (patch.permission !== undefined) _pushPermission = patch.permission;
+    if (patch.registered !== undefined) _pushRegistered = patch.registered;
+    if (patch.tokenPreview !== undefined) _pushTokenPreview = patch.tokenPreview;
+    if (patch.deviceIdPreview !== undefined) _pushDeviceIdPreview = patch.deviceIdPreview;
+    if (patch.appId !== undefined) _pushAppId = patch.appId;
 }
 
 export function getPushDebugInfo(): PushDebugInfo {
+    if (isCapacitorAndroid()) {
+        syncNativeDebugInfo();
+    }
+
     return {
         status: _pushStatus,
         endpoint: _pushEndpoint,
@@ -77,16 +106,33 @@ export function getPushDebugInfo(): PushDebugInfo {
         provider: _pushProvider,
         offlineCapable: _pushOfflineCapable,
         needsResubscribe: _pushNeedsResubscribe,
+        channel: _pushChannel,
+        permission: _pushPermission,
+        registered: _pushRegistered,
+        tokenPreview: _pushTokenPreview,
+        deviceIdPreview: _pushDeviceIdPreview,
+        appId: _pushAppId,
     };
 }
 
 export async function disablePushSubscription(): Promise<void> {
+    if (isCapacitorAndroid()) {
+        await unregisterNativePush();
+        syncNativeDebugInfo();
+        return;
+    }
+
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
         setPushDebugInfo({
             status: '浏览器不支持 Web Push',
             endpoint: '',
             error: '',
             provider: '不支持',
+            channel: 'unavailable',
+            permission: getWebNotificationPermissionLabel(),
+            registered: false,
+            tokenPreview: '',
+            deviceIdPreview: '',
             offlineCapable: false,
             needsResubscribe: false,
         });
@@ -102,6 +148,10 @@ export async function disablePushSubscription(): Promise<void> {
                 status: '推送通知已禁用',
                 endpoint: '',
                 provider: '未知',
+                channel: 'web-push',
+                registered: false,
+                tokenPreview: '',
+                deviceIdPreview: '',
                 offlineCapable: false,
             });
             return;
@@ -113,6 +163,10 @@ export async function disablePushSubscription(): Promise<void> {
                 status: '推送通知已禁用',
                 endpoint: '',
                 provider: '未知',
+                channel: 'web-push',
+                registered: false,
+                tokenPreview: '',
+                deviceIdPreview: '',
                 offlineCapable: false,
             });
             return;
@@ -127,39 +181,43 @@ export async function disablePushSubscription(): Promise<void> {
             status: '推送通知已禁用',
             endpoint: '',
             provider: '未知',
+            channel: 'web-push',
+            registered: false,
+            tokenPreview: '',
+            deviceIdPreview: '',
             offlineCapable: false,
         });
     } catch (error: any) {
         setPushDebugInfo({
             status: '禁用推送失败',
             error: error.message || String(error),
+            registered: false,
+            offlineCapable: false,
         });
         throw error;
     }
 }
 
 export async function initPushSubscription(): Promise<void> {
+    if (isCapacitorAndroid()) {
+        await registerNativePush();
+        syncNativeDebugInfo();
+        return;
+    }
+
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
         setPushDebugInfo({
             status: '浏览器不支持 Web Push',
             provider: '不支持',
+            channel: 'unavailable',
+            permission: getWebNotificationPermissionLabel(),
+            registered: false,
+            tokenPreview: '',
+            deviceIdPreview: '',
             offlineCapable: false,
             needsResubscribe: false,
         });
         console.log('[Push] Not supported in this browser');
-        return;
-    }
-
-    if (
-        typeof (window as any)?.Capacitor?.isNativePlatform === 'function'
-        && (window as any).Capacitor.isNativePlatform()
-    ) {
-        setPushDebugInfo({
-            status: '原生环境，跳过 Web Push',
-            provider: '原生',
-            offlineCapable: false,
-            needsResubscribe: false,
-        });
         return;
     }
 
@@ -168,6 +226,9 @@ export async function initPushSubscription(): Promise<void> {
         setPushDebugInfo({
             status: '未配置后端地址',
             provider: '未知',
+            channel: 'web-push',
+            permission: getWebNotificationPermissionLabel(),
+            registered: false,
             offlineCapable: false,
         });
         console.log('[Push] No backend URL configured, skipping');
@@ -177,6 +238,12 @@ export async function initPushSubscription(): Promise<void> {
     setPushDebugInfo({
         status: '正在注册...',
         error: '',
+        provider: 'Web Push',
+        channel: 'web-push',
+        permission: getWebNotificationPermissionLabel(),
+        registered: false,
+        tokenPreview: '',
+        deviceIdPreview: '',
         needsResubscribe: false,
     });
 
@@ -195,6 +262,9 @@ export async function initPushSubscription(): Promise<void> {
                 status: '已订阅，正在检查离线推送通道...',
                 endpoint: `${subscription.endpoint.slice(0, 60)}...`,
                 provider,
+                channel: 'web-push',
+                permission: getWebNotificationPermissionLabel(),
+                registered: false,
                 offlineCapable: !endpointIssue,
             });
 
@@ -207,6 +277,7 @@ export async function initPushSubscription(): Promise<void> {
                     status: '当前浏览器返回的推送端点不可投递',
                     error: '建议使用 Chrome Android、Safari iOS 主屏幕 PWA，或重新安装 PWA 后再初始化。',
                     provider,
+                    registered: false,
                     offlineCapable: false,
                     needsResubscribe: true,
                 });
@@ -223,6 +294,7 @@ export async function initPushSubscription(): Promise<void> {
                     status: '推送密钥已更新，正在重新订阅...',
                     endpoint: '',
                     provider: '未知',
+                    registered: false,
                     offlineCapable: false,
                     needsResubscribe: true,
                 });
@@ -231,6 +303,9 @@ export async function initPushSubscription(): Promise<void> {
                     status: '已订阅，正在同步到后端...',
                     endpoint: `${subscription.endpoint.slice(0, 60)}...`,
                     provider,
+                    channel: 'web-push',
+                    permission: getWebNotificationPermissionLabel(),
+                    registered: false,
                     offlineCapable: true,
                     needsResubscribe: false,
                 });
@@ -238,19 +313,26 @@ export async function initPushSubscription(): Promise<void> {
 
                 const syncResult = await syncSubscriptionToBackend(backendUrl, subscription);
                 if (syncResult === 'disabled') {
-                    setPushDebugInfo({ status: '当前环境未启用推送订阅接口' });
+                    setPushDebugInfo({
+                        status: '当前环境未启用推送订阅接口',
+                        registered: false,
+                    });
                     return;
                 }
                 if (syncResult === 'invalid') {
                     setPushDebugInfo({
                         status: '后端拒绝了当前推送端点',
+                        registered: false,
                         offlineCapable: false,
                         needsResubscribe: true,
                     });
                     return;
                 }
 
-                setPushDebugInfo({ status: '已订阅，离线推送就绪' });
+                setPushDebugInfo({
+                    status: '已订阅，离线推送就绪',
+                    registered: true,
+                });
                 return;
             }
         }
@@ -259,6 +341,9 @@ export async function initPushSubscription(): Promise<void> {
             setPushDebugInfo({
                 status: '当前浏览器不支持通知权限',
                 provider: '不支持',
+                channel: 'unavailable',
+                permission: getWebNotificationPermissionLabel(),
+                registered: false,
                 offlineCapable: false,
             });
             return;
@@ -271,6 +356,8 @@ export async function initPushSubscription(): Promise<void> {
                 setPushDebugInfo({
                     status: '通知权限被拒绝',
                     error: '请在浏览器设置中开启通知权限。',
+                    permission: getWebNotificationPermissionLabel(),
+                    registered: false,
                     offlineCapable: false,
                 });
                 console.log('[Push] Notification permission denied');
@@ -280,6 +367,8 @@ export async function initPushSubscription(): Promise<void> {
             setPushDebugInfo({
                 status: '通知权限已被禁用',
                 error: '通知权限已被禁用，请在浏览器站点设置里开启。',
+                permission: getWebNotificationPermissionLabel(),
+                registered: false,
                 offlineCapable: false,
             });
             console.log('[Push] Notification permission previously denied');
@@ -290,6 +379,7 @@ export async function initPushSubscription(): Promise<void> {
             setPushDebugInfo({
                 status: 'VAPID 公钥为空',
                 error: 'VAPID key empty from server',
+                registered: false,
                 offlineCapable: false,
             });
             console.warn('[Push] VAPID key empty');
@@ -311,6 +401,7 @@ export async function initPushSubscription(): Promise<void> {
                     setPushDebugInfo({
                         status: '推送订阅创建失败',
                         error: `创建推送订阅失败: ${error.message}`,
+                        registered: false,
                         offlineCapable: false,
                         needsResubscribe: true,
                     });
@@ -321,7 +412,7 @@ export async function initPushSubscription(): Promise<void> {
         }
 
         if (!subscription) {
-            setPushDebugInfo({ status: '推送订阅为空', offlineCapable: false });
+            setPushDebugInfo({ status: '推送订阅为空', registered: false, offlineCapable: false });
             return;
         }
 
@@ -330,6 +421,9 @@ export async function initPushSubscription(): Promise<void> {
         setPushDebugInfo({
             endpoint: `${subscription.endpoint.slice(0, 60)}...`,
             provider,
+            channel: 'web-push',
+            permission: getWebNotificationPermissionLabel(),
+            registered: false,
             offlineCapable: !endpointIssue,
         });
 
@@ -338,6 +432,7 @@ export async function initPushSubscription(): Promise<void> {
             setPushDebugInfo({
                 status: '当前浏览器返回的推送端点不可投递',
                 error: '浏览器返回了不可投递的 Web Push endpoint，未上传到后端。',
+                registered: false,
                 offlineCapable: false,
                 needsResubscribe: true,
             });
@@ -349,12 +444,16 @@ export async function initPushSubscription(): Promise<void> {
 
         const syncResult = await syncSubscriptionToBackend(backendUrl, subscription);
         if (syncResult === 'disabled') {
-            setPushDebugInfo({ status: '当前环境未启用推送订阅接口' });
+            setPushDebugInfo({
+                status: '当前环境未启用推送订阅接口',
+                registered: false,
+            });
             return;
         }
         if (syncResult === 'invalid') {
             setPushDebugInfo({
                 status: '后端拒绝了当前推送端点',
+                registered: false,
                 offlineCapable: false,
                 needsResubscribe: true,
             });
@@ -363,6 +462,7 @@ export async function initPushSubscription(): Promise<void> {
 
         setPushDebugInfo({
             status: '推送通知已就绪',
+            registered: true,
             offlineCapable: true,
             needsResubscribe: false,
         });
@@ -380,12 +480,21 @@ export async function initPushSubscription(): Promise<void> {
         setPushDebugInfo({
             status: '初始化失败',
             error: error.message || String(error),
+            registered: false,
+            offlineCapable: false,
         });
         console.warn('[Push] Initialization failed:', error.message);
     }
 }
 
 export async function forceResubscribe(): Promise<void> {
+    if (isCapacitorAndroid()) {
+        await unregisterNativePush();
+        await registerNativePush({ sendTest: true });
+        syncNativeDebugInfo();
+        return;
+    }
+
     try {
         const registration = await navigator.serviceWorker.getRegistration('/push-sw.js');
         if (registration) {
@@ -403,6 +512,34 @@ export async function forceResubscribe(): Promise<void> {
     }
 
     await initPushSubscription();
+}
+
+function syncNativeDebugInfo(): void {
+    const nativeInfo = getNativePushDebugInfo();
+    setPushDebugInfo({
+        status: nativeInfo.status,
+        endpoint: nativeInfo.tokenPreview,
+        error: nativeInfo.error,
+        provider: nativeInfo.provider,
+        offlineCapable: nativeInfo.offlineCapable,
+        needsResubscribe: nativeInfo.needsResubscribe,
+        channel: nativeInfo.channel,
+        permission: nativeInfo.permission,
+        registered: nativeInfo.registered,
+        tokenPreview: nativeInfo.tokenPreview,
+        deviceIdPreview: nativeInfo.deviceIdPreview,
+        appId: nativeInfo.appId,
+    });
+}
+
+function getWebNotificationPermissionLabel(): string {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+        return '当前浏览器不支持';
+    }
+
+    if (Notification.permission === 'granted') return '已允许';
+    if (Notification.permission === 'denied') return '已拒绝';
+    return '未决定';
 }
 
 async function fetchVapidPublicKey(backendUrl: string): Promise<string> {

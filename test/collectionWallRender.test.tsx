@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     autoArrangeWallItems,
@@ -7,14 +7,22 @@ import {
     buildInitialWallItems,
     buildWallAssetEntry,
     CharRemarkPopup,
+    CharInviteOrb,
     CollectionWallCardFrame,
     CollectionWallHtmlFrame,
+    COLLECTION_WALL_CHAR_INVITE_AVATAR_KIND,
     createCollectionWallPersistQueue,
     createCollectionWallDecorItemsFromPreset,
+    getCharInviteAvatarAsset,
+    getCharInviteOrbStorageKey,
+    getMoveableStartTranslate,
     getWallBackgroundEffects,
     getPersistableWallItems,
     isCollectionWallDecorPresetItem,
+    isCharInviteAvatarAsset,
     materializePlacedLooseWallItems,
+    clientPointToWallCanvasPoint,
+    normalizeWallItemFrameForCanvas,
     pickCharRemarkTemplate,
     resolveCollectionWallPresetBackground,
     wallAssetUsesTransparentCanvas,
@@ -129,10 +137,12 @@ class ImmediateIntersectionObserver {
 describe('collection wall real card rendering', () => {
     beforeEach(() => {
         vi.stubGlobal('IntersectionObserver', ImmediateIntersectionObserver);
+        localStorage.clear();
     });
 
     afterEach(() => {
         cleanup();
+        vi.useRealTimers();
         vi.unstubAllGlobals();
     });
 
@@ -140,7 +150,9 @@ describe('collection wall real card rendering', () => {
         render(<CollectionWallCardFrame book={makeBook()} width={330} height={360} forceMounted />);
 
         const frame = screen.getByTitle('拾光墙真渲染：票根') as HTMLIFrameElement;
-        expect(frame).toHaveAttribute('srcdoc', HTML);
+        expect(frame.getAttribute('srcdoc')).toContain('data-freeform-compat="summary"');
+        expect(frame.getAttribute('srcdoc')).toContain('function getFreeformSummaryCompat');
+        expect(frame.getAttribute('srcdoc')).toContain('data-card="real"');
         expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
     });
 
@@ -156,7 +168,9 @@ describe('collection wall real card rendering', () => {
         render(<CollectionWallHtmlFrame item={item} />);
 
         const frame = screen.getByTitle('拾光墙 HTML 卡：自定义卡') as HTMLIFrameElement;
-        expect(frame).toHaveAttribute('srcdoc', HTML);
+        expect(frame.getAttribute('srcdoc')).toContain('data-freeform-compat="summary"');
+        expect(frame.getAttribute('srcdoc')).toContain('function getFreeformSummaryCompat');
+        expect(frame.getAttribute('srcdoc')).toContain('data-card="real"');
         expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
     });
 
@@ -234,6 +248,38 @@ describe('collection wall real card rendering', () => {
         expect(getWallBackgroundEffects({ type: 'color', value: '#17120e', fit: 'cover', dim: -1 }).dim).toBe(0);
     });
 
+    it('converts scaled client points into wall canvas coordinates', () => {
+        const point = clientPointToWallCanvasPoint(160, 260, { left: 10, top: 20 }, 0.5);
+
+        expect(point).toEqual({ x: 300, y: 480 });
+    });
+
+    it('normalizes moveable drag frames as absolute canvas coordinates', () => {
+        const item = { ...makeWallItem(1), x: 220, y: 160, w: 120, h: 90 };
+        const start = getMoveableStartTranslate(item);
+        const saved = normalizeWallItemFrameForCanvas(item, {
+            x: start[0] + 42,
+            y: start[1] + 35,
+        }, { canvasHeight: 700 });
+
+        expect(start).toEqual([220, 160]);
+        expect(saved).toMatchObject({ x: 262, y: 195 });
+        expect(saved.x).not.toBe(42);
+        expect(saved.y).not.toBe(35);
+    });
+
+    it('normalizes resized moveable frames for save roundtrip', () => {
+        const item = { ...makeWallItem(1), x: 690, y: 640, w: 100, h: 80 };
+        const saved = normalizeWallItemFrameForCanvas(item, {
+            x: 720,
+            y: 690,
+            w: 120,
+            h: 90,
+        }, { canvasHeight: 720 });
+
+        expect(saved).toMatchObject({ w: 120, h: 90, x: 630, y: 630 });
+    });
+
     it('builds the default wall-head avatar bond widget', () => {
         const item = buildDefaultBondWidgetItem(makeWall());
 
@@ -247,6 +293,95 @@ describe('collection wall real card rendering', () => {
     it('adds the default avatar bond widget unless the wall hid it', () => {
         expect(buildInitialWallItems(makeWall(), []).some(item => item.type === 'bond')).toBe(true);
         expect(buildInitialWallItems({ ...makeWall(), defaultBondWidgetHidden: true }, []).some(item => item.type === 'bond')).toBe(false);
+    });
+
+    it('selects hidden char invite avatars without treating ordinary assets as invite avatars', () => {
+        const normal = makeAsset();
+        const inviteAvatar: CollectionWallAsset = {
+            ...makeAsset(),
+            id: 'asset-invite-avatar',
+            createdAt: 20,
+            meta: {
+                assetKind: COLLECTION_WALL_CHAR_INVITE_AVATAR_KIND,
+                charId: 'char-a',
+                name: 'Sully 的Q版小人',
+                hiddenFromLibrary: true,
+            },
+        };
+
+        expect(isCharInviteAvatarAsset(normal, 'char-a')).toBe(false);
+        expect(isCharInviteAvatarAsset(inviteAvatar, 'char-a')).toBe(true);
+        expect(getCharInviteAvatarAsset([normal, inviteAvatar], 'char-a')?.id).toBe('asset-invite-avatar');
+        expect(getCharInviteAvatarAsset([inviteAvatar], 'char-b')).toBeNull();
+    });
+
+    it('persists the draggable char invite orb position', () => {
+        render(
+            <CharInviteOrb
+                wall={makeWall()}
+                entries={[]}
+                charName="Sully"
+                inviting={false}
+                uploading={false}
+                pinning={false}
+                onRequestRemark={vi.fn()}
+                onUploadAvatar={vi.fn()}
+                onPinRemark={vi.fn()}
+            />,
+        );
+
+        const orb = screen.getByLabelText('Sully 的拾光墙邀请球');
+        fireEvent.pointerDown(orb, { button: 0, pointerId: 7, clientX: 900, clientY: 640 });
+        fireEvent.pointerMove(orb, { pointerId: 7, clientX: 820, clientY: 590 });
+        fireEvent.pointerUp(orb, { pointerId: 7, clientX: 820, clientY: 590 });
+
+        const stored = JSON.parse(localStorage.getItem(getCharInviteOrbStorageKey('char-a')) || '{}');
+        expect(stored.x).toBeGreaterThanOrEqual(14);
+        expect(stored.y).toBeGreaterThanOrEqual(14);
+        expect(screen.queryByRole('button', { name: '邀请他来' })).toBeNull();
+    });
+
+    it('turns invite into poke mode and reveals the reply with a typewriter state', async () => {
+        vi.useFakeTimers();
+        const onRequestRemark = vi.fn(async () => ({
+            wall: makeWall({ charLastVisitAt: 22, charRemarks: [{ text: '这张票根别挪，我喜欢它在这里。', ts: 22 }] }),
+            entries: [],
+            charName: 'Sully',
+            text: '这张票根别挪，我喜欢它在这里。',
+        }));
+        const { container } = render(
+            <CharInviteOrb
+                wall={makeWall()}
+                entries={[]}
+                charName="Sully"
+                inviting={false}
+                uploading={false}
+                pinning={false}
+                onRequestRemark={onRequestRemark}
+                onUploadAvatar={vi.fn()}
+                onPinRemark={vi.fn()}
+            />,
+        );
+
+        const orb = screen.getByLabelText('Sully 的拾光墙邀请球');
+        fireEvent.pointerDown(orb, { button: 0, pointerId: 1, clientX: 920, clientY: 650 });
+        fireEvent.pointerUp(orb, { pointerId: 1, clientX: 920, clientY: 650 });
+        expect(screen.getByRole('button', { name: /邀请他来/ })).toBeInTheDocument();
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: /邀请他来/ }));
+            await Promise.resolve();
+        });
+
+        expect(onRequestRemark).toHaveBeenCalledWith('invite');
+        expect(screen.getByRole('button', { name: /戳一戳，听听他说/ })).toBeInTheDocument();
+        expect(container.querySelector('.ar-char-orb-speech.typing')).not.toBeNull();
+
+        act(() => {
+            vi.runAllTimers();
+        });
+
+        expect(screen.getByText(/这张票根别挪/)).toBeInTheDocument();
     });
 
     it('routes char remarks to popup templates by character count', () => {

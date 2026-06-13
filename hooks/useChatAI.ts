@@ -56,7 +56,8 @@ import { getChatBackgroundNotificationsEnabled } from '../utils/chatBackgroundNo
 import { saveChatContextMirror } from '../utils/chatContextMirror';
 import { formatNotificationBody } from '../utils/notificationPreview';
 import { consumeCollectionWallPendingContext } from '../utils/collectionWallContext';
-import type { StatusCardData } from '../types/statusCard';
+import { pickMixedStatusMode } from '../utils/statusMode';
+import type { MixedStatusMode, StatusBarMode, StatusCardData } from '../types/statusCard';
 
 interface UseChatAIProps {
     char: CharacterProfile | undefined;
@@ -395,7 +396,7 @@ export const useChatAI = ({
     const isTypingRef = useRef(false);
 
     // MindSnapshot retry context
-    const lastMindSnapshotCtx = useRef<{ char: any; aiContent: string; msgs: Message[]; config: any; goalListStr?: string; contextOptions?: SecondaryFullContextOptions } | null>(null);
+    const lastMindSnapshotCtx = useRef<{ char: any; aiContent: string; msgs: Message[]; config: any; goalListStr?: string; contextOptions?: SecondaryFullContextOptions; statusMode?: StatusBarMode } | null>(null);
 
     // 跨消息持久化的 noteId→xsecToken 缓存，避免 lastXhsNotes 局部变量每次 triggerAI 都重置
     const xsecTokenCacheRef = useRef<Map<string, string>>(new Map());
@@ -1103,13 +1104,24 @@ export const useChatAI = ({
                 model: apiConfig.model,
             };
 
+            const configuredStatusMode = (char.statusBarMode || 'classic') as StatusBarMode;
+            let postReplyStatusMode: StatusBarMode = configuredStatusMode;
+            const mixedStatusMode: MixedStatusMode | null = configuredStatusMode === 'mixed'
+                ? pickMixedStatusMode()
+                : null;
+            if (mixedStatusMode) {
+                postReplyStatusMode = mixedStatusMode;
+            }
             let firstSavedMsgId: number | null = null;
+            let statusAnchorMsgId: number | null = null;
             const rememberFirstSavedMessage = (savedId: number) => {
                 if (firstSavedMsgId === null) firstSavedMsgId = savedId;
+                statusAnchorMsgId = savedId;
             };
             const attachStatusCardToFirstMessage = async (cardData: StatusCardData, source: string) => {
-                if (firstSavedMsgId === null) return;
-                await DB.updateMessageMetadata(firstSavedMsgId, {
+                const targetMsgId = statusAnchorMsgId ?? firstSavedMsgId;
+                if (targetMsgId === null) return;
+                await DB.updateMessageMetadata(targetMsgId, {
                     statusCardData: cardData,
                     statusCardSource: source,
                     hasStatusCard: true,
@@ -1535,6 +1547,18 @@ export const useChatAI = ({
                 await refreshRecentMessages();
             }
 
+            if (mixedStatusMode && statusAnchorMsgId !== null) {
+                await DB.updateMessageMetadata(statusAnchorMsgId, {
+                    mixedStatusMode,
+                    mixedStatusPickedAt: Date.now(),
+                });
+                await refreshRecentMessages();
+            } else if (configuredStatusMode === 'mixed') {
+                console.warn('[SurpriseMode] picked a status mode but no assistant message was saved to bind it', {
+                    mixedStatusMode,
+                });
+            }
+
             if (photoHint && autoPhoto && onPhotoHint) {
                 const payload: PhotoHintTrigger = {
                     char: { ...char },
@@ -1565,10 +1589,10 @@ export const useChatAI = ({
             const mindSecondaryConfig = selectSecondaryApiConfig();
             if (mindSecondaryConfig?.apiKey && aiContent) {
                 const charSnapshot = { ...char };
-                lastMindSnapshotCtx.current = { char: charSnapshot, aiContent, msgs: promptContextMsgs, config: mindSecondaryConfig, goalListStr, contextOptions: secondaryFullContextOptions };
-                const statusMode = char.statusBarMode || 'classic';
+                const statusMode = postReplyStatusMode;
+                lastMindSnapshotCtx.current = { char: charSnapshot, aiContent, msgs: promptContextMsgs, config: mindSecondaryConfig, goalListStr, contextOptions: secondaryFullContextOptions, statusMode };
                 // Skip card generation for modes that do not need a background status task.
-                if (statusMode === 'off' || statusMode === 'story_phone' || statusMode === 'afterglow') { /* noop — bionic engine still runs */ }
+                if (statusMode === 'off' || statusMode === 'story_phone' || statusMode === 'afterglow' || statusMode === 'mixed') { /* noop — bionic engine still runs */ }
                 else {
                 // Delay 2s to reduce resource contention on mobile
                 setTimeout(() => {
@@ -1593,10 +1617,10 @@ export const useChatAI = ({
                             secondaryFullContextOptions,
                         )
                             .then(cardData => {
-                                if (cardData && char && onMoodUpdate) {
+                                if (cardData && char) {
                                     void attachStatusCardToFirstMessage(cardData, 'freeform')
                                         .catch(e => console.error('✨ [FreeformCard] Attach metadata:', e));
-                                    onMoodUpdate(char.id, { ...(charSnapshot.moodState || {}), innerVoice: cardData.body }, cardData);
+                                    onMoodUpdate?.(char.id, { ...(charSnapshot.moodState || {}), innerVoice: cardData.body }, cardData);
                                 } else {
                                     console.warn('✨ [FreeformCard] Generation returned null');
                                 }
@@ -1614,10 +1638,10 @@ export const useChatAI = ({
                                 secondaryFullContextOptions,
                             )
                                 .then(cardData => {
-                                    if (cardData && char && onMoodUpdate) {
+                                    if (cardData && char) {
                                         void attachStatusCardToFirstMessage(cardData, 'custom')
                                             .catch(e => console.error('🎨 [CustomCard] Attach metadata:', e));
-                                        onMoodUpdate(char.id, { ...(charSnapshot.moodState || {}), innerVoice: cardData.body }, cardData);
+                                        onMoodUpdate?.(char.id, { ...(charSnapshot.moodState || {}), innerVoice: cardData.body }, cardData);
                                     } else {
                                         console.warn('🎨 [CustomCard] Generation returned null');
                                     }
@@ -1634,10 +1658,10 @@ export const useChatAI = ({
                             secondaryFullContextOptions,
                         )
                             .then(cardData => {
-                                if (cardData && char && onMoodUpdate) {
+                                if (cardData && char) {
                                     void attachStatusCardToFirstMessage(cardData, 'creative')
                                         .catch(e => console.error('🎴 [CreativeCard] Attach metadata:', e));
-                                    onMoodUpdate(char.id, { ...(charSnapshot.moodState || {}), innerVoice: cardData.body }, cardData);
+                                    onMoodUpdate?.(char.id, { ...(charSnapshot.moodState || {}), innerVoice: cardData.body }, cardData);
                                 } else {
                                     console.warn('🎴 [CreativeCard] Generation returned null');
                                 }
@@ -1723,10 +1747,14 @@ export const useChatAI = ({
     const retryMindSnapshot = useCallback(() => {
         const ctx = lastMindSnapshotCtx.current;
         if (!ctx) { console.warn('💭 [InnerVoice] No context to retry'); return; }
-        const statusMode = ctx.char.statusBarMode || 'classic';
+        const statusMode = ctx.statusMode || ctx.char.statusBarMode || 'classic';
         console.log(`💭 [InnerVoice] Manual retry triggered (mode: ${statusMode})`);
         if (statusMode === 'off') {
             addToast('心声已关闭，请先选择一个模式', 'info');
+            return;
+        }
+        if (statusMode === 'mixed') {
+            addToast('本轮惊喜模式还没有抽中可重试内容，请等下一轮回复', 'info');
             return;
         }
         if (statusMode === 'story_phone') {

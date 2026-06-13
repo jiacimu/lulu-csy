@@ -11,13 +11,12 @@ import GlobalInputEffect from './os/GlobalInputEffect';
 import Launcher from '../apps/Launcher';
 import { AppID } from '../types';
 import { App as CapApp } from '@capacitor/app';
-import { StatusBar as CapStatusBar,Style as StatusBarStyle,Animation as StatusBarAnimation } from '@capacitor/status-bar';
+import { StatusBar as CapStatusBar,Style as StatusBarStyle } from '@capacitor/status-bar';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
 import { requestSystemFullscreen } from '../utils/systemFullscreen';
-import { IOS_STANDALONE_CHANGE_EVENT,isIOSStandaloneBrowserWebApp,isIOSStandaloneWebApp } from '../utils/iosStandalone';
+import { isIOSStandaloneWebApp } from '../utils/iosStandalone';
 import { usePerformanceMode } from '../hooks/usePerformanceMode';
-import { prepareViewportForUnlock,repairViewportAfterUnlockSettle } from '../utils/viewportRepair';
 
 // --- Lazy-loaded Apps (only downloaded when user opens them) ---
 const Settings = React.lazy(() => import('../apps/Settings'));
@@ -317,7 +316,7 @@ const LockScreen: React.FC<LockScreenProps> = ({
   const unreadChar = unreadCharId ? characters.find(c => c.id === unreadCharId) : null;
   const [isUnlocking, setIsUnlocking] = useState(false);
 
-  const handleUnlock = async () => {
+  const handleUnlock = () => {
     if (isUnlocking) return;
     setIsUnlocking(true);
 
@@ -326,9 +325,7 @@ const LockScreen: React.FC<LockScreenProps> = ({
     }
     haptic.light();
     requestSystemFullscreen();
-    await prepareViewportForUnlock();
     onUnlock();
-    repairViewportAfterUnlockSettle().catch(() => { });
   };
 
   return (
@@ -456,38 +453,13 @@ const ActiveAppContainer = memo(function ActiveAppContainer({
 
 const PhoneShell: React.FC = () => {
   const { theme, isLocked, unlock, activeApp, closeApp, openApp, isDataLoaded, toasts, unreadMessages, characters, handleBack } = useOS();
-  const [useIOSStandaloneLayout, setUseIOSStandaloneLayout] = useState(() => (
-    typeof window !== 'undefined' && isIOSStandaloneWebApp()
-  ));
-  const [hasNativeIOSBrowserStatusBar, setHasNativeIOSBrowserStatusBar] = useState(() => (
-    typeof window !== 'undefined' && isIOSStandaloneBrowserWebApp()
-  ));
   const { isLite } = usePerformanceMode();
+  const useIOSStandaloneLayout = typeof window !== 'undefined' && isIOSStandaloneWebApp();
   const [showIdleOverlays, setShowIdleOverlays] = useState(false);
   const isNestedPhoneApp = activeApp === AppID.CheckPhone;
   const showSystemChrome = !isNestedPhoneApp;
-  const showSimulatedStatusBar = showSystemChrome && !theme.hideStatusBar && !hasNativeIOSBrowserStatusBar;
+  const showSimulatedStatusBar = showSystemChrome && !theme.hideStatusBar;
   const showAmbientOverlays = showSystemChrome && showIdleOverlays;
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const syncIOSStandaloneFlags = () => {
-      setUseIOSStandaloneLayout(isIOSStandaloneWebApp());
-      setHasNativeIOSBrowserStatusBar(isIOSStandaloneBrowserWebApp());
-    };
-
-    syncIOSStandaloneFlags();
-    window.addEventListener(IOS_STANDALONE_CHANGE_EVENT, syncIOSStandaloneFlags);
-    window.addEventListener('pageshow', syncIOSStandaloneFlags);
-    window.addEventListener('resize', syncIOSStandaloneFlags);
-
-    return () => {
-      window.removeEventListener(IOS_STANDALONE_CHANGE_EVENT, syncIOSStandaloneFlags);
-      window.removeEventListener('pageshow', syncIOSStandaloneFlags);
-      window.removeEventListener('resize', syncIOSStandaloneFlags);
-    };
-  }, []);
 
   // Use a ref so that the popstate / backButton handlers always see the latest values
   // without needing to be re-registered every time state changes.
@@ -580,8 +552,6 @@ const PhoneShell: React.FC = () => {
             // Android 15+ can ignore status bar color APIs when edge-to-edge is enforced.
           }
           await CapStatusBar.hide();
-        } else if (platform === 'ios') {
-          await CapStatusBar.hide({ animation: StatusBarAnimation.None });
         } else {
           await CapStatusBar.hide();
         }
@@ -702,7 +672,8 @@ const PhoneShell: React.FC = () => {
         ? `url(${wallpaper})`
         : wallpaper;
 
-    [document.documentElement, document.body].forEach(element => {
+    [document.documentElement, document.body, document.getElementById('root')].forEach(element => {
+      if (!element) return;
       element.style.background = backgroundValue;
       element.style.backgroundColor = 'var(--app-shell-background, #0f1115)';
       element.style.backgroundPosition = 'center';
@@ -743,6 +714,26 @@ const PhoneShell: React.FC = () => {
   const activeAppTopInset = activeApp === AppID.Launcher
     ? 0
     : `max(${safeTop}, 2.75rem)`;
+  const shellHandlesSafeArea = ![AppID.Launcher, AppID.Chat, AppID.GroupChat].includes(activeApp);
+  const appViewportStyle: React.CSSProperties = useIOSStandaloneLayout
+    ? shellHandlesSafeArea
+      ? {
+          bottom: 0,
+          paddingTop: 'var(--safe-top, env(safe-area-inset-top, 0px))',
+          paddingBottom: 'var(--safe-bottom, env(safe-area-inset-bottom, 0px))',
+          boxSizing: 'border-box',
+        }
+      : {
+          bottom: 'var(--standalone-safe-area-bottom, 0px)',
+          paddingTop: 0,
+          paddingBottom: 0,
+          boxSizing: 'border-box',
+        }
+    : {
+        paddingTop: 0,
+        paddingBottom: 0,
+        boxSizing: 'border-box',
+      };
 
   if (isLocked) {
     return (
@@ -781,13 +772,9 @@ const PhoneShell: React.FC = () => {
 
       {/* Full-bleed app viewport. The app root receives the top inset so its own background reaches behind the status area. */}
       <div
-        className="absolute inset-0 z-10 w-full h-full overflow-hidden bg-transparent overscroll-none flex flex-col"
+        className="absolute top-0 left-0 right-0 bottom-0 z-10 w-full overflow-hidden bg-transparent overscroll-none flex flex-col"
         data-testid="phone-shell-app-viewport"
-        style={{
-          paddingTop: 0,
-          paddingBottom: 0,
-          boxSizing: 'border-box',
-        }}
+        style={appViewportStyle}
       >
         <ActiveAppContainer
           activeApp={activeApp}
