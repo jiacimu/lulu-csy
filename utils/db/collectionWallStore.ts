@@ -50,6 +50,45 @@ const sortItems = (items: CollectionWallItem[]): CollectionWallItem[] =>
 const sortAssets = (assets: CollectionWallAsset[]): CollectionWallAsset[] =>
     assets.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
+const normalizeCollectionWallRecord = (input: CollectionWallInput, now = Date.now()): CollectionWall => ({
+    ...input,
+    id: input.id || createId('wall'),
+    name: normalizeWallName(input.name),
+    background: input.background || { type: 'color', value: '#17120e', fit: 'cover', dim: 0.18 },
+    layoutMode: input.layoutMode || 'free',
+    allowCharDecorate: input.allowCharDecorate !== false,
+    changeCountSinceVisit: Number.isFinite(input.changeCountSinceVisit) ? input.changeCountSinceVisit : 0,
+    charRemarks: Array.isArray(input.charRemarks)
+        ? input.charRemarks
+            .filter(remark => remark && typeof remark.text === 'string' && remark.text.trim())
+            .map(remark => ({ text: remark.text.trim().slice(0, 300), ts: Number.isFinite(remark.ts) ? remark.ts : now }))
+            .slice(-30)
+        : [],
+    hasUnseenCharItem: Boolean(input.hasUnseenCharItem),
+    sortOrder: Number.isFinite(input.sortOrder) ? input.sortOrder : 0,
+    isDefault: Boolean(input.isDefault),
+    createdAt: input.createdAt || now,
+    updatedAt: input.updatedAt || now,
+});
+
+const normalizeCollectionWallItemRecord = (
+    input: CollectionWallItemInput,
+    wallId = input.wallId,
+    now = Date.now(),
+): CollectionWallItem => ({
+    ...input,
+    id: input.id || createId('wallitem'),
+    wallId,
+    x: typeof input.x === 'number' ? input.x : null,
+    y: typeof input.y === 'number' ? input.y : null,
+    w: Number.isFinite(input.w) ? input.w : 375,
+    h: Number.isFinite(input.h) ? input.h : 360,
+    rotation: Number.isFinite(input.rotation) ? input.rotation : 0,
+    z: Number.isFinite(input.z) ? input.z : 0,
+    order: Number.isFinite(input.order) ? input.order : 0,
+    createdAt: input.createdAt || now,
+});
+
 const getStore = async (storeName: string, mode: IDBTransactionMode) => {
     const db = await openDB();
     if (!db.objectStoreNames.contains(storeName)) return null;
@@ -107,26 +146,7 @@ export const getCollectionWallById = async (id: string): Promise<CollectionWall 
 
 export const saveCollectionWall = async (input: CollectionWallInput): Promise<CollectionWall> => {
     const now = Date.now();
-    const record: CollectionWall = {
-        ...input,
-        id: input.id || createId('wall'),
-        name: normalizeWallName(input.name),
-        background: input.background || { type: 'color', value: '#17120e', fit: 'cover', dim: 0.18 },
-        layoutMode: input.layoutMode || 'free',
-        allowCharDecorate: input.allowCharDecorate !== false,
-        changeCountSinceVisit: Number.isFinite(input.changeCountSinceVisit) ? input.changeCountSinceVisit : 0,
-        charRemarks: Array.isArray(input.charRemarks)
-            ? input.charRemarks
-                .filter(remark => remark && typeof remark.text === 'string' && remark.text.trim())
-                .map(remark => ({ text: remark.text.trim().slice(0, 300), ts: Number.isFinite(remark.ts) ? remark.ts : now }))
-                .slice(-30)
-            : [],
-        hasUnseenCharItem: Boolean(input.hasUnseenCharItem),
-        sortOrder: Number.isFinite(input.sortOrder) ? input.sortOrder : 0,
-        isDefault: Boolean(input.isDefault),
-        createdAt: input.createdAt || now,
-        updatedAt: input.updatedAt || now,
-    };
+    const record = normalizeCollectionWallRecord(input, now);
 
     const opened = await getStore(STORE_COLLECTION_WALLS, 'readwrite');
     if (!opened) return record;
@@ -193,18 +213,7 @@ export const getCollectionWallItemsByBookId = async (bookId: string): Promise<Co
 
 export const saveCollectionWallItem = async (input: CollectionWallItemInput): Promise<CollectionWallItem> => {
     const now = Date.now();
-    const record: CollectionWallItem = {
-        ...input,
-        id: input.id || createId('wallitem'),
-        x: typeof input.x === 'number' ? input.x : null,
-        y: typeof input.y === 'number' ? input.y : null,
-        w: Number.isFinite(input.w) ? input.w : 375,
-        h: Number.isFinite(input.h) ? input.h : 360,
-        rotation: Number.isFinite(input.rotation) ? input.rotation : 0,
-        z: Number.isFinite(input.z) ? input.z : 0,
-        order: Number.isFinite(input.order) ? input.order : 0,
-        createdAt: input.createdAt || now,
-    };
+    const record = normalizeCollectionWallItemRecord(input, input.wallId, now);
 
     const opened = await getStore(STORE_COLLECTION_WALL_ITEMS, 'readwrite');
     if (!opened) return record;
@@ -212,6 +221,40 @@ export const saveCollectionWallItem = async (input: CollectionWallItemInput): Pr
         opened.store.put(record);
         opened.tx.oncomplete = () => resolve(record);
         opened.tx.onerror = () => reject(opened.tx.error);
+    });
+};
+
+export const replaceCollectionWallSnapshot = async (
+    wallInput: CollectionWallInput,
+    itemsInput: CollectionWallItemInput[],
+): Promise<{ wall: CollectionWall; items: CollectionWallItem[] }> => {
+    const now = Date.now();
+    const wall = normalizeCollectionWallRecord(wallInput, now);
+    const items = sortItems(itemsInput.map(item => normalizeCollectionWallItemRecord(item, wall.id, now)));
+    const db = await openDB();
+    if (!db.objectStoreNames.contains(STORE_COLLECTION_WALLS) || !db.objectStoreNames.contains(STORE_COLLECTION_WALL_ITEMS)) {
+        return { wall, items };
+    }
+
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_COLLECTION_WALLS, STORE_COLLECTION_WALL_ITEMS], 'readwrite');
+        const wallStore = tx.objectStore(STORE_COLLECTION_WALLS);
+        const itemStore = tx.objectStore(STORE_COLLECTION_WALL_ITEMS);
+        const existingRequest = itemStore.indexNames.contains('wallId')
+            ? itemStore.index('wallId').getAll(wall.id)
+            : itemStore.getAll();
+
+        existingRequest.onsuccess = () => {
+            const existingItems = ((existingRequest.result || []) as CollectionWallItem[])
+                .filter(item => item.wallId === wall.id);
+            existingItems.forEach(item => itemStore.delete(item.id));
+            wallStore.put(wall);
+            items.forEach(item => itemStore.put(item));
+        };
+        existingRequest.onerror = () => reject(existingRequest.error);
+        tx.oncomplete = () => resolve({ wall, items });
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
     });
 };
 

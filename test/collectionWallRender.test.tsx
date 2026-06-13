@@ -9,6 +9,7 @@ import {
     CharRemarkPopup,
     CollectionWallCardFrame,
     CollectionWallHtmlFrame,
+    createCollectionWallPersistQueue,
     createCollectionWallDecorItemsFromPreset,
     getWallBackgroundEffects,
     getPersistableWallItems,
@@ -93,6 +94,16 @@ function makeWall(): CollectionWall {
         createdAt: 1,
         updatedAt: 1,
     };
+}
+
+function makeDeferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+    return { promise, resolve, reject };
 }
 
 class ImmediateIntersectionObserver {
@@ -426,5 +437,71 @@ describe('collection wall real card rendering', () => {
         expect(saved[0].id.startsWith('loose-')).toBe(false);
         expect(saved[0].x).toBe(120);
         expect(saved[0].rotation).toBe(-8);
+    });
+
+    it('queues a forced final save after an in-flight autosave', async () => {
+        const oldWall = { ...makeWall(), name: '旧布局' };
+        const finalWall = { ...makeWall(), name: '完成布局' };
+        const oldItem = { ...makeWallItem(1), x: 10, y: 10 };
+        const finalItem = { ...makeWallItem(1), x: 220, y: 360, rotation: 11 };
+        const oldStarted = makeDeferred<void>();
+        const releaseOld = makeDeferred<void>();
+        const writes: string[] = [];
+        const queue = createCollectionWallPersistQueue(async (wall, items) => {
+            writes.push(`start:${wall.name}`);
+            if (wall.name === '旧布局') {
+                oldStarted.resolve();
+                await releaseOld.promise;
+            }
+            writes.push(`finish:${wall.name}`);
+            return { wall, items };
+        });
+
+        const oldToken = queue.nextToken();
+        const oldSave = queue.enqueue(oldWall, [oldItem], oldToken);
+        await oldStarted.promise;
+
+        const finalToken = queue.nextToken();
+        const finalSave = queue.enqueue(finalWall, [finalItem], finalToken, true);
+        releaseOld.resolve();
+
+        await oldSave;
+        const saved = await finalSave;
+
+        expect(saved.wall.name).toBe('完成布局');
+        expect(saved.items[0].x).toBe(220);
+        expect(saved.items[0].rotation).toBe(11);
+        expect(writes).toEqual(['start:旧布局', 'finish:旧布局', 'start:完成布局', 'finish:完成布局']);
+    });
+
+    it('queues cancel rollback after an in-flight autosave', async () => {
+        const autosaveWall = { ...makeWall(), name: '临时乱序' };
+        const snapshotWall = { ...makeWall(), name: '装修前' };
+        const autosaveItem = { ...makeWallItem(1), x: 420, y: 520, rotation: -17 };
+        const snapshotItem = { ...makeWallItem(1), x: 88, y: 96, rotation: 0 };
+        const autosaveStarted = makeDeferred<void>();
+        const releaseAutosave = makeDeferred<void>();
+        const queue = createCollectionWallPersistQueue(async (wall, items) => {
+            if (wall.name === '临时乱序') {
+                autosaveStarted.resolve();
+                await releaseAutosave.promise;
+            }
+            return { wall, items };
+        });
+
+        const autosaveToken = queue.nextToken();
+        const autosave = queue.enqueue(autosaveWall, [autosaveItem], autosaveToken);
+        await autosaveStarted.promise;
+
+        const rollbackToken = queue.nextToken();
+        const rollback = queue.enqueue(snapshotWall, [snapshotItem], rollbackToken, true);
+        releaseAutosave.resolve();
+
+        await autosave;
+        const saved = await rollback;
+
+        expect(saved.wall.name).toBe('装修前');
+        expect(saved.items[0].x).toBe(88);
+        expect(saved.items[0].rotation).toBe(0);
     });
 });

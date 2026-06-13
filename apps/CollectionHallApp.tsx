@@ -2552,6 +2552,43 @@ type WallDraftSnapshot = {
     items: CollectionWallItem[];
 };
 
+type PersistedWallDraftSnapshot = {
+    wall: CollectionWall;
+    items: CollectionWallItem[];
+};
+
+type CollectionWallPersistWriter = (
+    wall: CollectionWall,
+    items: CollectionWallItem[],
+) => Promise<PersistedWallDraftSnapshot>;
+
+export function createCollectionWallPersistQueue(writeSnapshot: CollectionWallPersistWriter) {
+    let latestToken = 0;
+    let chain: Promise<PersistedWallDraftSnapshot> | null = null;
+
+    return {
+        nextToken() {
+            latestToken += 1;
+            return latestToken;
+        },
+        isCurrent(token: number) {
+            return token === latestToken;
+        },
+        enqueue(wall: CollectionWall, items: CollectionWallItem[], token: number, force = false) {
+            const fallback = { wall, items };
+            const previous = chain || Promise.resolve(fallback);
+            const task = previous
+                .catch(() => fallback)
+                .then(async () => {
+                    if (!force && token !== latestToken) return fallback;
+                    return writeSnapshot(wall, items);
+                });
+            chain = task;
+            return task;
+        },
+    };
+}
+
 type WallScreenState = {
     wall: CollectionWall;
     entries: WallZoneEntry[];
@@ -2636,6 +2673,60 @@ export function buildInitialWallItems(wall: CollectionWall, entries: WallZoneEnt
     return relabelItems([...realItems, ...looseItems]);
 }
 
+type WallEntriesBuildResult = {
+    entries: WallZoneEntry[];
+    wallBookIds: Set<string>;
+};
+
+type CollectionHallLoadSnapshot = {
+    books: CollectionBook[];
+    walls: CollectionWall[];
+    wallItems: CollectionWallItem[];
+    wallAssets: CollectionWallAsset[];
+};
+
+const buildWallZoneEntriesFromItems = (
+    wall: CollectionWall,
+    wallItems: CollectionWallItem[],
+    books: CollectionBook[],
+    wallAssets: CollectionWallAsset[],
+): WallEntriesBuildResult => {
+    const bookById = new Map(books.map(book => [book.id, book]));
+    const assetById = new Map(wallAssets.map(asset => [asset.id, asset]));
+    const wallBookIds = new Set<string>();
+    const entries = wallItems
+        .filter(item => item.wallId === wall.id)
+        .sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0))
+        .reduce<WallZoneEntry[]>((acc, item) => {
+            if (item.type === 'html' || (item.type === 'card' && item.html && !item.bookId)) {
+                if (item.html) acc.push({ id: item.id, type: 'html', item });
+                return acc;
+            }
+            if (item.type === 'card' && item.bookId) {
+                const book = bookById.get(item.bookId);
+                if (book?.kind !== 'freeform') return acc;
+                wallBookIds.add(book.id);
+                acc.push({ id: item.id, type: 'book', item, book });
+                return acc;
+            }
+            if ((item.type === 'image' || item.type === 'sticker') && item.assetId) {
+                const entry = buildWallAssetEntry(item, assetById.get(item.assetId));
+                if (entry) acc.push(entry);
+                return acc;
+            }
+            if (item.type === 'bond') {
+                acc.push({ id: item.id, type: 'bond', item });
+                return acc;
+            }
+            if (item.type === 'text' && item.text?.content) {
+                acc.push({ id: item.id, type: 'text', item });
+                return acc;
+            }
+            return acc;
+        }, []);
+    return { entries, wallBookIds };
+};
+
 const useViewportSize = () => {
     const read = () => ({
         width: typeof window === 'undefined' ? WALL_CANVAS_WIDTH : window.innerWidth || WALL_CANVAS_WIDTH,
@@ -2661,8 +2752,8 @@ const FullScreenLightWall: React.FC<{
     onClose: () => void;
     onPickBook: (book: CollectionBook) => void;
     onPickImage: (entry: WallImageEntry, wallName: string) => void;
-    onSaved: () => Promise<void> | void;
-    onAssetsChanged: () => Promise<void> | void;
+    onSaved: () => Promise<unknown> | void;
+    onAssetsChanged: () => Promise<unknown> | void;
     say: (message: string) => void;
 }> = ({ wall, entries, libraryAssets, userName, userAvatar, charName, charAvatar, onClose, onPickBook, onPickImage, onSaved, onAssetsChanged, say }) => {
     const viewport = useViewportSize();
@@ -2673,6 +2764,8 @@ const FullScreenLightWall: React.FC<{
     const htmlFileInputRef = useRef<HTMLInputElement>(null);
     const decorPresetFileInputRef = useRef<HTMLInputElement>(null);
     const saveTimerRef = useRef<number | null>(null);
+    const persistWriterRef = useRef<CollectionWallPersistWriter>(async (nextWall, nextItems) => ({ wall: nextWall, items: nextItems }));
+    const persistQueueRef = useRef(createCollectionWallPersistQueue((nextWall, nextItems) => persistWriterRef.current(nextWall, nextItems)));
     const itemRefs = useRef(new Map<string, HTMLDivElement>());
     const longPressTimerRef = useRef<number | null>(null);
     const editStartSnapshotRef = useRef<WallDraftSnapshot | null>(null);
@@ -2692,6 +2785,7 @@ const FullScreenLightWall: React.FC<{
     const [uploadingAsset, setUploadingAsset] = useState(false);
     const [uploadingFont, setUploadingFont] = useState(false);
     const [importingPreset, setImportingPreset] = useState(false);
+    const [savingWallDraft, setSavingWallDraft] = useState(false);
     const [past, setPast] = useState<WallDraftSnapshot[]>([]);
     const [future, setFuture] = useState<WallDraftSnapshot[]>([]);
 
@@ -2748,6 +2842,7 @@ const FullScreenLightWall: React.FC<{
         setActionMenuOpen(false);
         setToolboxOpen(false);
         setImportingPreset(false);
+        setSavingWallDraft(false);
         setPast([]);
         setFuture([]);
         editStartSnapshotRef.current = null;
@@ -2759,12 +2854,16 @@ const FullScreenLightWall: React.FC<{
 
     useEffect(() => {
         if (!wall.hasUnseenCharItem || wall.id.startsWith('fallback-')) return;
-        void DB.saveCollectionWall({
-            ...wall,
-            layoutMode: 'free',
-            hasUnseenCharItem: false,
-            charLastVisitAt: Date.now(),
-        }).then(onSaved).catch(error => {
+        void (async () => {
+            const latestWall = await DB.getCollectionWallById(wall.id);
+            await DB.saveCollectionWall({
+                ...(latestWall || wall),
+                layoutMode: 'free',
+                hasUnseenCharItem: false,
+                charLastVisitAt: Date.now(),
+            });
+            await onSaved();
+        })().catch(error => {
             console.error('[CollectionHall] clear wall unseen failed:', error);
         });
     }, [onSaved, wall]);
@@ -2798,36 +2897,41 @@ const FullScreenLightWall: React.FC<{
         return null;
     }, [assetById, bookById, entryByItemId]);
 
-    const persistDraft = useCallback(async (nextWall: CollectionWall, nextItems: CollectionWallItem[]): Promise<CollectionWallItem[]> => {
-        const normalizedItems = normalizeWallDraftItemsForSave(nextItems);
-        if (!canPersist) return normalizedItems;
-        const realItems = getPersistableWallItems(normalizedItems);
-        const persistedNow = new Set(realItems.map(item => item.id));
-        const storedItems = await DB.getCollectionWallItemsByWallId(wall.id);
-        const deletedIds = storedItems
-            .map(item => item.id)
-            .filter(id => !persistedNow.has(id));
+    const buildPersistableWall = useCallback((nextWall: CollectionWall): CollectionWall => ({
+        ...nextWall,
+        layoutMode: 'free',
+        updatedAt: Date.now(),
+        background: {
+            ...nextWall.background,
+            dim: nextWall.background.type === 'asset' ? 0 : clamp(Number(nextWall.background.dim) || 0, 0, 0.6),
+        },
+    }), []);
 
-        await DB.saveCollectionWall({
-            ...nextWall,
-            layoutMode: 'free',
-            updatedAt: Date.now(),
-            background: {
-                ...nextWall.background,
-                dim: nextWall.background.type === 'asset' ? 0 : clamp(Number(nextWall.background.dim) || 0, 0, 0.6),
-            },
-        });
-        await Promise.all(deletedIds.map(id => DB.deleteCollectionWallItem(id)));
-        await Promise.all(realItems.map(item => DB.saveCollectionWallItem({ ...item, wallId: wall.id })));
-        return normalizedItems;
-    }, [canPersist, wall.id]);
+    const persistDraft = useCallback((
+        nextWall: CollectionWall,
+        nextItems: CollectionWallItem[],
+        token: number,
+        force = false,
+    ): Promise<PersistedWallDraftSnapshot> => {
+        const normalizedItems = normalizeWallDraftItemsForSave(nextItems);
+        const normalizedWall = buildPersistableWall(nextWall);
+        persistWriterRef.current = async (snapshotWall, snapshotItems) => {
+            if (!canPersist) return { wall: snapshotWall, items: snapshotItems };
+            const realItems = getPersistableWallItems(snapshotItems);
+            const result = await DB.replaceCollectionWallSnapshot(snapshotWall, realItems.map(item => ({ ...item, wallId: snapshotWall.id })));
+            return { wall: result.wall, items: snapshotItems };
+        };
+        return persistQueueRef.current.enqueue(normalizedWall, normalizedItems, token, force);
+    }, [buildPersistableWall, canPersist]);
 
     const schedulePersist = useCallback((nextWall: CollectionWall, nextItems: CollectionWallItem[]) => {
         if (!canPersist) return;
         if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
+        const token = persistQueueRef.current.nextToken();
         saveTimerRef.current = window.setTimeout(() => {
             saveTimerRef.current = null;
-            void persistDraft(nextWall, nextItems).catch(error => {
+            if (!persistQueueRef.current.isCurrent(token)) return;
+            void persistDraft(nextWall, nextItems, token).catch(error => {
                 console.error('[CollectionHall] autosave wall failed:', error);
                 say('自动保存失败，可以点完成重试');
             });
@@ -2860,21 +2964,27 @@ const FullScreenLightWall: React.FC<{
         setToolboxOpen(false);
     }, [canPersist, draftItems, draftWall, say]);
 
-    const flushPersist = useCallback(async () => {
+    const flushPersistSnapshot = useCallback(async (nextWall: CollectionWall, nextItems: CollectionWallItem[]) => {
         if (saveTimerRef.current != null) {
             window.clearTimeout(saveTimerRef.current);
             saveTimerRef.current = null;
         }
-        const savedItems = await persistDraft(draftWall, draftItems);
-        setDraftItems(savedItems);
-        return savedItems;
-    }, [draftItems, draftWall, persistDraft]);
+        const token = persistQueueRef.current.nextToken();
+        const saved = await persistDraft(nextWall, nextItems, token, true);
+        setDraftWall(saved.wall);
+        setDraftItems(saved.items);
+        return saved;
+    }, [persistDraft]);
+
+    const flushPersist = useCallback(async () => flushPersistSnapshot(draftWall, draftItems), [draftItems, draftWall, flushPersistSnapshot]);
 
     const finishEditing = useCallback(async () => {
+        if (savingWallDraft) return;
+        setSavingWallDraft(true);
         try {
-            const savedItems = await flushPersist();
-            addCollectionWallPendingContext(wall.charId, `用户最近在「${draftWall.name}」装修了拾光墙，墙上现在有 ${savedItems.length} 件内容。下次对话可自然提及，不要刻意。`);
-            editStartSnapshotRef.current = cloneWallSnapshot(draftWall, savedItems);
+            const saved = await flushPersist();
+            addCollectionWallPendingContext(wall.charId, `用户最近在「${saved.wall.name}」装修了拾光墙，墙上现在有 ${saved.items.length} 件内容。下次对话可自然提及，不要刻意。`);
+            editStartSnapshotRef.current = cloneWallSnapshot(saved.wall, saved.items);
             setPast([]);
             setFuture([]);
             setEditing(false);
@@ -2890,8 +3000,10 @@ const FullScreenLightWall: React.FC<{
         } catch (error) {
             console.error('[CollectionHall] finish wall edit failed:', error);
             say('保存失败，稍后再试');
+        } finally {
+            setSavingWallDraft(false);
         }
-    }, [draftItems, draftWall, flushPersist, onSaved, say, wall.charId]);
+    }, [flushPersist, onSaved, savingWallDraft, say, wall.charId]);
 
     const handleUploadLibraryAsset = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.currentTarget.files?.[0];
@@ -3030,13 +3142,9 @@ const FullScreenLightWall: React.FC<{
             saveTimerRef.current = null;
         }
         try {
-            const storedItems = await DB.getCollectionWallItemsByWallId(wall.id);
-            const snapshotIds = new Set(snapshot.items.filter(item => !item.id.startsWith('loose-')).map(item => item.id));
-            await DB.saveCollectionWall(snapshot.wall);
-            await Promise.all(storedItems.filter(item => !snapshotIds.has(item.id)).map(item => DB.deleteCollectionWallItem(item.id)));
-            await Promise.all(snapshot.items.filter(item => !item.id.startsWith('loose-')).map(item => DB.saveCollectionWallItem({ ...item, wallId: wall.id })));
-            setDraftWall(snapshot.wall);
-            setDraftItems(snapshot.items);
+            const restored = await flushPersistSnapshot(snapshot.wall, snapshot.items);
+            setDraftWall(restored.wall);
+            setDraftItems(restored.items);
             setPast([]);
             setFuture([]);
             setEditing(false);
@@ -3047,13 +3155,13 @@ const FullScreenLightWall: React.FC<{
             setLibraryOpen(false);
             setActiveAssetActions(null);
             setToolboxOpen(false);
-            onSaved();
+            await onSaved();
             say('已回到装修前');
         } catch (error) {
             console.error('[CollectionHall] cancel wall edit failed:', error);
             say('回滚失败，请稍后再试');
         }
-    }, [onSaved, say, wall.id]);
+    }, [flushPersistSnapshot, onSaved, say]);
 
     const undo = useCallback(() => {
         const previous = past[past.length - 1];
@@ -3940,7 +4048,9 @@ const FullScreenLightWall: React.FC<{
             )}
             {editing && (
                 <div className={`ar-edit-toolbar${toolboxOpen ? ' open' : ' collapsed'}`}>
-                    <button type="button" className="ar-edit-done" onClick={finishEditing}><Check weight="bold" size={15} />完成</button>
+                    <button type="button" className="ar-edit-done" onClick={finishEditing} disabled={savingWallDraft}>
+                        <Check weight="bold" size={15} />{savingWallDraft ? '保存中' : '完成'}
+                    </button>
                     <button
                         type="button"
                         className="ar-edit-toggle"
@@ -4324,7 +4434,7 @@ const WallEditor: React.FC<{
     wall: CollectionWall;
     entries: WallZoneEntry[];
     onClose: () => void;
-    onSaved: () => Promise<void> | void;
+    onSaved: () => Promise<unknown> | void;
     onDirtyChange?: (dirty: boolean) => void;
     say: (message: string) => void;
 }> = ({ wall, entries, onClose, onSaved, onDirtyChange, say }) => {
@@ -4439,10 +4549,7 @@ const WallEditor: React.FC<{
         }
         setSaving(true);
         try {
-            const originalItemIds = new Set(entries.map(entry => entry.item?.id).filter((id): id is string => Boolean(id)));
-            const draftItemIds = new Set(draftItems.map(item => item.id));
-            const deletedIds = Array.from(originalItemIds).filter(id => !draftItemIds.has(id));
-            await DB.saveCollectionWall({
+            await DB.replaceCollectionWallSnapshot({
                 ...draftWall,
                 name,
                 layoutMode: 'free',
@@ -4451,9 +4558,7 @@ const WallEditor: React.FC<{
                     dim: draftWall.background.type === 'asset' ? 0 : clamp(Number(draftWall.background.dim) || 0, 0, 0.6),
                 },
                 changeCountSinceVisit: (draftWall.changeCountSinceVisit || 0) + 1,
-            });
-            await Promise.all(deletedIds.map(id => DB.deleteCollectionWallItem(id)));
-            await Promise.all(relabelItems(draftItems).map(item => DB.saveCollectionWallItem({ ...item, wallId: wall.id })));
+            }, relabelItems(draftItems).map(item => ({ ...item, wallId: wall.id })));
             addCollectionWallPendingContext(wall.charId, `用户最近在「${name}」整理了拾光墙，墙上现在有 ${draftItems.length} 件内容。下次对话可自然提及，不要刻意。`);
             initialDraftSnapshotRef.current = serializeWallEditorDraft(draftWall, draftItems, textDraft);
             say('拾光墙已保存');
@@ -4719,7 +4824,7 @@ const CollectionHallApp: React.FC = () => {
 
     const charById = useMemo(() => new Map(characters.map(c => [c.id, c])), [characters]);
 
-    const loadBooks = useCallback(async () => {
+    const loadBooks = useCallback(async (): Promise<CollectionHallLoadSnapshot> => {
         try {
             const next = await DB.getAllCollectionBooks();
             setBooks(next);
@@ -4755,7 +4860,14 @@ const CollectionHallApp: React.FC = () => {
                 nextWallItems = nextWallItems.filter(item => !cannedCharNotes.some(note => note.id === item.id));
             }
             setWallItems(nextWallItems);
-            setWallAssets(await DB.getAllCollectionWallAssets());
+            const nextWallAssets = await DB.getAllCollectionWallAssets();
+            setWallAssets(nextWallAssets);
+            return {
+                books: next,
+                walls: nextWalls,
+                wallItems: nextWallItems,
+                wallAssets: nextWallAssets,
+            };
         } finally {
             setLoading(false);
         }
@@ -4777,6 +4889,18 @@ const CollectionHallApp: React.FC = () => {
         closeApp();
     }, [closeApp, editingWall, wallEditorDirty]);
 
+    const refreshActiveWallAfterSave = useCallback(async () => {
+        const snapshot = await loadBooks();
+        setActiveWall(current => {
+            if (!current) return current;
+            const freshWall = snapshot.walls.find(candidate => candidate.id === current.wall.id);
+            if (!freshWall) return null;
+            const { entries } = buildWallZoneEntriesFromItems(freshWall, snapshot.wallItems, snapshot.books, snapshot.wallAssets);
+            return { ...current, wall: freshWall, entries };
+        });
+        return snapshot;
+    }, [loadBooks]);
+
     const sections = useMemo(() => {
         const byChar = new Map<string, CollectionBook[]>();
         for (const b of books) {
@@ -4784,7 +4908,6 @@ const CollectionHallApp: React.FC = () => {
             byChar.get(b.charId)!.push(b);
         }
         const wallCharIds = new Set(walls.map(wall => wall.charId).filter(Boolean));
-        const assetById = new Map(wallAssets.map(asset => [asset.id, asset]));
         const orderedIds = [
             ...characters.map(c => c.id).filter(id => byChar.has(id) || wallCharIds.has(id)),
             ...Array.from(byChar.keys()).filter(id => !charById.has(id)),
@@ -4794,42 +4917,13 @@ const CollectionHallApp: React.FC = () => {
             const charBooks = (byChar.get(charId) || []).sort((a, b) => b.collectedAt - a.collectedAt);
             const character = charById.get(charId);
             const freeform = charBooks.filter(b => b.kind === 'freeform');
-            const bookById = new Map(charBooks.map(book => [book.id, book]));
             const charWalls = walls
                 .filter(wall => wall.charId === charId)
                 .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || (a.createdAt || 0) - (b.createdAt || 0));
             const wallBookIds = new Set<string>();
             const wallZones: { wall: CollectionWall; entries: WallZoneEntry[] }[] = charWalls.map(wall => {
-                const entries = wallItems
-                    .filter(item => item.wallId === wall.id)
-                    .sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0))
-                    .reduce<WallZoneEntry[]>((acc, item) => {
-                        if (item.type === 'html' || (item.type === 'card' && item.html && !item.bookId)) {
-                            if (item.html) acc.push({ id: item.id, type: 'html', item });
-                            return acc;
-                        }
-                        if (item.type === 'card' && item.bookId) {
-                            const book = bookById.get(item.bookId);
-                            if (book?.kind !== 'freeform') return acc;
-                            wallBookIds.add(book.id);
-                            acc.push({ id: item.id, type: 'book', item, book });
-                            return acc;
-                        }
-                        if ((item.type === 'image' || item.type === 'sticker') && item.assetId) {
-                            const entry = buildWallAssetEntry(item, assetById.get(item.assetId));
-                            if (entry) acc.push(entry);
-                            return acc;
-                        }
-                        if (item.type === 'bond') {
-                            acc.push({ id: item.id, type: 'bond', item });
-                            return acc;
-                        }
-                        if (item.type === 'text' && item.text?.content) {
-                            acc.push({ id: item.id, type: 'text', item });
-                            return acc;
-                        }
-                        return acc;
-                    }, []);
+                const { entries, wallBookIds: currentWallBookIds } = buildWallZoneEntriesFromItems(wall, wallItems, charBooks, wallAssets);
+                currentWallBookIds.forEach(id => wallBookIds.add(id));
                 return { wall, entries };
             });
             const looseFreeform = freeform.filter(book => !wallBookIds.has(book.id));
@@ -4908,9 +5002,11 @@ const CollectionHallApp: React.FC = () => {
                 return;
             }
             const now = Date.now();
+            const latestWall = await DB.getCollectionWallById(wall.id);
+            const wallForPatch = latestWall || wall;
             await DB.saveCollectionWall({
-                ...wall,
-                charRemarks: [...(wall.charRemarks || []), { text: result.content, ts: now }].slice(-30),
+                ...wallForPatch,
+                charRemarks: [...(wallForPatch.charRemarks || []), { text: result.content, ts: now }].slice(-30),
                 charLastVisitManifest: JSON.stringify(manifest),
                 hasUnseenCharItem: false,
                 charLastVisitAt: now,
@@ -5146,7 +5242,7 @@ const CollectionHallApp: React.FC = () => {
                     onClose={() => setActiveWall(null)}
                     onPickBook={book => setSelected(book)}
                     onPickImage={(entry, wallName) => setSelectedImage({ entry, wallName })}
-                    onSaved={loadBooks}
+                    onSaved={refreshActiveWallAfterSave}
                     onAssetsChanged={loadBooks}
                     say={say}
                 />
