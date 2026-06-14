@@ -25,6 +25,8 @@ import {
 import { DB } from './db';
 import { buildBackendHeaders,getBackendUrl } from './backendClient';
 import { loadJSZip } from './lazyThirdParty';
+import { cleanupAllUnreferencedGeneratedImageOriginalAssets,getReferencedGeneratedImageOriginalAssetIds } from './db/generatedImageAssetGc';
+import { isGeneratedImageOriginalAssetId } from './generatedImageAssets';
 import {
     IMAGE_API_PRESETS_KEY,
     IMAGE_GENERATION_CONFIG_KEY,
@@ -530,10 +532,15 @@ function isAppearanceAssetId(id: string): boolean {
     return SYSTEM_BACKUP_APPEARANCE_ASSET_PREFIXES.some(prefix => id.startsWith(prefix));
 }
 
-function shouldSkipRawAssetInBackup(asset: any): boolean {
+function shouldSkipRawAssetInBackup(asset: any, referencedGeneratedImageAssetIds?: ReadonlySet<string>): boolean {
     const id = asset?.id;
     return typeof id === 'string'
-        && (SYSTEM_BACKUP_DROPPED_ASSET_IDS.has(id) || isThemeAssetId(id) || isAppearanceAssetId(id));
+        && (
+            SYSTEM_BACKUP_DROPPED_ASSET_IDS.has(id)
+            || isThemeAssetId(id)
+            || isAppearanceAssetId(id)
+            || (isGeneratedImageOriginalAssetId(id) && referencedGeneratedImageAssetIds !== undefined && !referencedGeneratedImageAssetIds.has(id))
+        );
 }
 
 function stripUndefinedFields<T extends Record<string, any>>(value: T): T {
@@ -1211,6 +1218,15 @@ export async function exportSystemData(
 
     const storesToProcess = getStoresToProcess(mode, options);
     const includeMemoryRecordAudio = shouldIncludeMemoryRecordAudio(mode, options);
+    let referencedGeneratedImageAssetIds: Set<string> | undefined;
+    if (storesToProcess.includes('assets')) {
+        try {
+            await cleanupAllUnreferencedGeneratedImageOriginalAssets();
+            referencedGeneratedImageAssetIds = await getReferencedGeneratedImageOriginalAssetIds();
+        } catch (error) {
+            console.warn('[SystemBackup] failed to scan generated image asset references:', error);
+        }
+    }
 
     // Fetch Social App & Room Assets
     const sparkUserBg = await DB.getAsset('spark_user_bg');
@@ -1359,7 +1375,7 @@ export async function exportSystemData(
 
             processedData = processObject(
                 storeName === 'assets' && Array.isArray(rawData)
-                    ? rawData.filter((asset: any) => !shouldSkipRawAssetInBackup(asset))
+                    ? rawData.filter((asset: any) => !shouldSkipRawAssetInBackup(asset, referencedGeneratedImageAssetIds))
                     : rawData,
             );
             if (storeName === 'memory_records' && !includeMemoryRecordAudio) {

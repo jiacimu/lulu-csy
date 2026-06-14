@@ -22,6 +22,7 @@ import {
     type CollectionWallManifestItem,
 } from '../utils/collectionWallCoCreation';
 import { hasWallEditorDraftChanges, serializeWallEditorDraft } from '../utils/collectionWallEditorDraft';
+import { saveCollectionWallEditorDraftSnapshot } from '../utils/collectionWallSaveFlow';
 import { ChatPrompts } from '../utils/chatPrompts';
 import { loadCharacterGoals } from '../utils/goalService';
 import { getEmbeddingConfig } from '../utils/runtimeConfig';
@@ -3315,7 +3316,6 @@ const FullScreenLightWall: React.FC<{
             editStartSnapshotRef.current = cloneWallSnapshot(saved.wall, saved.items);
             setPast([]);
             setFuture([]);
-            setEditing(false);
             setSelectedItemId(null);
             setMenuPoint(null);
             setEditingTextId(null);
@@ -3324,6 +3324,7 @@ const FullScreenLightWall: React.FC<{
             setActiveAssetActions(null);
             setToolboxOpen(false);
             await onSaved();
+            setEditing(false);
             say('拾光墙已保存');
         } catch (error) {
             console.error('[CollectionHall] finish wall edit failed:', error);
@@ -3497,6 +3498,10 @@ const FullScreenLightWall: React.FC<{
     }, [flushPersist, onAssetsChanged, say, uploadingAsset]);
 
     const cancelEditing = useCallback(async () => {
+        if (savingWallDraft) {
+            say('正在保存...');
+            return;
+        }
         const snapshot = editStartSnapshotRef.current;
         if (!snapshot) {
             setEditing(false);
@@ -3510,6 +3515,7 @@ const FullScreenLightWall: React.FC<{
             window.clearTimeout(saveTimerRef.current);
             saveTimerRef.current = null;
         }
+        setSavingWallDraft(true);
         try {
             const restored = await flushPersistSnapshot(snapshot.wall, snapshot.items);
             setDraftWall(restored.wall);
@@ -3529,8 +3535,22 @@ const FullScreenLightWall: React.FC<{
         } catch (error) {
             console.error('[CollectionHall] cancel wall edit failed:', error);
             say('回滚失败，请稍后再试');
+        } finally {
+            setSavingWallDraft(false);
         }
-    }, [flushPersistSnapshot, onSaved, say]);
+    }, [flushPersistSnapshot, onSaved, savingWallDraft, say]);
+
+    const handleWallExit = useCallback(() => {
+        if (savingWallDraft) {
+            say('正在保存...');
+            return;
+        }
+        if (editing) {
+            void cancelEditing();
+            return;
+        }
+        onClose();
+    }, [cancelEditing, editing, onClose, savingWallDraft, say]);
 
     const undo = useCallback(() => {
         const previous = past[past.length - 1];
@@ -4102,7 +4122,7 @@ const FullScreenLightWall: React.FC<{
             <div className="ar-full-bg" />
             {!preview && (
                 <>
-                    <button type="button" className="ar-full-exit" aria-label="退出拾光墙" onClick={editing ? cancelEditing : onClose}>‹</button>
+                    <button type="button" className="ar-full-exit" aria-label="退出拾光墙" onClick={handleWallExit} disabled={savingWallDraft}>‹</button>
                     <div className={`ar-full-actions${actionMenuOpen ? ' open' : ''}`}>
                         <button
                             type="button"
@@ -4484,7 +4504,7 @@ const FullScreenLightWall: React.FC<{
                     )}
                     <button type="button" aria-label="撤销" title="撤销" disabled={past.length === 0} onClick={undo}><ArrowCounterClockwise weight="bold" size={17} /></button>
                     <button type="button" aria-label="重做" title="重做" disabled={future.length === 0} onClick={redo}><ArrowClockwise weight="bold" size={17} /></button>
-                    <button type="button" onClick={cancelEditing}><X weight="bold" size={15} />取消</button>
+                    <button type="button" onClick={cancelEditing} disabled={savingWallDraft}><X weight="bold" size={15} />取消</button>
                 </div>
             )}
             <span className="ar-preview-hint">点击任意处退出预览</span>
@@ -4912,8 +4932,9 @@ const WallEditor: React.FC<{
     onClose: () => void;
     onSaved: () => Promise<unknown> | void;
     onDirtyChange?: (dirty: boolean) => void;
+    onSavingChange?: (saving: boolean) => void;
     say: (message: string) => void;
-}> = ({ wall, entries, onClose, onSaved, onDirtyChange, say }) => {
+}> = ({ wall, entries, onClose, onSaved, onDirtyChange, onSavingChange, say }) => {
     const [draftWall, setDraftWall] = useState<CollectionWall>({ ...wall, layoutMode: 'free' });
     const [draftItems, setDraftItems] = useState<CollectionWallItem[]>(() => relabelItems(entries.map(entry => entry.item).filter((item): item is CollectionWallItem => Boolean(item))));
     const [textDraft, setTextDraft] = useState('');
@@ -4931,6 +4952,11 @@ const WallEditor: React.FC<{
     }, [hasUnsavedChanges, onDirtyChange]);
 
     useEffect(() => {
+        onSavingChange?.(saving);
+        return () => onSavingChange?.(false);
+    }, [onSavingChange, saving]);
+
+    useEffect(() => {
         if (!hasUnsavedChanges) return undefined;
         const handleBeforeUnload = (event: BeforeUnloadEvent) => {
             event.preventDefault();
@@ -4946,6 +4972,11 @@ const WallEditor: React.FC<{
         const state = { ...(window.history.state || {}), collectionWallEditorGuard: true };
         window.history.pushState(state, '', window.location.href);
         const handlePopState = () => {
+            if (saving) {
+                say('正在保存...');
+                window.history.pushState(state, '', window.location.href);
+                return;
+            }
             if (window.confirm('未保存更改')) {
                 onClose();
                 return;
@@ -4954,14 +4985,17 @@ const WallEditor: React.FC<{
         };
         window.addEventListener('popstate', handlePopState);
         return () => window.removeEventListener('popstate', handlePopState);
-    }, [hasUnsavedChanges, onClose]);
+    }, [hasUnsavedChanges, onClose, saving, say]);
 
     const requestClose = useCallback(() => {
-        if (saving) return;
+        if (saving) {
+            say('正在保存...');
+            return;
+        }
         if (!hasUnsavedChanges || window.confirm('未保存更改')) {
             onClose();
         }
-    }, [hasUnsavedChanges, onClose, saving]);
+    }, [hasUnsavedChanges, onClose, saving, say]);
 
     const updateWall = (patch: Partial<CollectionWall>) => {
         setDraftWall(prev => ({ ...prev, ...patch }));
@@ -5025,20 +5059,20 @@ const WallEditor: React.FC<{
         }
         setSaving(true);
         try {
-            await DB.replaceCollectionWallSnapshot({
-                ...draftWall,
+            const saved = await saveCollectionWallEditorDraftSnapshot({
                 name,
-                layoutMode: 'free',
-                background: {
-                    ...draftWall.background,
-                    dim: draftWall.background.type === 'asset' ? 0 : clamp(Number(draftWall.background.dim) || 0, 0, 0.6),
-                },
-                changeCountSinceVisit: (draftWall.changeCountSinceVisit || 0) + 1,
-            }, relabelItems(draftItems).map(item => ({ ...item, wallId: wall.id })));
-            addCollectionWallPendingContext(wall.charId, `用户最近在「${name}」整理了拾光墙，墙上现在有 ${draftItems.length} 件内容。下次对话可自然提及，不要刻意。`);
-            initialDraftSnapshotRef.current = serializeWallEditorDraft(draftWall, draftItems, textDraft);
+                draftWall,
+                wallId: wall.id,
+                items: relabelItems(draftItems),
+                writeSnapshot: DB.replaceCollectionWallSnapshot,
+                refreshAfterSave: onSaved,
+            });
+            addCollectionWallPendingContext(wall.charId, `用户最近在「${saved.wall.name}」整理了拾光墙，墙上现在有 ${saved.items.length} 件内容。下次对话可自然提及，不要刻意。`);
+            initialDraftSnapshotRef.current = serializeWallEditorDraft(saved.wall, saved.items, '');
+            setDraftWall({ ...saved.wall, layoutMode: 'free' });
+            setDraftItems(relabelItems(saved.items));
+            setTextDraft('');
             say('拾光墙已保存');
-            await onSaved();
             onClose();
         } catch (error) {
             console.error('[CollectionHall] wall editor save failed:', error);
@@ -5056,7 +5090,7 @@ const WallEditor: React.FC<{
                         <h3>装修「{draftWall.name || wall.name}」</h3>
                         <p>{draftItems.length} 件 · 顺序排列</p>
                     </div>
-                    <button type="button" className="ar-ebk-x" aria-label="关闭" onClick={requestClose}><X weight="bold" /></button>
+                    <button type="button" className="ar-ebk-x" aria-label="关闭" onClick={requestClose} disabled={saving}><X weight="bold" /></button>
                 </div>
                 <div className="ar-editor-body">
                     <section className="ar-editor-section">
@@ -5269,6 +5303,7 @@ const CollectionHallApp: React.FC = () => {
     const [forwardFor, setForwardFor] = useState<CollectionBook | null>(null);
     const [confirmDel, setConfirmDel] = useState<CollectionBook | null>(null);
     const [wallEditorDirty, setWallEditorDirty] = useState(false);
+    const [wallEditorSaving, setWallEditorSaving] = useState(false);
     const [invitingWallId, setInvitingWallId] = useState<string | null>(null);
     const [charWallRemark, setCharWallRemark] = useState<{
         wall: CollectionWall;
@@ -5343,9 +5378,13 @@ const CollectionHallApp: React.FC = () => {
 
     const say = (msg: string) => setToast({ key: Date.now(), msg });
     const handleCloseApp = useCallback(() => {
+        if (editingWall && wallEditorSaving) {
+            say('正在保存...');
+            return;
+        }
         if (editingWall && wallEditorDirty && !window.confirm('未保存更改')) return;
         closeApp();
-    }, [closeApp, editingWall, wallEditorDirty]);
+    }, [closeApp, editingWall, say, wallEditorDirty, wallEditorSaving]);
 
     const refreshActiveWallAfterSave = useCallback(async () => {
         const snapshot = await loadBooks();
@@ -5776,6 +5815,7 @@ const CollectionHallApp: React.FC = () => {
                     onClose={() => setEditingWall(null)}
                     onSaved={loadBooks}
                     onDirtyChange={setWallEditorDirty}
+                    onSavingChange={setWallEditorSaving}
                     say={say}
                 />
             )}

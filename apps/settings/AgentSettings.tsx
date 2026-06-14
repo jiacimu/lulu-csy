@@ -65,12 +65,24 @@ const AgentSettings: React.FC = () => {
         return '不可用';
     })();
     const pushPermissionLabel = pushInfo.permission || permissionLabel;
+    const nativePushBackendUnsupported = isNativePush
+        && (
+            pushInfo.status.includes('后端未开通')
+            || pushInfo.error.includes('原生 FCM token 登记接口')
+            || pushInfo.error.includes('/api/push/native/')
+        );
     const pushRegisteredLabel = (() => {
         if (pushInfo.registered) return '已注册';
         if (pushInfo.offlineCapable) return '已订阅';
+        if (nativePushBackendUnsupported) return '后端未开通';
         if (pushInfo.needsResubscribe) return '需要重新初始化';
         return '未注册';
     })();
+    const pushRepairSuggestion = nativePushBackendUnsupported
+        ? '需要更新或切换到已开通原生 FCM 的后端；重复初始化不会生效'
+        : pushInfo.needsResubscribe
+            ? '需要重新初始化或更换支持的浏览器'
+            : '暂无';
     const tokenPreviewLabel = pushInfo.tokenPreview || (isNativePush ? '暂无' : '不适用');
     const deviceIdPreviewLabel = pushInfo.deviceIdPreview || (isNativePush ? '暂无' : '不适用');
 
@@ -343,7 +355,7 @@ const AgentSettings: React.FC = () => {
 
                         <span className="text-[#8b7e74] font-bold">修复建议</span>
                         <span className="text-[#a89b91] break-all">
-                            {pushInfo.needsResubscribe ? '需要重新初始化或更换支持的浏览器' : '暂无'}
+                            {pushRepairSuggestion}
                         </span>
 
                         <span className="text-[#8b7e74] font-bold">端点/Token</span>

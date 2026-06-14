@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CharacterProfile, Message, UserProfile } from '../types';
-import { buildDateSessionPromptMessages, buildDateStatusSnapshotForMainApi, runDateRecapBridgeFirstSync } from '../apps/DateApp';
+import { buildDateNarrativeControlNote, buildDateSessionPromptMessages, buildDateStatusSnapshotForMainApi, runDateRecapBridgeFirstSync } from '../apps/DateApp';
 
 const char = {
     id: 'char-1',
@@ -117,6 +117,44 @@ describe('date session prompt assembly', () => {
             ...char,
             dateStatusBarEnabled: false,
         }, [statusMessage])).toBe('');
+    });
+
+    it('injects narrative control directives only when a mode is selected', () => {
+        const baseInput = {
+            char,
+            userProfile,
+            allMsgs: [],
+            currentUserInput: '我靠近一点，但不要替我继续说。',
+            turnDirectives: {
+                userName: userProfile.name,
+                directorNote: '',
+                photoPromptBlock: '',
+                bilingualNote: '',
+                lo: 105,
+                hi: 195,
+                rotationPicks: [],
+                stallNudge: '',
+            },
+        };
+
+        const defaultUserMessage = buildDateSessionPromptMessages(baseInput)[2].content;
+        expect(defaultUserMessage).not.toContain('本轮用户演绎权限');
+        expect(defaultUserMessage).not.toContain('抢话');
+        expect(defaultUserMessage).not.toContain('转述');
+        expect(defaultUserMessage).not.toContain('专注');
+
+        const paraphraseUserMessage = buildDateSessionPromptMessages({
+            ...baseInput,
+            turnDirectives: {
+                ...baseInput.turnDirectives,
+                narrativeControlNote: buildDateNarrativeControlNote('paraphrase', char.name, userProfile.name),
+            },
+        })[2].content;
+
+        expect(paraphraseUserMessage).toContain('■ 本轮用户演绎权限：转述');
+        expect(paraphraseUserMessage).toContain('将 <current_user_input> 视为本轮写作指导');
+        expect(paraphraseUserMessage).not.toContain('■ 本轮用户演绎权限：抢话');
+        expect(paraphraseUserMessage).not.toContain('绝对禁止任何对糯米的演绎');
     });
 
     it('follows the Date status bar switch in system output rules', () => {

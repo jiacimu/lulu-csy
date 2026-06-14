@@ -32,6 +32,9 @@ dist-ssr
 # Vite cache
 vite.config.ts.timestamp-*
 
+# Local Firebase config
+android/app/google-services.json
+
 # Misc junk
 *.lnk
 

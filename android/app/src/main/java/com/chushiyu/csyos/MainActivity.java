@@ -1,4 +1,4 @@
-package com.aetheros.simulator;
+package com.chushiyu.csyos;
 
 import com.getcapacitor.BridgeActivity;
 

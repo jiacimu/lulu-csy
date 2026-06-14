@@ -64,7 +64,7 @@
 | package 名 | `aetheros-simulator` |
 | PWA manifest 名称 | `Csy-OS` |
 | Capacitor appName | `手抓糯米机` |
-| Capacitor appId | `com.aetheros.simulator` |
+| Capacitor appId | `com.chushiyu.csyos` |
 | 许可证 | `PolyForm-Noncommercial-1.0.0`，非商业用途 |
 | 部署目标 | Cloudflare Pages |
 | Pages 项目名 | `sully-frontend` |

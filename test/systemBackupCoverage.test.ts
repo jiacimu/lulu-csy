@@ -33,6 +33,7 @@ import {
     type FullBackupData,
     type MemoryRecord,
 } from '../types';
+import { buildGeneratedImageOriginalAssetId } from '../utils/generatedImageAssets';
 
 const noopProgress = () => {};
 
@@ -849,6 +850,65 @@ describe('system backup coverage', () => {
         expect(await DB.getAsset('icon_Chat')).toBe(sharedImage);
         expect(await DB.getAsset('appearance_preset_ap_dup')).toContain('SULLY');
         expect(await DB.getAsset('sullyos_upstream_compat_payload')).toBeNull();
+    }, 15000);
+
+    it('omits orphan generated image originals from backup assets and keeps referenced originals', async () => {
+        const orphanAssetId = buildGeneratedImageOriginalAssetId('orphan-photo');
+        const messageAssetId = buildGeneratedImageOriginalAssetId('message-photo');
+        const galleryAssetId = buildGeneratedImageOriginalAssetId('gallery-photo');
+        const memoryRecordAssetId = buildGeneratedImageOriginalAssetId('memory-record-cover');
+
+        await DB.saveAsset(orphanAssetId, 'data:image/png;base64,b3JwaGFu');
+        await DB.saveAsset(messageAssetId, 'data:image/png;base64,bWVzc2FnZQ==');
+        await DB.saveAsset(galleryAssetId, 'data:image/png;base64,Z2FsbGVyeQ==');
+        await DB.saveAsset(memoryRecordAssetId, 'data:image/png;base64,bWVtb3J5');
+        await DB.saveMessage({
+            charId: 'char-a',
+            role: 'assistant',
+            type: 'image',
+            content: 'data:image/webp;base64,dGh1bWItbWVzc2FnZQ==',
+            timestamp: Date.now(),
+            metadata: {
+                thumbnailUrl: 'data:image/webp;base64,dGh1bWItbWVzc2FnZQ==',
+                originalAssetId: messageAssetId,
+            },
+        });
+        await DB.saveGalleryImage({
+            id: 'gallery-photo',
+            charId: 'char-a',
+            url: 'data:image/webp;base64,dGh1bWItZ2FsbGVyeQ==',
+            timestamp: Date.now(),
+            originalAssetId: galleryAssetId,
+        });
+        await DB.saveMemoryRecord({
+            id: 'mrec-cover',
+            charId: 'char-a',
+            charName: 'Sully',
+            userName: '我',
+            mode: 'blind_box',
+            status: 'draft',
+            title: '封面留声',
+            albumName: '回忆唱片匣',
+            artistName: 'Sully',
+            monologueText: '',
+            lyrics: '',
+            musicPrompt: '',
+            coverImageUrl: 'data:image/webp;base64,dGh1bWItbWVtb3J5',
+            coverOriginalAssetId: memoryRecordAssetId,
+            coverGradient: 'linear-gradient(135deg, #fff, #000)',
+            seedMemoryIds: [],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+        } as MemoryRecord);
+
+        const data = await readBackupData(await exportSystemData('full', makeStateSnapshot(), noopProgress));
+        const exportedAssetIds = new Set((data.assets || []).map(asset => asset.id));
+
+        expect(exportedAssetIds.has(orphanAssetId)).toBe(false);
+        expect(exportedAssetIds.has(messageAssetId)).toBe(true);
+        expect(exportedAssetIds.has(galleryAssetId)).toBe(true);
+        expect(exportedAssetIds.has(memoryRecordAssetId)).toBe(true);
+        expect(await DB.getAsset(orphanAssetId)).toBeNull();
     }, 15000);
 
     it('declares every primary IndexedDB store in the backup coverage map', () => {

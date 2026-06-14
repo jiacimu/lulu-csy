@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">手抓糯米机</string>
     <string name="title_activity_main">手抓糯米机</string>
-    <string name="package_name">com.aetheros.simulator</string>
-    <string name="custom_url_scheme">com.aetheros.simulator</string>
+    <string name="package_name">com.chushiyu.csyos</string>
+    <string name="custom_url_scheme">com.chushiyu.csyos</string>
 </resources>

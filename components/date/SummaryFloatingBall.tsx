@@ -1,7 +1,7 @@
 import React,{ memo,useEffect,useRef,useState } from 'react';
 import { motion,useMotionValue,PanInfo } from 'framer-motion';
 import { GearSix,NotePencil,X,WarningCircle,ArrowCounterClockwise,ClipboardText } from '@phosphor-icons/react';
-import { CharacterProfile,DateTokenUsage } from '../../types';
+import { CharacterProfile,DateTokenUsage,type DateNarrativeControlMode } from '../../types';
 import { DATE_DEFAULT_WORD_COUNT } from '../../utils/datePrompts';
 import WritingStyleSheet, { getStyleDisplayLabel } from './WritingStyleSheet';
 
@@ -27,6 +27,8 @@ interface SummaryFloatingBallProps {
     onChangeTemperature: (temp: number | undefined) => void;
     fontScale?: number;
     onChangeFontScale: (scale: number | undefined) => void;
+    narrativeControlMode?: DateNarrativeControlMode;
+    onChangeNarrativeControlMode?: (mode: DateNarrativeControlMode | undefined) => void;
     translationEnabled?: boolean;
     translateSourceLang?: string;
     translateTargetLang?: string;
@@ -108,6 +110,16 @@ const tokenSourceLabels: Record<DateTokenUsage['source'], string> = {
     reroll: '重掷',
 };
 
+const narrativeControlOptions: Array<{
+    mode: DateNarrativeControlMode;
+    label: string;
+    title: string;
+}> = [
+    { mode: 'takeover', label: '抢话', title: '同时扮演用户和角色推进剧情' },
+    { mode: 'paraphrase', label: '转述', title: '把输入视为写作指导并润色转述' },
+    { mode: 'focus', label: '专注', title: '只回应用户事实，不演绎用户' },
+];
+
 const formatTokenCount = (value?: number) => (
     Number.isFinite(value) ? Math.round(value as number).toLocaleString('zh-CN') : '--'
 );
@@ -166,6 +178,7 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
     onChangeWordCount, onChangeWritingStyle,
     temperature, onChangeTemperature,
     fontScale, onChangeFontScale,
+    narrativeControlMode, onChangeNarrativeControlMode,
     translationEnabled, translateSourceLang, translateTargetLang,
     lastTokenUsage,
     requestDebugCount = 0,
@@ -522,6 +535,48 @@ const SummaryFloatingBall: React.FC<SummaryFloatingBallProps> = memo(({
                                 >
                                     默认
                                 </button>
+                            </div>
+                            <div style={{ height: 1, background: C.divider, margin: '8px 0' }} />
+                            <div style={{ ...row, alignItems: 'flex-start', gap: 8 }}>
+                                <span style={{ ...label, lineHeight: '24px' }}>演绎</span>
+                                <div
+                                    role="group"
+                                    aria-label="用户演绎权限"
+                                    style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                                        gap: 4,
+                                        flex: 1,
+                                    }}
+                                >
+                                    {narrativeControlOptions.map(option => {
+                                        const active = narrativeControlMode === option.mode;
+                                        return (
+                                            <button
+                                                key={option.mode}
+                                                type="button"
+                                                aria-pressed={active}
+                                                title={option.title}
+                                                onClick={() => onChangeNarrativeControlMode?.(active ? undefined : option.mode)}
+                                                className="transition-all active:scale-95"
+                                                style={{
+                                                    minWidth: 0,
+                                                    height: 24,
+                                                    borderRadius: 8,
+                                                    border: 'none',
+                                                    cursor: 'pointer',
+                                                    background: active ? C.accent : C.base,
+                                                    boxShadow: active ? inset : raisedSm,
+                                                    color: active ? '#fff' : C.textSec,
+                                                    fontSize: 10,
+                                                    fontWeight: 700,
+                                                }}
+                                            >
+                                                {option.label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
                             <div style={{ height: 1, background: C.divider, margin: '8px 0' }} />
                             <div style={row}>

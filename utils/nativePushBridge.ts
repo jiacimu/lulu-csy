@@ -11,11 +11,14 @@ import { safeTimeoutSignal } from './safeTimeout';
 
 const NATIVE_PUSH_APP_ID = typeof capacitorConfig.appId === 'string'
     ? capacitorConfig.appId
-    : 'com.aetheros.simulator';
+    : 'com.chushiyu.csyos';
 const NATIVE_PUSH_DEVICE_ID_KEY = 'csyos_native_push_device_id';
 const NATIVE_PUSH_TOKEN_KEY = 'csyos_native_push_fcm_token';
 const NATIVE_PUSH_PENDING_CLICK_KEY = 'csyos_native_push_pending_click';
 const NATIVE_PUSH_REGISTRATION_TIMEOUT_MS = 30000;
+const NATIVE_PUSH_BACKEND_UNSUPPORTED_STATUS = '当前后端未开通原生 FCM 接口';
+const NATIVE_PUSH_BACKEND_UNSUPPORTED_ERROR =
+    '后端缺少原生 FCM token 登记接口，请更新后端或切换到已开通原生推送的 beta 后端；重复初始化不会生效。';
 
 export const NATIVE_PUSH_NOTIFICATION_CLICK_EVENT = 'csyos-native-push-notification-click';
 
@@ -59,6 +62,16 @@ type NativePushRegisterPayload = {
 type NativePushDevicePayload = Omit<NativePushRegisterPayload, 'token'> & {
     token?: string;
 };
+
+class NativePushBackendUnsupportedError extends Error {
+    constructor(
+        readonly statusCode: number,
+        readonly path: string,
+    ) {
+        super(`${NATIVE_PUSH_BACKEND_UNSUPPORTED_ERROR} (${path}, HTTP ${statusCode})`);
+        this.name = 'NativePushBackendUnsupportedError';
+    }
+}
 
 let nativePushDebugInfo: NativePushDebugInfo = {
     channel: 'unavailable',
@@ -191,7 +204,9 @@ export async function unregisterNativePush(): Promise<NativePushDebugInfo> {
             appId: NATIVE_PUSH_APP_ID,
         });
     } catch (error: any) {
-        errors.push(`后端注销失败: ${normalizeErrorMessage(error)}`);
+        if (!isNativePushBackendUnsupportedError(error)) {
+            errors.push(`后端注销失败: ${normalizeErrorMessage(error)}`);
+        }
     }
 
     try {
@@ -250,10 +265,17 @@ export async function sendNativeTestPush(): Promise<NativePushDebugInfo> {
             error: '',
         });
     } catch (error: any) {
-        setNativePushDebugInfo({
-            status: '原生测试推送失败',
-            error: normalizeErrorMessage(error),
-        });
+        if (isNativePushBackendUnsupportedError(error)) {
+            setNativePushDebugInfo({
+                status: NATIVE_PUSH_BACKEND_UNSUPPORTED_STATUS,
+                error: getNativePushBackendUnsupportedErrorMessage(error),
+            });
+        } else {
+            setNativePushDebugInfo({
+                status: '原生测试推送失败',
+                error: normalizeErrorMessage(error),
+            });
+        }
     }
 
     return getNativePushDebugInfo();
@@ -410,13 +432,7 @@ async function registerNativePushInternal(
             }
         }
     } catch (error: any) {
-        setNativePushDebugInfo({
-            status: '原生 FCM 初始化失败',
-            error: normalizeErrorMessage(error),
-            registered: false,
-            offlineCapable: false,
-            needsResubscribe: true,
-        });
+        setNativePushDebugInfo(buildNativePushFailurePatch(error, '原生 FCM 初始化失败'));
     }
 
     return getNativePushDebugInfo();
@@ -586,13 +602,7 @@ async function syncNativePushTokenRefresh(token: string): Promise<void> {
             needsResubscribe: false,
         });
     } catch (error: any) {
-        setNativePushDebugInfo({
-            status: 'FCM token 自动同步失败',
-            error: normalizeErrorMessage(error),
-            registered: false,
-            offlineCapable: false,
-            needsResubscribe: true,
-        });
+        setNativePushDebugInfo(buildNativePushFailurePatch(error, 'FCM token 自动同步失败'));
     }
 }
 
@@ -630,6 +640,10 @@ async function postNativePush(
     });
 
     if (response.ok) return;
+
+    if (response.status === 404 || response.status === 405) {
+        throw new NativePushBackendUnsupportedError(response.status, path);
+    }
 
     throw new Error(await readNativePushBackendError(response));
 }
@@ -773,6 +787,37 @@ function normalizeErrorMessage(error: unknown): string {
     } catch {
         return String(error);
     }
+}
+
+function isNativePushBackendUnsupportedError(error: unknown): error is NativePushBackendUnsupportedError {
+    return error instanceof NativePushBackendUnsupportedError;
+}
+
+function getNativePushBackendUnsupportedErrorMessage(error: NativePushBackendUnsupportedError): string {
+    return `${NATIVE_PUSH_BACKEND_UNSUPPORTED_ERROR} 缺失接口：${error.path}，HTTP ${error.statusCode}。`;
+}
+
+function buildNativePushFailurePatch(
+    error: unknown,
+    fallbackStatus: string,
+): Partial<NativePushDebugInfo> {
+    if (isNativePushBackendUnsupportedError(error)) {
+        return {
+            status: NATIVE_PUSH_BACKEND_UNSUPPORTED_STATUS,
+            error: getNativePushBackendUnsupportedErrorMessage(error),
+            registered: false,
+            offlineCapable: false,
+            needsResubscribe: false,
+        };
+    }
+
+    return {
+        status: fallbackStatus,
+        error: normalizeErrorMessage(error),
+        registered: false,
+        offlineCapable: false,
+        needsResubscribe: true,
+    };
 }
 
 function extractNativePushCharId(action: ActionPerformed): string {

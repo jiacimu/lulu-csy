@@ -1,5 +1,5 @@
 import React,{ useState,useEffect,useRef } from 'react';
-import { CharacterProfile,Message,DateState,DialogueItem,UserProfile,DateTokenUsage,DateRequestDebugSnapshot,type ImageProviderType,type ManualPhotoGenerationOptions,type ManualPhotoMode,type PhotoStylePreset,type SavedVibeReference,type VibeReferenceInput } from '../../types';
+import { CharacterProfile,Message,DateState,DialogueItem,UserProfile,DateTokenUsage,DateRequestDebugSnapshot,type DateNarrativeControlMode,type ImageProviderType,type ManualPhotoGenerationOptions,type ManualPhotoMode,type PhotoStylePreset,type SavedVibeReference,type VibeReferenceInput } from '../../types';
 import { type InnerWhisper } from '../../utils/thinkingExtractor';
 import type { StatusCardData } from '../../types/statusCard';
 import { extractTranslationPairs } from '../../utils/chatParser';
@@ -291,6 +291,8 @@ interface DateSessionProps {
     onChangeTemperature: (temp: number | undefined) => void;
     fontScale?: number;
     onChangeFontScale: (scale: number | undefined) => void;
+    narrativeControlMode?: DateNarrativeControlMode;
+    onChangeNarrativeControlMode?: (mode: DateNarrativeControlMode | undefined) => void;
     // Translation
     translationEnabled?: boolean;
     translateSourceLang?: string;
@@ -352,6 +354,8 @@ const DateSession: React.FC<DateSessionProps> = ({
     onChangeTemperature,
     fontScale,
     onChangeFontScale,
+    narrativeControlMode,
+    onChangeNarrativeControlMode,
     translationEnabled,
     translateSourceLang,
     translateTargetLang,
@@ -987,6 +991,8 @@ const DateSession: React.FC<DateSessionProps> = ({
                 onChangeTemperature={onChangeTemperature}
                 fontScale={textScale}
                 onChangeFontScale={onChangeFontScale}
+                narrativeControlMode={narrativeControlMode}
+                onChangeNarrativeControlMode={onChangeNarrativeControlMode}
                 translationEnabled={translationEnabled}
                 translateSourceLang={translateSourceLang}
                 translateTargetLang={translateTargetLang}

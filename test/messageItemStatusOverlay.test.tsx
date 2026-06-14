@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MessageItem from '../components/chat/MessageItem';
 import type { StatusCardData } from '../types/statusCard';
@@ -495,5 +495,33 @@ describe('MessageItem status overlay', () => {
         expect(screen.getByText('[图片]')).toBeInTheDocument();
         expect(screen.queryByText('窗边自拍')).not.toBeInTheDocument();
         expect(screen.queryByText(imageUrl)).not.toBeInTheDocument();
+    });
+
+    it('does not trigger message long press from the thinking scroll area', () => {
+        vi.useFakeTimers();
+        const onLongPress = vi.fn();
+        const thinking = Array.from({ length: 36 }, (_, index) => `Step ${index + 1}`).join('\n');
+
+        renderMessageItem({
+            onLongPress,
+            showThinking: true,
+            msg: {
+                ...baseMessage,
+                metadata: { thinking },
+            },
+        });
+
+        const thinkingToggle = screen.getByTestId('thinking-panel').querySelector('button');
+        expect(thinkingToggle).not.toBeNull();
+        fireEvent.click(thinkingToggle!);
+
+        const scrollArea = screen.getByTestId('thinking-panel-scroll');
+        fireEvent.touchStart(scrollArea, { touches: [{ clientX: 16, clientY: 24 }] });
+
+        act(() => {
+            vi.advanceTimersByTime(700);
+        });
+
+        expect(onLongPress).not.toHaveBeenCalled();
     });
 });

@@ -5060,7 +5060,20 @@ textarea[readonly] {
 }
 
 .sully-thinking-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  contain: content;
+}
+
+.sully-chat-bubble-wrapper:active:not(.sully-bubble-nested-scroll-active) {
+  transform: scale(0.98);
+}
+
+.sully-chat-bubble-wrapper.sully-bubble-nested-scroll-active {
+  transform: none !important;
 }
 
 .sully-bubble-text {
@@ -5158,6 +5171,9 @@ select:focus {
   min-height: 0;
   padding-bottom: 1.5rem;
   scroll-padding-bottom: 1.5rem;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
 }
 
 .sully-chat-dock {

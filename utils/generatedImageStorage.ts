@@ -1,7 +1,7 @@
 import type { ExtractedImage,GalleryImage,Message,PhotoAsset } from '../types';
 import { getAsset,saveAsset } from './db/contentStore';
+import { buildGeneratedImageOriginalAssetId } from './generatedImageAssets';
 
-const GENERATED_IMAGE_ORIGINAL_PREFIX = 'generated-image-original:';
 const GENERATED_IMAGE_THUMBNAIL_FALLBACK = 'data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20160%20160%22%3E%3Crect%20width%3D%22160%22%20height%3D%22160%22%20rx%3D%2220%22%20fill%3D%22%23eef2f7%22%2F%3E%3Cpath%20d%3D%22M38%20108l28-31%2021%2023%2012-13%2023%2021H38z%22%20fill%3D%22%23cbd5e1%22%2F%3E%3Ccircle%20cx%3D%22104%22%20cy%3D%2254%22%20r%3D%2214%22%20fill%3D%22%23dbe4ef%22%2F%3E%3C%2Fsvg%3E';
 
 export interface GeneratedImageStorageDeps {
@@ -21,9 +21,7 @@ export function isInlineImageDataUrl(value: unknown): value is string {
     return typeof value === 'string' && /^data:image\//i.test(value);
 }
 
-export function buildGeneratedImageOriginalAssetId(imageId: string): string {
-    return `${GENERATED_IMAGE_ORIGINAL_PREFIX}${imageId}`;
-}
+export { buildGeneratedImageOriginalAssetId };
 
 function normalizeBase64Payload(base64: string): string {
     const rawBase64 = base64.includes(',') ? base64.split(',').pop() || '' : base64;

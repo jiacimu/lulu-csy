@@ -1,6 +1,8 @@
 import { CharacterProfile,GroupProfile,Message } from '../../types';
 import { openDB,STORE_CHARACTERS,STORE_MESSAGES,STORE_GROUPS,ScheduledMessage,STORE_SCHEDULED,STORE_VECTOR_MEMORIES,STORE_MEMORY_RECORDS } from './core';
 import { getUserId } from '../backendConfig';
+import { collectGeneratedImageOriginalAssetIdsFromMessages } from '../generatedImageAssets';
+import { cleanupUnreferencedGeneratedImageOriginalAssets } from './generatedImageAssetGc';
 
 const MESSAGE_TIME_INDEX = 'charIdTimestampId';
 
@@ -545,35 +547,75 @@ export const updateMessageType = async (id: number, type: string, metadataUpdate
 
 export const deleteMessage = async (id: number): Promise<void> => {
     const db = await openDB();
-    const transaction = db.transaction(STORE_MESSAGES, 'readwrite');
-    transaction.objectStore(STORE_MESSAGES).delete(id);
+    const candidateAssetIds: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(STORE_MESSAGES, 'readwrite');
+        const store = transaction.objectStore(STORE_MESSAGES);
+        const request = store.get(id);
+        request.onsuccess = () => {
+            candidateAssetIds.push(...collectGeneratedImageOriginalAssetIdsFromMessages([request.result as Message | undefined]));
+            store.delete(id);
+        };
+        request.onerror = () => reject(request.error);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+    });
+    await cleanupUnreferencedGeneratedImageOriginalAssets(candidateAssetIds);
 };
 
 export const deleteMessages = async (ids: number[]): Promise<void> => {
+    const uniqueIds = Array.from(new Set(ids));
+    if (uniqueIds.length === 0) return;
+
     const db = await openDB();
-    const transaction = db.transaction(STORE_MESSAGES, 'readwrite');
-    const store = transaction.objectStore(STORE_MESSAGES);
-    ids.forEach(id => store.delete(id));
-    return new Promise((resolve) => { transaction.oncomplete = () => resolve(); });
+    const candidateAssetIds: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(STORE_MESSAGES, 'readwrite');
+        const store = transaction.objectStore(STORE_MESSAGES);
+        uniqueIds.forEach(id => {
+            const request = store.get(id);
+            request.onsuccess = () => {
+                candidateAssetIds.push(...collectGeneratedImageOriginalAssetIdsFromMessages([request.result as Message | undefined]));
+                store.delete(id);
+            };
+            request.onerror = () => reject(request.error);
+        });
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+    });
+    await cleanupUnreferencedGeneratedImageOriginalAssets(candidateAssetIds);
 };
 
 export const clearMessages = async (charId: string): Promise<void> => {
     const charIds = await resolveCharacterReadIds(charId);
     const db = await openDB();
-    const transaction = db.transaction(STORE_MESSAGES, 'readwrite');
-    const store = transaction.objectStore(STORE_MESSAGES);
-    const index = store.index('charId');
-    for (const targetCharId of charIds) {
-        const request = index.openCursor(IDBKeyRange.only(targetCharId));
-        request.onsuccess = () => {
-            const cursor = request.result;
-            if (cursor) {
-                const m = cursor.value as Message;
-                if (!m.groupId && belongsToCurrentOwner(m)) store.delete(cursor.primaryKey);
-                cursor.continue();
-            }
-        };
-    }
+    const candidateAssetIds: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(STORE_MESSAGES, 'readwrite');
+        const store = transaction.objectStore(STORE_MESSAGES);
+        const index = store.index('charId');
+        for (const targetCharId of charIds) {
+            const request = index.openCursor(IDBKeyRange.only(targetCharId));
+            request.onsuccess = () => {
+                const cursor = request.result;
+                if (cursor) {
+                    const m = cursor.value as Message;
+                    if (!m.groupId && belongsToCurrentOwner(m)) {
+                        candidateAssetIds.push(...collectGeneratedImageOriginalAssetIdsFromMessages([m]));
+                        cursor.delete();
+                    }
+                    cursor.continue();
+                }
+            };
+            request.onerror = () => reject(request.error);
+        }
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+    });
+    await cleanupUnreferencedGeneratedImageOriginalAssets(candidateAssetIds);
 };
 
 // --- Groups ---

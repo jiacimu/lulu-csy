@@ -43,6 +43,8 @@ export interface DateTokenUsage {
     updatedAt: number;
 }
 
+export type DateNarrativeControlMode = 'takeover' | 'paraphrase' | 'focus';
+
 export type DateRequestDebugSource = 'peek' | 'send' | 'reroll' | 'auto-summary' | 'manual-summary' | 'exit-summary';
 
 export interface DateRequestDebugMessage {

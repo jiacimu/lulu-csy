@@ -3,7 +3,7 @@ import React,{ useState,useEffect,useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { useVirtualTime } from '../context/VirtualTimeContext';
 import { DB } from '../utils/db';
-import { CharacterProfile,Message,DateState,UserProfile,DateTokenUsage,DateRequestDebugSnapshot,type ManualPhotoGenerationOptions,type PhotoDirectorResult,type PhotoHintTrigger,type PhotoMeta,type PhotoStylePreset,type SavedVibeEncoding,type SavedVibeReference,type VibeReferenceInput } from '../types';
+import { CharacterProfile,Message,DateState,UserProfile,DateTokenUsage,DateRequestDebugSnapshot,type DateNarrativeControlMode,type ManualPhotoGenerationOptions,type PhotoDirectorResult,type PhotoHintTrigger,type PhotoMeta,type PhotoStylePreset,type SavedVibeEncoding,type SavedVibeReference,type VibeReferenceInput } from '../types';
 import { ContextBuilder } from '../utils/context';
 import { safeResponseJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
@@ -420,6 +420,7 @@ export const buildDateCurrentUserInputPrompt = ({
     directorNote,
     photoPromptBlock,
     bilingualNote,
+    narrativeControlNote,
     lo,
     hi,
     rotationPicks,
@@ -430,6 +431,7 @@ export const buildDateCurrentUserInputPrompt = ({
     directorNote?: string;
     photoPromptBlock?: string;
     bilingualNote?: string;
+    narrativeControlNote?: string;
     lo: number;
     hi: number;
     rotationPicks: string[];
@@ -449,6 +451,10 @@ export const buildDateCurrentUserInputPrompt = ({
 
     if (bilingualNote?.trim()) {
         directivesEntries.push(bilingualNote.trim());
+    }
+
+    if (narrativeControlNote?.trim()) {
+        directivesEntries.push(narrativeControlNote.trim());
     }
 
     directivesEntries.push(`■ 本轮篇幅：${lo}–${hi} 字`);
@@ -478,6 +484,27 @@ ${currentUserInput}
 <turn_directives>
 ${directivesEntries.join('\n')}
 </turn_directives>`;
+};
+
+export const buildDateNarrativeControlNote = (
+    mode: DateNarrativeControlMode | undefined,
+    charName: string,
+    userName: string,
+): string => {
+    if (!mode) return '';
+
+    if (mode === 'takeover') {
+        return `■ 本轮用户演绎权限：抢话
+你同时负责扮演${userName}和${charName}推进剧情发展。可以代写${userName}的动作、反应、短句、沉默、迟疑、靠近或回避，让场景自然往前走；但必须严格顺着 <current_user_input> 表达出的意图，不要强行改写${userName}的立场、情绪或选择。重点仍是写出${charName}的反应与关系张力，不要把剧情变成单方面替用户做决定。`;
+    }
+
+    if (mode === 'paraphrase') {
+        return `■ 本轮用户演绎权限：转述
+将 <current_user_input> 视为本轮写作指导，而不是必须原样复述的台词。你需要理解其中的意图、动作、气氛和关系推进方向，并把它生动转述、润色成自然的场景描写或对话承接。可以调整措辞、节奏、视角和细节，让它更有画面感、更贴合当前文风；但不得丢失用户输入中的核心意思。`;
+    }
+
+    return `■ 本轮用户演绎权限：专注
+绝对禁止任何对${userName}的演绎。不要描写${userName}的动作、表情、心理、语气、身体反应、主动台词或下一步选择。只允许把 <current_user_input> 当作已经发生/已经说出的事实来回应，专注描写${charName}的动作、台词、心理波动和环境承接，并为${userName}保留下一轮行动空间。`;
 };
 
 export const buildDateSessionPromptMessages = ({
@@ -779,6 +806,7 @@ const DateApp: React.FC = () => {
         if (!char) return '中文';
         return normalizeDateTranslationLang(safeLocalStorageGet(`date_trans_tgt_${char.id}`), '中文');
     });
+    const [dateNarrativeControlMode, setDateNarrativeControlMode] = useState<DateNarrativeControlMode | undefined>();
 
     // Persist translation settings when they change
     useEffect(() => {
@@ -799,6 +827,9 @@ const DateApp: React.FC = () => {
             normalizeDateTranslationLang(dateTranslateTargetLang, '中文'),
         );
     }, [char?.id, dateTranslateTargetLang]);
+    useEffect(() => {
+        setDateNarrativeControlMode(undefined);
+    }, [char?.id]);
 
     const refreshSavedVibeReferences = async () => {
         try {
@@ -2251,6 +2282,7 @@ ${exitPromptContent}
 示例：
 [happy]<翻译><原文>「おはよう！今日はいい天気だね」</原文><译文>「早上好！今天天气真好呢」</译文></翻译>
 [shy] ${pronoun(char.gender ?? 'male')}的脸颊微微泛红，视线移向了窗外。]` : '';
+        const narrativeControlNote = buildDateNarrativeControlNote(dateNarrativeControlMode, char.name, userProfile.name);
 
         // --- Compute turn-index-based directives ---
         const turnUserMsgs = [...sessionMessages].filter(m => m.role === 'user');
@@ -2276,6 +2308,7 @@ ${exitPromptContent}
                 directorNote,
                 photoPromptBlock,
                 bilingualNote,
+                narrativeControlNote,
                 lo,
                 hi,
                 rotationPicks,
@@ -2417,6 +2450,7 @@ ${exitPromptContent}
         const directorNote = '';
         const photoPromptBlock = buildDatePhotoPromptForMainApi(char);
         const bilingualNote = dateTranslationEnabled ? `[Reminder: 双语模式已开启。每一行仍必须以 [emotion] 开头。只有${char.name}的台词用${dateTranslateSourceLang}写成 [emotion]<翻译><原文>...</原文><译文>...</译文></翻译>；叙述/动作/心理描写保持中文不变，不用 <翻译>。]` : '';
+        const narrativeControlNote = buildDateNarrativeControlNote(dateNarrativeControlMode, char.name, userProfile.name);
 
         // --- Compute turn-index-based directives ---
         const turnUserMsgs = [...validSessionMessages].filter(m => m.role === 'user');
@@ -2442,6 +2476,7 @@ ${exitPromptContent}
                 directorNote,
                 photoPromptBlock,
                 bilingualNote,
+                narrativeControlNote,
                 lo,
                 hi,
                 rotationPicks,
@@ -2888,6 +2923,8 @@ ${exitPromptContent}
                     onChangeTemperature={(temp) => updateCharacter(char.id, { dateTemperature: temp })}
                     fontScale={char.dateFontScale}
                     onChangeFontScale={(scale) => updateCharacter(char.id, { dateFontScale: scale })}
+                    narrativeControlMode={dateNarrativeControlMode}
+                    onChangeNarrativeControlMode={setDateNarrativeControlMode}
                     translationEnabled={dateTranslationEnabled}
                     translateSourceLang={dateTranslateSourceLang}
                     translateTargetLang={dateTranslateTargetLang}

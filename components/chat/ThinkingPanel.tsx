@@ -6,6 +6,7 @@ interface ThinkingPanelProps {
     textColor?: string;
     className?: string;
     maxHeight?: number;
+    onNestedScrollActiveChange?: (active: boolean) => void;
 }
 
 const alphaColor = (color: string | undefined, alphaHex: string, fallback: string) => {
@@ -19,7 +20,9 @@ const alphaColor = (color: string | undefined, alphaHex: string, fallback: strin
     return trimmed;
 };
 
-const stopNestedScrollPropagation = (event: React.TouchEvent | React.WheelEvent) => {
+type NestedScrollEvent = React.TouchEvent | React.PointerEvent | React.WheelEvent;
+
+const stopNestedScrollPropagation = (event: NestedScrollEvent) => {
     event.stopPropagation();
 };
 
@@ -28,12 +31,21 @@ const ThinkingPanel: React.FC<ThinkingPanelProps> = ({
     textColor,
     className = '',
     maxHeight = 240,
+    onNestedScrollActiveChange,
 }) => {
     const [expanded, setExpanded] = useState(false);
     const content = thinking?.trim();
     if (!content) return null;
 
     const bodyMaxHeight = Math.max(80, maxHeight - 20);
+    const startNestedScroll = (event: NestedScrollEvent) => {
+        event.stopPropagation();
+        onNestedScrollActiveChange?.(true);
+    };
+    const endNestedScroll = (event: NestedScrollEvent) => {
+        event.stopPropagation();
+        onNestedScrollActiveChange?.(false);
+    };
 
     return (
         <div
@@ -80,20 +92,31 @@ const ThinkingPanel: React.FC<ThinkingPanelProps> = ({
                 style={{
                     maxHeight: expanded ? `${maxHeight}px` : '0',
                     opacity: expanded ? 1 : 0,
-                    overflow: 'hidden',
+                    overflow: expanded ? 'visible' : 'hidden',
                     marginTop: expanded ? '4px' : '0',
                 }}
             >
                 <div
                     data-testid="thinking-panel-scroll"
                     className="sully-thinking-scroll overflow-y-auto no-scrollbar"
-                    onTouchStart={stopNestedScrollPropagation}
-                    onTouchMove={stopNestedScrollPropagation}
+                    onPointerDown={startNestedScroll}
+                    onPointerMove={startNestedScroll}
+                    onPointerUp={endNestedScroll}
+                    onPointerCancel={endNestedScroll}
+                    onPointerLeave={endNestedScroll}
+                    onTouchStart={startNestedScroll}
+                    onTouchMove={startNestedScroll}
+                    onTouchEnd={endNestedScroll}
+                    onTouchCancel={endNestedScroll}
                     onWheel={stopNestedScrollPropagation}
                     style={{
                         maxHeight: `${bodyMaxHeight}px`,
+                        overflowX: 'hidden',
+                        overflowY: 'auto',
+                        WebkitOverflowScrolling: 'touch',
                         overscrollBehavior: 'contain',
                         touchAction: 'pan-y',
+                        position: 'relative',
                         minHeight: 0,
                         padding: '8px 10px',
                         borderRadius: '6px',

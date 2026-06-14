@@ -1,4 +1,4 @@
-import React,{ useRef,useEffect } from 'react';
+import React,{ useRef,useEffect,useState } from 'react';
 import { renderMarkdown } from '../../utils/markdownLite';
 import type { BubbleStyle,Message } from '../../types/chat';
 import { useSafeImageLoad } from './useSafeImageLoad';
@@ -70,6 +70,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
     const radius = styleConfig.borderRadius ?? 6;
     const showTail = !styleConfig.hideTail;
     const bubbleRef = useRef<HTMLDivElement>(null);
+    const [nestedScrollActive, setNestedScrollActive] = useState(false);
     const isImageReply = !!replyTo && (
         replyTo.type === 'image'
         || !!replyTo.thumbnailUrl
@@ -142,7 +143,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
     return (
         /* Outer Wrapper — relative container; SVG tail & decoration sticker live here
            so they are NOT clipped by overflow-hidden on the inner shell */
-        <div className="relative animate-fade-in active:scale-[0.98] transition-transform">
+        <div className={`sully-chat-bubble-wrapper relative animate-fade-in transition-transform ${nestedScrollActive ? 'sully-bubble-nested-scroll-active' : ''}`}>
 
             {/* Layer 0: SVG Tail — outside inner shell, won't be clipped */}
             {showTail && (
@@ -189,7 +190,11 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
                 )}
 
                 {/* Layer 2.5: Thinking Chain Panel (editorial collapsible) */}
-                <ThinkingPanel thinking={thinking} textColor={styleConfig.textColor} />
+                <ThinkingPanel
+                    thinking={thinking}
+                    textColor={styleConfig.textColor}
+                    onNestedScrollActiveChange={setNestedScrollActive}
+                />
 
                 {/* Layer 3: Reply/Quote Block */}
                 {replyTo && (

@@ -31,11 +31,18 @@ describe('ThinkingPanel', () => {
     });
 
     it('keeps expanded thinking scroll gestures inside the panel', () => {
+        const onNestedScrollActiveChange = vi.fn();
+        const onParentPointerMove = vi.fn();
+        const onParentTouchStart = vi.fn();
         const onParentTouchMove = vi.fn();
         const thinking = Array.from({ length: 30 }, (_, index) => `Step ${index + 1}`).join('\n');
         render(
-            <div onTouchMove={onParentTouchMove}>
-                <ThinkingPanel thinking={thinking} />
+            <div
+                onPointerMove={onParentPointerMove}
+                onTouchStart={onParentTouchStart}
+                onTouchMove={onParentTouchMove}
+            >
+                <ThinkingPanel thinking={thinking} onNestedScrollActiveChange={onNestedScrollActiveChange} />
             </div>,
         );
 
@@ -43,11 +50,19 @@ describe('ThinkingPanel', () => {
         const scrollArea = screen.getByTestId('thinking-panel-scroll');
 
         expect(scrollArea).toHaveClass('sully-thinking-scroll');
+        expect(scrollArea.getAttribute('style')).toContain('overflow-y: auto');
         expect(scrollArea.getAttribute('style')).toContain('overscroll-behavior: contain');
         expect(scrollArea.getAttribute('style')).toContain('touch-action: pan-y');
 
+        fireEvent.pointerMove(scrollArea);
+        fireEvent.touchStart(scrollArea);
         fireEvent.touchMove(scrollArea);
+        fireEvent.touchEnd(scrollArea);
 
+        expect(onParentPointerMove).not.toHaveBeenCalled();
+        expect(onParentTouchStart).not.toHaveBeenCalled();
         expect(onParentTouchMove).not.toHaveBeenCalled();
+        expect(onNestedScrollActiveChange).toHaveBeenCalledWith(true);
+        expect(onNestedScrollActiveChange).toHaveBeenLastCalledWith(false);
     });
 });

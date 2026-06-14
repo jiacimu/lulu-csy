@@ -1,4 +1,6 @@
 import { ChatTheme,Emoji,EmojiCategory,UserProfile,GalleryImage,XhsStockImage,XhsActivityRecord,HotNewsSnapshot } from '../../types';
+import { getGalleryGeneratedImageOriginalAssetId } from '../generatedImageAssets';
+import { cleanupUnreferencedGeneratedImageOriginalAssets } from './generatedImageAssetGc';
 import {
   openDB,STORE_THEMES,STORE_EMOJIS,STORE_EMOJI_CATEGORIES,STORE_ASSETS,
   STORE_USER,STORE_GALLERY,STORE_JOURNAL_STICKERS,
@@ -254,7 +256,25 @@ export const updateGalleryImageReview = async (id: string, review: string): Prom
         req.onerror = () => reject(req.error);
     });
 };
-export const deleteGalleryImage = async (id: string): Promise<void> => { const db = await openDB(); db.transaction(STORE_GALLERY, 'readwrite').objectStore(STORE_GALLERY).delete(id); };
+export const deleteGalleryImage = async (id: string): Promise<void> => {
+    const db = await openDB();
+    const candidateAssetIds: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(STORE_GALLERY, 'readwrite');
+        const store = transaction.objectStore(STORE_GALLERY);
+        const request = store.get(id);
+        request.onsuccess = () => {
+            const assetId = getGalleryGeneratedImageOriginalAssetId(request.result as GalleryImage | undefined);
+            if (assetId) candidateAssetIds.push(assetId);
+            store.delete(id);
+        };
+        request.onerror = () => reject(request.error);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+    });
+    await cleanupUnreferencedGeneratedImageOriginalAssets(candidateAssetIds);
+};
 
 // --- XHS Stock Images ---
 export const getXhsStockImages = async (): Promise<XhsStockImage[]> => {
