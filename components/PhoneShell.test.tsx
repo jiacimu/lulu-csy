@@ -464,7 +464,7 @@ describe('PhoneShell active app rendering', () => {
 
         expect(screen.getByTestId('phone-shell-background').style.contain).toBe('');
         expect(screen.getByTestId('phone-shell-app-viewport')).toHaveStyle({
-            bottom: 'var(--standalone-safe-area-bottom, 0px)',
+            bottom: '0px',
             paddingTop: '0px',
             paddingBottom: '0px',
         });

@@ -724,7 +724,7 @@ const PhoneShell: React.FC = () => {
           boxSizing: 'border-box',
         }
       : {
-          bottom: 'var(--standalone-safe-area-bottom, 0px)',
+          bottom: 0,
           paddingTop: 0,
           paddingBottom: 0,
           boxSizing: 'border-box',
