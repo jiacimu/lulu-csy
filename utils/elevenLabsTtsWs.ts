@@ -8,6 +8,7 @@
 import type { TtsConfig } from '../types/tts';
 import type { TtsAudioChunk,WsConnectionState } from './minimaxTtsWs';
 import { trackedApiRequest } from './apiRequestLedger';
+import { resolveProxyEndpoint } from './proxyEndpoint';
 
 export interface ElevenLabsTtsWsCallbacks {
     onStateChange?: (state: WsConnectionState) => void;
@@ -65,7 +66,7 @@ function postVoiceCallDebug(event: string, details: Record<string, unknown> = {}
     try {
         if (!isVoiceCallDebugEnabled()) return;
         if (typeof fetch !== 'function') return;
-        fetch(VOICE_CALL_DEBUG_ENDPOINT, {
+        fetch(resolveProxyEndpoint(VOICE_CALL_DEBUG_ENDPOINT), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -119,13 +120,14 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
 async function createSingleUseToken(apiKey: string): Promise<string> {
     const startedAt = nowMs();
     postVoiceCallDebug('token_request');
+    const tokenEndpoint = resolveProxyEndpoint(ELEVENLABS_TOKEN_ENDPOINT);
     const response = await trackedApiRequest({
         feature: 'tts',
         reason: '语音通话 ElevenLabs TTS token',
         provider: 'elevenlabs',
         userInitiated: false,
-        url: ELEVENLABS_TOKEN_ENDPOINT,
-    }, () => fetch(ELEVENLABS_TOKEN_ENDPOINT, {
+        url: tokenEndpoint,
+    }, () => fetch(tokenEndpoint, {
         method: 'POST',
         headers: {
             'X-ElevenLabs-Key': apiKey,

@@ -65,6 +65,12 @@ function readCheckpoint(groupId: string): GroupMemoryCheckpoint {
     return { nextStart: 0, updatedAt: 0 };
 }
 
+export function getGroupMemoryHandoffStartIndex(groupId: string): number {
+    const checkpoint = readCheckpoint(groupId);
+    if (checkpoint.nextStart <= 0) return 0;
+    return checkpoint.nextStart + GROUP_MEMORY_OVERLAP;
+}
+
 function writeCheckpoint(groupId: string, nextStart: number): void {
     if (typeof localStorage === 'undefined') return;
     localStorage.setItem(checkpointKey(groupId), JSON.stringify({

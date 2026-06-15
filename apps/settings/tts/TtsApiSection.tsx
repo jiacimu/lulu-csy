@@ -36,7 +36,7 @@ const TtsApiSection: React.FC<Props> = ({ baseUrl, apiKey, groupId, model, set }
                 })}
             </div>
             <input type="text" value={baseUrl} onChange={e => set('baseUrl', e.target.value)} className="w-full bg-white/60 backdrop-blur-sm border border-[#e5ddf0]/50 rounded-xl px-3 py-2.5 text-sm font-mono focus:bg-white/80 transition-all" placeholder="默认 /minimax-api" {...getGuardedInputProps({ kind: 'url', field: 'tts-base-url', inputMode: 'text' })} />
-            <p className="text-[10px] text-[#b8aaa0]/80 mt-1">国内用户保持 <span className="font-mono bg-white/50 inline-block px-1 rounded text-[#9b7e8f]">/minimax-api</span>；海外用户可切到 <span className="font-mono bg-white/50 inline-block px-1 rounded text-[#9b7e8f]">/minimax-global-api</span> 或填自定义反代。</p></div>
+            <p className="text-[10px] text-[#b8aaa0]/80 mt-1">国内用户保持 <span className="font-mono bg-white/50 inline-block px-1 rounded text-[#9b7e8f]">/minimax-api</span>；海外用户可切到 <span className="font-mono bg-white/50 inline-block px-1 rounded text-[#9b7e8f]">/minimax-global-api</span> 或填自定义反代。APK 内会自动把这类相对代理转到部署站点，避免请求到本地页面。</p></div>
         <div><label className="text-[10px] font-bold text-[#b8aaa0] uppercase block mb-1">MiniMax API Key</label>
             <input type="text" value={apiKey} onChange={e => set('apiKey', e.target.value)} className="w-full bg-white/60 backdrop-blur-sm border border-[#e5ddf0]/50 rounded-xl px-3 py-2.5 text-sm font-mono focus:bg-white/80 transition-all" placeholder="Bearer Token" {...getGuardedInputProps({ kind: 'secret', field: 'tts-api-key' })} /></div>
         <div><label className="text-[10px] font-bold text-[#b8aaa0] uppercase block mb-1">Group ID <span className="text-[#c4929f]">（必填）</span></label>

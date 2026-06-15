@@ -25,6 +25,7 @@ import {
 } from '../utils/runtimeConfig';
 import { fetchStreamingChatCompletion } from '../hooks/useChatAI';
 import { queueGroupMemorySummaries } from '../utils/groupChatMemory';
+import { refreshGroupChatHandoffBridge } from '../utils/groupChatHandoffBridge';
 import {
     buildGroupLiveRoleplayApiOptions,
     getGroupLiveApiFingerprint,
@@ -62,9 +63,87 @@ const GROUP_LIVE_AUTONOMOUS_ENABLED_KEY = 'groupchat_live_autonomous_enabled';
 const GROUP_LIVE_AUTONOMOUS_ROUND_LIMIT_KEY = 'groupchat_live_autonomous_round_limit';
 const GROUP_LIVE_AUTONOMOUS_DELAY_KEY = 'groupchat_live_autonomous_delay_seconds';
 const GROUP_LIVE_COGNITION_KEY_PREFIX = 'groupchat_live_cognition';
+const GROUP_CHAT_CONTEXT_LIMIT_KEY = 'groupchat_context_limit';
+const GROUP_CHAT_CONTEXT_MIN = 20;
+const GROUP_CHAT_CONTEXT_MAX = 5000;
+const GROUP_CHAT_CONTEXT_DEFAULT = 30;
 
 function getGroupLiveCognitionKey(groupId: string, speakerId: string, targetId: string): string {
     return `${GROUP_LIVE_COGNITION_KEY_PREFIX}_${groupId}_${speakerId}_${targetId}`;
+}
+
+function getGroupContextLimitKey(groupId: string): string {
+    return `${GROUP_CHAT_CONTEXT_LIMIT_KEY}_${groupId}`;
+}
+
+const GROUP_LIVE_BUBBLE_TIMING = {
+    charsPerSecond: 11,
+    minTypingMs: 360,
+    maxTypingMs: 2600,
+    emojiTypingMs: 280,
+    pauseMinMs: 180,
+    pauseMaxMs: 620,
+    jitterRatio: 0.18,
+    maxConcurrentTypers: 4,
+};
+
+type GroupLiveBubble = {
+    type: MessageType;
+    content: string;
+    metadata?: Message['metadata'];
+    textLength: number;
+};
+
+type GroupLiveReplyPlan = {
+    speaker: CharacterProfile;
+    bubbles: GroupLiveBubble[];
+};
+
+type GroupLiveBubbleQueue = {
+    speaker: CharacterProfile;
+    bubbles: GroupLiveBubble[];
+    index: number;
+    typingAt: number;
+    readyAt: number;
+};
+
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+function normalizeGroupContextLimit(value: unknown, fallback = GROUP_CHAT_CONTEXT_DEFAULT): number {
+    const parsed = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.round(clamp(parsed, GROUP_CHAT_CONTEXT_MIN, GROUP_CHAT_CONTEXT_MAX));
+}
+
+function readStoredGroupContextLimit(group?: GroupProfile | null): number {
+    try {
+        if (group?.id) {
+            const groupSpecific = localStorage.getItem(getGroupContextLimitKey(group.id));
+            if (groupSpecific !== null) return normalizeGroupContextLimit(groupSpecific);
+        }
+        if (typeof group?.contextLimit === 'number') return normalizeGroupContextLimit(group.contextLimit);
+        const legacy = localStorage.getItem(GROUP_CHAT_CONTEXT_LIMIT_KEY);
+        if (legacy !== null) return normalizeGroupContextLimit(legacy);
+    } catch {
+        // Fall back to the product default when storage is unavailable.
+    }
+    return GROUP_CHAT_CONTEXT_DEFAULT;
+}
+
+function writeStoredGroupContextLimit(groupId: string | undefined, value: number) {
+    const normalized = normalizeGroupContextLimit(value);
+    try {
+        localStorage.setItem(GROUP_CHAT_CONTEXT_LIMIT_KEY, String(normalized));
+        if (groupId) localStorage.setItem(getGroupContextLimitKey(groupId), String(normalized));
+    } catch {
+        // Best effort: the DB-backed group field is still saved via the settings button.
+    }
+}
+
+function getGroupContextLoadLimit(limit: number): number {
+    return Math.max(GROUP_CHAT_CONTEXT_DEFAULT, normalizeGroupContextLimit(limit));
 }
 
 // --- Sub-Component: Group Message Bubble ---
@@ -96,6 +175,14 @@ const GroupMessageItem = React.memo(({
 
     // Time formatting
     const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const groupInnerVoice = !isUser && typeof msg.metadata?.groupInnerVoice === 'string'
+        ? msg.metadata.groupInnerVoice.trim()
+        : '';
+    const hasGroupInnerVoice = groupInnerVoice.length > 0;
+    const [showGroupInnerVoice, setShowGroupInnerVoice] = useState(false);
+    const groupInnerVoiceIssue = String(Math.abs(msg.id || 0) % 100).padStart(2, '0');
+    const groupInnerVoiceDate = new Date(msg.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const avatarInitial = name.trim().slice(0, 1) || '?';
 
     const handleTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
         if ('touches' in e) {
@@ -199,24 +286,140 @@ const GroupMessageItem = React.memo(({
 
             {!isUser && (
                 <div className="flex flex-col items-center gap-1 shrink-0">
-                    <img src={avatar} className="w-9 h-9 rounded-full object-cover shadow-sm border border-white" loading="lazy" />
+                    <div className="relative w-9 h-9">
+                        <img src={avatar} className="w-9 h-9 rounded-full object-cover shadow-sm border border-white" loading="lazy" />
+                        {hasGroupInnerVoice && !selectionMode && (
+                            <button
+                                type="button"
+                                className="absolute -right-1.5 -top-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-white text-rose-500 shadow-[0_3px_8px_rgba(190,18,60,0.22)] ring-1 ring-rose-100 transition-transform active:scale-90"
+                                title="打开心声卡片"
+                                aria-label={`打开${name}的心声卡片`}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onTouchStart={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowGroupInnerVoice(true);
+                                }}
+                            >
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-2.5 w-2.5" aria-hidden="true">
+                                    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                                </svg>
+                            </button>
+                        )}
+                    </div>
                 </div>
             )}
 
             <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-[80%] ${selectionMode ? 'pointer-events-none' : ''}`}>
                 {!isUser && <span className="text-[10px] text-slate-400 ml-1 mb-1">{name}</span>}
                 {renderContent()}
-                {!isUser && typeof msg.metadata?.groupInnerVoice === 'string' && msg.metadata.groupInnerVoice.trim() && (
-                    <div className="mt-1 max-w-full rounded-xl bg-rose-50/90 border border-rose-100 px-3 py-1.5 text-[11px] leading-relaxed text-rose-500 shadow-sm whitespace-pre-wrap break-words">
-                        心声：{msg.metadata.groupInnerVoice.trim()}
-                    </div>
-                )}
                 <span className="text-[9px] text-slate-300 mt-1 px-1">{timeStr}</span>
             </div>
 
             {isUser && (
                 <div className="flex flex-col items-center gap-1 shrink-0">
                     <img src={avatar} className="w-9 h-9 rounded-full object-cover shadow-sm border border-white" loading="lazy" />
+                </div>
+            )}
+
+            {showGroupInnerVoice && hasGroupInnerVoice && (
+                <div
+                    className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-[3px] animate-fade-in"
+                    onClick={() => setShowGroupInnerVoice(false)}
+                >
+                    <div
+                        className="relative max-h-[calc(100dvh-44px)] w-full max-w-[390px] overflow-y-auto rounded-[8px] bg-[#f8f4eb] text-slate-950 shadow-[0_30px_90px_rgba(15,23,42,0.42)] ring-1 ring-white/80"
+                        style={{
+                            backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.75), rgba(255,255,255,0) 42%), radial-gradient(circle at 24px 18px, rgba(15,23,42,0.055) 0, rgba(15,23,42,0.055) 1px, transparent 1px)',
+                            backgroundSize: 'auto, 14px 14px',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <button
+                            type="button"
+                            className="absolute right-3 top-3 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-950 shadow-[0_10px_24px_rgba(15,23,42,0.22)] ring-1 ring-slate-950/10 backdrop-blur transition-transform active:scale-95"
+                            aria-label="关闭心声卡片"
+                            title="关闭心声卡片"
+                            onClick={() => setShowGroupInnerVoice(false)}
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
+                                <path d="M6.75 6.75l10.5 10.5M17.25 6.75l-10.5 10.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                            </svg>
+                        </button>
+
+                        <div className="relative min-h-[245px] overflow-hidden bg-slate-900">
+                            <div className="absolute inset-0">
+                                {avatar ? (
+                                    <img src={avatar} alt={name} className="h-full w-full object-cover saturate-[0.82] contrast-[0.98]" />
+                                ) : (
+                                    <div className="flex h-full w-full items-center justify-center bg-slate-800 text-5xl font-black text-white">{avatarInitial}</div>
+                                )}
+                            </div>
+                            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(15,23,42,0.10)_0%,rgba(15,23,42,0.18)_36%,rgba(15,23,42,0.78)_100%)]" />
+                            <div className="absolute inset-x-0 top-0 flex items-start justify-between px-5 pt-5 text-white">
+                                <div className="border-l-2 border-rose-300 pl-3">
+                                    <p className="text-[9px] font-black uppercase tracking-[0.32em] text-white/80">Private Journal</p>
+                                    <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-rose-100">Issue {groupInnerVoiceIssue}</p>
+                                </div>
+                                <p className="mr-10 text-right text-[9px] font-bold uppercase tracking-[0.22em] text-white/70">{groupInnerVoiceDate}</p>
+                            </div>
+                            <div className="absolute inset-x-0 bottom-0 px-5 pb-5 text-white">
+                                <div className="flex items-end justify-between gap-4 border-b border-white/30 pb-3">
+                                    <div className="min-w-0">
+                                        <p className="text-[10px] font-black uppercase tracking-[0.38em] text-rose-200">Whisper</p>
+                                        <h2 className="mt-1 break-words font-[inherit] text-[42px] font-semibold leading-[0.88] tracking-normal drop-shadow-sm">
+                                            {name}
+                                        </h2>
+                                    </div>
+                                    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/70 bg-white/15 shadow-[0_12px_30px_rgba(0,0,0,0.24)] backdrop-blur-sm">
+                                        {avatar ? (
+                                            <img src={avatar} alt="" className="h-full w-full object-cover" />
+                                        ) : (
+                                            <span className="font-[inherit] text-xl text-white">{avatarInitial}</span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="relative px-6 pb-7 pt-6">
+                            <div className="mb-5 grid grid-cols-[1fr_auto] items-start gap-4 border-b border-slate-950/12 pb-4">
+                                <div>
+                                    <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-500">Inner voice</p>
+                                    <p className="mt-1 text-[11px] font-semibold leading-snug text-slate-500">Captured at {timeStr}</p>
+                                </div>
+                                <div className="rounded-full border border-slate-950/15 px-3 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-rose-600">
+                                    No.{groupInnerVoiceIssue}
+                                </div>
+                            </div>
+
+                            <div className="relative">
+                                <div className="absolute -left-1 -top-6 select-none font-[inherit] text-[76px] leading-none text-rose-500/15">“</div>
+                                <p className="relative whitespace-pre-wrap break-words pl-5 font-[inherit] text-[18px] leading-[2.05] tracking-normal text-slate-800">
+                                    {groupInnerVoice}
+                                </p>
+                            </div>
+
+                            <div className="mt-7 grid grid-cols-[56px_1fr] gap-4 border-t border-slate-950/12 pt-5">
+                                <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-[3px] bg-slate-950 text-white shadow-sm">
+                                    {avatar ? (
+                                        <img src={avatar} alt="" className="h-full w-full object-cover grayscale-[18%] saturate-[0.75]" />
+                                    ) : (
+                                        <span className="font-[inherit] text-xl">{avatarInitial}</span>
+                                    )}
+                                </div>
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className="h-px w-8 bg-rose-500" />
+                                        <span className="text-[9px] font-black uppercase tracking-[0.28em] text-slate-400">Editor's note</span>
+                                    </div>
+                                    <p className="mt-2 break-words text-[11px] font-semibold leading-relaxed text-slate-500">
+                                        {name} 的未公开片刻，像夹在页缝里的一张小纸。
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
@@ -253,7 +456,7 @@ const GroupChat: React.FC = () => {
 
     // Context limit (like Chat app's settingsContextLimit)
     const [contextLimit, setContextLimit] = useState<number>(() => {
-        try { return parseInt(localStorage.getItem('groupchat_context_limit') || '30'); } catch { return 30; }
+        return readStoredGroupContextLimit(null);
     });
     const [liveGroupModeEnabled, setLiveGroupModeEnabled] = useState<boolean>(() => {
         try { return localStorage.getItem('groupchat_live_mode_enabled') === 'true'; } catch { return false; }
@@ -350,8 +553,11 @@ const GroupChat: React.FC = () => {
     // Initial Load
     useEffect(() => {
         if (activeGroup) {
+            const nextContextLimit = readStoredGroupContextLimit(activeGroup);
+            const loadLimit = getGroupContextLoadLimit(nextContextLimit);
+            setContextLimit(nextContextLimit);
             setVisibleCount(30);
-            DB.getRecentGroupMessagesWithCount(activeGroup.id, 30).then(({ messages: msgs, totalCount }) => {
+            DB.getRecentGroupMessagesWithCount(activeGroup.id, loadLimit).then(({ messages: msgs, totalCount }) => {
                 setMessages(sortGroupLogMessages(msgs));
                 setTotalMsgCount(totalCount);
             });
@@ -508,12 +714,25 @@ const GroupChat: React.FC = () => {
 
     const handleUpdateGroupInfo = async () => {
         if (!activeGroup) return;
-        const updatedGroup = { ...activeGroup, name: tempGroupName || activeGroup.name };
+        const normalizedContextLimit = normalizeGroupContextLimit(contextLimit);
+        const updatedGroup = {
+            ...activeGroup,
+            name: tempGroupName || activeGroup.name,
+            contextLimit: normalizedContextLimit,
+        };
+        writeStoredGroupContextLimit(updatedGroup.id, normalizedContextLimit);
         await DB.saveGroup(updatedGroup);
+        setContextLimit(normalizedContextLimit);
         setActiveGroup(updatedGroup);
         setGroups(prev => prev.map(group => group.id === updatedGroup.id ? updatedGroup : group));
         setModalType('none');
         addToast('群信息已更新', 'success');
+    };
+
+    const handleGroupContextLimitChange = (value: number) => {
+        const normalizedContextLimit = normalizeGroupContextLimit(value);
+        setContextLimit(normalizedContextLimit);
+        writeStoredGroupContextLimit(activeGroup?.id, normalizedContextLimit);
     };
 
     const handleGroupAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -733,6 +952,31 @@ ${logText.substring(0, 10000)}
         localStorage.setItem(GROUP_LIVE_AUTONOMOUS_ENABLED_KEY, 'true');
     };
 
+    const saveActiveGroupHandoffBridge = async (sourceMessages?: Message[]): Promise<void> => {
+        if (!activeGroup) return;
+        try {
+            let bridgeMessages = sourceMessages && sourceMessages.length > 0 ? sourceMessages : messages;
+            if (!sourceMessages || (totalMsgCount > 0 && bridgeMessages.length < totalMsgCount)) {
+                bridgeMessages = sortGroupLogMessages(await DB.getGroupMessages(activeGroup.id));
+            }
+
+            refreshGroupChatHandoffBridge({
+                group: activeGroup,
+                messages: bridgeMessages,
+                characters,
+                userProfile,
+                emojis,
+            });
+        } catch (error) {
+            console.warn('Failed to refresh group chat handoff bridge:', error);
+        }
+    };
+
+    const handleBackToGroupList = () => {
+        void saveActiveGroupHandoffBridge();
+        setView('list');
+    };
+
     const handleSendMessage = async (content: string, type: MessageType = 'text', metadata?: any) => {
         if (!activeGroup) return;
         const contentToSend = type === 'text' ? content.trim() : content;
@@ -759,7 +1003,8 @@ ${logText.substring(0, 10000)}
             return;
         }
 
-        setMessages(prev => sortGroupLogMessages([...prev, savedMessage]));
+        const optimisticMessages = sortGroupLogMessages([...messages, savedMessage]);
+        setMessages(optimisticMessages);
         setTotalMsgCount(prev => prev + 1);
         setInput('');
 
@@ -773,8 +1018,10 @@ ${logText.substring(0, 10000)}
             const updatedMsgs = sortGroupLogMessages(await DB.getGroupMessages(activeGroup.id));
             setMessages(updatedMsgs);
             setTotalMsgCount(updatedMsgs.length);
+            await saveActiveGroupHandoffBridge(updatedMsgs);
         } catch (error) {
             console.warn('Group message saved but refresh failed:', error);
+            await saveActiveGroupHandoffBridge(optimisticMessages);
         }
     };
 
@@ -797,6 +1044,28 @@ ${logText.substring(0, 10000)}
         return refreshed;
     };
 
+    const ensureGroupContextMessages = async (sourceMessages: Message[], limit = contextLimit): Promise<Message[]> => {
+        if (!activeGroup) return sortGroupLogMessages(sourceMessages);
+
+        const sortedSource = sortGroupLogMessages(sourceMessages);
+        const loadLimit = getGroupContextLoadLimit(limit);
+        if (sortedSource.length >= loadLimit || (totalMsgCount > 0 && totalMsgCount <= sortedSource.length)) {
+            return sortedSource;
+        }
+
+        try {
+            const { messages: loadedMessages, totalCount } = await DB.getRecentGroupMessagesWithCount(activeGroup.id, loadLimit);
+            const sortedLoaded = sortGroupLogMessages(loadedMessages);
+            setMessages(sortedLoaded);
+            setTotalMsgCount(totalCount);
+            setVisibleCount(prev => Math.min(Math.max(prev, GROUP_CHAT_CONTEXT_DEFAULT), sortedLoaded.length || GROUP_CHAT_CONTEXT_DEFAULT));
+            return sortedLoaded;
+        } catch (error) {
+            console.warn('Failed to load configured group context window:', error);
+            return sortedSource;
+        }
+    };
+
     const appendTextToChatContent = (content: any, text: string): any => {
         if (!text) return content;
         if (typeof content === 'string') return `${content}${text}`;
@@ -809,15 +1078,6 @@ ${logText.substring(0, 10000)}
         if (lastUserIdx < 0) return false;
         apiMessages[lastUserIdx].content = appendTextToChatContent(apiMessages[lastUserIdx].content, text);
         return true;
-    };
-
-    const buildGroupStreamingPreviewContent = (content: string, usePrefill: boolean, thinkTag: string): string => {
-        const contentForExtraction = usePrefill && !content.includes('<thinking>') && !content.includes('<think>')
-            ? `<${thinkTag}>\n${content}`
-            : content;
-        const extracted = extractThinking(contentForExtraction);
-        const liveText = extractGroupLiveText(extracted.content);
-        return ChatParser.sanitize(liveText.publicContent).trim();
     };
 
     const formatGroupLogForDirector = (sourceMessages: Message[], limit: number): string => {
@@ -909,64 +1169,72 @@ ${logText.substring(0, 10000)}
         }
     };
 
-    const saveGroupLivePublicReply = async (
-        speaker: CharacterProfile,
+    const buildGroupLiveBubbleMetadata = (
+        base: NonNullable<Message['metadata']>,
+        includePrivateMeta: boolean,
+        innerVoice: string | undefined,
+        thinking: string | undefined,
+    ): Message['metadata'] => ({
+        ...base,
+        groupLive: true,
+        ...(includePrivateMeta && innerVoice?.trim() ? { groupInnerVoice: innerVoice.trim() } : {}),
+        ...(includePrivateMeta && thinking?.trim() ? { thinking: thinking.trim() } : {}),
+    });
+
+    const buildGroupLivePublicBubbles = (
         publicContent: string,
         innerVoice: string | undefined,
         thinking: string | undefined,
-    ): Promise<number> => {
-        if (!activeGroup) return 0;
+    ): GroupLiveBubble[] => {
         const cleaned = ChatParser.sanitize(publicContent);
-        if (!cleaned.trim()) return 0;
+        if (!cleaned.trim()) return [];
 
         const parts = ChatParser.splitResponse(cleaned);
-        let savedCount = 0;
-        let firstSaved = true;
+        const bubbles: GroupLiveBubble[] = [];
+        let firstBubble = true;
+
+        const pushBubble = (bubble: GroupLiveBubble) => {
+            bubbles.push(bubble);
+            firstBubble = false;
+        };
 
         for (const part of parts) {
             if (part.type === 'emoji') {
                 const foundEmoji = emojis.find(e => e.name === part.content);
                 if (!foundEmoji) continue;
-                await new Promise(r => setTimeout(r, Math.random() * 500 + 250));
-                await DB.saveMessage({
-                    charId: speaker.id,
-                    groupId: activeGroup.id,
-                    role: 'assistant',
+                pushBubble({
                     type: 'emoji',
                     content: foundEmoji.url,
-                    metadata: {
-                        name: part.content,
-                        categoryId: foundEmoji.categoryId,
-                        groupLive: true,
-                        ...(firstSaved && innerVoice ? { groupInnerVoice: innerVoice } : {}),
-                        ...(firstSaved && thinking ? { thinking } : {}),
-                    },
+                    metadata: buildGroupLiveBubbleMetadata(
+                        {
+                            name: part.content,
+                            categoryId: foundEmoji.categoryId,
+                        },
+                        firstBubble,
+                        innerVoice,
+                        thinking,
+                    ),
+                    textLength: 2,
                 });
-                firstSaved = false;
-                savedCount += 1;
-                await refreshGroupMessages();
                 continue;
             }
 
             if (part.type === 'song') {
                 const songText = `分享了一首歌：${part.content.songName} - ${part.content.artist}`;
-                await DB.saveMessage({
-                    charId: speaker.id,
-                    groupId: activeGroup.id,
-                    role: 'assistant',
+                pushBubble({
                     type: 'text',
                     content: songText,
-                    metadata: {
-                        type: 'song_card',
-                        ...part.content,
-                        groupLive: true,
-                        ...(firstSaved && innerVoice ? { groupInnerVoice: innerVoice } : {}),
-                        ...(firstSaved && thinking ? { thinking } : {}),
-                    },
+                    metadata: buildGroupLiveBubbleMetadata(
+                        {
+                            type: 'song_card',
+                            ...part.content,
+                        },
+                        firstBubble,
+                        innerVoice,
+                        thinking,
+                    ),
+                    textLength: songText.replace(/\s+/g, '').length,
                 });
-                firstSaved = false;
-                savedCount += 1;
-                await refreshGroupMessages();
                 continue;
             }
 
@@ -974,27 +1242,146 @@ ${logText.substring(0, 10000)}
             for (const chunk of chunks) {
                 const cleanChunk = ChatParser.sanitize(chunk);
                 if (!ChatParser.hasDisplayContent(cleanChunk)) continue;
-                const delay = Math.min(Math.max(cleanChunk.length * 45, 450), 1800);
-                await new Promise(r => setTimeout(r, delay));
-                await DB.saveMessage({
-                    charId: speaker.id,
-                    groupId: activeGroup.id,
-                    role: 'assistant',
+                pushBubble({
                     type: 'text',
                     content: cleanChunk,
-                    metadata: {
-                        groupLive: true,
-                        ...(firstSaved && innerVoice ? { groupInnerVoice: innerVoice } : {}),
-                        ...(firstSaved && thinking ? { thinking } : {}),
-                    },
+                    metadata: buildGroupLiveBubbleMetadata(
+                        {},
+                        firstBubble,
+                        innerVoice,
+                        thinking,
+                    ),
+                    textLength: cleanChunk.replace(/\s+/g, '').length || cleanChunk.length,
                 });
-                firstSaved = false;
-                savedCount += 1;
-                await refreshGroupMessages();
             }
         }
 
-        return savedCount;
+        return bubbles;
+    };
+
+    const estimateGroupLiveBubbleTypingMs = (bubble: GroupLiveBubble): number => {
+        const base = bubble.type === 'emoji'
+            ? GROUP_LIVE_BUBBLE_TIMING.emojiTypingMs
+            : clamp(
+                (Math.max(1, bubble.textLength) / GROUP_LIVE_BUBBLE_TIMING.charsPerSecond) * 1000,
+                GROUP_LIVE_BUBBLE_TIMING.minTypingMs,
+                GROUP_LIVE_BUBBLE_TIMING.maxTypingMs,
+            );
+        const jitter = 1 + (Math.random() * 2 - 1) * GROUP_LIVE_BUBBLE_TIMING.jitterRatio;
+        return Math.round(clamp(base * jitter, GROUP_LIVE_BUBBLE_TIMING.minTypingMs, GROUP_LIVE_BUBBLE_TIMING.maxTypingMs));
+    };
+
+    const getGroupLiveBubblePauseMs = (): number => (
+        Math.round(GROUP_LIVE_BUBBLE_TIMING.pauseMinMs + Math.random() * (GROUP_LIVE_BUBBLE_TIMING.pauseMaxMs - GROUP_LIVE_BUBBLE_TIMING.pauseMinMs))
+    );
+
+    const releaseGroupLiveBubble = async (
+        speaker: CharacterProfile,
+        bubble: GroupLiveBubble,
+    ): Promise<number> => {
+        if (!activeGroup) return 0;
+        const timestamp = Date.now();
+        const messageDraft = {
+            charId: speaker.id,
+            groupId: activeGroup.id,
+            role: 'assistant' as const,
+            type: bubble.type,
+            content: bubble.content,
+            timestamp,
+            metadata: bubble.metadata,
+        };
+        const id = await DB.saveMessage(messageDraft);
+        const savedMessage: Message = { ...messageDraft, id };
+        setMessages(prev => sortGroupLogMessages([...prev, savedMessage]));
+        setTotalMsgCount(prev => prev + 1);
+        return 1;
+    };
+
+    const playGroupLiveBubbleSchedule = async (
+        plans: GroupLiveReplyPlan[],
+    ): Promise<{ savedCount: number; failures: unknown[] }> => {
+        const waitingQueues = plans
+            .filter(plan => plan.bubbles.length > 0)
+            .map(plan => ({ speaker: plan.speaker, bubbles: plan.bubbles }));
+        const activeQueues: GroupLiveBubbleQueue[] = [];
+        const failures: unknown[] = [];
+        let savedCount = 0;
+        let virtualNow = 0;
+
+        const startQueue = (queue: { speaker: CharacterProfile; bubbles: GroupLiveBubble[] }, startAt: number): GroupLiveBubbleQueue => {
+            const typingAt = startAt;
+            return {
+                ...queue,
+                index: 0,
+                typingAt,
+                readyAt: typingAt + estimateGroupLiveBubbleTypingMs(queue.bubbles[0]),
+            };
+        };
+
+        const fillTypingSlots = () => {
+            const maxTypers = Math.max(1, GROUP_LIVE_BUBBLE_TIMING.maxConcurrentTypers);
+            while (activeQueues.length < maxTypers && waitingQueues.length > 0) {
+                const nextQueue = waitingQueues.shift();
+                if (nextQueue) activeQueues.push(startQueue(nextQueue, virtualNow));
+            }
+        };
+
+        const updateVisibleTypers = () => {
+            setTypingCharIds(
+                activeQueues
+                    .filter(queue => queue.index < queue.bubbles.length && queue.typingAt <= virtualNow)
+                    .map(queue => queue.speaker.id),
+            );
+        };
+
+        fillTypingSlots();
+        while (activeQueues.length > 0) {
+            updateVisibleTypers();
+            const nextTypingAt = activeQueues.reduce(
+                (nextAt, queue) => queue.typingAt > virtualNow ? Math.min(nextAt, queue.typingAt) : nextAt,
+                Number.POSITIVE_INFINITY,
+            );
+            const nextReadyAt = activeQueues.reduce(
+                (nextAt, queue) => Math.min(nextAt, queue.readyAt),
+                Number.POSITIVE_INFINITY,
+            );
+            const nextEventAt = Math.min(nextTypingAt, nextReadyAt);
+            if (!Number.isFinite(nextEventAt)) break;
+
+            await wait(Math.max(0, nextEventAt - virtualNow));
+            virtualNow = nextEventAt;
+
+            if (nextTypingAt < nextReadyAt) {
+                updateVisibleTypers();
+                continue;
+            }
+
+            activeQueues.sort((left, right) => left.readyAt - right.readyAt);
+            const queue = activeQueues.shift();
+            if (!queue) break;
+
+            const bubble = queue.bubbles[queue.index];
+            try {
+                savedCount += await releaseGroupLiveBubble(queue.speaker, bubble);
+            } catch (error) {
+                failures.push(error);
+            }
+
+            const nextIndex = queue.index + 1;
+            if (nextIndex < queue.bubbles.length) {
+                const typingAt = virtualNow + getGroupLiveBubblePauseMs();
+                activeQueues.push({
+                    ...queue,
+                    index: nextIndex,
+                    typingAt,
+                    readyAt: typingAt + estimateGroupLiveBubbleTypingMs(queue.bubbles[nextIndex]),
+                });
+            }
+            fillTypingSlots();
+        }
+
+        setTypingCharIds([]);
+        return { savedCount, failures };
     };
 
     const readLiveRoleplayApiSelectionValue = (speakerId: string): string => {
@@ -1073,8 +1460,8 @@ ${logText.substring(0, 10000)}
         autonomous = false,
         apiResolution?: GroupLiveRoleplayApiResolution,
         contextMode: GroupLiveContextMode = 'serial',
-    ): Promise<number> => {
-        if (!activeGroup) return 0;
+    ): Promise<GroupLiveReplyPlan> => {
+        if (!activeGroup) return { speaker, bubbles: [] };
         const roleplayApi = apiResolution || resolveLiveRoleplayApiForSpeaker(speaker);
         const roleplayApiConfig = roleplayApi.config;
         const baseUrl = roleplayApiConfig.baseUrl.replace(/\/+$/, '');
@@ -1144,33 +1531,8 @@ ${logText.substring(0, 10000)}
             stream: false,
         };
 
-        const streamPreviewId = -Math.floor(Date.now() + Math.random() * 1000);
-        let streamPreviewVisible = false;
-        const clearStreamPreview = () => {
-            if (!streamPreviewVisible) return;
-            setMessages(prev => prev.filter(message => message.id !== streamPreviewId));
-            streamPreviewVisible = false;
-        };
-        const updateStreamPreview = (rawContent: string) => {
-            const previewContent = buildGroupStreamingPreviewContent(rawContent, usePrefill, thinkTag);
-            if (!previewContent) return;
-            streamPreviewVisible = true;
-            const previewMessage: Message = {
-                id: streamPreviewId,
-                charId: speaker.id,
-                groupId: activeGroup.id,
-                role: 'assistant',
-                type: 'text',
-                content: previewContent,
-                timestamp: Date.now(),
-                metadata: { streamingPreview: true, groupLive: true },
-            };
-            setMessages(prev => {
-                const existingIndex = prev.findIndex(message => message.id === streamPreviewId);
-                if (existingIndex === -1) return [...prev, previewMessage];
-                return prev.map(message => message.id === streamPreviewId ? previewMessage : message);
-            });
-        };
+        const clearStreamPreview = () => {};
+        const updateStreamPreview = (_rawContent: string) => {};
 
         let data: any;
         try {
@@ -1244,12 +1606,14 @@ ${logText.substring(0, 10000)}
             addToast(`${speaker.name} 悄悄对你说: ${privateCommand.content.substring(0, 15)}...`, 'info');
         }
 
-        return saveGroupLivePublicReply(
+        return {
             speaker,
-            liveText.publicContent,
-            liveText.innerVoice,
-            thinkingContent || undefined,
-        );
+            bubbles: buildGroupLivePublicBubbles(
+                liveText.publicContent,
+                liveText.innerVoice,
+                thinkingContent || undefined,
+            ),
+        };
     };
 
     const buildNextPhysicalRoleplayBatch = (
@@ -1304,7 +1668,7 @@ ${logText.substring(0, 10000)}
         autonomous: boolean,
         waveFingerprints: Set<string>,
         contextMode: GroupLiveContextMode,
-    ): Promise<number> => {
+    ): Promise<GroupLiveReplyPlan> => {
         try {
             return await generateLiveGroupReply(job.speaker, groupLog, groupMembers, autonomous, job.api, contextMode);
         } catch (firstError) {
@@ -1337,13 +1701,9 @@ ${logText.substring(0, 10000)}
         autonomous: boolean,
         waveFingerprints: Set<string>,
         contextMode: GroupLiveContextMode,
-    ): Promise<number> => {
-        try {
-            return await generateLiveGroupReplyWithPoolRetry(job, groupLog, groupMembers, autonomous, waveFingerprints, contextMode);
-        } finally {
-            setTypingCharIds(prev => prev.filter(id => id !== job.speaker.id));
-        }
-    };
+    ): Promise<GroupLiveReplyPlan> => (
+        generateLiveGroupReplyWithPoolRetry(job, groupLog, groupMembers, autonomous, waveFingerprints, contextMode)
+    );
 
     const runSemanticRoleplayWave = async (
         semanticSpeakers: CharacterProfile[],
@@ -1353,6 +1713,7 @@ ${logText.substring(0, 10000)}
     ): Promise<{ savedCount: number; failures: unknown[] }> => {
         let savedCount = 0;
         const failures: unknown[] = [];
+        const replyPlans: GroupLiveReplyPlan[] = [];
         let pendingSpeakers = [...semanticSpeakers];
         const contextMode: GroupLiveContextMode = semanticSpeakers.length > 1 ? 'snapshot' : 'serial';
 
@@ -1371,12 +1732,12 @@ ${logText.substring(0, 10000)}
                     wave.map(job => runSnapshotRoleplayJob(job, waveSnapshotLog, groupMembers, autonomous, waveFingerprints, contextMode)),
                 );
                 for (const result of results) {
-                    if (result.status === 'fulfilled') savedCount += result.value;
+                    if (result.status === 'fulfilled') replyPlans.push(result.value);
                     else failures.push(result.reason);
                 }
             } else {
                 try {
-                    savedCount += await runSnapshotRoleplayJob(
+                    const plan = await runSnapshotRoleplayJob(
                         wave[0],
                         waveSnapshotLog,
                         groupMembers,
@@ -1384,13 +1745,19 @@ ${logText.substring(0, 10000)}
                         waveFingerprints,
                         contextMode,
                     );
+                    replyPlans.push(plan);
                 } catch (error) {
                     failures.push(error);
                 }
             }
         }
 
-        await refreshGroupMessages();
+        const scheduled = await playGroupLiveBubbleSchedule(replyPlans);
+        savedCount += scheduled.savedCount;
+        failures.push(...scheduled.failures);
+
+        const refreshed = await refreshGroupMessages();
+        await saveActiveGroupHandoffBridge(refreshed);
         return { savedCount, failures };
     };
 
@@ -1407,8 +1774,9 @@ ${logText.substring(0, 10000)}
             if (groupMembers.length === 0) {
                 throw new Error('群成员数据异常：找不到可发言角色');
             }
+            const contextMsgs = await ensureGroupContextMessages(currentMsgs);
 
-            const speakerWaves = await requestLiveSpeakerWaves(currentMsgs, groupMembers, options.autonomous);
+            const speakerWaves = await requestLiveSpeakerWaves(contextMsgs, groupMembers, options.autonomous);
             const semanticWaves = speakerWaves
                 .map(wave => wave
                     .map(id => groupMembers.find(member => member.id === id))
@@ -1420,7 +1788,7 @@ ${logText.substring(0, 10000)}
                 return;
             }
 
-            let liveLog = sortGroupLogMessages(currentMsgs);
+            let liveLog = sortGroupLogMessages(contextMsgs);
             const waveFailures: unknown[] = [];
 
             for (const semanticWave of semanticWaves) {
@@ -1467,6 +1835,9 @@ ${logText.substring(0, 10000)}
                 console.error('Failed to refresh group messages:', error);
                 return [] as Message[];
             });
+            if (refreshed.length > 0) {
+                await saveActiveGroupHandoffBridge(refreshed);
+            }
             const embeddingApiKey = getEmbeddingConfig().apiKey || undefined;
             const hasSummaryApi = getReadySecondaryApiPoolEntries(getSecondaryApiPoolWithStatus()).length > 0;
             if (activeGroup && liveGroupModeEnabled && hasSummaryApi && embeddingApiKey && refreshed.length > 0) {
@@ -1521,9 +1892,10 @@ ${logText.substring(0, 10000)}
             if (groupMembers.length === 0) {
                 throw new Error('群成员数据异常：找不到可发言角色');
             }
+            const contextMsgs = await ensureGroupContextMessages(currentMsgs);
 
             // Calculate Time Context
-            const lastMsg = currentMsgs[currentMsgs.length - 1];
+            const lastMsg = contextMsgs[contextMsgs.length - 1];
             const timeGapInfo = lastMsg ? getTimeGapHint(lastMsg.timestamp) : "这是群聊的第一条消息。";
             const currentTimeStr = `${virtualTime.hours.toString().padStart(2, '0')}:${virtualTime.minutes.toString().padStart(2, '0')}`;
 
@@ -1578,7 +1950,7 @@ ${recentPrivate || '(暂无私聊)'}
             // 3. Group History (uses configurable context limit)
             // Keep raw image data out of prompt text, but attach recent valid images as OpenAI
             // content parts so the director can actually see what the group is reacting to.
-            const recentMsgsWindow = currentMsgs.filter(m => shouldIncludeMessageInContext(m)).slice(-contextLimit);
+            const recentMsgsWindow = contextMsgs.filter(m => shouldIncludeMessageInContext(m)).slice(-contextLimit);
             const MAX_ATTACHED_IMAGES = 3;
             const validImageWindowIdx: number[] = [];
             recentMsgsWindow.forEach((m, i) => {
@@ -1816,7 +2188,10 @@ ${attachedImagesNote}
         } finally {
             if (activeGroup) {
                 try {
-                    setMessages(await DB.getGroupMessages(activeGroup.id));
+                    const refreshed = sortGroupLogMessages(await DB.getGroupMessages(activeGroup.id));
+                    setMessages(refreshed);
+                    setTotalMsgCount(refreshed.length);
+                    await saveActiveGroupHandoffBridge(refreshed);
                 } catch (refreshError) {
                     console.error('Failed to refresh group messages:', refreshError);
                 }
@@ -1919,7 +2294,7 @@ ${attachedImagesNote}
                     </div>
                 ) : (
                     <div className="flex items-center gap-3 w-full">
-                        <button onClick={() => setView('list')} className="p-2 -ml-2 rounded-full hover:bg-slate-100 active:bg-slate-200 transition-colors">
+                        <button onClick={handleBackToGroupList} className="p-2 -ml-2 rounded-full hover:bg-slate-100 active:bg-slate-200 transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-slate-600"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                         </button>
                         <div className="flex-1 min-w-0" onClick={() => { setTempGroupName(activeGroup?.name || ''); setModalType('settings'); }}>
@@ -2125,7 +2500,7 @@ ${attachedImagesNote}
                     {/* Context Limit */}
                     <div className="pt-2 border-t border-slate-100">
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI 上下文条数 ({contextLimit})</label>
-                        <input type="range" min="20" max="5000" step="10" value={contextLimit} onChange={e => { const v = parseInt(e.target.value); setContextLimit(v); localStorage.setItem('groupchat_context_limit', String(v)); }} className="w-full h-2 bg-slate-200 rounded-full appearance-none accent-violet-500" />
+                        <input type="range" min={GROUP_CHAT_CONTEXT_MIN} max={GROUP_CHAT_CONTEXT_MAX} step="10" value={contextLimit} onChange={e => handleGroupContextLimitChange(parseInt(e.target.value, 10))} className="w-full h-2 bg-slate-200 rounded-full appearance-none accent-violet-500" />
                         <div className="flex justify-between text-[10px] text-slate-400 mt-1"><span>20 (省流)</span><span>5000 (超长记忆)</span></div>
                         <p className="text-[9px] text-slate-400 mt-1 leading-tight">控制每次触发AI导演时发送的群聊历史消息数量。越多上下文越丰富，但消耗更多token。</p>
                     </div>
@@ -2147,12 +2522,6 @@ ${attachedImagesNote}
                             >
                                 <span className={`block w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${liveGroupModeEnabled ? 'translate-x-5' : 'translate-x-0'}`}></span>
                             </button>
-                        </div>
-                        <div className="rounded-xl border border-violet-100 bg-violet-50/50 px-3 py-2">
-                            <div className="text-xs font-bold text-violet-600">导演自动排波</div>
-                            <p className="text-[9px] text-violet-500/80 mt-1 leading-tight">
-                                每轮由导演决定谁先说、谁同时冒泡。后一波能看到前一波；同一波只看本波开始时的快照，满足不同 key 条件时才真并发。
-                            </p>
                         </div>
                         <div className="mt-4 rounded-xl border border-slate-100 bg-white px-3 py-3">
                             <div className="flex items-center justify-between gap-3">

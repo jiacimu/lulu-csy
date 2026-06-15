@@ -8,6 +8,7 @@
 import type { TtsConfig } from '../types/tts';
 import type { TtsAudioChunk, WsConnectionState } from './minimaxTtsWs';
 import { trackedApiRequest } from './apiRequestLedger';
+import { resolveProxyEndpoint } from './proxyEndpoint';
 
 export interface ElevenLabsTtsHttpStreamCallbacks {
     onStateChange?: (state: WsConnectionState) => void;
@@ -202,14 +203,15 @@ export class ElevenLabsTtsHttpStream {
         };
 
         const modelId = resolveModelId(config.elevenLabs.modelId);
+        const streamEndpoint = resolveProxyEndpoint(ELEVENLABS_STREAM_PROXY_ENDPOINT);
         const response = await trackedApiRequest({
             feature: 'tts',
             reason: '语音通话 ElevenLabs TTS 流式合成',
             provider: 'elevenlabs',
             model: modelId,
             userInitiated: false,
-            url: ELEVENLABS_STREAM_PROXY_ENDPOINT,
-        }, () => fetch(ELEVENLABS_STREAM_PROXY_ENDPOINT, {
+            url: streamEndpoint,
+        }, () => fetch(streamEndpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

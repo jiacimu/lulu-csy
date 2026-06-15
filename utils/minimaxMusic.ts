@@ -1,6 +1,7 @@
 import { safeResponseJson } from './safeApi';
 import { safeTimeoutSignal } from './safeTimeout';
 import { buildBackendUrl, buildBackendHeaders } from './backendConfig';
+import { resolveProxyBaseUrl } from './proxyEndpoint';
 
 const DEFAULT_BASE_URL = '/minimax-music-api';
 const FREE_MODEL = 'music-2.6-free';
@@ -61,7 +62,7 @@ interface MinimaxMusicResponse {
  *   3. Pages Function proxy `/minimax-music-api` (Vite dev / legacy fallback)
  */
 function resolveBaseUrl(url?: string): string {
-    if (url) return url.replace(/\/+$/, '');
+    if (url) return resolveProxyBaseUrl(url, DEFAULT_BASE_URL);
 
     // Prefer the csyos-workers backend — Workers can hold the 60-180s music gen request.
     try {
@@ -69,7 +70,7 @@ function resolveBaseUrl(url?: string): string {
         if (workersUrl) return workersUrl.replace(/\/+$/, '');
     } catch { /* fallback below */ }
 
-    return DEFAULT_BASE_URL;
+    return resolveProxyBaseUrl(DEFAULT_BASE_URL, DEFAULT_BASE_URL);
 }
 
 function makeHeaders(apiKey: string, groupId?: string, useWorkersProxy?: boolean): Record<string, string> {

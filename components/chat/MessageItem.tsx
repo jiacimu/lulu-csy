@@ -12,6 +12,7 @@ import DefaultTransferCard from './plugins/DefaultTransferCard';
 import { stripJunk } from '../../utils/markdownLite';
 import { parseBilingual } from '../../utils/chatParser';
 import { getImageMessageDisplayUrl,resolveOriginalImageUrl } from '../../utils/generatedImageStorage';
+import { isNativeFileShareAvailable, shareImageFile } from '../../utils/nativeFileShare';
 import {
     deleteAfterglowCustomMotif,
     exportAfterglowMotifsToJson,
@@ -1706,6 +1707,19 @@ const MessageItem = React.memo(({
                 event.stopPropagation();
             }
         };
+        const saveImageFromPreview = async (event: React.MouseEvent<HTMLAnchorElement>) => {
+            event.stopPropagation();
+            if (!isNativeFileShareAvailable()) return;
+
+            event.preventDefault();
+            try {
+                const previewSrc = imagePreview?.src;
+                if (!previewSrc) return;
+                await shareImageFile(previewSrc, `sully-image-${m.id}`);
+            } catch (error) {
+                console.error('[ImagePreview] Native image save failed:', error);
+            }
+        };
         const openImagePreview = () => {
             const requestId = imagePreviewRequestRef.current + 1;
             imagePreviewRequestRef.current = requestId;
@@ -1752,7 +1766,7 @@ const MessageItem = React.memo(({
                     download={`sully-image-${m.id}.png`}
                     aria-label="保存原图"
                     title="保存原图"
-                    onClick={event => event.stopPropagation()}
+                    onClick={saveImageFromPreview}
                 >
                     <DownloadSimple className="h-5 w-5" weight="bold" />
                 </a>

@@ -14,6 +14,14 @@ import { formatMessageForContext,shouldIncludeMessageInContext } from './message
 import { formatCalendarContextForPrompt, loadCalendarContextForCharacter } from './calendarContext';
 import { getEffectiveHistoryStartMessageId,isAfterHistoryStart } from './historyStart';
 import type { PlaybackLyricSnapshot } from './playbackLyricsRuntime';
+import { findGroupCharacterByMemberId } from './groupChatDirector';
+import { getGroupMemoryHandoffStartIndex } from './groupChatMemory';
+import {
+    formatGroupChatHandoffBridgeForPrompt,
+    isPublicGroupHandoffMessage,
+    readGroupChatHandoffBridge,
+    type GroupChatHandoffBridge,
+} from './groupChatHandoffBridge';
 
 interface ChatActionPromptOptions {
     autoVoice?: boolean;
@@ -31,6 +39,9 @@ interface ChatActionPromptFlags extends ChatActionPromptOptions {
     canvaEnabled: boolean;
     xhsEnabled: boolean;
 }
+
+const GROUP_CONTEXT_PROMPT_GROUP_LIMIT = 1;
+const GROUP_CONTEXT_FALLBACK_MESSAGE_LIMIT = 40;
 
 const buildChatActionPrompt = (
     charName: string,
@@ -382,22 +393,65 @@ export const ChatPrompts = {
         try {
             const memberGroups = groups.filter(g => g.members.includes(char.id));
             if (memberGroups.length > 0) {
-                let allGroupMsgs: (Message & { groupName: string })[] = [];
-                for (const g of memberGroups) {
-                    const gMsgs = await DB.getGroupMessages(g.id);
-                    const enriched = gMsgs.map(m => ({ ...m, groupName: g.name }));
-                    allGroupMsgs = [...allGroupMsgs, ...enriched];
-                }
-                allGroupMsgs.sort((a, b) => b.timestamp - a.timestamp);
-                const recentGroupMsgs = allGroupMsgs.slice(0, 200).reverse();
+                const bridgeCandidates = memberGroups
+                    .map(g => ({ group: g, bridge: readGroupChatHandoffBridge(g.id) }))
+                    .filter((item): item is { group: GroupProfile; bridge: GroupChatHandoffBridge } => Boolean(item.bridge))
+                    .sort((a, b) => (b.bridge.endTimestamp || b.bridge.updatedAt || 0) - (a.bridge.endTimestamp || a.bridge.updatedAt || 0));
+                const bridgedGroupIds = new Set(bridgeCandidates.map(item => item.group.id));
+                const bridgePrompts = bridgeCandidates
+                    .slice(0, GROUP_CONTEXT_PROMPT_GROUP_LIMIT)
+                    .map(item => formatGroupChatHandoffBridgeForPrompt(item.bridge, char, userProfile));
 
-                if (recentGroupMsgs.length > 0) {
-                    // 这里简化了 UserProfile 查找，假设非 User 即 Member
-                    const groupLogStr = recentGroupMsgs.map(m => {
-                        const dateStr = new Date(m.timestamp).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-                        return `[${dateStr}] [Group: ${m.groupName}] ${m.role === 'user' ? userProfile.name : 'Member'}: ${m.content}`;
-                    }).join('\n');
-                    baseSystemPrompt += `\n### [Background Context: Recent Group Activities]\n(注意：你是以下群聊的成员...)\n${groupLogStr}\n`;
+                if (bridgePrompts.length > 0) {
+                    baseSystemPrompt += `\n### 【轻量群聊接续桥】\n以下是${userProfile.name}从群聊语境回到私聊时可参考的短接续桥。它只覆盖正式群聊回顾 checkpoint 之后尚未总结的公开消息，并且最多注入最近 ${GROUP_CONTEXT_PROMPT_GROUP_LIMIT} 个相关群。请根据时间戳判断远近；不要当长期总结，不要机械复述。\n${bridgePrompts.join('\n\n')}\n`;
+                }
+
+                const fallbackGroups = memberGroups.filter(g => !bridgedGroupIds.has(g.id));
+                if (fallbackGroups.length > 0) {
+                    const allCharacters = await DB.getAllCharacters();
+                    const fallbackCandidates: Array<{ group: GroupProfile; messages: Message[]; latestTimestamp: number }> = [];
+                    for (const g of fallbackGroups) {
+                        const gMsgs = await DB.getGroupMessages(g.id);
+                        const handoffStartIndex = getGroupMemoryHandoffStartIndex(g.id);
+                        const enriched = gMsgs
+                            .sort((a, b) => a.timestamp - b.timestamp)
+                            .filter(shouldIncludeMessageInContext)
+                            .slice(handoffStartIndex)
+                            .filter(isPublicGroupHandoffMessage)
+                        if (enriched.length === 0) continue;
+                        fallbackCandidates.push({
+                            group: g,
+                            messages: enriched,
+                            latestTimestamp: enriched[enriched.length - 1]?.timestamp || 0,
+                        });
+                    }
+                    const allGroupMsgs: (Message & { groupName: string })[] = fallbackCandidates
+                        .sort((a, b) => b.latestTimestamp - a.latestTimestamp)
+                        .slice(0, GROUP_CONTEXT_PROMPT_GROUP_LIMIT)
+                        .flatMap(item => item.messages.map(m => ({ ...m, groupName: item.group.name })));
+                    allGroupMsgs.sort((a, b) => b.timestamp - a.timestamp);
+                    const recentGroupMsgs = allGroupMsgs.slice(0, GROUP_CONTEXT_FALLBACK_MESSAGE_LIMIT).reverse();
+
+                    if (recentGroupMsgs.length > 0) {
+                        const groupLogStr = recentGroupMsgs.map(m => {
+                            const dateStr = new Date(m.timestamp).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+                            const senderName = m.role === 'user'
+                                ? userProfile.name
+                                : (m.charId === char.id
+                                    ? `${char.name}（我）`
+                                    : (findGroupCharacterByMemberId(m.charId, allCharacters)?.name || '群成员'));
+                            const content = formatMessageForContext(m, {
+                                surface: 'chat',
+                                charName: senderName,
+                                userName: userProfile.name,
+                                emojis,
+                                compact: true,
+                                maxContentChars: 360,
+                            }) || (m.type === 'image' ? '[图片]' : m.content);
+                            return `[${dateStr}] [${m.groupName}] ${senderName}: ${content}`;
+                        }).join('\n');
+                        baseSystemPrompt += `\n### 【近期群聊尾巴｜兜底】\n以下是没有轻量接续桥时的兜底公开群聊尾巴，最多取最近 ${GROUP_CONTEXT_PROMPT_GROUP_LIMIT} 个相关群。它不是你和${userProfile.name}的私聊；如果${userProfile.name}提起群里的事，你可以按时间戳自然接上。不要把它当作长期总结，也不要生硬复述整段。\n${groupLogStr}\n`;
+                    }
                 }
             }
         } catch (e) { console.error("Failed to load group context", e); }

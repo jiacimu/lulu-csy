@@ -20,6 +20,7 @@ import type {
   TtsQueryTaskResponse,
 } from '../types/tts';
 import { trackedApiRequest,type ApiRequestTraceMeta } from './apiRequestLedger';
+import { resolveProxyBaseUrl } from './proxyEndpoint';
 
 // ─── Constants ──────────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ type TtsPreprocessRequestConfig = {
 
 /** 统一解析 baseUrl，去除尾部斜杠，提供默认值 */
 function resolveBaseUrl(url?: string): string {
-    return (url || DEFAULT_BASE_URL).replace(/\/+$/, '');
+    return resolveProxyBaseUrl(url, DEFAULT_BASE_URL);
 }
 
 /** 构建请求头 */

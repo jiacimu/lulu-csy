@@ -1,5 +1,6 @@
 import type { APIConfig, CharacterProfile, UserProfile } from '../types';
 import { extractContent, extractJson, safeFetchJson } from './safeApi';
+import { resolveProxyEndpoint } from './proxyEndpoint';
 
 export type EchoVoiceDesignModelId = 'eleven_multilingual_ttv_v2' | 'eleven_ttv_v3';
 
@@ -261,7 +262,7 @@ async function requestVoiceDesign(
     options: DesignVoiceOptions,
     shouldEnhance: boolean,
 ): Promise<Response> {
-    return fetch(ECHO_VOICE_DESIGN_ENDPOINT, {
+    return fetch(resolveProxyEndpoint(ECHO_VOICE_DESIGN_ENDPOINT), {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -339,7 +340,7 @@ export async function createElevenLabsVoice(options: CreateVoiceOptions): Promis
     if (!generatedVoiceId) throw new Error('请先选择一个预览音色');
 
     const voiceDescription = ensureDescriptionLength(options.voiceDescription);
-    const response = await fetch(ECHO_VOICE_CREATE_ENDPOINT, {
+    const response = await fetch(resolveProxyEndpoint(ECHO_VOICE_CREATE_ENDPOINT), {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

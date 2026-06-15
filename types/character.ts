@@ -132,6 +132,7 @@ export interface GroupProfile {
     name: string;
     members: string[];
     avatar?: string;
+    contextLimit?: number;
     createdAt: number;
 }
 
