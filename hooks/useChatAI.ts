@@ -201,7 +201,7 @@ function buildStreamingPreviewContent(content: string, usePrefill: boolean, thin
     return ChatParser.sanitize(extracted.content).trim();
 }
 
-async function fetchStreamingChatCompletion(
+export async function fetchStreamingChatCompletion(
     url: string,
     init: RequestInit,
     onPreview: (content: string) => void,

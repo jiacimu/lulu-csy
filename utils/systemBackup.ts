@@ -34,6 +34,7 @@ import {
     PHOTO_STYLE_PRESETS_KEY,
 } from './runtimeConfig';
 import { safeTimeoutSignal } from './safeTimeout';
+import { loadSparkCharHandles, saveSparkCharHandles } from './socialHandlesStorage';
 
 // ─── JSZip Dynamic Loader ───────────────────────────────────────────────
 
@@ -1231,6 +1232,7 @@ export async function exportSystemData(
     // Fetch Social App & Room Assets
     const sparkUserBg = await DB.getAsset('spark_user_bg');
     const sparkSocialProfile = await DB.getAsset('spark_social_profile');
+    const sparkCharHandles = await loadSparkCharHandles();
     const roomCustomAssets = await DB.getAsset('room_custom_assets_list');
     const musicAssets = await exportMusicAssetsForBackup(mode);
     const halfSugarData = (mode === 'text_only' || mode === 'full')
@@ -1258,7 +1260,7 @@ export async function exportSystemData(
         theme: state.theme,
 
         socialAppData: (mode === 'text_only' || mode === 'media_only' || mode === 'full') ? {
-            charHandles: JSON.parse(localStorage.getItem('spark_char_handles') || '{}'),
+            charHandles: sparkCharHandles,
             userProfile: sparkSocialProfile ? JSON.parse(sparkSocialProfile) : undefined,
             userId: localStorage.getItem('spark_user_id') || undefined,
             userBg: sparkUserBg || undefined
@@ -1604,7 +1606,7 @@ export async function importSystemData(
         if (data.photoStylePresets) localStorage.setItem(PHOTO_STYLE_PRESETS_KEY, JSON.stringify(data.photoStylePresets));
 
         if (data.socialAppData) {
-            if (data.socialAppData.charHandles) localStorage.setItem('spark_char_handles', JSON.stringify(data.socialAppData.charHandles));
+            if (data.socialAppData.charHandles) await saveSparkCharHandles(data.socialAppData.charHandles);
             if (data.socialAppData.userId) localStorage.setItem('spark_user_id', data.socialAppData.userId);
             if (data.socialAppData.userProfile) await DB.saveAsset('spark_social_profile', JSON.stringify(data.socialAppData.userProfile));
             if (data.socialAppData.userBg) await DB.saveAsset('spark_user_bg', data.socialAppData.userBg);

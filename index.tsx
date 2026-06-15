@@ -7,16 +7,25 @@ import { initAppLifecycle } from './utils/appLifecycle';
 import { preloadLocalAssets,scheduleIdlePreload } from './utils/preloadResources';
 import { installIOSStandaloneWorkaround } from './utils/iosStandalone';
 import { installViewportRepair } from './utils/viewportRepair';
+import { startRuntimeHealthProbe } from './utils/runtimeHealthProbe';
+import {
+  captureCollectionWallDebugConsoleArgs,
+  installCollectionWallDebugConsoleCapture,
+} from './utils/collectionWallDebugLog';
+
+installCollectionWallDebugConsoleCapture();
 
 // ── Production Log Suppression ──────────────────────────────────
 // 生产环境下隐藏 console.log / console.warn，只保留 console.error
 // 开发时 (vite dev) 不受影响，所有日志正常输出
 if (!import.meta.env.DEV) {
-  const noop = () => {};
-  console.log = noop;
-  console.warn = noop;
-  console.debug = noop;
-  console.info = noop;
+  const keepCollectionWallDebug = (level: 'log' | 'info' | 'warn' | 'debug') => (...args: unknown[]) => {
+    captureCollectionWallDebugConsoleArgs(level, args);
+  };
+  console.log = keepCollectionWallDebug('log');
+  console.warn = keepCollectionWallDebug('warn');
+  console.debug = keepCollectionWallDebug('debug');
+  console.info = keepCollectionWallDebug('info');
   // console.error 保留 → 用户能看到真正的报错
 }
 
@@ -28,6 +37,7 @@ initAppLifecycle();
 
 installIOSStandaloneWorkaround();
 installViewportRepair();
+startRuntimeHealthProbe();
 
 // 预加载本地关键图片（心声水墨画 + 邮戳装饰）
 preloadLocalAssets();

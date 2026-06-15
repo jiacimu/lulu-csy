@@ -18,6 +18,11 @@ import { parseBilingual } from './chatParser';
 
 const MAX_CHAT_LINES = 90;
 const MAX_CHAT_CHARS = 12000;
+const MAX_SOURCE_MESSAGES_BY_PERIOD: Record<YesterdayNewspaperPeriodType, number> = {
+    daily: 180,
+    weekly: 240,
+    monthly: 320,
+};
 const MAX_MEMORY_LINES = 12;
 const GENERATING_STALE_MS = 2 * 60 * 1000;
 const NEWSPAPER_MAX_COMPLETION_TOKENS = 65536;
@@ -547,13 +552,17 @@ async function fetchGraphRelationsForDay(charId: string, day: NewspaperPeriodBou
 }
 
 async function collectNewspaperSources(char: CharacterProfile, day: NewspaperPeriodBounds): Promise<NewspaperSourceBundle> {
-    const [allMessages, diaries, vectorMemories, graphRelations] = await Promise.all([
-        DB.getMessagesByCharId(char.id).catch(() => [] as Message[]),
+    const [messages, diaries, vectorMemories, graphRelations] = await Promise.all([
+        DB.getMessagesByCharIdBetweenTimestamps(
+            char.id,
+            day.start,
+            day.end,
+            MAX_SOURCE_MESSAGES_BY_PERIOD[day.periodType] || MAX_SOURCE_MESSAGES_BY_PERIOD.daily,
+        ).catch(() => [] as Message[]),
         DB.getDiariesByCharId(char.id).catch(() => []),
         DB.getAllVectorMemories(char.id).catch(() => [] as VectorMemory[]),
         fetchGraphRelationsForDay(char.id, day),
     ]);
-    const messages = allMessages.filter(message => isWithinDay(message.timestamp, day));
     const diaryTexts = extractDiaryTexts(diaries, day);
     const traditionalMemories = extractTraditionalMemories(char, day);
     const dayVectorMemories = vectorMemories

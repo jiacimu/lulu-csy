@@ -54,7 +54,7 @@ const Settings: React.FC = () => {
     const ActiveComponent = activePanel !== 'menu' ? panelComponents[activePanel] : null;
 
     return (
-        <div className="h-full w-full min-w-0 overflow-hidden bg-slate-50/50 flex flex-col font-light relative">
+        <div className="h-full w-full min-w-0 overflow-hidden bg-slate-50 flex flex-col font-light relative">
 
             {/* GLOBAL PROGRESS OVERLAY */}
             {sysOperation.status === 'processing' && (
@@ -85,7 +85,7 @@ const Settings: React.FC = () => {
                 </div>
             </div>
 
-            <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-5 sm:p-5 space-y-6 no-scrollbar pb-20">
+            <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-5 sm:p-5 space-y-6 no-scrollbar pb-[calc(5rem+var(--safe-bottom,env(safe-area-inset-bottom,0px)))]">
                 {activePanel === 'menu' ? (
                     <SettingsMenu onNavigate={setActivePanel} />
                 ) : (

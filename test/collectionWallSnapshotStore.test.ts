@@ -91,4 +91,32 @@ describe('collection wall snapshot store', () => {
             order: 3,
         });
     });
+
+    it('roundtrips multiple free-layout items without rewriting order or layer values', async () => {
+        const sourceItems = [
+            makeItem({ id: 'card-high-order', bookId: 'book-a', x: 320, y: 180, w: 210, h: 160, rotation: 4, z: 90, order: 40, createdAt: 20 }),
+            makeItem({ id: 'card-low-order', bookId: 'book-b', x: 42, y: 420, w: 160, h: 110, rotation: -9, z: 12, order: 10, createdAt: 10 }),
+            makeItem({ id: 'text-mid-order', type: 'text', bookId: undefined, text: { content: '稳定', preset: 'big_plain' }, x: 510, y: 60, w: 180, h: 120, rotation: 1.5, z: 33, order: 30, createdAt: 30 }),
+        ];
+
+        await DB.replaceCollectionWallSnapshot(makeWall(), sourceItems);
+
+        const items = await DB.getCollectionWallItemsByWallId('wall-a');
+        const byId = new Map(items.map(item => [item.id, item]));
+
+        expect(items.map(item => item.id)).toEqual(['card-low-order', 'text-mid-order', 'card-high-order']);
+        for (const source of sourceItems) {
+            expect(byId.get(source.id)).toMatchObject({
+                id: source.id,
+                bookId: source.bookId,
+                x: source.x,
+                y: source.y,
+                w: source.w,
+                h: source.h,
+                rotation: source.rotation,
+                z: source.z,
+                order: source.order,
+            });
+        }
+    });
 });

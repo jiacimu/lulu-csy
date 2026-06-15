@@ -18,6 +18,7 @@ import {
     type NormalizedGeneratedComment,
     type NormalizedGeneratedPost,
 } from '../utils/socialAuthor';
+import { loadSparkCharHandles, saveSparkCharHandles } from '../utils/socialHandlesStorage';
 
 // --- Constants & Styles ---
 const BRAND_COLOR = '#ff2442'; // Premium Red
@@ -245,12 +246,8 @@ const SocialApp: React.FC = () => {
             };
             setSocialProfile(effectiveProfile);
 
-            // Load Handles
-            const savedHandles = localStorage.getItem('spark_char_handles');
-            let initialHandles: Record<string, SubAccount[]> = {};
-            if (savedHandles) {
-                try { initialHandles = JSON.parse(savedHandles); } catch(e) {}
-            }
+            // Load Handles from IndexedDB and migrate the legacy localStorage payload.
+            const initialHandles = await loadSparkCharHandles();
             
             // Ensure every character has at least one default handle
             characters.forEach(c => {
@@ -279,10 +276,12 @@ const SocialApp: React.FC = () => {
         setSelectedPost(current => current ? normalizeStoredSocialPost(identityIndex, current) : current);
     }, [identityIndex]);
 
-    // Save Handles to LocalStorage whenever updated
+    // Save Handles to IndexedDB whenever updated. These can grow past localStorage quota.
     useEffect(() => {
         if (Object.keys(characterHandles).length > 0) {
-            localStorage.setItem('spark_char_handles', JSON.stringify(characterHandles));
+            saveSparkCharHandles(characterHandles).catch((err) => {
+                console.error('Failed to save Spark character handles:', err);
+            });
         }
     }, [characterHandles]);
 

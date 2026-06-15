@@ -1,7 +1,7 @@
 
 
 const DB_NAME = 'AetherOS_Data';
-const DB_VERSION = 49; // Bumped for Collection Hall light walls
+const DB_VERSION = 50; // Bumped to repair group message indexes
 
 export const STORE_CHARACTERS = 'characters';
 export const STORE_MESSAGES = 'messages';
@@ -98,7 +98,7 @@ export const openDB = (): Promise<IDBDatabase> => {
                 msgStore.createIndex('ownerUserIdCharIdTimestampId', ['ownerUserId', 'charId', 'timestamp', 'id'], { unique: false });
             } else {
                 const msgStore = (event.target as IDBOpenDBRequest).transaction?.objectStore(STORE_MESSAGES);
-                if (msgStore && !msgStore.indexNames.contains(STORE_MESSAGES) && !msgStore.indexNames.contains('groupId')) {
+                if (msgStore && !msgStore.indexNames.contains('groupId')) {
                     try {
                         msgStore.createIndex('groupId', 'groupId', { unique: false });
                     } catch (e) { console.log('Index already exists'); }

@@ -114,6 +114,7 @@ import {
     buildCollectionSourceKey,
     inferCollectionBookKind,
 } from '../utils/collectionBooks';
+import { runtimeHealthProbe } from '../utils/runtimeHealthProbe';
 import { fnv1aBytes } from '../utils/fnv1a';
 import { PaperPlaneTilt, Plus, Smiley, Trash, X } from '@phosphor-icons/react';
 
@@ -161,6 +162,20 @@ function isCollectableFreeformStatusCard(card?: StatusCardData): card is StatusC
         && typeof card.meta?.html === 'string'
         && card.meta.html.trim()
     );
+}
+
+function getMessageStatusCard(message: Message): StatusCardData | undefined {
+    const card = message.metadata?.statusCardData;
+    return card && typeof card === 'object' ? card as StatusCardData : undefined;
+}
+
+function countMessageStatusCards(messages: Message[], cardType?: StatusCardData['cardType']): number {
+    return messages.reduce((count, message) => {
+        const card = getMessageStatusCard(message);
+        if (!card) return count;
+        if (cardType && card.cardType !== cardType) return count;
+        return count + 1;
+    }, 0);
 }
 
 function buildCollectionInputForStatusCard(charId: string, card: StatusCardData, sourceMessage: Message) {
@@ -4611,6 +4626,36 @@ const Chat: React.FC = () => {
             hideSystemLogs: char?.hideSystemLogs,
         }).slice(-visibleCount);
     }, [messages, char?.hideBeforeMessageId, char?.hideSystemLogs, visibleCount]);
+
+    useEffect(() => {
+        runtimeHealthProbe.setContext({
+            route: char ? 'chat' : null,
+            charId: char?.id || null,
+        });
+    }, [char?.id]);
+
+    useEffect(() => {
+        runtimeHealthProbe.reportCustom({
+            chatLoadedMessageCount: messages.length,
+            chatDisplayMessageCount: displayMessages.length,
+            chatVisibleCount: visibleCount,
+            chatStatusCardCount: countMessageStatusCards(displayMessages),
+            chatFreeformStatusCardCount: countMessageStatusCards(displayMessages, 'freeform'),
+            newspaperEnabled: newspaperFeatureEnabled,
+            newspaperGenerating: isYesterdayNewspaperGenerating,
+            newspaperRecordCount: yesterdayNewspaperRecords.length,
+            newspaperStatuses: yesterdayNewspaperRecords
+                .map(record => `${record.periodType || 'daily'}:${record.status}`)
+                .join(','),
+        });
+    }, [
+        displayMessages,
+        isYesterdayNewspaperGenerating,
+        messages.length,
+        newspaperFeatureEnabled,
+        visibleCount,
+        yesterdayNewspaperRecords,
+    ]);
 
     useEffect(() => {
         if (!highlightedMessageId) return;

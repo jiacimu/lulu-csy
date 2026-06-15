@@ -86,6 +86,37 @@ describe('date session prompt assembly', () => {
         expect(userMessage).not.toContain('上一轮正文');
     });
 
+    it('injects recalled vector memory into the context package only', () => {
+        const messages = buildDateSessionPromptMessages({
+            char,
+            userProfile,
+            allMsgs: [],
+            vectorMemoryBlock: '**你的记忆 · 浮现**\n1. 雨夜见面\n   你们一起躲过雨。',
+            currentUserInput: '这雨声有点熟悉。',
+            turnDirectives: {
+                userName: userProfile.name,
+                directorNote: '',
+                photoPromptBlock: '',
+                bilingualNote: '',
+                lo: 105,
+                hi: 195,
+                rotationPicks: [],
+                stallNudge: '',
+            },
+        });
+
+        const [systemMessage, contextMessage, userMessage] = messages.map(message => message.content);
+
+        expect(contextMessage).toContain('<recalled_memory>');
+        expect(contextMessage).toContain('此时一些与当前话题相关的往事浮现在你的脑海里，不是新的用户输入；不要逐条复述');
+        expect(contextMessage).toContain('**你的记忆 · 浮现**');
+        expect(contextMessage).toContain('</recalled_memory>');
+        expect(contextMessage.indexOf('</long_term_memory>')).toBeLessThan(contextMessage.indexOf('<recalled_memory>'));
+        expect(contextMessage.indexOf('</recalled_memory>')).toBeLessThan(contextMessage.indexOf('<recent_summary>'));
+        expect(systemMessage).not.toContain('<recalled_memory>');
+        expect(userMessage).not.toContain('<recalled_memory>');
+    });
+
     it('does not inject old status snapshots when the Date status bar is disabled', () => {
         const statusMessage: Message = {
             id: 11,

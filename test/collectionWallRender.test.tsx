@@ -5,6 +5,7 @@ import {
     buildDefaultBondWidgetItem,
     buildCollectionWallDecorPreset,
     buildInitialWallItems,
+    buildWallZoneEntriesFromItems,
     buildWallAssetEntry,
     CharRemarkPopup,
     CharInviteOrb,
@@ -16,12 +17,14 @@ import {
     getCharInviteAvatarAsset,
     getCharInviteOrbStorageKey,
     getMoveableStartTranslate,
+    getViewportWallCanvasHeight,
     getWallBackgroundEffects,
     getPersistableWallItems,
     isCollectionWallDecorPresetItem,
     isCharInviteAvatarAsset,
     materializePlacedLooseWallItems,
     clientPointToWallCanvasPoint,
+    normalizeWallDraftItemsForSave,
     normalizeWallItemFrameForCanvas,
     pickCharRemarkTemplate,
     resolveCollectionWallPresetBackground,
@@ -254,6 +257,22 @@ describe('collection wall real card rendering', () => {
         expect(point).toEqual({ x: 300, y: 480 });
     });
 
+    it('keeps the free-layout canvas to one viewport instead of extending for content', () => {
+        expect(getViewportWallCanvasHeight(812, 0.5)).toBe(1624);
+        expect(getViewportWallCanvasHeight(700, 2)).toBe(350);
+    });
+
+    it('keeps manual auto-arrange inside the fixed viewport canvas', () => {
+        const arranged = autoArrangeWallItems([
+            makeWallItem(1),
+            makeWallItem(2),
+            makeWallItem(3),
+            makeWallItem(4),
+        ], { canvasHeight: 500 });
+
+        expect(Math.max(...arranged.map(item => (item.y || 0) + item.h))).toBeLessThanOrEqual(500);
+    });
+
     it('normalizes moveable drag frames as absolute canvas coordinates', () => {
         const item = { ...makeWallItem(1), x: 220, y: 160, w: 120, h: 90 };
         const start = getMoveableStartTranslate(item);
@@ -293,6 +312,97 @@ describe('collection wall real card rendering', () => {
     it('adds the default avatar bond widget unless the wall hid it', () => {
         expect(buildInitialWallItems(makeWall(), []).some(item => item.type === 'bond')).toBe(true);
         expect(buildInitialWallItems({ ...makeWall(), defaultBondWidgetHidden: true }, []).some(item => item.type === 'bond')).toBe(false);
+    });
+
+    it('roundtrips free-layout entries without rewriting frame order or layer values', () => {
+        const wall = { ...makeWall(), defaultBondWidgetHidden: true };
+        const book = makeBook({ id: 'book-card', title: '票根' });
+        const asset = makeAsset();
+        const cardItem: CollectionWallItem = {
+            ...makeWallItem(1),
+            id: 'card-placed',
+            bookId: book.id,
+            x: 240,
+            y: 90,
+            w: 315,
+            h: 205,
+            rotation: 7.25,
+            z: 31,
+            order: 40,
+        };
+        const imageItem: CollectionWallItem = {
+            ...makeWallItem(2),
+            id: 'image-placed',
+            type: 'image',
+            bookId: undefined,
+            assetId: asset.id,
+            x: 36,
+            y: 420,
+            w: 128,
+            h: 128,
+            rotation: -4,
+            z: 12,
+            order: 10,
+        };
+        const textItem: CollectionWallItem = {
+            ...makeWallItem(3),
+            id: 'text-placed',
+            type: 'text',
+            bookId: undefined,
+            text: { content: '不要重排', preset: 'big_plain' },
+            x: 520,
+            y: 330,
+            w: 180,
+            h: 100,
+            rotation: 2,
+            z: 44,
+            order: 30,
+        };
+        const htmlItem: CollectionWallItem = {
+            ...makeWallItem(4),
+            id: 'html-placed',
+            type: 'html',
+            bookId: undefined,
+            html: HTML,
+            x: 80,
+            y: 130,
+            w: 220,
+            h: 160,
+            rotation: 0.5,
+            z: 7,
+            order: 20,
+        };
+        const bondItem: CollectionWallItem = {
+            ...buildDefaultBondWidgetItem(wall, 99, 88),
+            id: 'bond-placed',
+            x: 410,
+            y: 24,
+            w: 320,
+            h: 110,
+            rotation: -1,
+            z: 88,
+            order: 99,
+        };
+        const sourceItems = [cardItem, imageItem, textItem, htmlItem, bondItem];
+        const { entries } = buildWallZoneEntriesFromItems(wall, sourceItems, [book], [asset]);
+        const rebuilt = buildInitialWallItems(wall, entries);
+
+        expect(rebuilt).toHaveLength(sourceItems.length);
+        const rebuiltById = new Map(rebuilt.map(item => [item.id, item]));
+        for (const source of sourceItems) {
+            const rebuiltItem = rebuiltById.get(source.id);
+            expect(rebuiltItem?.bookId ?? undefined).toBe(source.bookId);
+            expect(rebuiltItem).toMatchObject({
+                id: source.id,
+                x: source.x,
+                y: source.y,
+                w: source.w,
+                h: source.h,
+                rotation: source.rotation,
+                z: source.z,
+                order: source.order,
+            });
+        }
     });
 
     it('selects hidden char invite avatars without treating ordinary assets as invite avatars', () => {
@@ -552,6 +662,8 @@ describe('collection wall real card rendering', () => {
             bookId: 'book-unplaced',
             x: null,
             y: null,
+            z: 91,
+            order: 70,
         };
         const placedLoose: CollectionWallItem = {
             ...makeWallItem(2),
@@ -560,18 +672,25 @@ describe('collection wall real card rendering', () => {
             x: 120,
             y: 260,
             rotation: -8,
+            z: 19,
+            order: 23,
         };
 
         const materialized = materializePlacedLooseWallItems([unplacedLoose, placedLoose]);
+        const normalized = normalizeWallDraftItemsForSave([unplacedLoose, placedLoose]);
         const saved = getPersistableWallItems([unplacedLoose, placedLoose]);
 
         expect(materialized[0].id).toBe('loose-book-unplaced');
         expect(materialized[1].id.startsWith('loose-')).toBe(false);
+        expect(normalized[0]).toMatchObject({ id: 'loose-book-unplaced', x: null, y: null, z: 91, order: 70 });
+        expect(normalized[1]).toMatchObject({ bookId: 'book-placed', x: 120, y: 260, z: 19, order: 23 });
         expect(saved).toHaveLength(1);
         expect(saved[0].bookId).toBe('book-placed');
         expect(saved[0].id.startsWith('loose-')).toBe(false);
         expect(saved[0].x).toBe(120);
         expect(saved[0].rotation).toBe(-8);
+        expect(saved[0].z).toBe(19);
+        expect(saved[0].order).toBe(23);
     });
 
     it('queues a forced final save after an in-flight autosave', async () => {

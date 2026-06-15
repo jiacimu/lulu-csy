@@ -27,6 +27,20 @@ vi.mock('../apps/Launcher', async () => {
     };
 });
 
+vi.mock('../apps/Settings', async () => {
+    const React = await import('react');
+    return {
+        default: () => React.createElement('div', null, 'Settings App'),
+    };
+});
+
+vi.mock('../apps/music/MusicApp', async () => {
+    const React = await import('react');
+    return {
+        default: () => React.createElement('div', null, 'Music App'),
+    };
+});
+
 vi.mock('./os/StatusBar', async () => {
     const React = await import('react');
     const { useVirtualTime } = await import('../context/VirtualTimeContext');
@@ -469,6 +483,55 @@ describe('PhoneShell active app rendering', () => {
             paddingBottom: '0px',
         });
         expect(screen.getByTestId('phone-shell-active-app-container').style.contain).toBe('');
+    });
+
+    it('uses full-bleed iOS standalone layout for settings and music apps', async () => {
+        vi.useRealTimers();
+        vi.mocked(isIOSStandaloneWebApp).mockReturnValue(true);
+
+        const baseOS = {
+            characters: [],
+            closeApp: vi.fn(),
+            handleBack: vi.fn(() => true),
+            isDataLoaded: true,
+            isLocked: false,
+            theme: {
+                wallpaper: 'linear-gradient(#000000, #111111)',
+                hideStatusBar: false,
+            },
+            toasts: [],
+            unreadMessages: {},
+            unlock: vi.fn(),
+        };
+
+        mockedUseOS.mockReturnValue({ ...baseOS, activeApp: AppID.Settings } as any);
+        const settingsRender = render(
+            <VirtualTimeProvider>
+                <PhoneShell />
+            </VirtualTimeProvider>,
+        );
+
+        expect(await screen.findByText('Settings App', {}, { timeout: 3000 })).toBeTruthy();
+        expect(screen.getByTestId('phone-shell-app-viewport')).toHaveStyle({
+            bottom: '0px',
+            paddingTop: '0px',
+            paddingBottom: '0px',
+        });
+        settingsRender.unmount();
+
+        mockedUseOS.mockReturnValue({ ...baseOS, activeApp: AppID.Music } as any);
+        render(
+            <VirtualTimeProvider>
+                <PhoneShell />
+            </VirtualTimeProvider>,
+        );
+
+        expect(await screen.findByText('Music App', {}, { timeout: 3000 })).toBeTruthy();
+        expect(screen.getByTestId('phone-shell-app-viewport')).toHaveStyle({
+            bottom: '0px',
+            paddingTop: '0px',
+            paddingBottom: '0px',
+        });
     });
 
     it('lets the shell handle safe area for unmigrated iOS standalone apps', async () => {

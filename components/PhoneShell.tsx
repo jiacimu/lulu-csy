@@ -714,7 +714,13 @@ const PhoneShell: React.FC = () => {
   const activeAppTopInset = activeApp === AppID.Launcher
     ? 0
     : `max(${safeTop}, 2.75rem)`;
-  const shellHandlesSafeArea = ![AppID.Launcher, AppID.Chat, AppID.GroupChat].includes(activeApp);
+  const shellHandlesSafeArea = ![
+    AppID.Launcher,
+    AppID.Chat,
+    AppID.GroupChat,
+    AppID.Settings,
+    AppID.Music,
+  ].includes(activeApp);
   const appViewportStyle: React.CSSProperties = useIOSStandaloneLayout
     ? shellHandlesSafeArea
       ? {

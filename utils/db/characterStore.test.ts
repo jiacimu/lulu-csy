@@ -75,6 +75,48 @@ describe('characterStore recent message windows', () => {
         expect(fullWindow.hasMore).toBe(false);
     });
 
+    it('returns the latest messages inside a timestamp range without scanning the full history', async () => {
+        const base = 1717286400000;
+        for (let i = 1; i <= 10; i += 1) {
+            await DB.saveMessage({
+                charId: 'char-1',
+                role: 'user',
+                type: 'text',
+                content: `range-${i}`,
+                timestamp: base + i,
+            });
+        }
+
+        const range = await DB.getMessagesByCharIdBetweenTimestamps('char-1', base + 3, base + 8, 3);
+
+        expect(range.map(message => message.content)).toEqual(['range-6', 'range-7', 'range-8']);
+        expect(range.map(message => message.timestamp)).toEqual([base + 6, base + 7, base + 8]);
+    });
+
+    it('keeps legacy second-based timestamps visible in timestamp range reads', async () => {
+        await rawInsertMessage({
+            charId: 'char-1',
+            content: 'legacy-seconds',
+            timestamp: 1717286400,
+        });
+        await DB.saveMessage({
+            charId: 'char-1',
+            role: 'assistant',
+            type: 'text',
+            content: 'modern-ms',
+            timestamp: 1717286400000,
+        });
+
+        const range = await DB.getMessagesByCharIdBetweenTimestamps(
+            'char-1',
+            1717286400000,
+            1717286400000,
+            10,
+        );
+
+        expect(range.map(message => message.content)).toEqual(['legacy-seconds', 'modern-ms']);
+    });
+
     it('keeps owner, group, and legacy character compatibility filters', async () => {
         await DB.saveCharacter({
             id: 'char-1',

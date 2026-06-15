@@ -42,12 +42,22 @@ function compareMessagesDesc(a: Message, b: Message): number {
     return b.timestamp - a.timestamp || b.id - a.id;
 }
 
+function normalizeMessageTimestamp(timestamp: unknown): number {
+    const value = Number(timestamp);
+    if (!Number.isFinite(value)) return NaN;
+    return value < 1_000_000_000_000 ? value * 1000 : value;
+}
+
 function messageCharRange(charId: string): IDBKeyRange {
     return IDBKeyRange.bound([charId], [charId, []]);
 }
 
 function messageAfterTimestampRange(charId: string, afterTimestamp: number): IDBKeyRange {
     return IDBKeyRange.bound([charId, afterTimestamp], [charId, []], true, false);
+}
+
+function messageTimestampRange(charId: string, startTimestamp: number, endTimestamp: number): IDBKeyRange {
+    return IDBKeyRange.bound([charId, startTimestamp], [charId, endTimestamp, []], false, false);
 }
 
 function uniqueMessages(messages: Message[]): Message[] {
@@ -261,6 +271,60 @@ function readMessagesAfterTimestampForCharId(db: IDBDatabase, charId: string, af
     });
 }
 
+function readMessagesBetweenTimestampsForCharId(
+    db: IDBDatabase,
+    charId: string,
+    startTimestamp: number,
+    endTimestamp: number,
+    limit: number,
+): Promise<Message[]> {
+    if (limit <= 0) return Promise.resolve([]);
+
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(STORE_MESSAGES, 'readonly');
+        const store = transaction.objectStore(STORE_MESSAGES);
+
+        if (!store.indexNames.contains(MESSAGE_TIME_INDEX)) {
+            const request = store.index('charId').getAll(IDBKeyRange.only(charId));
+            request.onsuccess = () => {
+                resolve((request.result || [])
+                    .filter((m: Message) => {
+                        const timestamp = normalizeMessageTimestamp(m.timestamp);
+                        return timestamp >= startTimestamp
+                            && timestamp <= endTimestamp
+                            && !m.groupId
+                            && belongsToCurrentOwner(m);
+                    })
+                    .sort(compareMessagesDesc)
+                    .slice(0, limit)
+                    .sort(compareMessagesAsc));
+            };
+            request.onerror = () => reject(request.error);
+            return;
+        }
+
+        const index = store.index(MESSAGE_TIME_INDEX);
+        const results: Message[] = [];
+        const request = index.openCursor(messageTimestampRange(charId, startTimestamp, endTimestamp), 'prev');
+
+        request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor || results.length >= limit) {
+                resolve(results.sort(compareMessagesAsc));
+                return;
+            }
+
+            const message = cursor.value as Message;
+            if (!message.groupId && belongsToCurrentOwner(message)) {
+                results.push(message);
+            }
+            cursor.continue();
+        };
+        request.onerror = () => reject(request.error);
+        transaction.onerror = () => reject(transaction.error);
+    });
+}
+
 function updateItemCharIdAndOwner<T extends { charId?: string; ownerUserId?: string }>(
     item: T,
     nextCharId: string,
@@ -373,6 +437,53 @@ export const getMessagesByCharIdAfterTimestamp = async (charId: string, afterTim
     if (!db.objectStoreNames.contains(STORE_MESSAGES)) return [];
     const batches = await Promise.all(charIds.map(id => readMessagesAfterTimestampForCharId(db, id, afterTimestamp)));
     return uniqueMessages(batches.flat()).sort(compareMessagesAsc);
+};
+
+export const getMessagesByCharIdBetweenTimestamps = async (
+    charId: string,
+    startTimestamp: number,
+    endTimestamp: number,
+    limit: number,
+): Promise<Message[]> => {
+    const normalizedStart = Number(startTimestamp);
+    const normalizedEnd = Number(endTimestamp);
+    const normalizedLimit = normalizeLimit(limit);
+    if (
+        !Number.isFinite(normalizedStart)
+        || !Number.isFinite(normalizedEnd)
+        || normalizedEnd < normalizedStart
+        || normalizedLimit <= 0
+    ) {
+        return [];
+    }
+
+    const charIds = await resolveCharacterReadIds(charId);
+    const db = await openDB();
+    if (!db.objectStoreNames.contains(STORE_MESSAGES)) return [];
+    const rangeReads = charIds.flatMap(id => {
+        const reads = [
+            readMessagesBetweenTimestampsForCharId(db, id, normalizedStart, normalizedEnd, normalizedLimit),
+        ];
+        if (normalizedStart >= 1_000_000_000_000) {
+            reads.push(readMessagesBetweenTimestampsForCharId(
+                db,
+                id,
+                Math.floor(normalizedStart / 1000),
+                Math.ceil(normalizedEnd / 1000),
+                normalizedLimit,
+            ));
+        }
+        return reads;
+    });
+    const batches = await Promise.all(rangeReads);
+    return uniqueMessages(batches.flat())
+        .filter(message => {
+            const timestamp = normalizeMessageTimestamp(message.timestamp);
+            return timestamp >= normalizedStart && timestamp <= normalizedEnd;
+        })
+        .sort(compareMessagesDesc)
+        .slice(0, normalizedLimit)
+        .sort(compareMessagesAsc);
 };
 
 /**
@@ -632,21 +743,44 @@ export const getGroups = async (): Promise<GroupProfile[]> => {
 
 export const saveGroup = async (group: GroupProfile): Promise<void> => {
     const db = await openDB();
-    db.transaction(STORE_GROUPS, 'readwrite').objectStore(STORE_GROUPS).put(group);
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(STORE_GROUPS, 'readwrite');
+        const request = transaction.objectStore(STORE_GROUPS).put(group);
+        request.onerror = () => reject(request.error);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+    });
 };
 
 export const deleteGroup = async (id: string): Promise<void> => {
     const db = await openDB();
-    db.transaction(STORE_GROUPS, 'readwrite').objectStore(STORE_GROUPS).delete(id);
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(STORE_GROUPS, 'readwrite');
+        const request = transaction.objectStore(STORE_GROUPS).delete(id);
+        request.onerror = () => reject(request.error);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+    });
 };
 
 export const getGroupMessages = async (groupId: string): Promise<Message[]> => {
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(STORE_MESSAGES, 'readonly');
-        const index = transaction.objectStore(STORE_MESSAGES).index('groupId');
+        const store = transaction.objectStore(STORE_MESSAGES);
+        if (!store.indexNames.contains('groupId')) {
+            const fallbackRequest = store.getAll();
+            fallbackRequest.onsuccess = () => resolve((fallbackRequest.result || [])
+                .filter((message: Message) => message.groupId === groupId)
+                .sort(compareMessagesAsc));
+            fallbackRequest.onerror = () => reject(fallbackRequest.error);
+            return;
+        }
+        const index = store.index('groupId');
         const request = index.getAll(IDBKeyRange.only(groupId));
-        request.onsuccess = () => resolve(request.result || []);
+        request.onsuccess = () => resolve((request.result || []).sort(compareMessagesAsc));
         request.onerror = () => reject(request.error);
     });
 };
@@ -655,7 +789,22 @@ export const getRecentGroupMessagesWithCount = async (groupId: string, limit: nu
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(STORE_MESSAGES, 'readonly');
-        const index = transaction.objectStore(STORE_MESSAGES).index('groupId');
+        const store = transaction.objectStore(STORE_MESSAGES);
+        if (!store.indexNames.contains('groupId')) {
+            const fallbackRequest = store.getAll();
+            fallbackRequest.onsuccess = () => {
+                const allGroupMessages = (fallbackRequest.result || [])
+                    .filter((message: Message) => message.groupId === groupId)
+                    .sort(compareMessagesAsc);
+                resolve({
+                    messages: allGroupMessages.slice(-limit),
+                    totalCount: allGroupMessages.length,
+                });
+            };
+            fallbackRequest.onerror = () => reject(fallbackRequest.error);
+            return;
+        }
+        const index = store.index('groupId');
         const countReq = index.count(IDBKeyRange.only(groupId));
         countReq.onsuccess = () => {
             const totalCount = countReq.result;

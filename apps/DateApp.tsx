@@ -22,6 +22,7 @@ import { buildTemporalContext } from '../utils/temporalContext';
 import { EventExtractor } from '../utils/eventExtractor';
 import { buildDateRequestContextMessages, type DateRequestContextMessage } from '../utils/dateContext';
 import { buildDateHistoryContextBlock } from '../utils/datePromptHistory';
+import { VectorMemoryRetriever } from '../utils/vectorMemoryRetriever';
 import {
     buildLatestDateStatusSnapshotBlock,
     buildDateStatusInlineInstruction,
@@ -339,12 +340,23 @@ const buildDateRuntimeTimeText = (char: CharacterProfile): string => {
         .trim();
 };
 
+const buildDateRecalledMemoryBlock = (vectorMemoryBlock?: string): string => {
+    const normalized = vectorMemoryBlock?.trim();
+    if (!normalized) return '';
+    return `<recalled_memory>
+此时一些与当前话题相关的往事浮现在你的脑海里，不是新的用户输入；不要逐条复述
+
+${normalized}
+</recalled_memory>`;
+};
+
 export const buildDateSessionContextPackagePrompt = ({
     char,
     userProfile,
     allMsgs,
     historyContextBlock,
     statusSnapshotBlock,
+    vectorMemoryBlock,
     runtimeScene = '正式见面回复',
     currentLocation = '面对面现场，未指定具体地点',
     conversationTempo = '',
@@ -355,6 +367,7 @@ export const buildDateSessionContextPackagePrompt = ({
     allMsgs: Message[];
     historyContextBlock?: string;
     statusSnapshotBlock?: string;
+    vectorMemoryBlock?: string;
     runtimeScene?: string;
     currentLocation?: string;
     conversationTempo?: string;
@@ -365,6 +378,7 @@ export const buildDateSessionContextPackagePrompt = ({
     const recentSummary = buildDateSummaryMemoryPrompt(allMsgs).trim() || '无已总结上下文。';
     const lastTurnsRaw = historyContextBlock?.trim() || '无最近未压缩原文。';
     const longTermMemory = buildDateLongTermMemoryContext(char, userProfile).trim();
+    const recalledMemoryBlock = buildDateRecalledMemoryBlock(vectorMemoryBlock);
 
     const contextLines = [
         `current_time: ${buildDateRuntimeTimeText(char)}`,
@@ -398,7 +412,7 @@ ${snapshot}
 不要主动总结这些记忆，不要把它们写成说明。
 
 ${longTermMemory}
-</long_term_memory>
+</long_term_memory>${recalledMemoryBlock ? `\n\n${recalledMemoryBlock}` : ''}
 
 <recent_summary>
 以下是本次见面较早内容或最近若干轮的压缩总结。
@@ -519,6 +533,7 @@ export const buildDateSessionPromptMessages = ({
     statusSnapshotBlock?: string;
     photoPromptBlock?: string;
     statusPromptBlock?: string;
+    vectorMemoryBlock?: string;
     runtimeScene?: string;
     currentLocation?: string;
     conversationTempo?: string;
@@ -554,6 +569,43 @@ export const maybeDumpDateSessionPromptForDebug = (requestMessages: DatePromptMe
 export const appendDateTemporalContext = (content: string, temporalContext?: string): string => {
     const normalized = temporalContext?.trim();
     return normalized ? `${content}\n\n${normalized}` : content;
+};
+
+type DateVectorMemoryApiConfig = Parameters<typeof VectorMemoryRetriever.retrieve>[5];
+
+const shouldRetrieveDateVectorMemory = (char: CharacterProfile): boolean => {
+    return char.vectorMemoryEnabled === true;
+};
+
+const retrieveDateVectorMemoryBlock = async ({
+    char,
+    userProfile,
+    contextMessages,
+    apiConfig,
+}: {
+    char: CharacterProfile;
+    userProfile: UserProfile;
+    contextMessages: Message[];
+    apiConfig: DateVectorMemoryApiConfig;
+}): Promise<string> => {
+    if (!shouldRetrieveDateVectorMemory(char)) return '';
+
+    const embeddingApiKey = getEmbeddingConfig().apiKey;
+    if (!embeddingApiKey) return '';
+
+    try {
+        return (await VectorMemoryRetriever.retrieve(
+            char.id,
+            char.name,
+            userProfile.name,
+            contextMessages,
+            embeddingApiKey,
+            apiConfig,
+        ))?.trim() || '';
+    } catch (error) {
+        console.warn('[DateApp] Date vector memory retrieval failed:', error);
+        return '';
+    }
 };
 
 const buildDateRequestHistoryBlock = (
@@ -2266,6 +2318,12 @@ ${exitPromptContent}
 
         const historyContextBlock = buildDateRequestHistoryBlock(requestContext, char.name, userProfile.name, userMessageId);
         const statusSnapshotBlock = buildDateStatusSnapshotForMainApi(char, sessionMessages);
+        const vectorMemoryBlock = await retrieveDateVectorMemoryBlock({
+            char,
+            userProfile,
+            contextMessages: temporalHistory,
+            apiConfig,
+        });
 
         // --- Separate informational specialNote from directive content ---
         const temporalNote = temporalContext ? `\n\n<temporal_context>${temporalContext}</temporal_context>` : '';
@@ -2297,6 +2355,7 @@ ${exitPromptContent}
             allMsgs,
             historyContextBlock,
             statusSnapshotBlock,
+            vectorMemoryBlock,
             photoPromptBlock: photoPromptBlock,
             statusPromptBlock: buildDateStatusPromptForMainApi(char),
             runtimeScene: directorHint ? '见面导演提示回复' : '见面聊天回复',
@@ -2441,6 +2500,12 @@ ${exitPromptContent}
             : '';
         const historyContextBlock = buildDateRequestHistoryBlock(requestContext, char.name, userProfile.name, lastUserMsg.id);
         const statusSnapshotBlock = buildDateStatusSnapshotForMainApi(char, validSessionMessages);
+        const vectorMemoryBlock = await retrieveDateVectorMemoryBlock({
+            char,
+            userProfile,
+            contextMessages: temporalHistory,
+            apiConfig,
+        });
 
         // --- Separate informational specialNote from directive content ---
         const temporalNote = temporalContext ? `\n\n<temporal_context>${temporalContext}</temporal_context>` : '';
@@ -2465,6 +2530,7 @@ ${exitPromptContent}
             allMsgs,
             historyContextBlock,
             statusSnapshotBlock,
+            vectorMemoryBlock,
             photoPromptBlock: photoPromptBlock,
             statusPromptBlock: buildDateStatusPromptForMainApi(char),
             runtimeScene: '见面回复重掷',

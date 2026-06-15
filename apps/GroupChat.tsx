@@ -7,9 +7,45 @@ import { Message,GroupProfile,CharacterProfile,MessageType,MemoryFragment,EmojiC
 import { safeResponseJson } from '../utils/safeApi';
 import Modal from '../components/os/Modal';
 import { ContextBuilder } from '../utils/context';
+import { ChatPrompts } from '../utils/chatPrompts';
+import { ChatParser } from '../utils/chatParser';
 import { processImage } from '../utils/file';
 import { DEFAULT_ARCHIVE_PROMPTS } from '../constants/archivePrompts';
 import { formatMessageForContext,shouldIncludeMessageInContext } from '../utils/messageContext';
+import { extractThinking,safeThinkingFallbackReply,selectThinkingForDisplay } from '../utils/thinkingExtractor';
+import { isDeepSeekMode } from '../utils/deepseekPrompts';
+import {
+    DEFAULT_CHAT_TEMPERATURE,
+    getEmbeddingConfig,
+    getSecondaryApiPoolWithStatus,
+    markSecondaryApiConfigFailure,
+    markSecondaryApiConfigSuccess,
+    normalizeChatTemperature,
+    selectSecondaryApiConfig,
+} from '../utils/runtimeConfig';
+import { fetchStreamingChatCompletion } from '../hooks/useChatAI';
+import { queueGroupMemorySummaries } from '../utils/groupChatMemory';
+import {
+    buildGroupLiveRoleplayApiOptions,
+    getGroupLiveApiFingerprint,
+    getReadySecondaryApiPoolEntries,
+    GROUP_CHAT_MAX_TOKENS,
+    GROUP_LIVE_ROLEPLAY_DEFAULT_API_VALUE,
+    readGroupLiveRoleplayApiSelection,
+    reserveDistinctSecondaryRoleplayApis,
+    resolveGroupLiveRoleplayApiConfig,
+    writeGroupLiveRoleplayApiSelection,
+    type GroupLiveRoleplayApiResolution,
+} from '../utils/groupChatApiSelection';
+import {
+    buildGroupLiveScenePrompt,
+    buildGroupPerspectiveMessages,
+    buildGroupSpeakerDirectorPrompt,
+    extractGroupLiveText,
+    parseGroupSpeakerWaves,
+    sortGroupLogMessages,
+    type GroupLiveContextMode,
+} from '../utils/groupChatPerspective';
 import {
     buildGroupDirectorUserContent,
     getGroupDirectorActionContent,
@@ -21,6 +57,15 @@ import {
 } from '../utils/groupChatDirector';
 
 // 复用 Chat.tsx 的高颜值样式逻辑，但针对群聊微调
+
+const GROUP_LIVE_AUTONOMOUS_ENABLED_KEY = 'groupchat_live_autonomous_enabled';
+const GROUP_LIVE_AUTONOMOUS_ROUND_LIMIT_KEY = 'groupchat_live_autonomous_round_limit';
+const GROUP_LIVE_AUTONOMOUS_DELAY_KEY = 'groupchat_live_autonomous_delay_seconds';
+const GROUP_LIVE_COGNITION_KEY_PREFIX = 'groupchat_live_cognition';
+
+function getGroupLiveCognitionKey(groupId: string, speakerId: string, targetId: string): string {
+    return `${GROUP_LIVE_COGNITION_KEY_PREFIX}_${groupId}_${speakerId}_${targetId}`;
+}
 
 // --- Sub-Component: Group Message Bubble ---
 const GroupMessageItem = React.memo(({
@@ -161,6 +206,11 @@ const GroupMessageItem = React.memo(({
             <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-[80%] ${selectionMode ? 'pointer-events-none' : ''}`}>
                 {!isUser && <span className="text-[10px] text-slate-400 ml-1 mb-1">{name}</span>}
                 {renderContent()}
+                {!isUser && typeof msg.metadata?.groupInnerVoice === 'string' && msg.metadata.groupInnerVoice.trim() && (
+                    <div className="mt-1 max-w-full rounded-xl bg-rose-50/90 border border-rose-100 px-3 py-1.5 text-[11px] leading-relaxed text-rose-500 shadow-sm whitespace-pre-wrap break-words">
+                        心声：{msg.metadata.groupInnerVoice.trim()}
+                    </div>
+                )}
                 <span className="text-[9px] text-slate-300 mt-1 px-1">{timeStr}</span>
             </div>
 
@@ -176,7 +226,7 @@ const GroupMessageItem = React.memo(({
 // --- Main Component ---
 
 const GroupChat: React.FC = () => {
-    const { closeApp, groups, createGroup, deleteGroup, characters, updateCharacter, apiConfig, addToast, userProfile } = useOS();
+    const { closeApp, groups, setGroups, createGroup, deleteGroup, characters, updateCharacter, apiConfig, apiPresets, addToast, userProfile, realtimeConfig } = useOS();
     const virtualTime = useVirtualTime();
     const [view, setView] = useState<'list' | 'chat'>('list');
     const [activeGroup, setActiveGroup] = useState<GroupProfile | null>(null);
@@ -185,6 +235,8 @@ const GroupChat: React.FC = () => {
     const [visibleCount, setVisibleCount] = useState(30);
     const [input, setInput] = useState('');
     const [isTyping, setIsTyping] = useState(false);
+    const [typingCharId, setTypingCharId] = useState<string | null>(null);
+    const [typingCharIds, setTypingCharIds] = useState<string[]>([]);
 
     // UI State
     const [showActions, setShowActions] = useState(false);
@@ -203,6 +255,23 @@ const GroupChat: React.FC = () => {
     const [contextLimit, setContextLimit] = useState<number>(() => {
         try { return parseInt(localStorage.getItem('groupchat_context_limit') || '30'); } catch { return 30; }
     });
+    const [liveGroupModeEnabled, setLiveGroupModeEnabled] = useState<boolean>(() => {
+        try { return localStorage.getItem('groupchat_live_mode_enabled') === 'true'; } catch { return false; }
+    });
+    const [liveApiSelectionRevision, setLiveApiSelectionRevision] = useState(0);
+    const [liveRoleplayApiSelections, setLiveRoleplayApiSelections] = useState<Record<string, string>>({});
+    const [autonomousChatEnabled, setAutonomousChatEnabled] = useState<boolean>(() => {
+        try { return localStorage.getItem(GROUP_LIVE_AUTONOMOUS_ENABLED_KEY) === 'true'; } catch { return false; }
+    });
+    const [autonomousRoundLimit, setAutonomousRoundLimit] = useState<number>(() => {
+        try { return Math.max(1, Math.min(20, parseInt(localStorage.getItem(GROUP_LIVE_AUTONOMOUS_ROUND_LIMIT_KEY) || '3', 10))); } catch { return 3; }
+    });
+    const [autonomousDelaySeconds, setAutonomousDelaySeconds] = useState<number>(() => {
+        try { return Math.max(1, Math.min(60, parseInt(localStorage.getItem(GROUP_LIVE_AUTONOMOUS_DELAY_KEY) || '3', 10))); } catch { return 3; }
+    });
+    const [autonomousRoundsRemaining, setAutonomousRoundsRemaining] = useState(0);
+    const [cognitionEditorSpeakerId, setCognitionEditorSpeakerId] = useState<string>('');
+    const [cognitionRevision, setCognitionRevision] = useState(0);
 
     // Selection Mode
     const [selectionMode, setSelectionMode] = useState(false);
@@ -221,6 +290,50 @@ const GroupChat: React.FC = () => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const groupAvatarInputRef = useRef<HTMLInputElement>(null);
+    const autonomousTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => {
+        const refreshApiSelections = () => setLiveApiSelectionRevision(prev => prev + 1);
+        window.addEventListener('agent-config-changed', refreshApiSelections);
+        return () => window.removeEventListener('agent-config-changed', refreshApiSelections);
+    }, []);
+
+    useEffect(() => {
+        setTypingCharId(typingCharIds.length === 1 ? typingCharIds[0] : null);
+    }, [typingCharIds]);
+
+    useEffect(() => {
+        if (!activeGroup) {
+            setLiveRoleplayApiSelections({});
+            setCognitionEditorSpeakerId('');
+            return;
+        }
+
+        const memberCharacters = getGroupMemberCharacters(activeGroup, characters);
+        const nextSelections: Record<string, string> = {};
+        for (const member of memberCharacters) {
+            nextSelections[member.id] = readGroupLiveRoleplayApiSelection(activeGroup.id, member.id);
+        }
+        setLiveRoleplayApiSelections(nextSelections);
+        setCognitionEditorSpeakerId(prev => memberCharacters.some(member => member.id === prev) ? prev : (memberCharacters[0]?.id || ''));
+    }, [activeGroup?.id, activeGroup?.members, characters, liveApiSelectionRevision]);
+
+    useEffect(() => {
+        if (!activeGroup) return;
+        const latestGroup = groups.find(group => group.id === activeGroup.id);
+        if (latestGroup && latestGroup !== activeGroup) {
+            setActiveGroup(latestGroup);
+        }
+    }, [groups, activeGroup?.id]);
+
+    const secondaryApiPoolForSettings = useMemo(
+        () => getSecondaryApiPoolWithStatus(),
+        [liveApiSelectionRevision, modalType],
+    );
+    const liveRoleplayApiOptions = useMemo(
+        () => buildGroupLiveRoleplayApiOptions(apiConfig, apiPresets, secondaryApiPoolForSettings),
+        [apiConfig, apiPresets, secondaryApiPoolForSettings],
+    );
 
     // Load shared archive prompts from localStorage (same key as Chat app)
     useEffect(() => {
@@ -239,7 +352,7 @@ const GroupChat: React.FC = () => {
         if (activeGroup) {
             setVisibleCount(30);
             DB.getRecentGroupMessagesWithCount(activeGroup.id, 30).then(({ messages: msgs, totalCount }) => {
-                setMessages(msgs);
+                setMessages(sortGroupLogMessages(msgs));
                 setTotalMsgCount(totalCount);
             });
             // Fetch emojis AND categories
@@ -375,7 +488,8 @@ const GroupChat: React.FC = () => {
         setMessages(newHistory);
         addToast('回溯对话中...', 'info');
 
-        triggerDirector(newHistory);
+        if (liveGroupModeEnabled) triggerLiveGroupRound(newHistory);
+        else triggerDirector(newHistory);
     };
 
     // --- Logic: Group Management ---
@@ -397,6 +511,7 @@ const GroupChat: React.FC = () => {
         const updatedGroup = { ...activeGroup, name: tempGroupName || activeGroup.name };
         await DB.saveGroup(updatedGroup);
         setActiveGroup(updatedGroup);
+        setGroups(prev => prev.map(group => group.id === updatedGroup.id ? updatedGroup : group));
         setModalType('none');
         addToast('群信息已更新', 'success');
     };
@@ -409,6 +524,7 @@ const GroupChat: React.FC = () => {
             const updatedGroup = { ...activeGroup, avatar: base64 };
             await DB.saveGroup(updatedGroup);
             setActiveGroup(updatedGroup);
+            setGroups(prev => prev.map(group => group.id === updatedGroup.id ? updatedGroup : group));
             addToast('群头像已修改', 'success');
         } catch (err: any) {
             addToast('图片处理失败', 'error');
@@ -458,7 +574,7 @@ const GroupChat: React.FC = () => {
     // --- Logic: Group Summary & Distribution ---
 
     const handleGroupSummary = async () => {
-        if (!activeGroup || !apiConfig.apiKey) {
+        if (!activeGroup) {
             addToast('请检查配置', 'error');
             return;
         }
@@ -527,17 +643,24 @@ ${logText.substring(0, 10000)}
 `;
                 }
 
-                const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                const summaryApiConfig = selectSecondaryApiConfig();
+                if (!summaryApiConfig?.baseUrl || !summaryApiConfig.model) {
+                    throw new Error('请先配置可用的副 API，用于群聊总结');
+                }
+
+                const response = await fetch(`${summaryApiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${summaryApiConfig.apiKey || 'sk-none'}` },
                     body: JSON.stringify({
-                        model: apiConfig.model,
+                        model: summaryApiConfig.model,
                         messages: [{ role: "user", content: prompt }],
-                        temperature: 0.3
+                        temperature: 0.3,
+                        max_tokens: GROUP_CHAT_MAX_TOKENS,
                     })
                 });
 
                 if (response.ok) {
+                    markSecondaryApiConfigSuccess(summaryApiConfig);
                     const data = await safeResponseJson(response);
                     let content = data.choices[0].message.content.trim();
                     // Basic YAML extraction
@@ -564,6 +687,9 @@ ${logText.substring(0, 10000)}
                             }
                         }
                     }
+                } else {
+                    const detail = await response.text().catch(() => '');
+                    markSecondaryApiConfigFailure(summaryApiConfig, new Error(`HTTP ${response.status}${detail ? `: ${detail.slice(0, 120)}` : ''}`));
                 }
 
                 await new Promise(r => setTimeout(r, 500)); // Rate limit buffer
@@ -583,32 +709,73 @@ ${logText.substring(0, 10000)}
 
     // --- Logic: Messaging ---
 
+    const clearAutonomousTimer = () => {
+        if (!autonomousTimerRef.current) return;
+        clearTimeout(autonomousTimerRef.current);
+        autonomousTimerRef.current = null;
+    };
+
+    const stopAutonomousChat = () => {
+        clearAutonomousTimer();
+        setAutonomousChatEnabled(false);
+        setAutonomousRoundsRemaining(0);
+        localStorage.setItem(GROUP_LIVE_AUTONOMOUS_ENABLED_KEY, 'false');
+    };
+
+    const startAutonomousChat = () => {
+        if (!liveGroupModeEnabled) {
+            addToast('请先打开群像 Beta 的真实多角色生成', 'info');
+            return;
+        }
+        const rounds = Math.max(1, Math.min(20, autonomousRoundLimit));
+        setAutonomousChatEnabled(true);
+        setAutonomousRoundsRemaining(rounds);
+        localStorage.setItem(GROUP_LIVE_AUTONOMOUS_ENABLED_KEY, 'true');
+    };
+
     const handleSendMessage = async (content: string, type: MessageType = 'text', metadata?: any) => {
         if (!activeGroup) return;
+        const contentToSend = type === 'text' ? content.trim() : content;
+        if (!contentToSend) return;
 
+        const timestamp = Date.now();
         const newMessage = {
             charId: 'user',
             groupId: activeGroup.id,
             role: 'user' as const,
             type,
-            content,
+            content: contentToSend,
+            timestamp,
             metadata
         };
 
-        await DB.saveMessage(newMessage);
+        let savedMessage: Message;
+        try {
+            const savedId = await DB.saveMessage(newMessage);
+            savedMessage = { ...newMessage, id: savedId };
+        } catch (error: any) {
+            console.error('Failed to send group message:', error);
+            addToast(`消息发送失败: ${error?.message || '本地写入失败'}`, 'error');
+            return;
+        }
 
-        // Optimistic update
-        const updatedMsgs = await DB.getGroupMessages(activeGroup.id);
-        setMessages(updatedMsgs);
+        setMessages(prev => sortGroupLogMessages([...prev, savedMessage]));
+        setTotalMsgCount(prev => prev + 1);
+        setInput('');
 
         // Close panels
         if (type !== 'text') {
             setShowActions(false);
             setShowEmojiPicker(false);
         }
-        setInput('');
 
-        // NOTE: No auto-trigger. User must click lightning button.
+        try {
+            const updatedMsgs = sortGroupLogMessages(await DB.getGroupMessages(activeGroup.id));
+            setMessages(updatedMsgs);
+            setTotalMsgCount(updatedMsgs.length);
+        } catch (error) {
+            console.warn('Group message saved but refresh failed:', error);
+        }
     };
 
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -621,6 +788,721 @@ ${logText.substring(0, 10000)}
             addToast('图片发送失败', 'error');
         }
     };
+
+    const refreshGroupMessages = async (): Promise<Message[]> => {
+        if (!activeGroup) return [];
+        const refreshed = sortGroupLogMessages(await DB.getGroupMessages(activeGroup.id));
+        setMessages(refreshed);
+        setTotalMsgCount(refreshed.length);
+        return refreshed;
+    };
+
+    const appendTextToChatContent = (content: any, text: string): any => {
+        if (!text) return content;
+        if (typeof content === 'string') return `${content}${text}`;
+        if (Array.isArray(content)) return [...content, { type: 'text', text }];
+        return `${String(content || '')}${text}`;
+    };
+
+    const appendTextToLastUserMessage = (apiMessages: any[], text: string): boolean => {
+        const lastUserIdx = apiMessages.map(message => message.role).lastIndexOf('user');
+        if (lastUserIdx < 0) return false;
+        apiMessages[lastUserIdx].content = appendTextToChatContent(apiMessages[lastUserIdx].content, text);
+        return true;
+    };
+
+    const buildGroupStreamingPreviewContent = (content: string, usePrefill: boolean, thinkTag: string): string => {
+        const contentForExtraction = usePrefill && !content.includes('<thinking>') && !content.includes('<think>')
+            ? `<${thinkTag}>\n${content}`
+            : content;
+        const extracted = extractThinking(contentForExtraction);
+        const liveText = extractGroupLiveText(extracted.content);
+        return ChatParser.sanitize(liveText.publicContent).trim();
+    };
+
+    const formatGroupLogForDirector = (sourceMessages: Message[], limit: number): string => {
+        return sortGroupLogMessages(sourceMessages)
+            .filter(shouldIncludeMessageInContext)
+            .slice(-limit)
+            .map(message => {
+                const senderName = message.role === 'user'
+                    ? userProfile.name
+                    : (characters.find(c => c.id === message.charId)?.name || '未知成员');
+                const content = formatMessageForContext(message, {
+                    surface: 'secondaryModel',
+                    charName: senderName,
+                    userName: userProfile.name,
+                    emojis,
+                    compact: true,
+                    maxContentChars: 300,
+                }) || (message.type === 'image' ? '[图片]' : message.content);
+                return `${senderName}: ${content}`;
+            })
+            .join('\n');
+    };
+
+    const fallbackSpeakerWaves = (currentMsgs: Message[], groupMembers: CharacterProfile[]): string[][] => {
+        const lastPublic = sortGroupLogMessages(currentMsgs)
+            .filter(message => message.role === 'user' || message.role === 'assistant')
+            .slice(-1)[0];
+        const lastText = lastPublic?.content || '';
+        const named = groupMembers
+            .filter(member => lastText.includes(member.name))
+            .map(member => member.id);
+        if (named.length > 0) return named.slice(0, 2).map(id => [id]);
+
+        const lastSpeakerId = lastPublic?.role === 'assistant' ? lastPublic.charId : '';
+        const candidate = groupMembers.find(member => member.id !== lastSpeakerId) || groupMembers[0];
+        return candidate ? [[candidate.id]] : [];
+    };
+
+    const requestLiveSpeakerWaves = async (
+        currentMsgs: Message[],
+        groupMembers: CharacterProfile[],
+        autonomous = false,
+    ): Promise<string[][]> => {
+        if (!activeGroup) return [];
+        const maxSpeakers = Math.min(3, groupMembers.length);
+        const prompt = buildGroupSpeakerDirectorPrompt({
+            groupName: activeGroup.name,
+            members: groupMembers,
+            userProfile,
+            recentLogText: formatGroupLogForDirector(currentMsgs, Math.min(contextLimit, 80)),
+            autonomous,
+            maxSpeakers,
+        });
+
+        let secondaryDirectorConfig: ReturnType<typeof selectSecondaryApiConfig> = undefined;
+        try {
+            secondaryDirectorConfig = selectSecondaryApiConfig();
+            const directorApiConfig = secondaryDirectorConfig || apiConfig;
+            if (!directorApiConfig.baseUrl || !directorApiConfig.model) {
+                throw new Error('导演 API 未配置完整');
+            }
+
+            const response = await fetch(`${directorApiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${directorApiConfig.apiKey || 'sk-none'}` },
+                body: JSON.stringify({
+                    model: directorApiConfig.model,
+                    messages: [{ role: 'user', content: prompt }],
+                    temperature: 0.25,
+                    max_tokens: GROUP_CHAT_MAX_TOKENS,
+                    stream: false,
+                }),
+            });
+
+            if (!response.ok) {
+                const detail = await response.text().catch(() => '');
+                throw new Error(`导演请求失败 (${response.status})${detail ? `: ${detail.slice(0, 120)}` : ''}`);
+            }
+            if (secondaryDirectorConfig) markSecondaryApiConfigSuccess(secondaryDirectorConfig);
+
+            const data = await safeResponseJson(response);
+            const content = data.choices?.[0]?.message?.content || '';
+            const parsed = parseGroupSpeakerWaves(content, groupMembers, maxSpeakers);
+            return parsed !== null ? parsed : fallbackSpeakerWaves(currentMsgs, groupMembers);
+        } catch (error) {
+            if (secondaryDirectorConfig) markSecondaryApiConfigFailure(secondaryDirectorConfig, error);
+            console.warn('[GroupLive] speaker director fallback:', error);
+            return fallbackSpeakerWaves(currentMsgs, groupMembers);
+        }
+    };
+
+    const saveGroupLivePublicReply = async (
+        speaker: CharacterProfile,
+        publicContent: string,
+        innerVoice: string | undefined,
+        thinking: string | undefined,
+    ): Promise<number> => {
+        if (!activeGroup) return 0;
+        const cleaned = ChatParser.sanitize(publicContent);
+        if (!cleaned.trim()) return 0;
+
+        const parts = ChatParser.splitResponse(cleaned);
+        let savedCount = 0;
+        let firstSaved = true;
+
+        for (const part of parts) {
+            if (part.type === 'emoji') {
+                const foundEmoji = emojis.find(e => e.name === part.content);
+                if (!foundEmoji) continue;
+                await new Promise(r => setTimeout(r, Math.random() * 500 + 250));
+                await DB.saveMessage({
+                    charId: speaker.id,
+                    groupId: activeGroup.id,
+                    role: 'assistant',
+                    type: 'emoji',
+                    content: foundEmoji.url,
+                    metadata: {
+                        name: part.content,
+                        categoryId: foundEmoji.categoryId,
+                        groupLive: true,
+                        ...(firstSaved && innerVoice ? { groupInnerVoice: innerVoice } : {}),
+                        ...(firstSaved && thinking ? { thinking } : {}),
+                    },
+                });
+                firstSaved = false;
+                savedCount += 1;
+                await refreshGroupMessages();
+                continue;
+            }
+
+            if (part.type === 'song') {
+                const songText = `分享了一首歌：${part.content.songName} - ${part.content.artist}`;
+                await DB.saveMessage({
+                    charId: speaker.id,
+                    groupId: activeGroup.id,
+                    role: 'assistant',
+                    type: 'text',
+                    content: songText,
+                    metadata: {
+                        type: 'song_card',
+                        ...part.content,
+                        groupLive: true,
+                        ...(firstSaved && innerVoice ? { groupInnerVoice: innerVoice } : {}),
+                        ...(firstSaved && thinking ? { thinking } : {}),
+                    },
+                });
+                firstSaved = false;
+                savedCount += 1;
+                await refreshGroupMessages();
+                continue;
+            }
+
+            const chunks = ChatParser.chunkText(part.content);
+            for (const chunk of chunks) {
+                const cleanChunk = ChatParser.sanitize(chunk);
+                if (!ChatParser.hasDisplayContent(cleanChunk)) continue;
+                const delay = Math.min(Math.max(cleanChunk.length * 45, 450), 1800);
+                await new Promise(r => setTimeout(r, delay));
+                await DB.saveMessage({
+                    charId: speaker.id,
+                    groupId: activeGroup.id,
+                    role: 'assistant',
+                    type: 'text',
+                    content: cleanChunk,
+                    metadata: {
+                        groupLive: true,
+                        ...(firstSaved && innerVoice ? { groupInnerVoice: innerVoice } : {}),
+                        ...(firstSaved && thinking ? { thinking } : {}),
+                    },
+                });
+                firstSaved = false;
+                savedCount += 1;
+                await refreshGroupMessages();
+            }
+        }
+
+        return savedCount;
+    };
+
+    const readLiveRoleplayApiSelectionValue = (speakerId: string): string => {
+        if (!activeGroup) return GROUP_LIVE_ROLEPLAY_DEFAULT_API_VALUE;
+        return liveRoleplayApiSelections[speakerId]
+            || readGroupLiveRoleplayApiSelection(activeGroup.id, speakerId);
+    };
+
+    const handleLiveRoleplayApiSelectionChange = (memberId: string, value: string) => {
+        if (!activeGroup) return;
+        writeGroupLiveRoleplayApiSelection(activeGroup.id, memberId, value);
+        setLiveRoleplayApiSelections(prev => ({ ...prev, [memberId]: value }));
+    };
+
+    const resolveLiveRoleplayApiForSpeaker = (
+        speaker: CharacterProfile,
+        secondaryPool = getSecondaryApiPoolWithStatus(),
+    ): GroupLiveRoleplayApiResolution => {
+        if (!activeGroup) throw new Error('群聊未打开');
+        const value = readLiveRoleplayApiSelectionValue(speaker.id);
+        const resolved = resolveGroupLiveRoleplayApiConfig(value, apiConfig, apiPresets, secondaryPool);
+        if (!resolved) {
+            throw new Error(`${speaker.name} 的群像扮演 API 未配置完整`);
+        }
+        return resolved;
+    };
+
+    const isSecondaryRoleplayApi = (resolution: GroupLiveRoleplayApiResolution): boolean => {
+        return resolution.source === 'secondary-pool' || resolution.source === 'secondary-round-robin';
+    };
+
+    type LiveRoleplayJob = {
+        speaker: CharacterProfile;
+        api: GroupLiveRoleplayApiResolution;
+        fingerprint: string;
+    };
+
+    const readGroupLiveCognition = (speakerId: string, targetId: string): string => {
+        if (!activeGroup) return '';
+        try {
+            return localStorage.getItem(getGroupLiveCognitionKey(activeGroup.id, speakerId, targetId)) || '';
+        } catch {
+            return '';
+        }
+    };
+
+    const writeGroupLiveCognition = (speakerId: string, targetId: string, value: string) => {
+        if (!activeGroup) return;
+        const key = getGroupLiveCognitionKey(activeGroup.id, speakerId, targetId);
+        try {
+            if (value.trim()) localStorage.setItem(key, value);
+            else localStorage.removeItem(key);
+            setCognitionRevision(prev => prev + 1);
+        } catch {
+            // Best effort: this is prompt-side local UI state.
+        }
+    };
+
+    const buildGroupLiveCognitionMap = (
+        speaker: CharacterProfile,
+        groupMembers: CharacterProfile[],
+    ): Record<string, string> => {
+        const map: Record<string, string> = {};
+        for (const member of groupMembers) {
+            if (member.id === speaker.id) continue;
+            const note = readGroupLiveCognition(speaker.id, member.id).trim();
+            if (note) map[member.id] = note;
+        }
+        return map;
+    };
+
+    const generateLiveGroupReply = async (
+        speaker: CharacterProfile,
+        groupLog: Message[],
+        groupMembers: CharacterProfile[],
+        autonomous = false,
+        apiResolution?: GroupLiveRoleplayApiResolution,
+        contextMode: GroupLiveContextMode = 'serial',
+    ): Promise<number> => {
+        if (!activeGroup) return 0;
+        const roleplayApi = apiResolution || resolveLiveRoleplayApiForSpeaker(speaker);
+        const roleplayApiConfig = roleplayApi.config;
+        const baseUrl = roleplayApiConfig.baseUrl.replace(/\/+$/, '');
+        const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${roleplayApiConfig.apiKey || 'sk-none'}` };
+        const embeddingApiKey = getEmbeddingConfig().apiKey || undefined;
+        const currentGroupExcluded = groups.filter(group => group.id !== activeGroup.id);
+        const perspective = buildGroupPerspectiveMessages(groupLog.slice(-contextLimit), {
+            speaker,
+            userProfile,
+            characters,
+            emojis,
+            includeTimestamp: true,
+        });
+
+        let systemPrompt = await ChatPrompts.buildSystemPrompt(
+            speaker,
+            userProfile,
+            currentGroupExcluded,
+            emojis,
+            categories,
+            perspective.contextMessages,
+            realtimeConfig,
+            roleplayApiConfig,
+            embeddingApiKey,
+            undefined,
+            {},
+        );
+        systemPrompt += buildGroupLiveScenePrompt({
+            groupName: activeGroup.name,
+            speaker,
+            members: groupMembers,
+            userProfile,
+            contextMode,
+            autonomous,
+            cognitionByMemberId: buildGroupLiveCognitionMap(speaker, groupMembers),
+        });
+
+        const fullMessages: any[] = [
+            { role: 'system', content: systemPrompt },
+            ...perspective.apiMessages.map(message => ({ ...message })),
+        ];
+
+        const usePrefill = !roleplayApiConfig.disablePrefill;
+        const thinkTag = isDeepSeekMode(roleplayApiConfig) ? 'think' : 'thinking';
+        let trailingInstructions = `\n\n[群像输出提醒]\n只输出${speaker.name}自己的本轮回复。不要写其他人的台词。先闭合思考，再写一段 <心声>...</心声>，随后写公开群消息正文。公开正文不要带名字前缀或时间戳。`;
+        if (usePrefill) {
+            trailingInstructions += isDeepSeekMode(roleplayApiConfig)
+                ? `\n\n[思考提示]\n请先在 <think> 内简短思考，闭合 </think> 后输出心声和正文。`
+                : `\n\n[思考提示]\n请先在 <thinking> 内简短思考，闭合 </thinking> 后输出心声和正文。`;
+        }
+        const lastMessageBeforePrefill = fullMessages[fullMessages.length - 1];
+        if (lastMessageBeforePrefill?.role === 'user') {
+            appendTextToLastUserMessage(fullMessages, trailingInstructions);
+        } else {
+            fullMessages.push({ role: 'user', content: `[系统执行指令]${trailingInstructions}` });
+        }
+        if (usePrefill) {
+            fullMessages.push({ role: 'assistant', content: `<${thinkTag}>` });
+        }
+
+        const chatTemperature = normalizeChatTemperature(roleplayApiConfig.temperature, DEFAULT_CHAT_TEMPERATURE);
+        let requestBody: Record<string, any> = {
+            model: roleplayApiConfig.model,
+            messages: fullMessages,
+            temperature: chatTemperature,
+            max_tokens: GROUP_CHAT_MAX_TOKENS,
+            stream: false,
+        };
+
+        const streamPreviewId = -Math.floor(Date.now() + Math.random() * 1000);
+        let streamPreviewVisible = false;
+        const clearStreamPreview = () => {
+            if (!streamPreviewVisible) return;
+            setMessages(prev => prev.filter(message => message.id !== streamPreviewId));
+            streamPreviewVisible = false;
+        };
+        const updateStreamPreview = (rawContent: string) => {
+            const previewContent = buildGroupStreamingPreviewContent(rawContent, usePrefill, thinkTag);
+            if (!previewContent) return;
+            streamPreviewVisible = true;
+            const previewMessage: Message = {
+                id: streamPreviewId,
+                charId: speaker.id,
+                groupId: activeGroup.id,
+                role: 'assistant',
+                type: 'text',
+                content: previewContent,
+                timestamp: Date.now(),
+                metadata: { streamingPreview: true, groupLive: true },
+            };
+            setMessages(prev => {
+                const existingIndex = prev.findIndex(message => message.id === streamPreviewId);
+                if (existingIndex === -1) return [...prev, previewMessage];
+                return prev.map(message => message.id === streamPreviewId ? previewMessage : message);
+            });
+        };
+
+        let data: any;
+        try {
+            if (roleplayApiConfig.streamChat === true) {
+                try {
+                    requestBody = { ...requestBody, stream: true };
+                    data = await fetchStreamingChatCompletion(
+                        `${baseUrl}/chat/completions`,
+                        { method: 'POST', headers, body: JSON.stringify(requestBody) },
+                        updateStreamPreview,
+                    );
+                    updateStreamPreview(data.choices?.[0]?.message?.content || '');
+                } catch (streamError: any) {
+                    clearStreamPreview();
+                    if (streamError?.partialContent?.trim()) throw streamError;
+                    requestBody = { ...requestBody, stream: false };
+                    const response = await fetch(`${baseUrl}/chat/completions`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify(requestBody),
+                    });
+                    if (!response.ok) {
+                        const detail = await response.text().catch(() => '');
+                        throw new Error(`AI 请求失败 (${response.status})${detail ? `: ${detail.slice(0, 120)}` : ''}`);
+                    }
+                    data = await safeResponseJson(response);
+                }
+            } else {
+                const response = await fetch(`${baseUrl}/chat/completions`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(requestBody),
+                });
+                if (!response.ok) {
+                    const detail = await response.text().catch(() => '');
+                    throw new Error(`AI 请求失败 (${response.status})${detail ? `: ${detail.slice(0, 120)}` : ''}`);
+                }
+                data = await safeResponseJson(response);
+            }
+
+            if (isSecondaryRoleplayApi(roleplayApi)) {
+                markSecondaryApiConfigSuccess(roleplayApiConfig);
+            }
+        } catch (error) {
+            if (isSecondaryRoleplayApi(roleplayApi)) {
+                markSecondaryApiConfigFailure(roleplayApiConfig, error);
+            }
+            throw error;
+        }
+
+        clearStreamPreview();
+        let aiContent = data.choices?.[0]?.message?.content || '';
+        const nativeThinking: string = data.choices?.[0]?.message?.reasoning_content || data.choices?.[0]?.message?.thinking || '';
+        if (usePrefill && !nativeThinking && !aiContent.includes('<thinking>') && !aiContent.includes('<think>')) {
+            aiContent = `<${thinkTag}>\n${aiContent}`;
+        }
+        const extracted = extractThinking(aiContent);
+        const thinkingContent = selectThinkingForDisplay(extracted.thinking, nativeThinking) || '';
+        aiContent = extracted.content.trim() || safeThinkingFallbackReply(thinkingContent);
+        aiContent = ChatParser.cleanAiSecondPass(aiContent);
+        const liveText = extractGroupLiveText(aiContent);
+
+        for (const privateCommand of liveText.privateCommands) {
+            await DB.saveMessage({
+                charId: speaker.id,
+                role: 'assistant',
+                type: 'text',
+                content: privateCommand.content,
+                metadata: { source: 'group_live_private', groupId: activeGroup.id, groupName: activeGroup.name },
+            });
+            addToast(`${speaker.name} 悄悄对你说: ${privateCommand.content.substring(0, 15)}...`, 'info');
+        }
+
+        return saveGroupLivePublicReply(
+            speaker,
+            liveText.publicContent,
+            liveText.innerVoice,
+            thinkingContent || undefined,
+        );
+    };
+
+    const buildNextPhysicalRoleplayBatch = (
+        pendingSpeakers: CharacterProfile[],
+    ): { wave: LiveRoleplayJob[]; rest: CharacterProfile[] } => {
+        if (!activeGroup) return { wave: [], rest: pendingSpeakers };
+
+        const wave: LiveRoleplayJob[] = [];
+        const rest: CharacterProfile[] = [];
+        const usedFingerprints = new Set<string>();
+
+        for (const speaker of pendingSpeakers) {
+            const value = readLiveRoleplayApiSelectionValue(speaker.id);
+            let api: GroupLiveRoleplayApiResolution | null = null;
+
+            if (value === 'secondary:round-robin') {
+                api = reserveDistinctSecondaryRoleplayApis(
+                    1,
+                    getSecondaryApiPoolWithStatus(),
+                    usedFingerprints,
+                )[0] || null;
+            } else {
+                api = resolveGroupLiveRoleplayApiConfig(value, apiConfig, apiPresets, getSecondaryApiPoolWithStatus());
+            }
+
+            if (!api) {
+                rest.push(speaker);
+                continue;
+            }
+
+            const fingerprint = getGroupLiveApiFingerprint(api.config);
+            if (usedFingerprints.has(fingerprint)) {
+                rest.push(speaker);
+                continue;
+            }
+
+            usedFingerprints.add(fingerprint);
+            wave.push({ speaker, api, fingerprint });
+        }
+
+        if (wave.length === 0 && pendingSpeakers[0]) {
+            resolveLiveRoleplayApiForSpeaker(pendingSpeakers[0]);
+        }
+
+        return { wave, rest };
+    };
+
+    const generateLiveGroupReplyWithPoolRetry = async (
+        job: LiveRoleplayJob,
+        groupLog: Message[],
+        groupMembers: CharacterProfile[],
+        autonomous: boolean,
+        waveFingerprints: Set<string>,
+        contextMode: GroupLiveContextMode,
+    ): Promise<number> => {
+        try {
+            return await generateLiveGroupReply(job.speaker, groupLog, groupMembers, autonomous, job.api, contextMode);
+        } catch (firstError) {
+            if (!isSecondaryRoleplayApi(job.api)) throw firstError;
+
+            const retryBlockedFingerprints = new Set(waveFingerprints);
+            retryBlockedFingerprints.add(job.fingerprint);
+            const retryApi = reserveDistinctSecondaryRoleplayApis(
+                1,
+                getSecondaryApiPoolWithStatus(),
+                retryBlockedFingerprints,
+            )[0];
+            if (!retryApi) throw firstError;
+
+            return generateLiveGroupReply(
+                job.speaker,
+                groupLog,
+                groupMembers,
+                autonomous,
+                retryApi,
+                contextMode,
+            );
+        }
+    };
+
+    const runSnapshotRoleplayJob = async (
+        job: LiveRoleplayJob,
+        groupLog: Message[],
+        groupMembers: CharacterProfile[],
+        autonomous: boolean,
+        waveFingerprints: Set<string>,
+        contextMode: GroupLiveContextMode,
+    ): Promise<number> => {
+        try {
+            return await generateLiveGroupReplyWithPoolRetry(job, groupLog, groupMembers, autonomous, waveFingerprints, contextMode);
+        } finally {
+            setTypingCharIds(prev => prev.filter(id => id !== job.speaker.id));
+        }
+    };
+
+    const runSemanticRoleplayWave = async (
+        semanticSpeakers: CharacterProfile[],
+        waveSnapshotLog: Message[],
+        groupMembers: CharacterProfile[],
+        autonomous: boolean,
+    ): Promise<{ savedCount: number; failures: unknown[] }> => {
+        let savedCount = 0;
+        const failures: unknown[] = [];
+        let pendingSpeakers = [...semanticSpeakers];
+        const contextMode: GroupLiveContextMode = semanticSpeakers.length > 1 ? 'snapshot' : 'serial';
+
+        while (pendingSpeakers.length > 0) {
+            const { wave, rest } = buildNextPhysicalRoleplayBatch(pendingSpeakers);
+            if (wave.length === 0) {
+                throw new Error('群像语义波没有可用 API');
+            }
+            pendingSpeakers = rest;
+
+            const waveFingerprints = new Set(wave.map(job => job.fingerprint));
+            setTypingCharIds(wave.map(job => job.speaker.id));
+
+            if (wave.length >= 2) {
+                const results = await Promise.allSettled(
+                    wave.map(job => runSnapshotRoleplayJob(job, waveSnapshotLog, groupMembers, autonomous, waveFingerprints, contextMode)),
+                );
+                for (const result of results) {
+                    if (result.status === 'fulfilled') savedCount += result.value;
+                    else failures.push(result.reason);
+                }
+            } else {
+                try {
+                    savedCount += await runSnapshotRoleplayJob(
+                        wave[0],
+                        waveSnapshotLog,
+                        groupMembers,
+                        autonomous,
+                        waveFingerprints,
+                        contextMode,
+                    );
+                } catch (error) {
+                    failures.push(error);
+                }
+            }
+        }
+
+        await refreshGroupMessages();
+        return { savedCount, failures };
+    };
+
+    const triggerLiveGroupRound = async (currentMsgs: Message[], options: { autonomous?: boolean } = {}) => {
+        if (!activeGroup) return;
+        if (isTyping) return;
+
+        setIsTyping(true);
+        setTypingCharIds([]);
+        let savedMessageCount = 0;
+
+        try {
+            const groupMembers = getGroupMemberCharacters(activeGroup, characters);
+            if (groupMembers.length === 0) {
+                throw new Error('群成员数据异常：找不到可发言角色');
+            }
+
+            const speakerWaves = await requestLiveSpeakerWaves(currentMsgs, groupMembers, options.autonomous);
+            const semanticWaves = speakerWaves
+                .map(wave => wave
+                    .map(id => groupMembers.find(member => member.id === id))
+                    .filter((member): member is CharacterProfile => !!member))
+                .filter(wave => wave.length > 0);
+
+            if (semanticWaves.length === 0) {
+                addToast('这轮没人接话', 'info');
+                return;
+            }
+
+            let liveLog = sortGroupLogMessages(currentMsgs);
+            const waveFailures: unknown[] = [];
+
+            for (const semanticWave of semanticWaves) {
+                const waveSnapshot = liveLog;
+                const result = await runSemanticRoleplayWave(
+                    semanticWave,
+                    waveSnapshot,
+                    groupMembers,
+                    Boolean(options.autonomous),
+                );
+                savedMessageCount += result.savedCount;
+                waveFailures.push(...result.failures);
+                liveLog = await refreshGroupMessages();
+            }
+
+            if (savedMessageCount === 0 && waveFailures.length > 0) {
+                throw waveFailures[0];
+            }
+
+            if (waveFailures.length > 0) {
+                addToast(`有 ${waveFailures.length} 个成员这轮生成失败，其余回复已保留`, 'info');
+            }
+
+            if (savedMessageCount === 0) {
+                throw new Error('AI 已返回，但没有产生可公开显示的群消息');
+            }
+        } catch (e: any) {
+            console.error(e);
+            addToast(`群像生成失败: ${e.message || '未知错误'}`, 'error');
+        } finally {
+            setTypingCharIds([]);
+            setIsTyping(false);
+            if (options.autonomous) {
+                setAutonomousRoundsRemaining(prev => {
+                    const next = Math.max(0, prev - 1);
+                    if (next === 0) {
+                        setAutonomousChatEnabled(false);
+                        localStorage.setItem(GROUP_LIVE_AUTONOMOUS_ENABLED_KEY, 'false');
+                    }
+                    return next;
+                });
+            }
+            const refreshed = await refreshGroupMessages().catch(error => {
+                console.error('Failed to refresh group messages:', error);
+                return [] as Message[];
+            });
+            const embeddingApiKey = getEmbeddingConfig().apiKey || undefined;
+            const hasSummaryApi = getReadySecondaryApiPoolEntries(getSecondaryApiPoolWithStatus()).length > 0;
+            if (activeGroup && liveGroupModeEnabled && hasSummaryApi && embeddingApiKey && refreshed.length > 0) {
+                queueGroupMemorySummaries({
+                    group: activeGroup,
+                    messages: refreshed,
+                    characters,
+                    userProfile,
+                    embeddingApiKey,
+                });
+            }
+        }
+    };
+
+    useEffect(() => {
+        clearAutonomousTimer();
+        if (!activeGroup || !liveGroupModeEnabled || !autonomousChatEnabled || autonomousRoundsRemaining <= 0 || isTyping) {
+            return;
+        }
+
+        autonomousTimerRef.current = setTimeout(async () => {
+            if (!activeGroup || isTyping) return;
+            const currentMsgs = sortGroupLogMessages(await DB.getGroupMessages(activeGroup.id));
+            await triggerLiveGroupRound(currentMsgs, { autonomous: true });
+        }, Math.max(1, autonomousDelaySeconds) * 1000);
+
+        return clearAutonomousTimer;
+    }, [
+        activeGroup?.id,
+        liveGroupModeEnabled,
+        autonomousChatEnabled,
+        autonomousRoundsRemaining,
+        autonomousDelaySeconds,
+        isTyping,
+        messages.length,
+    ]);
 
     // --- Logic: AI Director (The Core Logic) ---
 
@@ -809,7 +1691,7 @@ ${attachedImagesNote}
                     model: apiConfig.model,
                     messages: [{ role: "user", content: userMessageContent }],
                     temperature: 0.9, // High creativity for banter
-                    max_tokens: 8000
+                    max_tokens: GROUP_CHAT_MAX_TOKENS,
                 })
             });
 
@@ -1014,6 +1896,17 @@ ${attachedImagesNote}
     }
 
     // CHAT VIEW
+    const typingCharacters = typingCharIds
+        .map(id => characters.find(c => c.id === id))
+        .filter((character): character is CharacterProfile => Boolean(character));
+    const typingCharacter = typingCharacters.length === 1
+        ? typingCharacters[0]
+        : (typingCharId ? characters.find(c => c.id === typingCharId) : null);
+    const activeGroupMemberCharacters = activeGroup ? getGroupMemberCharacters(activeGroup, characters) : [];
+    const cognitionEditorSpeaker = activeGroupMemberCharacters.find(member => member.id === cognitionEditorSpeakerId) || activeGroupMemberCharacters[0];
+    const cognitionEditorTargets = activeGroupMemberCharacters.filter(member => member.id !== cognitionEditorSpeaker?.id);
+    const autonomousChatActive = autonomousChatEnabled && autonomousRoundsRemaining > 0;
+
     return (
         <div className="h-full w-full bg-[#f0f4f8] flex flex-col font-sans relative">
             {/* Header */}
@@ -1050,9 +1943,10 @@ ${attachedImagesNote}
 
                         {/* Manual Trigger Button (Only trigger, not send) */}
                         <button
-                            onClick={() => triggerDirector(messages)}
+                            onClick={() => liveGroupModeEnabled ? triggerLiveGroupRound(messages) : triggerDirector(messages)}
                             disabled={isTyping}
                             className={`p-2 rounded-full transition-all active:scale-90 ${isTyping ? 'bg-slate-100 text-slate-300' : 'bg-violet-100 text-violet-600 shadow-sm'}`}
+                            title={liveGroupModeEnabled ? '群像 Beta：真实多角色接话' : '旧导演接话'}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M14.615 1.595a.75.75 0 0 1 .359.852L12.982 9.75h7.268a.75.75 0 0 1 .548 1.262l-10.5 11.25a.75.75 0 0 1-1.272-.71l1.992-7.302H3.75a.75.75 0 0 1-.548-1.262l10.5-11.25a.75.75 0 0 1 .914-.143Z" clipRule="evenodd" /></svg>
                         </button>
@@ -1066,7 +1960,7 @@ ${attachedImagesNote}
                     <div className="flex justify-center mb-4">
                         <button onClick={async () => {
                             const { messages: moreMsgs, totalCount } = await DB.getRecentGroupMessagesWithCount(activeGroup.id, messages.length + 30);
-                            setMessages(moreMsgs);
+                            setMessages(sortGroupLogMessages(moreMsgs));
                             setTotalMsgCount(totalCount);
                             setVisibleCount(moreMsgs.length);
                         }} className="px-4 py-2 bg-white/50 backdrop-blur-sm rounded-full text-xs text-slate-500 shadow-sm border border-white hover:bg-white transition-colors">
@@ -1096,10 +1990,24 @@ ${attachedImagesNote}
                 {isTyping && (
                     <div className="flex items-center gap-2 pl-4 py-2 animate-pulse opacity-70">
                         <div className="flex -space-x-1">
-                            <div className="w-6 h-6 rounded-full bg-slate-300 border-2 border-white"></div>
+                            {typingCharacters.length > 0 ? typingCharacters.slice(0, 4).map(character => (
+                                <img key={character.id} src={character.avatar} className="w-6 h-6 rounded-full object-cover border-2 border-white" />
+                            )) : typingCharacter?.avatar ? (
+                                <img src={typingCharacter.avatar} className="w-6 h-6 rounded-full object-cover border-2 border-white" />
+                            ) : (
+                                <div className="w-6 h-6 rounded-full bg-slate-300 border-2 border-white"></div>
+                            )}
                             <div className="w-6 h-6 rounded-full bg-slate-200 border-2 border-white"></div>
                         </div>
-                        <span className="text-xs text-slate-400 font-medium">成员正在输入...</span>
+                        {typingCharacters.length > 1 ? (
+                            <div className="flex flex-col gap-0.5">
+                                {typingCharacters.map(character => (
+                                    <span key={character.id} className="text-xs text-slate-400 font-medium">{character.name} 正在输入...</span>
+                                ))}
+                            </div>
+                        ) : (
+                            <span className="text-xs text-slate-400 font-medium">{typingCharacter ? `${typingCharacter.name} 正在输入...` : '成员正在输入...'}</span>
+                        )}
                     </div>
                 )}
             </div>
@@ -1220,6 +2128,164 @@ ${attachedImagesNote}
                         <input type="range" min="20" max="5000" step="10" value={contextLimit} onChange={e => { const v = parseInt(e.target.value); setContextLimit(v); localStorage.setItem('groupchat_context_limit', String(v)); }} className="w-full h-2 bg-slate-200 rounded-full appearance-none accent-violet-500" />
                         <div className="flex justify-between text-[10px] text-slate-400 mt-1"><span>20 (省流)</span><span>5000 (超长记忆)</span></div>
                         <p className="text-[9px] text-slate-400 mt-1 leading-tight">控制每次触发AI导演时发送的群聊历史消息数量。越多上下文越丰富，但消耗更多token。</p>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">群像 Beta</label>
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                            <div className="min-w-0">
+                                <div className="text-xs font-bold text-slate-700">真实多角色生成</div>
+                                <p className="text-[9px] text-slate-400 mt-1 leading-tight">每个被导演点到的成员各自发起一次真实回复，旧导演模式保留。</p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    const next = !liveGroupModeEnabled;
+                                    setLiveGroupModeEnabled(next);
+                                    localStorage.setItem('groupchat_live_mode_enabled', String(next));
+                                }}
+                                className={`w-11 h-6 rounded-full p-0.5 transition-colors shrink-0 ${liveGroupModeEnabled ? 'bg-violet-500' : 'bg-slate-200'}`}
+                            >
+                                <span className={`block w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${liveGroupModeEnabled ? 'translate-x-5' : 'translate-x-0'}`}></span>
+                            </button>
+                        </div>
+                        <div className="rounded-xl border border-violet-100 bg-violet-50/50 px-3 py-2">
+                            <div className="text-xs font-bold text-violet-600">导演自动排波</div>
+                            <p className="text-[9px] text-violet-500/80 mt-1 leading-tight">
+                                每轮由导演决定谁先说、谁同时冒泡。后一波能看到前一波；同一波只看本波开始时的快照，满足不同 key 条件时才真并发。
+                            </p>
+                        </div>
+                        <div className="mt-4 rounded-xl border border-slate-100 bg-white px-3 py-3">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="text-xs font-bold text-slate-700">自主交谈</div>
+                                    <p className="text-[9px] text-slate-400 mt-1 leading-tight">不需要你发言，角色们自己聊；你一发言就会打断。</p>
+                                </div>
+                                <button
+                                    onClick={() => autonomousChatActive ? stopAutonomousChat() : startAutonomousChat()}
+                                    className={`w-11 h-6 rounded-full p-0.5 transition-colors shrink-0 ${autonomousChatActive ? 'bg-emerald-500' : 'bg-slate-200'}`}
+                                >
+                                    <span className={`block w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${autonomousChatActive ? 'translate-x-5' : 'translate-x-0'}`}></span>
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 mt-3">
+                                <label className="block">
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">轮数上限</span>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={20}
+                                        value={autonomousRoundLimit}
+                                        onChange={event => {
+                                            const next = Math.max(1, Math.min(20, parseInt(event.target.value || '1', 10)));
+                                            setAutonomousRoundLimit(next);
+                                            localStorage.setItem(GROUP_LIVE_AUTONOMOUS_ROUND_LIMIT_KEY, String(next));
+                                            if (autonomousChatActive) setAutonomousRoundsRemaining(next);
+                                        }}
+                                        className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-violet-300 focus:bg-white"
+                                    />
+                                </label>
+                                <label className="block">
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">间隔秒数</span>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={60}
+                                        value={autonomousDelaySeconds}
+                                        onChange={event => {
+                                            const next = Math.max(1, Math.min(60, parseInt(event.target.value || '1', 10)));
+                                            setAutonomousDelaySeconds(next);
+                                            localStorage.setItem(GROUP_LIVE_AUTONOMOUS_DELAY_KEY, String(next));
+                                        }}
+                                        className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-violet-300 focus:bg-white"
+                                    />
+                                </label>
+                            </div>
+                            <div className="mt-2 text-[9px] text-slate-400 leading-tight">
+                                {autonomousChatActive
+                                    ? `运行中：还会自动聊 ${autonomousRoundsRemaining} 轮。`
+                                    : '关闭中：只会在你点闪电时接话。'}
+                            </div>
+                        </div>
+                        {activeGroupMemberCharacters.length > 0 && (
+                            <div className="mt-4 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div>
+                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">成员扮演 API</div>
+                                        <p className="text-[9px] text-slate-400 mt-0.5 leading-tight">只影响群像 Beta 的角色发言；总结固定走副 API 池。</p>
+                                    </div>
+                                    <span className="text-[9px] text-slate-400 shrink-0">max_tokens {GROUP_CHAT_MAX_TOKENS}</span>
+                                </div>
+                                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                                    {activeGroupMemberCharacters.map(member => {
+                                        const selectedValue = liveRoleplayApiSelections[member.id]
+                                            || (activeGroup
+                                                ? readGroupLiveRoleplayApiSelection(activeGroup.id, member.id)
+                                                : GROUP_LIVE_ROLEPLAY_DEFAULT_API_VALUE);
+                                        const value = liveRoleplayApiOptions.some(option => option.value === selectedValue)
+                                            ? selectedValue
+                                            : GROUP_LIVE_ROLEPLAY_DEFAULT_API_VALUE;
+                                        const selectedOption = liveRoleplayApiOptions.find(option => option.value === value);
+                                        return (
+                                            <div key={member.id} className="flex items-center gap-2 rounded-xl border border-slate-100 bg-white px-2.5 py-2">
+                                                <img src={member.avatar} className="w-8 h-8 rounded-full object-cover shrink-0" />
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="text-xs font-bold text-slate-700 truncate">{member.name}</div>
+                                                    <select
+                                                        value={value}
+                                                        onChange={event => {
+                                                            handleLiveRoleplayApiSelectionChange(member.id, event.target.value);
+                                                        }}
+                                                        className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600 outline-none focus:border-violet-300 focus:bg-white"
+                                                    >
+                                                        {liveRoleplayApiOptions.map(option => (
+                                                            <option key={option.value} value={option.value} disabled={option.disabled}>
+                                                                {option.label} · {option.detail}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    {selectedOption && (
+                                                        <div className="mt-1 text-[9px] text-violet-500 truncate">
+                                                            当前：{selectedOption.label} · {selectedOption.detail}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                        {activeGroupMemberCharacters.length > 1 && cognitionEditorSpeaker && (
+                            <div className="mt-4 space-y-2" data-cognition-revision={cognitionRevision}>
+                                <div>
+                                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">轻量认知 / 交互层</div>
+                                    <p className="text-[9px] text-slate-400 mt-0.5 leading-tight">写“某个角色视角里，他认识谁、什么关系、有没有旧账”。只进该角色群像提示词，不进共享群记录。</p>
+                                </div>
+                                <select
+                                    value={cognitionEditorSpeaker.id}
+                                    onChange={event => setCognitionEditorSpeakerId(event.target.value)}
+                                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-700 outline-none focus:border-violet-300 focus:bg-white"
+                                >
+                                    {activeGroupMemberCharacters.map(member => (
+                                        <option key={member.id} value={member.id}>{member.name} 的视角</option>
+                                    ))}
+                                </select>
+                                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                                    {cognitionEditorTargets.map(member => (
+                                        <label key={`${cognitionEditorSpeaker.id}-${member.id}`} className="block rounded-xl border border-slate-100 bg-white px-2.5 py-2">
+                                            <span className="text-[10px] font-bold text-slate-600">{cognitionEditorSpeaker.name} 对 {member.name}</span>
+                                            <textarea
+                                                value={readGroupLiveCognition(cognitionEditorSpeaker.id, member.id)}
+                                                onChange={event => writeGroupLiveCognition(cognitionEditorSpeaker.id, member.id, event.target.value)}
+                                                rows={2}
+                                                placeholder="例：以前合作过，嘴上互怼但彼此认可；或：刚进群，还不熟。"
+                                                className="mt-1 w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] leading-relaxed text-slate-700 outline-none focus:border-violet-300 focus:bg-white"
+                                            />
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Memory & Context Management */}

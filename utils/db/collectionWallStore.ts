@@ -45,10 +45,62 @@ const sortWalls = (walls: CollectionWall[]): CollectionWall[] =>
     walls.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || (a.createdAt || 0) - (b.createdAt || 0));
 
 const sortItems = (items: CollectionWallItem[]): CollectionWallItem[] =>
-    items.sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0));
+    items.sort((a, b) => (
+        (Number.isFinite(a.order) ? a.order : 0) - (Number.isFinite(b.order) ? b.order : 0)
+        || (a.createdAt || 0) - (b.createdAt || 0)
+        || String(a.id || '').localeCompare(String(b.id || ''))
+    ));
 
 const sortAssets = (assets: CollectionWallAsset[]): CollectionWallAsset[] =>
     assets.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+let collectionWallSnapshotDebugSeq = 0;
+
+const summarizeCollectionWallError = (error: unknown) => {
+    const err = error as { name?: string; message?: string; code?: number } | null | undefined;
+    return {
+        name: err?.name || (error instanceof Error ? error.name : typeof error),
+        message: err?.message || String(error || ''),
+        code: err?.code,
+    };
+};
+
+const debugCollectionWallItems = (phase: string, wallId: string, items: CollectionWallItem[]): void => {
+    console.info(`[CollectionWallDebug] ${phase}`, {
+        wallId,
+        items: items.map((item, index) => ({
+            index,
+            id: item.id,
+            x: item.x,
+            y: item.y,
+            z: item.z,
+            order: item.order,
+        })),
+    });
+};
+
+const debugCollectionWallSnapshot = (
+    phase: string,
+    seq: number,
+    wallId: string,
+    items: CollectionWallItem[],
+    extra: Record<string, unknown> = {},
+): void => {
+    console.info(`[CollectionWallDebug] snapshot-${phase}`, {
+        seq,
+        wallId,
+        itemCount: items.length,
+        head: items.slice(0, 8).map((item, index) => ({
+            index,
+            id: item.id,
+            order: item.order,
+            z: item.z,
+            x: item.x,
+            y: item.y,
+        })),
+        ...extra,
+    });
+};
 
 const normalizeCollectionWallRecord = (input: CollectionWallInput, now = Date.now()): CollectionWall => ({
     ...input,
@@ -187,7 +239,10 @@ export const getCollectionWallItemsByWallId = async (wallId: string): Promise<Co
         request.onsuccess = () => {
             const items = ((request.result || []) as CollectionWallItem[])
                 .filter(item => item.wallId === wallId);
-            resolve(sortItems(items));
+            debugCollectionWallItems('read-raw', wallId, items);
+            const sortedItems = sortItems(items);
+            debugCollectionWallItems('read-return-sorted', wallId, sortedItems);
+            resolve(sortedItems);
         };
         request.onerror = () => reject(request.error);
     });
@@ -228,34 +283,88 @@ export const replaceCollectionWallSnapshot = async (
     wallInput: CollectionWallInput,
     itemsInput: CollectionWallItemInput[],
 ): Promise<{ wall: CollectionWall; items: CollectionWallItem[] }> => {
-    const now = Date.now();
-    const wall = normalizeCollectionWallRecord(wallInput, now);
-    const items = sortItems(itemsInput.map(item => normalizeCollectionWallItemRecord(item, wall.id, now)));
-    const db = await openDB();
-    if (!db.objectStoreNames.contains(STORE_COLLECTION_WALLS) || !db.objectStoreNames.contains(STORE_COLLECTION_WALL_ITEMS)) {
-        return { wall, items };
+    const seq = ++collectionWallSnapshotDebugSeq;
+    let wallId = wallInput.id || '(new-wall)';
+
+    try {
+        const now = Date.now();
+        const wall = normalizeCollectionWallRecord(wallInput, now);
+        wallId = wall.id;
+        const items = sortItems(itemsInput.map(item => normalizeCollectionWallItemRecord(item, wall.id, now)));
+        debugCollectionWallSnapshot('enter', seq, wall.id, items);
+        debugCollectionWallItems('write-before-put', wall.id, items);
+        const db = await openDB();
+        if (!db.objectStoreNames.contains(STORE_COLLECTION_WALLS) || !db.objectStoreNames.contains(STORE_COLLECTION_WALL_ITEMS)) {
+            debugCollectionWallSnapshot('skipped-missing-store', seq, wall.id, items, {
+                hasWallStore: db.objectStoreNames.contains(STORE_COLLECTION_WALLS),
+                hasItemStore: db.objectStoreNames.contains(STORE_COLLECTION_WALL_ITEMS),
+            });
+            return { wall, items };
+        }
+
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction([STORE_COLLECTION_WALLS, STORE_COLLECTION_WALL_ITEMS], 'readwrite');
+            const wallStore = tx.objectStore(STORE_COLLECTION_WALLS);
+            const itemStore = tx.objectStore(STORE_COLLECTION_WALL_ITEMS);
+            const existingRequest = itemStore.indexNames.contains('wallId')
+                ? itemStore.index('wallId').getAll(wall.id)
+                : itemStore.getAll();
+
+            existingRequest.onsuccess = () => {
+                const existingItems = ((existingRequest.result || []) as CollectionWallItem[])
+                    .filter(item => item.wallId === wall.id);
+                console.info('[CollectionWallDebug] snapshot-delete-old', {
+                    seq,
+                    wallId: wall.id,
+                    deleteCount: existingItems.length,
+                    oldHead: existingItems.slice(0, 8).map((item, index) => ({
+                        index,
+                        id: item.id,
+                        order: item.order,
+                        z: item.z,
+                    })),
+                });
+                existingItems.forEach(item => itemStore.delete(item.id));
+                wallStore.put(wall);
+                items.forEach(item => itemStore.put(item));
+            };
+            existingRequest.onerror = () => {
+                console.error('[CollectionWallDebug] snapshot-read-existing-error', {
+                    seq,
+                    wallId: wall.id,
+                    error: summarizeCollectionWallError(existingRequest.error),
+                });
+                reject(existingRequest.error);
+            };
+            tx.oncomplete = () => {
+                debugCollectionWallSnapshot('complete', seq, wall.id, items);
+                resolve({ wall, items });
+            };
+            tx.onerror = () => {
+                console.error('[CollectionWallDebug] snapshot-tx-error', {
+                    seq,
+                    wallId: wall.id,
+                    error: summarizeCollectionWallError(tx.error),
+                });
+                reject(tx.error);
+            };
+            tx.onabort = () => {
+                console.error('[CollectionWallDebug] snapshot-tx-abort', {
+                    seq,
+                    wallId: wall.id,
+                    error: summarizeCollectionWallError(tx.error),
+                });
+                reject(tx.error);
+            };
+        });
+    } catch (error) {
+        console.error('[CollectionWallDebug] snapshot-error', {
+            seq,
+            wallId,
+            error: summarizeCollectionWallError(error),
+        });
+        throw error;
     }
-
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction([STORE_COLLECTION_WALLS, STORE_COLLECTION_WALL_ITEMS], 'readwrite');
-        const wallStore = tx.objectStore(STORE_COLLECTION_WALLS);
-        const itemStore = tx.objectStore(STORE_COLLECTION_WALL_ITEMS);
-        const existingRequest = itemStore.indexNames.contains('wallId')
-            ? itemStore.index('wallId').getAll(wall.id)
-            : itemStore.getAll();
-
-        existingRequest.onsuccess = () => {
-            const existingItems = ((existingRequest.result || []) as CollectionWallItem[])
-                .filter(item => item.wallId === wall.id);
-            existingItems.forEach(item => itemStore.delete(item.id));
-            wallStore.put(wall);
-            items.forEach(item => itemStore.put(item));
-        };
-        existingRequest.onerror = () => reject(existingRequest.error);
-        tx.oncomplete = () => resolve({ wall, items });
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-    });
 };
 
 export const deleteCollectionWallItem = async (id: string): Promise<void> => {
@@ -342,21 +451,49 @@ export const addCollectionBookToDefaultWall = async (book: CollectionBook): Prom
 };
 
 export const saveCollectionWallAsset = async (input: CollectionWallAssetInput): Promise<CollectionWallAsset> => {
-    const now = Date.now();
-    const record: CollectionWallAsset = {
-        ...input,
-        id: input.id || createId('wallasset'),
-        bytes: Number.isFinite(input.bytes) ? input.bytes : input.blob.size,
-        createdAt: input.createdAt || now,
-    };
+    let record: CollectionWallAsset | null = null;
+    try {
+        const now = Date.now();
+        record = {
+            ...input,
+            id: input.id || createId('wallasset'),
+            bytes: Number.isFinite(input.bytes) ? input.bytes : input.blob.size,
+            createdAt: input.createdAt || now,
+        };
 
-    const opened = await getStore(STORE_COLLECTION_WALL_ASSETS, 'readwrite');
-    if (!opened) return record;
-    return new Promise((resolve, reject) => {
-        opened.store.put(record);
-        opened.tx.oncomplete = () => resolve(record);
-        opened.tx.onerror = () => reject(opened.tx.error);
-    });
+        const opened = await getStore(STORE_COLLECTION_WALL_ASSETS, 'readwrite');
+        if (!opened) return record;
+        return await new Promise((resolve, reject) => {
+            opened.store.put(record);
+            opened.tx.oncomplete = () => resolve(record);
+            opened.tx.onerror = () => {
+                console.error('[CollectionWallDebug] asset-save-tx-error', {
+                    id: record?.id,
+                    bytes: record?.bytes,
+                    hash: record?.hash,
+                    error: summarizeCollectionWallError(opened.tx.error),
+                });
+                reject(opened.tx.error);
+            };
+            opened.tx.onabort = () => {
+                console.error('[CollectionWallDebug] asset-save-tx-abort', {
+                    id: record?.id,
+                    bytes: record?.bytes,
+                    hash: record?.hash,
+                    error: summarizeCollectionWallError(opened.tx.error),
+                });
+                reject(opened.tx.error);
+            };
+        });
+    } catch (error) {
+        console.error('[CollectionWallDebug] asset-save-error', {
+            id: record?.id || input.id,
+            bytes: record?.bytes || input.bytes,
+            hash: record?.hash || input.hash,
+            error: summarizeCollectionWallError(error),
+        });
+        throw error;
+    }
 };
 
 export const getCollectionWallAssetById = async (id: string): Promise<CollectionWallAsset | null> => {

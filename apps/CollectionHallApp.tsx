@@ -28,6 +28,14 @@ import { loadCharacterGoals } from '../utils/goalService';
 import { getEmbeddingConfig } from '../utils/runtimeConfig';
 import { getGalleryImageDisplayUrl } from '../utils/generatedImageStorage';
 import { fnv1aBytes } from '../utils/fnv1a';
+import {
+    clearCollectionWallDebugLogs,
+    formatCollectionWallDebugDiagnostics,
+    formatCollectionWallDebugEntrySummary,
+    getCollectionWallDebugLogs,
+    subscribeCollectionWallDebugLogs,
+    type CollectionWallDebugLogEntry,
+} from '../utils/collectionWallDebugLog';
 import { injectFreeformCompatScript } from '../components/chat/statusCardIframe';
 const StatusCardRenderer = React.lazy(() => import('../components/chat/StatusCardRenderer'));
 
@@ -197,7 +205,7 @@ const CSS = `
 .ar-wall-invite:hover{transform:translateY(-1px);border-color:rgba(168,58,78,.34);background:rgba(255,250,241,.84)}
 .ar-wall-invite:disabled{opacity:.54;cursor:wait;transform:none}
 .ar-wall-empty-list{margin:18px 16px 34px;border:1px dashed rgba(201,163,106,.2);border-radius:10px;padding:20px 16px;text-align:center;color:var(--ar-t3);font-size:12px;line-height:1.8;background:rgba(255,236,210,.035)}
-.ar-full-wall{position:fixed;inset:0;z-index:90;overflow-y:auto;overflow-x:hidden;background:#17120e;color:#f4ead8;-webkit-overflow-scrolling:touch;touch-action:pan-y}
+.ar-full-wall{position:fixed;inset:0;z-index:90;overflow:hidden;background:#17120e;color:#f4ead8;touch-action:none}
 .ar-full-wall.editing{overflow:hidden;touch-action:none}
 .ar-full-wall.preview{scrollbar-width:none;-ms-overflow-style:none;cursor:pointer}
 .ar-full-wall.preview::-webkit-scrollbar{display:none}
@@ -212,8 +220,8 @@ const CSS = `
 .ar-full-menu-action{height:36px;min-width:84px;border:1px solid rgba(231,140,160,.32);border-radius:999px;background:rgba(255,255,255,.75);color:var(--wall-ink);font-size:12px;font-weight:800;cursor:pointer}
 .ar-full-menu-action.primary{border-color:transparent;background:linear-gradient(180deg,var(--wall-rose-hi),var(--wall-rose));color:#fff;box-shadow:0 12px 22px -14px rgba(228,124,151,.85)}
 .ar-full-wall.preview .ar-full-exit,.ar-full-wall.preview .ar-full-actions,.ar-full-wall.preview .ar-edit-toolbar,.ar-full-wall.preview .ar-tray,.ar-full-wall.preview .moveable-control-box,.ar-full-wall.preview .ar-selection-actions,.ar-full-wall.preview .ar-text-style-panel,.ar-full-wall.preview .ar-asset-sheet{display:none!important}
-.ar-full-stage-wrap{position:relative;width:100%;min-height:100dvh}
-.ar-full-canvas{position:relative;width:750px;transform:scale(var(--wall-scale,1));transform-origin:top left;isolation:isolate}
+.ar-full-stage-wrap{position:relative;width:100%;height:100dvh;min-height:0;overflow:hidden}
+.ar-full-canvas{position:absolute;left:0;top:0;width:750px;transform:scale(var(--wall-scale,1));transform-origin:top left;isolation:isolate}
 .ar-edit-toolbar{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);z-index:6;display:flex;gap:8px;transform:translateX(-50%);padding:6px;border-radius:999px;background:rgba(11,9,7,.44);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
 .ar-edit-toolbar button{height:36px;border-radius:999px;padding:0 12px;gap:6px;font-size:12px;font-weight:800}
 .ar-edit-toolbar button:disabled{opacity:.45;cursor:default}
@@ -223,6 +231,7 @@ const CSS = `
 .ar-wall-free-item{position:absolute;left:0;top:0;z-index:var(--z,1);width:var(--item-w,320px);height:var(--item-h,260px);transform:translate3d(var(--x,0px),var(--y,0px),0) rotate(var(--r,0deg));transform-origin:center center;touch-action:auto}
 .ar-wall-free-item.editing{touch-action:none;cursor:grab}
 .ar-wall-free-item.selected{outline:1px solid rgba(245,224,181,.9);outline-offset:5px}
+.ar-full-wall.editing .ar-wall-free-item.selected,.ar-wall-free-item.dragging{z-index:10000}
 .ar-wall-free-item.dragging{cursor:grabbing}
 .ar-wall-free-item button{font:inherit}
 .ar-live-card{position:absolute;inset:0;overflow:hidden;background:transparent}
@@ -327,8 +336,8 @@ const CSS = `
 .ar-full-action{height:40px;border-radius:999px;padding:0 15px;gap:6px;font-size:12px;font-weight:800;letter-spacing:.04em}
 .ar-full-actions .ar-full-action:first-child{border-color:transparent;background:linear-gradient(180deg,var(--wall-rose-hi),var(--wall-rose));color:#fff;box-shadow:0 12px 22px -12px rgba(228,124,151,.85)}
 .ar-full-action:active,.ar-full-exit:active,.ar-edit-toolbar button:active,.ar-tray-item:active,.ar-wall-item-menu button:active{transform:scale(.96)}
-.ar-full-stage-wrap{position:relative;width:100%;min-height:100dvh}
-.ar-full-canvas{position:relative;width:750px;min-height:980px;transform:scale(var(--wall-scale,1));transform-origin:top left;isolation:isolate}
+.ar-full-stage-wrap{position:relative;width:100%;height:100dvh;min-height:0;overflow:hidden}
+.ar-full-canvas{position:absolute;left:0;top:0;width:750px;transform:scale(var(--wall-scale,1));transform-origin:top left;isolation:isolate}
 .ar-tray{position:fixed;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 64px);z-index:5;display:flex;gap:8px;overflow-x:auto;padding:0 12px 8px;scrollbar-width:none}
 .ar-tray-item{flex:none;min-width:118px;height:40px;border-radius:999px;padding:0 14px;color:var(--wall-rose-ink);font-size:12px;font-weight:800;gap:6px;white-space:nowrap}
 .ar-wall-free-item{transition:filter .16s ease}
@@ -342,8 +351,7 @@ const CSS = `
 .ticket-card p{margin:16px 0 0;font-size:14px;line-height:1.7;color:var(--wall-ink-soft)}
 .ticket-card small{position:absolute;left:22px;right:22px;bottom:20px;border-top:1px dashed rgba(231,140,160,.5);padding-top:10px;color:var(--wall-rose-ink);font-size:10px;letter-spacing:.16em;font-weight:900}
 .ar-html-card{position:absolute;inset:0;overflow:hidden;border-radius:6px;background:#fff;box-shadow:0 18px 30px -24px rgba(150,90,110,.55),inset 0 0 0 1px rgba(247,202,214,.4)}
-.ar-html-frame{display:block;width:100%;height:100%;border:0;background:#fff}
-.ar-full-wall.editing .ar-html-card .ar-html-frame{pointer-events:none}
+.ar-html-frame{display:block;width:100%;height:100%;border:0;background:#fff;pointer-events:none}
 .ar-wall-img-item{border-radius:6px;background:#fff;padding:7px;box-shadow:0 18px 30px -24px rgba(150,90,110,.55),inset 0 0 0 1px rgba(247,202,214,.4)}
 .ar-wall-img-item img{border-radius:3px;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;user-select:none}
 .ar-wall-img-item.transparent{background:transparent;box-shadow:none;border-radius:0;padding:0}
@@ -657,6 +665,18 @@ const CSS = `
 .tk-rcpt .ln{margin:0;color:#232323;font-family:var(--tk-font-mono);font-size:12px;line-height:1.85;letter-spacing:.05em;white-space:pre-wrap;word-break:break-all}.tk-rcpt .ln.c{text-align:center}.tk-rcpt .ln.dim{color:var(--tk-grey)}.tk-rcpt .ln.bar{padding:6px 26px 2px}.tk-rcpt .ln.bar .tk-barcode{width:100%}
 .tk-rcpt-stamp{position:absolute;left:50%;top:46%;padding:7px 14px;border:2px dashed var(--tk-stamp);border-radius:6px;color:var(--tk-stamp);font-size:13px;font-weight:900;letter-spacing:.3em;text-indent:.3em;white-space:nowrap;transform:translate(-50%,-50%) rotate(-9deg) scale(1.7);opacity:0;mix-blend-mode:multiply;pointer-events:none}.tk-rcpt.fin .tk-rcpt-stamp{animation:tk-rstamp .32s cubic-bezier(.2,1.1,.3,1) forwards}@keyframes tk-rstamp{0%{transform:translate(-50%,-50%) rotate(-2deg) scale(1.7);opacity:0}100%{transform:translate(-50%,-50%) rotate(-9deg) scale(1);opacity:.9}}
 .ar-toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);z-index:300;padding:9px 17px;border-radius:999px;border:1px solid rgba(201,163,106,.38);background:#241b12;color:var(--ar-t1);font-size:12.5px;font-weight:700;letter-spacing:.02em;box-shadow:0 24px 60px -24px rgba(0,0,0,.78);animation:ar-rise .22s ease}
+.ar-debug-fab{position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 76px);z-index:360;display:flex;align-items:center;gap:6px;height:34px;border:1px solid rgba(201,163,106,.5);border-radius:999px;background:rgba(12,10,8,.78);color:var(--ar-accent);padding:0 12px;font-size:11px;font-weight:900;letter-spacing:.08em;box-shadow:0 14px 34px -20px rgba(0,0,0,.95);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);cursor:pointer}
+.ar-debug-panel{position:fixed;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 10px);z-index:361;display:flex;max-height:min(72dvh,560px);flex-direction:column;overflow:hidden;border:1px solid rgba(201,163,106,.35);border-radius:18px;background:rgba(17,13,10,.94);color:var(--ar-t1);box-shadow:0 26px 80px -32px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,236,210,.08);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.ar-debug-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 12px 8px;border-bottom:1px solid rgba(255,236,210,.12)}
+.ar-debug-head h3{margin:0;color:var(--ar-accent);font-size:13px;font-weight:900;letter-spacing:.08em}
+.ar-debug-actions{display:flex;gap:7px;align-items:center}
+.ar-debug-actions button{height:30px;border:1px solid rgba(255,236,210,.16);border-radius:999px;background:rgba(11,9,7,.72);color:var(--ar-t2);padding:0 10px;font-size:11px;font-weight:900;cursor:pointer}
+.ar-debug-actions button:disabled{opacity:.45}
+.ar-debug-list{flex:1;min-height:180px;overflow:auto;padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace;font-size:10.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.ar-debug-row{padding:7px 0;border-bottom:1px solid rgba(255,236,210,.08)}
+.ar-debug-row:last-child{border-bottom:0}
+.ar-debug-meta{display:block;margin-bottom:3px;color:rgba(222,202,172,.62);font-size:9px;letter-spacing:.04em}
+.ar-debug-empty{padding:24px 12px;color:rgba(222,202,172,.62);text-align:center;font-size:12px}
 .ar-sk-spine{flex:none;border-radius:3px 3px 1px 1px;background:linear-gradient(100deg,#241b13 38%,#32271c 50%,#241b13 62%);background-size:220% 100%;animation:ar-shimmer 1.4s ease infinite}
 @keyframes ar-shimmer{from{background-position:120% 0}to{background-position:-120% 0}}
 .ar-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 40px;text-align:center}
@@ -1378,7 +1398,6 @@ const WALL_PREVIEW_LIMIT = 12;
 const WALL_PREVIEW_SLOT_EVENT = 'collection-wall-preview-slots';
 const wallPreviewMountedIds = new Set<string>();
 const WALL_CANVAS_WIDTH = 750;
-const WALL_CANVAS_BOTTOM_PADDING = 120;
 const WALL_CANVAS_TOP_PADDING = 92;
 const WALL_AUTO_GAP = 24;
 const WALL_AUTO_SIDE_PAD = 46;
@@ -2117,21 +2136,64 @@ const normalizeWallItemForCanvas = (item: CollectionWallItem): CollectionWallIte
     const w = Number.isFinite(item.w) && item.w > 0 ? item.w : fallback.w;
     const h = Number.isFinite(item.h) && item.h > 0 ? item.h : fallback.h;
     const isBookCard = item.type === 'card' && !item.html;
+    const shouldUseDefaultCardFrame = isBookCard && item.x == null && item.y == null && h <= 240;
     return {
         ...item,
-        w: isBookCard && h <= 240 ? Math.max(w, DEFAULT_CARD_W) : w,
-        h: isBookCard && h <= 240 ? DEFAULT_CARD_H : h,
+        w: shouldUseDefaultCardFrame ? Math.max(w, DEFAULT_CARD_W) : w,
+        h: shouldUseDefaultCardFrame ? DEFAULT_CARD_H : h,
         rotation: Number.isFinite(item.rotation) ? item.rotation : 0,
         z: Number.isFinite(item.z) ? item.z : 0,
         order: Number.isFinite(item.order) ? item.order : 0,
     };
 };
 
-export function autoArrangeWallItems(items: CollectionWallItem[]): CollectionWallItem[] {
+export function autoArrangeWallItems(
+    items: CollectionWallItem[],
+    options: { canvasHeight?: number } = {},
+): CollectionWallItem[] {
+    const sortedItems = [...items]
+        .sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0));
+    const fixedCanvasHeight = Number(options.canvasHeight);
+    if (Number.isFinite(fixedCanvasHeight) && fixedCanvasHeight > 0 && sortedItems.length > 0) {
+        const count = sortedItems.length;
+        const gap = count > 20 ? 14 : 18;
+        const sidePad = count > 20 ? 28 : WALL_AUTO_SIDE_PAD;
+        const maxColumns = count > 18 ? 4 : count > 8 ? 3 : 2;
+        const columnCount = Math.min(maxColumns, Math.max(1, Math.ceil(Math.sqrt((count * WALL_CANVAS_WIDTH) / fixedCanvasHeight))));
+        const rowCount = Math.max(1, Math.ceil(count / columnCount));
+        const availableW = Math.max(1, WALL_CANVAS_WIDTH - sidePad * 2 - gap * (columnCount - 1));
+        const availableH = Math.max(1, fixedCanvasHeight - WALL_CANVAS_TOP_PADDING - sidePad - gap * (rowCount - 1));
+        const cellW = availableW / columnCount;
+        const cellH = availableH / rowCount;
+
+        return sortedItems.map((source, index) => {
+            const item = normalizeWallItemForCanvas(source);
+            const col = index % columnCount;
+            const row = Math.floor(index / columnCount);
+            const fit = Math.min(cellW / item.w, cellH / item.h, 1);
+            const minW = Math.min(44, cellW);
+            const minH = Math.min(44, cellH);
+            const w = Math.round(Math.min(cellW, Math.max(minW, item.w * fit)));
+            const h = Math.round(Math.min(cellH, Math.max(minH, item.h * fit)));
+            const x = sidePad + col * (cellW + gap) + (cellW - w) / 2;
+            const y = WALL_CANVAS_TOP_PADDING + row * (cellH + gap) + (cellH - h) / 2;
+            const microTilt = ((hashOf(item.id || `${item.wallId}:${index}`) % 7) - 3) * 0.5;
+            return {
+                ...item,
+                x: Math.round(x),
+                y: Math.round(y),
+                w,
+                h,
+                rotation: Number((item.rotation || microTilt || 0).toFixed(2)),
+                z: item.z || index + 1,
+                order: index,
+            };
+        });
+    }
+
     const columnWidth = (WALL_CANVAS_WIDTH - WALL_AUTO_SIDE_PAD * 2 - WALL_AUTO_GAP) / 2;
     const columns = [WALL_CANVAS_TOP_PADDING, WALL_CANVAS_TOP_PADDING];
-    return [...items]
-        .sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0))
+    return sortedItems
         .map((source, index) => {
             const item = normalizeWallItemForCanvas(source);
             const col = columns[0] <= columns[1] ? 0 : 1;
@@ -2141,7 +2203,7 @@ export function autoArrangeWallItems(items: CollectionWallItem[]): CollectionWal
             const y = columns[col];
             columns[col] += h + WALL_AUTO_GAP;
             const microTilt = ((hashOf(item.id || `${item.wallId}:${index}`) % 7) - 3) * 0.5;
-            return {
+            const arranged = {
                 ...item,
                 x: Math.round(x),
                 y: Math.round(y),
@@ -2150,6 +2212,17 @@ export function autoArrangeWallItems(items: CollectionWallItem[]): CollectionWal
                 rotation: Number((item.rotation || microTilt || 0).toFixed(2)),
                 z: item.z || index + 1,
                 order: index,
+            };
+            if (!Number.isFinite(options.canvasHeight)) return arranged;
+            return {
+                ...arranged,
+                ...normalizeWallItemFrameForCanvas(arranged, {
+                    x: arranged.x,
+                    y: arranged.y,
+                    w: arranged.w,
+                    h: arranged.h,
+                    rotation: arranged.rotation,
+                }, { canvasHeight: options.canvasHeight }),
             };
         });
 }
@@ -2655,6 +2728,21 @@ function cloneWallSnapshot(wall: CollectionWall, items: CollectionWallItem[]): W
     };
 }
 
+const debugWallDraftHead = (phase: string, wallId: string, items: CollectionWallItem[]): void => {
+    console.info(`[CollectionWallDebug] ${phase}`, {
+        wallId,
+        itemCount: items.length,
+        head: items.slice(0, 8).map((item, index) => ({
+            index,
+            id: item.id,
+            order: item.order,
+            z: item.z,
+            x: item.x,
+            y: item.y,
+        })),
+    });
+};
+
 export function buildDefaultBondWidgetItem(wall: CollectionWall, order = 0, z = 1): CollectionWallItem {
     return normalizeWallItemForCanvas({
         id: `wall-bond-${wall.id}`,
@@ -2709,14 +2797,14 @@ export function buildInitialWallItems(wall: CollectionWall, entries: WallZoneEnt
         }));
 
     if (realItems.some(item => item.x != null && item.y != null)) {
-        return relabelItems([...realItems, ...looseItems]);
+        return preserveFreeLayoutItemOrder([...realItems, ...looseItems]);
     }
 
     if (wall.id.startsWith('fallback-') && looseItems.length > 0) {
         return autoArrangeWallItems(looseItems);
     }
 
-    return relabelItems([...realItems, ...looseItems]);
+    return preserveFreeLayoutItemOrder([...realItems, ...looseItems]);
 }
 
 type WallEntriesBuildResult = {
@@ -2731,7 +2819,7 @@ type CollectionHallLoadSnapshot = {
     wallAssets: CollectionWallAsset[];
 };
 
-const buildWallZoneEntriesFromItems = (
+export const buildWallZoneEntriesFromItems = (
     wall: CollectionWall,
     wallItems: CollectionWallItem[],
     books: CollectionBook[],
@@ -2742,7 +2830,7 @@ const buildWallZoneEntriesFromItems = (
     const wallBookIds = new Set<string>();
     const entries = wallItems
         .filter(item => item.wallId === wall.id)
-        .sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0))
+        .sort(compareWallItemsStable)
         .reduce<WallZoneEntry[]>((acc, item) => {
             if (item.type === 'html' || (item.type === 'card' && item.html && !item.bookId)) {
                 if (item.html) acc.push({ id: item.id, type: 'html', item });
@@ -3085,6 +3173,8 @@ const FullScreenLightWall: React.FC<{
     const htmlFileInputRef = useRef<HTMLInputElement>(null);
     const decorPresetFileInputRef = useRef<HTMLInputElement>(null);
     const saveTimerRef = useRef<number | null>(null);
+    const transientDraftFrameRef = useRef<number | null>(null);
+    const pendingTransientItemsRef = useRef<CollectionWallItem[] | null>(null);
     const persistWriterRef = useRef<CollectionWallPersistWriter>(async (nextWall, nextItems) => ({ wall: nextWall, items: nextItems }));
     const persistQueueRef = useRef(createCollectionWallPersistQueue((nextWall, nextItems) => persistWriterRef.current(nextWall, nextItems)));
     const itemRefs = useRef(new Map<string, HTMLDivElement>());
@@ -3110,6 +3200,7 @@ const FullScreenLightWall: React.FC<{
     const [savingWallDraft, setSavingWallDraft] = useState(false);
     const [past, setPast] = useState<WallDraftSnapshot[]>([]);
     const [future, setFuture] = useState<WallDraftSnapshot[]>([]);
+    const latestDraftRef = useRef<WallDraftSnapshot>(cloneWallSnapshot(draftWall, draftItems));
 
     const entryByItemId = useMemo(() => new Map(entries.filter(entry => Boolean(entry.item)).map(entry => [entry.item!.id, entry])), [entries]);
     const bookById = useMemo(() => new Map(entries.filter((entry): entry is WallBookEntry => entry.type === 'book').map(entry => [entry.book.id, entry.book])), [entries]);
@@ -3157,7 +3248,9 @@ const FullScreenLightWall: React.FC<{
 
     useEffect(() => {
         const nextItems = buildInitialWallItems(wall, entries);
-        setDraftWall({ ...wall, layoutMode: 'free' });
+        const nextWall = { ...wall, layoutMode: 'free' as const };
+        latestDraftRef.current = cloneWallSnapshot(nextWall, nextItems);
+        setDraftWall(nextWall);
         setDraftItems(nextItems);
         setEditing(false);
         setPreview(false);
@@ -3200,15 +3293,12 @@ const FullScreenLightWall: React.FC<{
     useEffect(() => () => {
         if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
         if (longPressTimerRef.current != null) window.clearTimeout(longPressTimerRef.current);
+        if (transientDraftFrameRef.current != null) window.cancelAnimationFrame(transientDraftFrameRef.current);
     }, []);
 
     const visibleItems = useMemo(() => draftItems.filter(item => item.x != null && item.y != null), [draftItems]);
     const trayItems = useMemo(() => draftItems.filter(item => item.x == null), [draftItems]);
-    const canvasHeight = useMemo(() => {
-        const maxBottom = visibleItems.reduce((max, item) => Math.max(max, (item.y || 0) + item.h), 0);
-        const minHeight = Math.ceil(viewport.height / scale);
-        return Math.max(minHeight, maxBottom + WALL_CANVAS_BOTTOM_PADDING, 640);
-    }, [scale, viewport.height, visibleItems]);
+    const canvasHeight = useMemo(() => getViewportWallCanvasHeight(viewport.height, scale), [scale, viewport.height]);
 
     const getEntryForItem = useCallback((item: CollectionWallItem): WallZoneEntry | null => {
         const existing = entryByItemId.get(item.id);
@@ -3272,12 +3362,41 @@ const FullScreenLightWall: React.FC<{
         setFuture([]);
     }, []);
 
-    const applyDraft = useCallback((nextItems: CollectionWallItem[], nextWall = draftWall) => {
-        pushHistory(draftWall, draftItems);
+    const applyDraft = useCallback((nextItems: CollectionWallItem[], nextWall = latestDraftRef.current.wall) => {
+        const current = latestDraftRef.current;
+        pushHistory(current.wall, current.items);
+        latestDraftRef.current = cloneWallSnapshot(nextWall, nextItems);
         setDraftWall(nextWall);
         setDraftItems(nextItems);
         schedulePersist(nextWall, nextItems);
-    }, [draftItems, draftWall, pushHistory, schedulePersist]);
+    }, [pushHistory, schedulePersist]);
+
+    const cancelTransientDraftFrame = useCallback(() => {
+        pendingTransientItemsRef.current = null;
+        if (transientDraftFrameRef.current != null) {
+            window.cancelAnimationFrame(transientDraftFrameRef.current);
+            transientDraftFrameRef.current = null;
+        }
+    }, []);
+
+    const previewTransientItemFrame = useCallback((id: string, patch: WallItemFramePatch) => {
+        const current = latestDraftRef.current;
+        const nextItems = current.items.map(item => item.id === id
+            ? normalizeWallItemForCanvas({
+                ...item,
+                ...patch,
+                ...normalizeWallItemFrameForCanvas(item, patch, { canvasHeight }),
+            })
+            : item);
+        pendingTransientItemsRef.current = nextItems;
+        if (transientDraftFrameRef.current != null) return;
+        transientDraftFrameRef.current = window.requestAnimationFrame(() => {
+            transientDraftFrameRef.current = null;
+            const pending = pendingTransientItemsRef.current;
+            pendingTransientItemsRef.current = null;
+            if (pending) setDraftItems(pending);
+        });
+    }, [canvasHeight]);
 
     const enterEditing = useCallback(() => {
         if (!canPersist) {
@@ -3285,13 +3404,14 @@ const FullScreenLightWall: React.FC<{
             return;
         }
         if (!editStartSnapshotRef.current) {
-            editStartSnapshotRef.current = cloneWallSnapshot(draftWall, draftItems);
+            const current = latestDraftRef.current;
+            editStartSnapshotRef.current = cloneWallSnapshot(current.wall, current.items);
         }
         setEditing(true);
         setPreview(false);
         setActionMenuOpen(false);
         setToolboxOpen(false);
-    }, [canPersist, draftItems, draftWall, say]);
+    }, [canPersist, say]);
 
     const flushPersistSnapshot = useCallback(async (nextWall: CollectionWall, nextItems: CollectionWallItem[]) => {
         if (saveTimerRef.current != null) {
@@ -3300,12 +3420,16 @@ const FullScreenLightWall: React.FC<{
         }
         const token = persistQueueRef.current.nextToken();
         const saved = await persistDraft(nextWall, nextItems, token, true);
+        latestDraftRef.current = cloneWallSnapshot(saved.wall, saved.items);
         setDraftWall(saved.wall);
         setDraftItems(saved.items);
         return saved;
     }, [persistDraft]);
 
-    const flushPersist = useCallback(async () => flushPersistSnapshot(draftWall, draftItems), [draftItems, draftWall, flushPersistSnapshot]);
+    const flushPersist = useCallback(async () => {
+        const latest = latestDraftRef.current;
+        return flushPersistSnapshot(latest.wall, latest.items);
+    }, [flushPersistSnapshot]);
 
     const finishEditing = useCallback(async () => {
         if (savingWallDraft) return;
@@ -3398,6 +3522,7 @@ const FullScreenLightWall: React.FC<{
     }, [charName, onAssetsChanged, say, uploadingInviteAvatar, wall.charId]);
 
     const addAssetToWall = useCallback((asset: CollectionWallAsset, itemType: 'image' | 'sticker') => {
+        const current = latestDraftRef.current;
         const now = Date.now();
         const size = itemType === 'sticker'
             ? getFittedAssetSize(asset, DEFAULT_STICKER_MAX, DEFAULT_STICKER_MAX, DEFAULT_STICKER_MIN, DEFAULT_STICKER_MIN, DEFAULT_STICKER_MAX, DEFAULT_STICKER_MAX)
@@ -3414,8 +3539,8 @@ const FullScreenLightWall: React.FC<{
             w: size.w,
             h: size.h,
             rotation,
-            z: draftItems.reduce((max, candidate) => Math.max(max, candidate.z || 0), 0) + 1,
-            order: draftItems.length,
+            z: current.items.reduce((max, candidate) => Math.max(max, candidate.z || 0), 0) + 1,
+            order: current.items.length,
             assetId: asset.id,
             name: getAssetLabel(asset),
             createdAt: now,
@@ -3430,16 +3555,17 @@ const FullScreenLightWall: React.FC<{
                 rotation,
             }, { canvasHeight }),
         };
-        applyDraft(relabelItems([...draftItems, normalizedItem]), draftWall);
+        applyDraft(relabelItems([...current.items, normalizedItem]), current.wall);
         setSelectedItemId(item.id);
         setLibraryOpen(false);
         setActiveAssetActions(null);
         say(itemType === 'sticker' ? '贴纸已放到墙上' : '图片已放到墙上');
-    }, [applyDraft, canvasHeight, draftItems, draftWall, scale, say, viewport.height, wall.id]);
+    }, [applyDraft, canvasHeight, scale, say, viewport.height, wall.id]);
 
     const handleSetAssetBackground = useCallback((asset: CollectionWallAsset) => {
-        applyDraft(draftItems, {
-            ...draftWall,
+        const current = latestDraftRef.current;
+        applyDraft(current.items, {
+            ...current.wall,
             background: {
                 type: 'asset',
                 value: asset.id,
@@ -3450,17 +3576,18 @@ const FullScreenLightWall: React.FC<{
         setLibraryOpen(false);
         setActiveAssetActions(null);
         say('已设为墙纸');
-    }, [applyDraft, draftItems, draftWall, say]);
+    }, [applyDraft, say]);
 
     const handleSetAvatarFrame = useCallback((asset: CollectionWallAsset) => {
+        const current = latestDraftRef.current;
         const selectedBondItem = selectedItemId
-            ? draftItems.find(item => item.id === selectedItemId && item.type === 'bond')
+            ? current.items.find(item => item.id === selectedItemId && item.type === 'bond')
             : undefined;
-        const existingBondItem = selectedBondItem || draftItems.find(item => item.type === 'bond');
-        const maxZ = draftItems.reduce((max, candidate) => Math.max(max, candidate.z || 0), 0);
-        const bondItem = existingBondItem || buildDefaultBondWidgetItem(draftWall, draftItems.length, maxZ + 1);
+        const existingBondItem = selectedBondItem || current.items.find(item => item.type === 'bond');
+        const maxZ = current.items.reduce((max, candidate) => Math.max(max, candidate.z || 0), 0);
+        const bondItem = existingBondItem || buildDefaultBondWidgetItem(current.wall, current.items.length, maxZ + 1);
         const targetId = bondItem.id;
-        const nextItems = (existingBondItem ? draftItems : [bondItem, ...draftItems]).map(item => (
+        const nextItems = (existingBondItem ? current.items : [bondItem, ...current.items]).map(item => (
             item.id === targetId
                 ? normalizeWallItemForCanvas({
                     ...item,
@@ -3473,12 +3600,12 @@ const FullScreenLightWall: React.FC<{
                 })
                 : item
         ));
-        applyDraft(relabelItems(nextItems), { ...draftWall, defaultBondWidgetHidden: false });
+        applyDraft(relabelItems(nextItems), { ...current.wall, defaultBondWidgetHidden: false });
         setSelectedItemId(targetId);
         setLibraryOpen(false);
         setActiveAssetActions(null);
         say('已设为头像框');
-    }, [applyDraft, draftItems, draftWall, say, selectedItemId]);
+    }, [applyDraft, say, selectedItemId]);
 
     const handleRemoveLibraryAsset = useCallback(async (asset: CollectionWallAsset) => {
         if (uploadingAsset) return;
@@ -3555,45 +3682,52 @@ const FullScreenLightWall: React.FC<{
     const undo = useCallback(() => {
         const previous = past[past.length - 1];
         if (!previous) return;
-        const current = cloneWallSnapshot(draftWall, draftItems);
+        const current = cloneWallSnapshot(latestDraftRef.current.wall, latestDraftRef.current.items);
         const nextPast = past.slice(0, -1);
         setPast(nextPast);
         setFuture(prev => [current, ...prev].slice(0, 50));
+        latestDraftRef.current = cloneWallSnapshot(previous.wall, previous.items);
         setDraftWall(previous.wall);
         setDraftItems(previous.items);
         schedulePersist(previous.wall, previous.items);
-    }, [draftItems, draftWall, past, schedulePersist]);
+    }, [past, schedulePersist]);
 
     const redo = useCallback(() => {
         const next = future[0];
         if (!next) return;
-        const current = cloneWallSnapshot(draftWall, draftItems);
+        const current = cloneWallSnapshot(latestDraftRef.current.wall, latestDraftRef.current.items);
         setFuture(prev => prev.slice(1));
         setPast(prev => [...prev.slice(-49), current]);
+        latestDraftRef.current = cloneWallSnapshot(next.wall, next.items);
         setDraftWall(next.wall);
         setDraftItems(next.items);
         schedulePersist(next.wall, next.items);
-    }, [draftItems, draftWall, future, schedulePersist]);
+    }, [future, schedulePersist]);
 
     const arrangeAll = useCallback(() => {
-        applyDraft(relabelItems(materializePlacedLooseWallItems(autoArrangeWallItems(draftItems))), draftWall);
+        const current = latestDraftRef.current;
+        debugWallDraftHead('draft-auto-arrange-before', current.wall.id, current.items);
+        const arrangedItems = relabelItems(materializePlacedLooseWallItems(autoArrangeWallItems(current.items, { canvasHeight })));
+        debugWallDraftHead('draft-auto-arrange-after', current.wall.id, arrangedItems);
+        applyDraft(arrangedItems, current.wall);
         setSelectedItemId(null);
         setMenuPoint(null);
-    }, [applyDraft, draftItems, draftWall]);
+    }, [applyDraft, canvasHeight]);
 
     const updateItem = useCallback((id: string, patch: Partial<CollectionWallItem>) => {
-        const nextItems = draftItems.map(item => item.id === id
+        const current = latestDraftRef.current;
+        const nextItems = current.items.map(item => item.id === id
             ? normalizeWallItemForCanvas({
                 ...item,
                 ...patch,
                 ...normalizeWallItemFrameForCanvas(item, patch, { canvasHeight }),
             })
             : item);
-        applyDraft(nextItems, draftWall);
-    }, [applyDraft, canvasHeight, draftItems, draftWall]);
+        applyDraft(nextItems, current.wall);
+    }, [applyDraft, canvasHeight]);
 
     const updateTextStyle = useCallback((id: string, patch: Partial<NonNullable<CollectionWallItem['text']>>) => {
-        const source = draftItems.find(item => item.id === id);
+        const source = latestDraftRef.current.items.find(item => item.id === id);
         if (!source || source.type !== 'text') return;
         updateItem(id, {
             text: {
@@ -3603,7 +3737,7 @@ const FullScreenLightWall: React.FC<{
                 ...patch,
             },
         });
-    }, [draftItems, updateItem]);
+    }, [updateItem]);
 
     const handleUploadTextFont = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.currentTarget.files?.[0];
@@ -3647,11 +3781,12 @@ const FullScreenLightWall: React.FC<{
             return;
         }
         try {
-            const preset = await buildCollectionWallDecorPreset(draftWall, draftItems, assetById);
+            const current = latestDraftRef.current;
+            const preset = await buildCollectionWallDecorPreset(current.wall, current.items, assetById);
             const blob = new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
-            const safeWallName = String(draftWall.name || 'lightwall')
+            const safeWallName = String(current.wall.name || 'lightwall')
                 .replace(/[\\/:*?"<>|]+/g, '-')
                 .replace(/\s+/g, '-')
                 .slice(0, 32) || 'lightwall';
@@ -3666,7 +3801,7 @@ const FullScreenLightWall: React.FC<{
             console.error('[CollectionHall] export decor preset failed:', error);
             say(error?.message || '导出预设失败，稍后再试');
         }
-    }, [assetById, canPersist, draftItems, draftWall, say]);
+    }, [assetById, canPersist, say]);
 
     const handleImportDecorPresetFile = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.currentTarget.files?.[0];
@@ -3726,11 +3861,12 @@ const FullScreenLightWall: React.FC<{
             }
 
             const importedDecorItems = createCollectionWallDecorItemsFromPreset(preset, assetIdByKey, wall.id);
-            const nextBackground = resolveCollectionWallPresetBackground(preset, assetIdByKey, draftWall.background);
+            const current = latestDraftRef.current;
+            const nextBackground = resolveCollectionWallPresetBackground(preset, assetIdByKey, current.wall.background);
             const avatarFrameAssetId = preset.decor.avatarFrameAssetKey
                 ? assetIdByKey.get(preset.decor.avatarFrameAssetKey)
                 : undefined;
-            const keptItems = draftItems
+            const keptItems = current.items
                 .filter(item => !isCollectionWallDecorPresetItem(item, item.assetId ? assetById.get(item.assetId) : undefined))
                 .map(item => item.type === 'bond'
                     ? normalizeWallItemForCanvas({
@@ -3744,7 +3880,7 @@ const FullScreenLightWall: React.FC<{
                     : item);
             const nextItems = relabelItems([...keptItems, ...importedDecorItems]);
             applyDraft(nextItems, {
-                ...draftWall,
+                ...current.wall,
                 background: nextBackground,
             });
             setSelectedItemId(null);
@@ -3761,11 +3897,11 @@ const FullScreenLightWall: React.FC<{
         } finally {
             setImportingPreset(false);
         }
-    }, [applyDraft, assetById, canPersist, draftItems, draftWall, importingPreset, onAssetsChanged, say, wall.id]);
+    }, [applyDraft, assetById, canPersist, importingPreset, onAssetsChanged, say, wall.id]);
 
     const openHtmlEditor = useCallback((id?: string) => {
         if (!editing) enterEditing();
-        const item = id ? draftItems.find(candidate => candidate.id === id) : undefined;
+        const item = id ? latestDraftRef.current.items.find(candidate => candidate.id === id) : undefined;
         setHtmlEditor({
             itemId: id,
             draft: normalizeWallHtml(item?.html || DEFAULT_CUSTOM_WALL_HTML),
@@ -3773,7 +3909,7 @@ const FullScreenLightWall: React.FC<{
         if (id) setSelectedItemId(id);
         setMenuPoint(null);
         setLibraryOpen(false);
-    }, [draftItems, editing, enterEditing]);
+    }, [editing, enterEditing]);
 
     const handleHtmlFileUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.currentTarget.files?.[0];
@@ -3802,7 +3938,7 @@ const FullScreenLightWall: React.FC<{
         }
         const now = Date.now();
         if (htmlEditor.itemId) {
-            const item = draftItems.find(candidate => candidate.id === htmlEditor.itemId);
+            const item = latestDraftRef.current.items.find(candidate => candidate.id === htmlEditor.itemId);
             if (!item) return;
             updateItem(item.id, {
                 type: 'html',
@@ -3813,6 +3949,7 @@ const FullScreenLightWall: React.FC<{
             setSelectedItemId(item.id);
             say('HTML 卡已更新');
         } else {
+            const current = latestDraftRef.current;
             const item: CollectionWallItem = {
                 id: createLocalItemId(),
                 wallId: wall.id,
@@ -3823,8 +3960,8 @@ const FullScreenLightWall: React.FC<{
                 w: DEFAULT_HTML_W,
                 h: DEFAULT_HTML_H,
                 rotation: ((hashOf(String(now)) % 7) - 3) * 0.35,
-                z: draftItems.reduce((max, candidate) => Math.max(max, candidate.z || 0), 0) + 1,
-                order: draftItems.length,
+                z: current.items.reduce((max, candidate) => Math.max(max, candidate.z || 0), 0) + 1,
+                order: current.items.length,
                 html,
                 name: '自定义卡',
                 createdAt: now,
@@ -3839,36 +3976,46 @@ const FullScreenLightWall: React.FC<{
                     rotation: item.rotation,
                 }, { canvasHeight }),
             };
-            applyDraft(relabelItems([...draftItems, normalizedItem]), draftWall);
+            applyDraft(relabelItems([...current.items, normalizedItem]), current.wall);
             setSelectedItemId(item.id);
             say('已插入 HTML 卡');
         }
         setHtmlEditor(null);
-    }, [applyDraft, canvasHeight, draftItems, draftWall, htmlEditor, scale, say, updateItem, viewport.height, wall.id]);
+    }, [applyDraft, canvasHeight, htmlEditor, scale, say, updateItem, viewport.height, wall.id]);
 
     const deleteItem = useCallback((id: string) => {
-        const deleted = draftItems.find(item => item.id === id);
-        const nextItems = relabelItems(draftItems.filter(item => item.id !== id));
+        const current = latestDraftRef.current;
+        const deleted = current.items.find(item => item.id === id);
+        const nextItems = relabelItems(current.items.filter(item => item.id !== id));
         const nextWall = deleted?.type === 'bond'
-            ? { ...draftWall, defaultBondWidgetHidden: true }
-            : draftWall;
+            ? { ...current.wall, defaultBondWidgetHidden: true }
+            : current.wall;
         applyDraft(nextItems, nextWall);
         setSelectedItemId(null);
         setMenuPoint(null);
         if (editingTextId === id) setEditingTextId(null);
         if (htmlEditor?.itemId === id) setHtmlEditor(null);
-    }, [applyDraft, draftItems, draftWall, editingTextId, htmlEditor?.itemId]);
+    }, [applyDraft, editingTextId, htmlEditor?.itemId]);
+
+    const requestDeleteItem = useCallback((id: string, message?: string) => {
+        const item = latestDraftRef.current.items.find(candidate => candidate.id === id);
+        const label = item ? getEditorItemLabel(item, entryByItemId) : '这件内容';
+        const confirmed = window.confirm(message || `确定从拾光墙移除「${label}」吗？`);
+        if (!confirmed) return false;
+        deleteItem(id);
+        return true;
+    }, [deleteItem, entryByItemId]);
 
     const renameItem = useCallback((id: string) => {
-        const item = draftItems.find(candidate => candidate.id === id);
+        const item = latestDraftRef.current.items.find(candidate => candidate.id === id);
         if (!item) return;
         const nextName = window.prompt('给这件墙上物起名', item.name || getEditorItemLabel(item, entryByItemId));
         if (nextName == null) return;
         updateItem(id, { name: nextName.replace(/\s+/g, ' ').trim().slice(0, 32) || undefined });
-    }, [draftItems, entryByItemId, updateItem]);
+    }, [entryByItemId, updateItem]);
 
     const editSelectedItem = useCallback((id: string) => {
-        const item = draftItems.find(candidate => candidate.id === id);
+        const item = latestDraftRef.current.items.find(candidate => candidate.id === id);
         if (!item) return;
         setMenuPoint(null);
         if (item.type === 'text') {
@@ -3880,26 +4027,26 @@ const FullScreenLightWall: React.FC<{
             return;
         }
         renameItem(id);
-    }, [draftItems, openHtmlEditor, renameItem]);
+    }, [openHtmlEditor, renameItem]);
 
     const bringToFront = useCallback((id: string) => {
-        const maxZ = draftItems.reduce((max, item) => Math.max(max, item.z || 0), 0);
+        const maxZ = latestDraftRef.current.items.reduce((max, item) => Math.max(max, item.z || 0), 0);
         updateItem(id, { z: maxZ + 1 });
         setMenuPoint(null);
-    }, [draftItems, updateItem]);
+    }, [updateItem]);
 
     const sendToBack = useCallback((id: string) => {
-        const minZ = draftItems.reduce((min, item) => Math.min(min, item.z || 0), 0);
+        const minZ = latestDraftRef.current.items.reduce((min, item) => Math.min(min, item.z || 0), 0);
         updateItem(id, { z: minZ - 1 });
         setMenuPoint(null);
-    }, [draftItems, updateItem]);
+    }, [updateItem]);
 
     const rotateItemBy = useCallback((id: string, delta: number) => {
-        const item = draftItems.find(candidate => candidate.id === id);
+        const item = latestDraftRef.current.items.find(candidate => candidate.id === id);
         if (!item) return;
         updateItem(id, { rotation: Number(((item.rotation || 0) + delta).toFixed(2)) });
         setMenuPoint(null);
-    }, [draftItems, updateItem]);
+    }, [updateItem]);
 
     const screenToCanvas = useCallback((clientX: number, clientY: number) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -3908,6 +4055,7 @@ const FullScreenLightWall: React.FC<{
     }, [scale]);
 
     const addTextAt = useCallback((clientX: number, clientY: number) => {
+        const current = latestDraftRef.current;
         const point = screenToCanvas(clientX, clientY);
         const now = Date.now();
         const item: CollectionWallItem = {
@@ -3920,8 +4068,8 @@ const FullScreenLightWall: React.FC<{
             w: DEFAULT_TEXT_W,
             h: DEFAULT_TEXT_H,
             rotation: ((hashOf(String(now)) % 7) - 3) * 0.5,
-            z: draftItems.reduce((max, item) => Math.max(max, item.z || 0), 0) + 1,
-            order: draftItems.length,
+            z: current.items.reduce((max, item) => Math.max(max, item.z || 0), 0) + 1,
+            order: current.items.length,
             text: {
                 content: '新便签',
                 preset: 'big_plain',
@@ -3942,13 +4090,13 @@ const FullScreenLightWall: React.FC<{
                 rotation: item.rotation,
             }, { canvasHeight }),
         };
-        applyDraft(relabelItems([...draftItems, normalizedItem]), draftWall);
+        applyDraft(relabelItems([...current.items, normalizedItem]), current.wall);
         setSelectedItemId(item.id);
         setEditingTextId(item.id);
-    }, [applyDraft, canvasHeight, draftItems, draftWall, screenToCanvas, wall.id]);
+    }, [applyDraft, canvasHeight, screenToCanvas, wall.id]);
 
     const commitText = useCallback((id: string, content: string) => {
-        const source = draftItems.find(item => item.id === id);
+        const source = latestDraftRef.current.items.find(item => item.id === id);
         const maxLength = source?.author === 'char' ? 300 : 160;
         const normalized = content.trim().slice(0, maxLength);
         updateItem(id, {
@@ -3965,7 +4113,7 @@ const FullScreenLightWall: React.FC<{
             },
         });
         setEditingTextId(null);
-    }, [draftItems, updateItem]);
+    }, [updateItem]);
 
     const startTrayDrag = useCallback((item: CollectionWallItem, event: React.PointerEvent<HTMLButtonElement>) => {
         if (!editing) return;
@@ -3983,8 +4131,9 @@ const FullScreenLightWall: React.FC<{
             window.removeEventListener('pointerup', handleUp);
             if (!moved) return;
             const point = screenToCanvas(upEvent.clientX, upEvent.clientY);
+            const current = latestDraftRef.current;
             const nextId = isLooseWallItem(item) ? createLocalItemId() : item.id;
-            const nextItems = draftItems.map(candidate => candidate.id === item.id
+            const nextItems = current.items.map(candidate => candidate.id === item.id
                 ? normalizeWallItemForCanvas({
                     ...candidate,
                     id: nextId,
@@ -3992,15 +4141,15 @@ const FullScreenLightWall: React.FC<{
                         x: point.x - candidate.w / 2,
                         y: point.y - candidate.h / 2,
                     }, { canvasHeight }),
-                    z: draftItems.reduce((max, current) => Math.max(max, current.z || 0), 0) + 1,
+                    z: current.items.reduce((max, existing) => Math.max(max, existing.z || 0), 0) + 1,
                 })
                 : candidate);
-            applyDraft(relabelItems(nextItems), draftWall);
+            applyDraft(relabelItems(nextItems), current.wall);
             setSelectedItemId(nextId);
         };
         window.addEventListener('pointermove', handleMove);
         window.addEventListener('pointerup', handleUp);
-    }, [applyDraft, canvasHeight, draftItems, draftWall, editing, screenToCanvas]);
+    }, [applyDraft, canvasHeight, editing, screenToCanvas]);
 
     const clearLongPress = useCallback(() => {
         if (longPressTimerRef.current != null) {
@@ -4194,7 +4343,7 @@ const FullScreenLightWall: React.FC<{
             )}
             <div
                 className="ar-full-stage-wrap"
-                style={{ height: `${canvasHeight * scale}px` }}
+                style={{ height: `${viewport.height}px` }}
                 onDoubleClick={event => {
                     if (!editing) return;
                     if ((event.target as HTMLElement).closest('.ar-wall-free-item')) return;
@@ -4224,49 +4373,132 @@ const FullScreenLightWall: React.FC<{
                     throttleDrag={0}
                     throttleResize={0}
                     throttleRotate={0}
-                    onDrag={({ target, transform }: any) => {
-                        target.style.transform = transform;
+                    onDrag={({ target, transform, beforeTranslate }: any) => {
+                        const item = latestDraftRef.current.items.find(candidate => candidate.id === selectedItemId);
+                        const translate = readMoveableTranslate(beforeTranslate);
+                        if (item && translate) {
+                            const patch = normalizeWallItemFrameForCanvas(item, { x: translate[0], y: translate[1] }, { canvasHeight });
+                            setWallItemElementFrameStyle(target, patch);
+                            previewTransientItemFrame(item.id, patch);
+                        }
+                        if (transform) target.style.transform = transform;
                     }}
                     onDragEnd={({ target, lastEvent }: any) => {
                         target.classList.remove('dragging');
-                        const item = draftItems.find(candidate => candidate.id === selectedItemId);
-                        const translate = lastEvent?.beforeTranslate;
-                        if (!item || !translate) return;
-                        updateItem(item.id, { x: translate[0], y: translate[1] });
+                        const item = latestDraftRef.current.items.find(candidate => candidate.id === selectedItemId);
+                        const translate = readMoveableTranslate(lastEvent?.beforeTranslate);
+                        cancelTransientDraftFrame();
+                        if (!item || !translate) {
+                            clearMoveableElementOverrides(target);
+                            setDraftItems(latestDraftRef.current.items);
+                            console.warn('[CollectionWallDebug] draft-move-missing-translate', {
+                                wallId: wall.id,
+                                itemId: selectedItemId,
+                            });
+                            return;
+                        }
+                        const patch = normalizeWallItemFrameForCanvas(item, { x: translate[0], y: translate[1] }, { canvasHeight });
+                        setWallItemElementFrameStyle(target, patch);
+                        clearMoveableElementOverrides(target);
+                        updateItem(item.id, patch);
+                        console.info('[CollectionWallDebug] draft-move-end', {
+                            wallId: wall.id,
+                            itemId: item.id,
+                            x: patch.x,
+                            y: patch.y,
+                            z: item.z,
+                            order: item.order,
+                        });
                     }}
                     onDragStart={({ target, set }: any) => {
+                        cancelTransientDraftFrame();
                         target.classList.add('dragging');
-                        const item = draftItems.find(candidate => candidate.id === selectedItemId);
-                        if (item) set?.(getMoveableStartTranslate(item));
+                        const item = latestDraftRef.current.items.find(candidate => candidate.id === selectedItemId);
+                        if (item) {
+                            set?.(getMoveableStartTranslate(item));
+                            console.info('[CollectionWallDebug] draft-move-start', {
+                                wallId: wall.id,
+                                itemId: item.id,
+                                x: item.x,
+                                y: item.y,
+                                z: item.z,
+                                order: item.order,
+                            });
+                        }
                     }}
                     onResizeStart={({ dragStart }: any) => {
-                        const item = draftItems.find(candidate => candidate.id === selectedItemId);
+                        cancelTransientDraftFrame();
+                        const item = latestDraftRef.current.items.find(candidate => candidate.id === selectedItemId);
                         if (item) dragStart?.set?.(getMoveableStartTranslate(item));
                     }}
                     onResize={({ target, width, height, drag }: any) => {
                         target.style.width = `${width}px`;
                         target.style.height = `${height}px`;
+                        const item = latestDraftRef.current.items.find(candidate => candidate.id === selectedItemId);
+                        const translate = readMoveableTranslate(drag?.beforeTranslate);
+                        if (item) {
+                            const rawPatch = {
+                                w: width,
+                                h: height,
+                                ...(translate ? { x: translate[0], y: translate[1] } : {}),
+                            };
+                            const patch = normalizeWallItemFrameForCanvas(item, rawPatch, { canvasHeight });
+                            setWallItemElementFrameStyle(target, patch);
+                            previewTransientItemFrame(item.id, patch);
+                        }
                         if (drag?.transform) target.style.transform = drag.transform;
                     }}
                     onResizeEnd={({ lastEvent }: any) => {
-                        const item = draftItems.find(candidate => candidate.id === selectedItemId);
-                        const translate = lastEvent?.drag?.beforeTranslate;
-                        if (!item || !lastEvent || !translate) return;
-                        updateItem(item.id, {
+                        const item = latestDraftRef.current.items.find(candidate => candidate.id === selectedItemId);
+                        const target = selectedTarget;
+                        const translate = readMoveableTranslate(lastEvent?.drag?.beforeTranslate);
+                        cancelTransientDraftFrame();
+                        if (!item || !lastEvent) {
+                            if (target) clearMoveableElementOverrides(target);
+                            setDraftItems(latestDraftRef.current.items);
+                            return;
+                        }
+                        const patch = normalizeWallItemFrameForCanvas(item, {
                             w: lastEvent.width,
                             h: lastEvent.height,
-                            x: translate[0],
-                            y: translate[1],
-                        });
+                            ...(translate ? { x: translate[0], y: translate[1] } : {}),
+                        }, { canvasHeight });
+                        if (target) {
+                            setWallItemElementFrameStyle(target, patch);
+                            clearMoveableElementOverrides(target);
+                        }
+                        updateItem(item.id, patch);
                     }}
                     onRotate={({ target, drag }: any) => {
-                        target.style.transform = drag.transform;
+                        const item = latestDraftRef.current.items.find(candidate => candidate.id === selectedItemId);
+                        const rawRotation = Number(drag?.beforeRotate ?? drag?.rotate);
+                        if (item && Number.isFinite(rawRotation)) {
+                            const patch = normalizeWallItemFrameForCanvas(item, {
+                                rotation: Number(rawRotation.toFixed(2)),
+                            }, { canvasHeight });
+                            setWallItemElementFrameStyle(target, patch);
+                            previewTransientItemFrame(item.id, patch);
+                        }
+                        if (drag?.transform) target.style.transform = drag.transform;
                     }}
                     onRotateEnd={({ lastEvent }: any) => {
-                        const item = draftItems.find(candidate => candidate.id === selectedItemId);
-                        if (!item || !lastEvent) return;
+                        const item = latestDraftRef.current.items.find(candidate => candidate.id === selectedItemId);
+                        const target = selectedTarget;
+                        cancelTransientDraftFrame();
+                        if (!item || !lastEvent) {
+                            if (target) clearMoveableElementOverrides(target);
+                            setDraftItems(latestDraftRef.current.items);
+                            return;
+                        }
                         const nextRotation = Number(lastEvent.beforeRotate ?? lastEvent.rotate ?? item.rotation ?? 0);
-                        updateItem(item.id, { rotation: Number(nextRotation.toFixed(2)) });
+                        const patch = normalizeWallItemFrameForCanvas(item, {
+                            rotation: Number(nextRotation.toFixed(2)),
+                        }, { canvasHeight });
+                        if (target) {
+                            setWallItemElementFrameStyle(target, patch);
+                            clearMoveableElementOverrides(target);
+                        }
+                        updateItem(item.id, patch);
                     }}
                 />
             )}
@@ -4276,7 +4508,7 @@ const FullScreenLightWall: React.FC<{
                     <button type="button" aria-label="向右旋转" title="向右旋转" onClick={() => rotateItemBy(selectedItem.id, 15)}><ArrowClockwise weight="bold" size={14} />右转</button>
                     <button type="button" onClick={() => editSelectedItem(selectedItem.id)}>编辑</button>
                     <button type="button" onClick={() => bringToFront(selectedItem.id)}>置顶</button>
-                    <button type="button" className="danger" onClick={() => deleteItem(selectedItem.id)}>删除</button>
+                    <button type="button" className="danger" onClick={() => requestDeleteItem(selectedItem.id)}>删除</button>
                 </div>
             )}
             {editing && selectedUserTextItem && (
@@ -4361,7 +4593,7 @@ const FullScreenLightWall: React.FC<{
                     <button type="button" onClick={() => bringToFront(selectedItemId)}>置顶</button>
                     <button type="button" onClick={() => sendToBack(selectedItemId)}>置底</button>
                     <button type="button" onClick={() => renameItem(selectedItemId)}>起名</button>
-                    <button type="button" data-menu="delete" onClick={() => deleteItem(selectedItemId)}>删除</button>
+                    <button type="button" data-menu="delete" onClick={() => requestDeleteItem(selectedItemId)}>删除</button>
                 </div>
             )}
             {editing && libraryOpen && !preview && (
@@ -4456,9 +4688,10 @@ const FullScreenLightWall: React.FC<{
                                     onClick={() => {
                                         const itemId = htmlEditor?.itemId;
                                         if (!itemId) return;
-                                        deleteItem(itemId);
-                                        setHtmlEditor(null);
-                                        say('HTML 卡已删除');
+                                        if (requestDeleteItem(itemId, '确定删除这张 HTML 卡吗？')) {
+                                            setHtmlEditor(null);
+                                            say('HTML 卡已删除');
+                                        }
                                     }}
                                 >
                                     删除这张 HTML 卡
@@ -4655,10 +4888,47 @@ export const clientPointToWallCanvasPoint = (
     };
 };
 
+export const getViewportWallCanvasHeight = (viewportHeight: number, scale: number): number => {
+    const safeHeight = Number.isFinite(viewportHeight) && viewportHeight > 0 ? viewportHeight : 800;
+    const safeScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+    return Math.max(1, Math.ceil(safeHeight / safeScale));
+};
+
 export const getMoveableStartTranslate = (item: CollectionWallItem): [number, number] => [
     Number.isFinite(item.x) && item.x != null ? item.x : 0,
     Number.isFinite(item.y) && item.y != null ? item.y : 0,
 ];
+
+const readMoveableTranslate = (value: unknown): [number, number] | null => {
+    if (!Array.isArray(value) || value.length < 2) return null;
+    const x = Number(value[0]);
+    const y = Number(value[1]);
+    return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
+};
+
+const setWallItemElementFrameStyle = (target: HTMLElement, patch: WallItemFramePatch): void => {
+    if (typeof patch.x === 'number' && Number.isFinite(patch.x)) {
+        target.style.setProperty('--x', `${Math.round(patch.x)}px`);
+    }
+    if (typeof patch.y === 'number' && Number.isFinite(patch.y)) {
+        target.style.setProperty('--y', `${Math.round(patch.y)}px`);
+    }
+    if (typeof patch.w === 'number' && Number.isFinite(patch.w) && patch.w > 0) {
+        target.style.setProperty('--item-w', `${Math.round(patch.w)}px`);
+    }
+    if (typeof patch.h === 'number' && Number.isFinite(patch.h) && patch.h > 0) {
+        target.style.setProperty('--item-h', `${Math.round(patch.h)}px`);
+    }
+    if (typeof patch.rotation === 'number' && Number.isFinite(patch.rotation)) {
+        target.style.setProperty('--r', `${Number(patch.rotation.toFixed(2))}deg`);
+    }
+};
+
+const clearMoveableElementOverrides = (target: HTMLElement): void => {
+    target.style.transform = '';
+    target.style.width = '';
+    target.style.height = '';
+};
 
 export const normalizeWallItemFrameForCanvas = (
     item: CollectionWallItem,
@@ -4712,6 +4982,26 @@ export function getWallBackgroundEffects(background?: CollectionWall['background
 const relabelItems = (items: CollectionWallItem[]): CollectionWallItem[] =>
     items.map((item, index) => ({ ...item, order: index, z: item.z || index + 1 }));
 
+const relabelItemOrderPreservingLayer = (items: CollectionWallItem[]): CollectionWallItem[] =>
+    items.map((item, index) => ({
+        ...item,
+        order: index,
+        z: Number.isFinite(item.z) ? item.z : index + 1,
+    }));
+
+const preserveFreeLayoutItemOrder = (items: CollectionWallItem[]): CollectionWallItem[] =>
+    items.map((item, index) => ({
+        ...item,
+        order: Number.isFinite(item.order) ? item.order : index,
+        z: Number.isFinite(item.z) ? item.z : index + 1,
+    }));
+
+const compareWallItemsStable = (a: CollectionWallItem, b: CollectionWallItem): number => (
+    (Number.isFinite(a.order) ? a.order : 0) - (Number.isFinite(b.order) ? b.order : 0)
+    || (a.createdAt || 0) - (b.createdAt || 0)
+    || String(a.id || '').localeCompare(String(b.id || ''))
+);
+
 const isLooseWallItem = (item: CollectionWallItem): boolean => item.id.startsWith('loose-');
 
 export const materializePlacedLooseWallItems = (items: CollectionWallItem[]): CollectionWallItem[] =>
@@ -4722,7 +5012,7 @@ export const materializePlacedLooseWallItems = (items: CollectionWallItem[]): Co
     ));
 
 export const normalizeWallDraftItemsForSave = (items: CollectionWallItem[]): CollectionWallItem[] =>
-    relabelItems(materializePlacedLooseWallItems(items));
+    preserveFreeLayoutItemOrder(materializePlacedLooseWallItems(items));
 
 export const getPersistableWallItems = (items: CollectionWallItem[]): CollectionWallItem[] =>
     normalizeWallDraftItemsForSave(items).filter(item => !isLooseWallItem(item));
@@ -4936,7 +5226,7 @@ const WallEditor: React.FC<{
     say: (message: string) => void;
 }> = ({ wall, entries, onClose, onSaved, onDirtyChange, onSavingChange, say }) => {
     const [draftWall, setDraftWall] = useState<CollectionWall>({ ...wall, layoutMode: 'free' });
-    const [draftItems, setDraftItems] = useState<CollectionWallItem[]>(() => relabelItems(entries.map(entry => entry.item).filter((item): item is CollectionWallItem => Boolean(item))));
+    const [draftItems, setDraftItems] = useState<CollectionWallItem[]>(() => preserveFreeLayoutItemOrder(entries.map(entry => entry.item).filter((item): item is CollectionWallItem => Boolean(item))));
     const [textDraft, setTextDraft] = useState('');
     const [saving, setSaving] = useState(false);
     const entryByItemId = useMemo(() => new Map(entries.filter(entry => Boolean(entry.item)).map(entry => [entry.item!.id, entry])), [entries]);
@@ -5009,7 +5299,7 @@ const WallEditor: React.FC<{
             if (index < 0 || target < 0 || target >= next.length) return prev;
             const [item] = next.splice(index, 1);
             next.splice(target, 0, item);
-            return relabelItems(next);
+            return relabelItemOrderPreservingLayer(next);
         });
     };
 
@@ -5020,25 +5310,29 @@ const WallEditor: React.FC<{
             return;
         }
         const now = Date.now();
-        setDraftItems(prev => relabelItems([
-            ...prev,
-            {
-                id: createLocalItemId(),
-                wallId: wall.id,
-                type: 'text',
-                author: 'user',
-                x: null,
-                y: null,
-                w: 220,
-                h: 150,
-                rotation: 0,
-                z: prev.length + 1,
-                order: prev.length,
-                text: { content: content.slice(0, 120), preset: 'sticky_note' },
-                name: '文字便签',
-                createdAt: now,
-            },
-        ]));
+        setDraftItems(prev => {
+            const maxOrder = prev.reduce((max, item) => Math.max(max, Number.isFinite(item.order) ? item.order : -1), -1);
+            const maxZ = prev.reduce((max, item) => Math.max(max, Number.isFinite(item.z) ? item.z : 0), 0);
+            return [
+                ...prev,
+                {
+                    id: createLocalItemId(),
+                    wallId: wall.id,
+                    type: 'text',
+                    author: 'user',
+                    x: null,
+                    y: null,
+                    w: 220,
+                    h: 150,
+                    rotation: 0,
+                    z: maxZ + 1,
+                    order: maxOrder + 1,
+                    text: { content: content.slice(0, 120), preset: 'sticky_note' },
+                    name: '文字便签',
+                    createdAt: now,
+                },
+            ];
+        });
         setTextDraft('');
     };
 
@@ -5047,7 +5341,7 @@ const WallEditor: React.FC<{
         if (deleted?.type === 'bond') {
             setDraftWall(prev => ({ ...prev, defaultBondWidgetHidden: true }));
         }
-        setDraftItems(prev => relabelItems(prev.filter(item => item.id !== id)));
+        setDraftItems(prev => prev.filter(item => item.id !== id));
     };
 
     const handleSave = async () => {
@@ -5063,14 +5357,14 @@ const WallEditor: React.FC<{
                 name,
                 draftWall,
                 wallId: wall.id,
-                items: relabelItems(draftItems),
+                items: normalizeWallDraftItemsForSave(draftItems),
                 writeSnapshot: DB.replaceCollectionWallSnapshot,
                 refreshAfterSave: onSaved,
             });
             addCollectionWallPendingContext(wall.charId, `用户最近在「${saved.wall.name}」整理了拾光墙，墙上现在有 ${saved.items.length} 件内容。下次对话可自然提及，不要刻意。`);
             initialDraftSnapshotRef.current = serializeWallEditorDraft(saved.wall, saved.items, '');
             setDraftWall({ ...saved.wall, layoutMode: 'free' });
-            setDraftItems(relabelItems(saved.items));
+            setDraftItems(preserveFreeLayoutItemOrder(saved.items));
             setTextDraft('');
             say('拾光墙已保存');
             onClose();
@@ -5280,6 +5574,87 @@ const CharacterArchivePage: React.FC<{
     );
 };
 
+const copyTextToClipboard = async (text: string): Promise<void> => {
+    if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (!copied) throw new Error('copy failed');
+};
+
+const CollectionWallDebugPanel: React.FC<{ say: (message: string) => void }> = ({ say }) => {
+    const [open, setOpen] = useState(false);
+    const [logs, setLogs] = useState<CollectionWallDebugLogEntry[]>(() => getCollectionWallDebugLogs());
+
+    useEffect(() => subscribeCollectionWallDebugLogs(() => {
+        setLogs(getCollectionWallDebugLogs());
+    }), []);
+
+    const displayedLogs = logs.slice(-60);
+
+    const handleCopyDiagnostics = useCallback(async () => {
+        const text = formatCollectionWallDebugDiagnostics(logs);
+        if (!text) {
+            say('还没有拾光墙日志');
+            return;
+        }
+        try {
+            await copyTextToClipboard(text);
+            say('已复制诊断摘要');
+        } catch (error) {
+            console.error('[CollectionWallDebug] panel-copy-error', error);
+            say('复制失败，请长按摘要手动复制');
+        }
+    }, [logs, say]);
+
+    const handleClear = useCallback(() => {
+        clearCollectionWallDebugLogs();
+        setLogs([]);
+        say('日志已清空');
+    }, [say]);
+
+    if (!open) {
+        return (
+            <button type="button" className="ar-debug-fab" onClick={() => setOpen(true)}>
+                日志 {logs.length}
+            </button>
+        );
+    }
+
+    return (
+        <section className="ar-debug-panel" aria-label="拾光墙调试日志">
+            <div className="ar-debug-head">
+                <h3>拾光墙日志 · {logs.length}</h3>
+                <div className="ar-debug-actions">
+                    <button type="button" onClick={handleCopyDiagnostics} disabled={logs.length === 0}>复制诊断</button>
+                    <button type="button" onClick={handleClear} disabled={logs.length === 0}>清空</button>
+                    <button type="button" onClick={() => setOpen(false)}>关闭</button>
+                </div>
+            </div>
+            <div className="ar-debug-list">
+                {displayedLogs.length === 0 ? (
+                    <div className="ar-debug-empty">还没有日志。装修、保存、刷新后这里会出现 CollectionWallDebug。</div>
+                ) : displayedLogs.map(entry => (
+                    <div key={entry.id} className="ar-debug-row">
+                        <span className="ar-debug-meta">{new Date(entry.ts).toLocaleTimeString()} · {entry.level}</span>
+                        {formatCollectionWallDebugEntrySummary(entry)}
+                    </div>
+                ))}
+            </div>
+        </section>
+    );
+};
+
 /* ============================================================
    Main App
    ============================================================ */
@@ -5323,13 +5698,30 @@ const CollectionHallApp: React.FC = () => {
             setBooks(next);
             let nextWalls = await DB.getAllCollectionWalls();
             const itemLists = await Promise.all(nextWalls.map(wall => DB.getCollectionWallItemsByWallId(wall.id)));
+            nextWalls.forEach((wall, index) => {
+                const itemsForWall = itemLists[index] || [];
+                console.info('[CollectionWallDebug] load-before-render', {
+                    wallId: wall.id,
+                    wallName: wall.name,
+                    items: itemsForWall.map((item, itemIndex) => ({
+                        index: itemIndex,
+                        id: item.id,
+                        x: item.x,
+                        y: item.y,
+                        z: item.z,
+                        order: item.order,
+                    })),
+                });
+            });
             let nextWallItems = itemLists.flat();
             const migratedWalls: CollectionWall[] = [];
             const migratedItems: CollectionWallItem[] = [];
             for (const wall of nextWalls) {
                 if (wall.layoutMode === 'free') continue;
                 const itemsForWall = nextWallItems.filter(item => item.wallId === wall.id);
+                debugWallDraftHead('load-migrate-auto-arrange-before', wall.id, itemsForWall);
                 const arranged = autoArrangeWallItems(itemsForWall);
+                debugWallDraftHead('load-migrate-auto-arrange-after', wall.id, arranged);
                 const nextWall = { ...wall, layoutMode: 'free' as const, updatedAt: Date.now() };
                 await DB.saveCollectionWall(nextWall);
                 await Promise.all(arranged.map(item => DB.saveCollectionWallItem(item)));
@@ -5910,6 +6302,7 @@ const CollectionHallApp: React.FC = () => {
                 />
             )}
 
+            <CollectionWallDebugPanel say={say} />
             {toast && <div className="ar-toast" key={toast.key}>{toast.msg}</div>}
         </div>
     );
