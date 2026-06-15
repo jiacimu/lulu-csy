@@ -96,6 +96,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
     const startInFlightRef = useRef(false);
     const pendingFinishZoneRef = useRef<GestureZone | null>(null);
     const stopGestureTrackingRef = useRef<(() => void) | null>(null);
+    const isComposingRef = useRef(false);
     const onVoiceMessageRef = useRef(onVoiceMessage);
     const onStartRecordingRef = useRef(onStartRecording);
     const onStopRecordingRef = useRef(onStopRecording);
@@ -323,8 +324,19 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
         el.style.height = Math.min(el.scrollHeight, 120) + 'px';
     }, [input]);
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            if (isComposingRef.current || e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            onSend();
+        }
+    };
+    const handleCompositionStart = () => {
+        isComposingRef.current = true;
+    };
+    const handleCompositionEnd = (e: React.CompositionEvent<HTMLTextAreaElement>) => {
+        isComposingRef.current = false;
+        setInput(e.currentTarget.value);
     };
     const handleToggleVoiceMode = useCallback(() => setIsVoiceMode(prev => !prev), []);
     const handleTextareaFocus = useCallback(() => {
@@ -354,7 +366,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
     const convertActive = gestureZone === 'convert';
 
     const recordingOverlay = isRecording && typeof document !== 'undefined' ? createPortal(
-        <div style={{
+        <div className="sully-recording-overlay sully-wechat-recording-overlay" style={{
             position: 'fixed', inset: 0, top: '44px', zIndex: 9999,
             background: 'rgba(0, 0, 0, 0.65)',
             touchAction: 'none',
@@ -362,13 +374,13 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
             overflow: 'hidden',
         }}>
             {/* ===== Green Voice Bubble — centered in screen ===== */}
-            <div style={{
+            <div className="sully-recording-bubble-wrap sully-wechat-recording-bubble-wrap" style={{
                 position: 'absolute',
                 top: '40%', left: '50%',
                 transform: 'translate(-50%, -50%)',
                 width: '56%', maxWidth: '260px',
             }}>
-                <div style={{
+                <div className="sully-recording-bubble sully-wechat-recording-bubble" style={{
                     background: '#95ec69',
                     borderRadius: '20px',
                     padding: '20px 28px',
@@ -446,7 +458,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
                     pointerEvents: 'none',
                     whiteSpace: 'nowrap',
                 }}>
-                    <span style={{
+                    <span className="sully-recording-cancel-label" style={{
                         fontSize: '16px', fontWeight: 500,
                         color: cancelActive ? '#ffffff' : 'rgba(255,255,255,0.85)',
                         transition: 'color 0.2s',
@@ -463,7 +475,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
                     pointerEvents: 'none',
                     whiteSpace: 'nowrap',
                 }}>
-                    <span style={{
+                    <span className="sully-recording-convert-label" style={{
                         fontSize: '16px', fontWeight: 500,
                         color: convertActive ? '#ffffff' : 'rgba(255,255,255,0.85)',
                         transition: 'color 0.2s',
@@ -473,7 +485,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
                 </div>
 
                 {/* "松开 发送" — centered in dome zone */}
-                <div style={{
+                <div className="sully-recording-send-label" style={{
                     position: 'absolute',
                     top: '60%',
                     left: '50%', transform: 'translateX(-50%)',
@@ -494,12 +506,12 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
 
     // ===== Converting overlay =====
     const convertingOverlay = isConverting && typeof document !== 'undefined' ? createPortal(
-        <div style={{
+        <div className="sully-theme-overlay-backdrop sully-wechat-converting-overlay" style={{
             position: 'fixed', inset: 0, zIndex: 10000,
             background: 'rgba(0,0,0,0.5)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-            <div style={{
+            <div className="sully-theme-overlay-modal sully-wechat-converting-modal" style={{
                 background: 'rgba(0,0,0,0.78)', borderRadius: '16px',
                 padding: '24px 32px', display: 'flex', flexDirection: 'column',
                 alignItems: 'center', gap: '12px',
@@ -521,12 +533,13 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
 
     // ===== Render =====
     return (
-        <div style={{
+        <div className="sully-chat-input-main sully-wechat-input-main" style={{
             display: 'flex', alignItems: 'center',
             minHeight: '56px', padding: '8px 6px', gap: '4px',
             background: '#f7f7f7', borderTop: '0.5px solid rgba(0,0,0,0.12)',
         }}>
             <button
+                className="sully-chat-input-icon-button sully-wechat-input-mode-button"
                 onClick={handleToggleVoiceMode}
                 disabled={isVoiceProcessing || isConverting}
                 aria-label={isVoiceMode ? '切换到文字输入' : '切换到语音输入'}
@@ -554,6 +567,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
 
             {isVoiceMode ? (
                 <div
+                    className="sully-chat-input-textbox sully-wechat-voice-hold"
                     style={{
                         flex: 1, minWidth: 0, height: '38px',
                         background: '#ffffff', borderRadius: '6px',
@@ -573,12 +587,12 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
                     role="button"
                     aria-label="按住说话"
                 >
-                    <span style={{ fontSize: '16px', fontWeight: 500, color: '#333', letterSpacing: '2px' }}>
+                    <span className="sully-chat-input-placeholder" style={{ fontSize: '16px', fontWeight: 500, color: '#333', letterSpacing: '2px' }}>
                         按住 说话
                     </span>
                 </div>
             ) : (
-                <div style={{
+                <div className="sully-chat-input-textbox sully-wechat-input-textbox" style={{
                     flex: 1, minWidth: 0, minHeight: '38px',
                     background: '#ffffff', borderRadius: '6px',
                     border: '0.5px solid rgba(0,0,0,0.08)',
@@ -588,6 +602,8 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
                         ref={wxTextareaRef} rows={1}
                         value={input} onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
+                        onCompositionStart={handleCompositionStart}
+                        onCompositionEnd={handleCompositionEnd}
                         onFocus={handleTextareaFocus}
                         inputMode="text"
                         enterKeyHint="send"
@@ -600,12 +616,12 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
                             minHeight: '24px', maxHeight: '120px', lineHeight: '24px',
                             padding: 0, margin: 0, overflowY: 'auto',
                         }}
-                        className="no-scrollbar" placeholder=""
+                        className="sully-chat-input-textarea sully-wechat-input-textarea no-scrollbar" placeholder=""
                     />
                 </div>
             )}
 
-            <button onClick={() => handleOpenPanel('emojis')} aria-label="打开表情面板" style={{
+            <button className="sully-chat-input-emoji-button sully-wechat-input-emoji-button" onClick={() => handleOpenPanel('emojis')} aria-label="打开表情面板" style={{
                 width: '36px', height: '36px', display: 'flex',
                 alignItems: 'center', justifyContent: 'center',
                 background: 'transparent', border: 'none',
@@ -615,7 +631,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
             </button>
 
             {input.trim() && !isVoiceMode ? (
-                <button onClick={onSend} aria-label="发送" style={{
+                <button className="sully-chat-input-send-button sully-wechat-input-send-button" onClick={onSend} aria-label="发送" style={{
                     height: '36px', flexShrink: 0, padding: '0 14px',
                     background: '#07c160', borderRadius: '5px',
                     color: '#fff', fontSize: '15px', fontWeight: 500,
@@ -623,7 +639,7 @@ const WeChatInputBar: React.FC<WeChatInputBarProps> = ({
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>发送</button>
             ) : (
-                <button onClick={() => handleOpenPanel('actions')} aria-label="打开更多操作" style={{
+                <button className="sully-chat-input-icon-button sully-wechat-input-plus-button" onClick={() => handleOpenPanel('actions')} aria-label="打开更多操作" style={{
                     width: '36px', height: '36px', display: 'flex',
                     alignItems: 'center', justifyContent: 'center',
                     background: 'transparent', border: 'none',

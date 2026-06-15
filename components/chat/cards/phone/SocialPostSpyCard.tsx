@@ -13,7 +13,7 @@ interface SocialPostSpyCardProps {
 }
 
 const SocialPostSpyCard: React.FC<SocialPostSpyCardProps> = ({ title, detail, charName, charAvatar }) => (
-    <div className="w-64 bg-white rounded-xl overflow-hidden shadow-sm border border-slate-100">
+    <div className="sully-card-container sully-phone-card sully-phone-social-card w-64 bg-white rounded-xl overflow-hidden shadow-sm border border-slate-100">
         {/* Content area — WeChat Moments layout */}
         <div style={{ display: 'flex', gap: 10, padding: '12px 12px 0' }}>
             {/* Avatar (square with rounded corners) */}

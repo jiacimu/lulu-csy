@@ -15,7 +15,7 @@ const SoulReflectionCard: React.FC<SoulReflectionCardProps> = ({ message }) => {
 
     return (
         <div
-            className="max-w-[85%] mx-auto my-2 rounded-2xl border border-stone-200/60 shadow-[0_2px_8px_rgba(0,0,0,0.04)] overflow-hidden"
+            className="sully-card-container sully-soul-reflection-card max-w-[85%] mx-auto my-2 rounded-2xl border border-stone-200/60 shadow-[0_2px_8px_rgba(0,0,0,0.04)] overflow-hidden"
             style={{ background: 'rgba(250, 250, 249, 0.8)', backdropFilter: 'blur(16px)' }}
         >
             <div className="px-5 pt-4 pb-5">

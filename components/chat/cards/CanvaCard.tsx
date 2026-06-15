@@ -22,7 +22,7 @@ const CanvaCard: React.FC<CanvaCardProps> = ({ design }) => {
     };
 
     return (
-        <div className="sully-card-container w-64 overflow-hidden rounded-xl border border-cyan-100 bg-white shadow-sm">
+        <div className="sully-card-container sully-canva-card w-64 overflow-hidden rounded-xl border border-cyan-100 bg-white shadow-sm">
             <button
                 type="button"
                 onClick={openPrimary}

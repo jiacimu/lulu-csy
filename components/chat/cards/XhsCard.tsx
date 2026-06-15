@@ -7,7 +7,7 @@ interface XhsCardProps {
 
 const XhsCard: React.FC<XhsCardProps> = ({ note, isUser }) => {
     return (
-        <div className="sully-card-container w-64 bg-white rounded-xl overflow-hidden shadow-sm border border-slate-100 cursor-pointer active:opacity-90 transition-opacity">
+        <div className="sully-card-container sully-xhs-card w-64 bg-white rounded-xl overflow-hidden shadow-sm border border-slate-100 cursor-pointer active:opacity-90 transition-opacity">
             {/* Cover image */}
             {note.coverUrl ? (
                 <div className="relative w-full h-36 bg-slate-100 overflow-hidden">

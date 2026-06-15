@@ -74,7 +74,7 @@ const MeituanTakeoutCard: React.FC<MeituanTakeoutCardProps> = ({ title, detail, 
     const statusInfo = getStatusInfo(statusRaw);
 
     return (
-        <div style={{
+        <div className="sully-card-container sully-phone-card sully-phone-meituan-card" style={{
             width: 260,
             borderRadius: 12,
             overflow: 'hidden',

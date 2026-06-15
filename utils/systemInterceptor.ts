@@ -7,6 +7,7 @@
  */
 
 import { SystemLog } from '../types';
+import { resolveNvidiaLlmFetchResource } from './llmApiProxy';
 
 // --- Event-based communication channel ---
 type LogListener = (log: SystemLog) => void;
@@ -100,11 +101,12 @@ export function initSystemInterceptor(): void {
     // 1. Monkey Patch Fetch
     const originalFetch = window.fetch;
     const patchedFetch = async (...args: [RequestInfo | URL, RequestInit?]) => {
-        const [resource] = args;
-        const urlStr = String(resource);
+        const [resource, init] = args;
+        const proxiedResource = resolveNvidiaLlmFetchResource(resource);
+        const urlStr = proxiedResource instanceof Request ? proxiedResource.url : String(proxiedResource);
 
         try {
-            const response = await originalFetch(...args);
+            const response = await originalFetch(proxiedResource, init);
 
             if (!response.ok) {
                 // Only log if it's an important user-facing API call

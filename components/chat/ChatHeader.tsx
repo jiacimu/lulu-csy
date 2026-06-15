@@ -50,18 +50,18 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                 </div>
             ) : (
                 <div className="flex items-center gap-3 w-full">
-                    <button onClick={onClose} className="p-2 -ml-2 text-slate-500 hover:bg-slate-100 rounded-full">
+                    <button onClick={onClose} className="sully-chat-header-button sully-chat-header-back p-2 -ml-2 text-slate-500 hover:bg-slate-100 rounded-full">
                         <CaretLeft className="w-5 h-5" weight="bold" />
                     </button>
 
                     <div onClick={onShowCharsPanel} className="flex-1 min-w-0 flex items-center gap-3 cursor-pointer">
-                        <img src={activeCharacter.avatar} className="w-10 h-10 rounded-xl object-cover shadow-sm" alt="avatar" />
+                        <img src={activeCharacter.avatar} className="sully-chat-header-avatar w-10 h-10 rounded-xl object-cover shadow-sm" alt="avatar" />
                         <div>
-                            <div className="font-bold text-slate-800">{activeCharacter.name}</div>
+                            <div className="sully-chat-header-title font-bold text-slate-800">{activeCharacter.name}</div>
                             <div className="flex items-center gap-2">
-                                <div className="text-[10px] text-slate-400 uppercase">Online</div>
+                                <div className="sully-chat-header-subtitle text-[10px] text-slate-400 uppercase">Online</div>
                                 {lastTokenUsage && (
-                                    <div className="text-[9px] px-1.5 py-0.5 bg-slate-100 text-slate-400 rounded-md font-mono border border-slate-200" title={tokenBreakdown ? `prompt: ${tokenBreakdown.prompt} | completion: ${tokenBreakdown.completion} | msgs: ${tokenBreakdown.msgCount} | pass: ${tokenBreakdown.pass}` : ''}>
+                                    <div className="sully-chat-header-token text-[9px] px-1.5 py-0.5 bg-slate-100 text-slate-400 rounded-md font-mono border border-slate-200" title={tokenBreakdown ? `prompt: ${tokenBreakdown.prompt} | completion: ${tokenBreakdown.completion} | msgs: ${tokenBreakdown.msgCount} | pass: ${tokenBreakdown.pass}` : ''}>
                                         ⚡ {lastTokenUsage}
                                     </div>
                                 )}
@@ -72,7 +72,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                     {onCallPress && (
                         <button
                             onClick={onCallPress}
-                            className="p-2 -mr-1 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
+                            className="sully-chat-header-button sully-chat-header-call p-2 -mr-1 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
                             title="语音通话"
                         >
                             <Phone className="w-5 h-5" weight="bold" />
@@ -82,7 +82,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                     <button
                         onClick={onTriggerAI}
                         disabled={isTyping}
-                        className={`p-2 rounded-full ${isTyping ? 'bg-slate-100' : 'bg-primary/10 text-primary'}`}
+                        className={`sully-chat-header-button sully-chat-header-trigger p-2 rounded-full ${isTyping ? 'bg-slate-100' : 'bg-primary/10 text-primary'}`}
                     >
                         <Lightning className="w-5 h-5" weight="bold" />
                     </button>
@@ -90,7 +90,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
             )}
 
             {isSummarizing && (
-                <div className="absolute top-full left-0 w-full bg-indigo-50 border-b border-indigo-100 p-2 flex items-center justify-center gap-2">
+                <div className="sully-chat-header-summary absolute top-full left-0 w-full bg-indigo-50 border-b border-indigo-100 p-2 flex items-center justify-center gap-2">
                     <div className="w-3 h-3 border-2 border-indigo-200 border-t-indigo-500 rounded-full animate-spin"></div>
                     <span className="text-xs text-indigo-600 font-medium">正在整理记忆档案，请稍候...</span>
                 </div>

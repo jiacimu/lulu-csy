@@ -120,7 +120,7 @@ const SongShareCardBubble: React.FC<SongShareCardBubbleProps> = ({ metadata }) =
     return (
         <>
             <div
-                className="animate-fade-in active:scale-[0.97] transition-transform cursor-pointer select-none"
+                className="sully-card-container sully-song-share-card animate-fade-in active:scale-[0.97] transition-transform cursor-pointer select-none"
                 onClick={() => setShowConfirm(true)}
                 style={{
                     width: '240px',

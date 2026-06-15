@@ -105,7 +105,7 @@ const NeteaseMusicPhoneCard: React.FC<NeteaseMusicPhoneCardProps> = ({
     const avatarSrc = !avatarLoadFailed ? (charAvatar || firstCover) : undefined;
 
     return (
-        <article className="w-[304px] max-w-[78vw] overflow-hidden rounded-[7px] border border-red-950/10 bg-[#0f1014] text-white shadow-[0_16px_34px_rgba(15,23,42,0.28)]">
+        <article className="sully-card-container sully-phone-card sully-phone-netease-card w-[304px] max-w-[78vw] overflow-hidden rounded-[7px] border border-red-950/10 bg-[#0f1014] text-white shadow-[0_16px_34px_rgba(15,23,42,0.28)]">
             <div className="bg-gradient-to-b from-[#2b0d11] via-[#151015] to-[#0f1014] px-4 pt-3.5 pb-3">
                 <div className="mb-3 flex items-center justify-between text-[8px] font-semibold uppercase tracking-[0.18em] text-red-100/45">
                     <span>NETEASE CLOUD</span>

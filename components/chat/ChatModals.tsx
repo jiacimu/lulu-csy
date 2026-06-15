@@ -1218,47 +1218,47 @@ const ChatModals: React.FC<ChatModalsProps> = ({
             </Modal>
 
             <Modal isOpen={modalType === 'message-options'} title="消息操作" onClose={onCloseMessageOptions}>
-                <div className="space-y-3">
-                    <button onClick={onEnterSelectionMode} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
+                <div className="sully-message-action-modal space-y-3">
+                    <button onClick={onEnterSelectionMode} className="sully-message-action-button w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
                         多选 / 批量删除
                     </button>
-                    <button onClick={onReplyMessage} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
+                    <button onClick={onReplyMessage} className="sully-message-action-button w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
                         引用 / 回复
                     </button>
                     {selectedMessage?.type === 'text' && (
-                        <button onClick={onEditMessageStart} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
+                        <button onClick={onEditMessageStart} className="sully-message-action-button w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
                             编辑内容
                         </button>
                     )}
                     {selectedMessage?.type === 'text' && (
-                        <button onClick={onCopyMessage} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
+                        <button onClick={onCopyMessage} className="sully-message-action-button w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
                             复制文字
                         </button>
                     )}
                     {selectedMessage?.type === 'image' && selectedMessage.role === 'assistant' && onCollectImageToWall && (
-                        <button onClick={onCollectImageToWall} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
+                        <button onClick={onCollectImageToWall} className="sully-message-action-button w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
                             收藏到拾光墙
                         </button>
                     )}
                     {/* Voice: Read Aloud for text messages */}
                     {selectedMessage?.type === 'text' && onReadAloud && (
-                        <button onClick={onReadAloud} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
+                        <button onClick={onReadAloud} className="sully-message-action-button w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
                             🔊 朗读
                         </button>
                     )}
                     {/* Voice: Convert to text for voice messages */}
                     {selectedMessage?.type === 'voice' && onVoiceToText && (
-                        <button onClick={onVoiceToText} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
+                        <button onClick={onVoiceToText} className="sully-message-action-button w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
                             📝 转文字
                         </button>
                     )}
                     {/* Voice: Download audio for voice messages */}
                     {selectedMessage?.type === 'voice' && selectedMessage?.metadata?.hasAudio && onDownloadVoice && (
-                        <button onClick={onDownloadVoice} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
+                        <button onClick={onDownloadVoice} className="sully-message-action-button w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
                             ⬇️ 下载语音
                         </button>
                     )}
-                    <button onClick={onDeleteMessage} className="w-full py-3 bg-red-50 text-red-500 font-medium rounded-2xl active:bg-red-100 transition-colors flex items-center justify-center gap-2">
+                    <button onClick={onDeleteMessage} className="sully-message-action-button sully-message-action-danger w-full py-3 bg-red-50 text-red-500 font-medium rounded-2xl active:bg-red-100 transition-colors flex items-center justify-center gap-2">
                         删除消息
                     </button>
                 </div>

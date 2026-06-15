@@ -16,7 +16,7 @@ interface ChartReadingCardProps {
 const ChartReadingCard: React.FC<ChartReadingCardProps> = ({ displayText }) => {
     return (
         <div
-            className="w-[90%] max-w-sm mx-auto relative overflow-hidden"
+            className="sully-card-container sully-chart-reading-card w-[90%] max-w-sm mx-auto relative overflow-hidden"
             style={{
                 borderRadius: '16px',
                 background: 'linear-gradient(160deg, #1a1408 0%, #2a1f10 30%, #1e1a0e 60%, #151008 100%)',

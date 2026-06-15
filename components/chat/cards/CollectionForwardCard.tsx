@@ -133,7 +133,7 @@ const CollectionForwardCard: React.FC<CollectionForwardCardProps> = ({ data, com
         return (
             commonLayout(
                 <article
-                    className={`relative w-64 overflow-hidden rounded-[14px] border px-4 py-4 shadow-[0_18px_42px_-30px_rgba(109,48,70,0.62)] transition-transform ${selectionMode ? '' : 'active:scale-[0.99]'}`}
+                    className={`sully-card-container sully-collection-forward-card sully-collection-forward-heart-card relative w-64 overflow-hidden rounded-[14px] border px-4 py-4 shadow-[0_18px_42px_-30px_rgba(109,48,70,0.62)] transition-transform ${selectionMode ? '' : 'active:scale-[0.99]'}`}
                     style={{
                         background: 'linear-gradient(145deg, #fffafb 0%, #f7eded 48%, #eef8f6 100%)',
                         borderColor: 'rgba(176,76,104,0.24)',
@@ -197,7 +197,7 @@ const CollectionForwardCard: React.FC<CollectionForwardCardProps> = ({ data, com
     return (
         commonLayout(
             <article
-                className={`relative w-64 overflow-hidden rounded-[14px] border shadow-[0_18px_42px_-28px_rgba(32,25,20,0.6)] transition-transform ${selectionMode ? '' : 'active:scale-[0.99]'}`}
+                className={`sully-card-container sully-collection-forward-card relative w-64 overflow-hidden rounded-[14px] border shadow-[0_18px_42px_-28px_rgba(32,25,20,0.6)] transition-transform ${selectionMode ? '' : 'active:scale-[0.99]'}`}
                 style={{
                     backgroundColor: palette.paper,
                     borderColor: `${palette.accent}33`,

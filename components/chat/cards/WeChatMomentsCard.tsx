@@ -77,7 +77,7 @@ const WeChatMomentsCard: React.FC<Props> = ({ data }) => {
     const hasInteraction = likes.length > 0 || comments.length > 0;
 
     return (
-        <div style={{
+        <div className="sully-card-container sully-wechat-moments-card" style={{
             display: 'flex',
             gap: 10,
             padding: '12px 16px',

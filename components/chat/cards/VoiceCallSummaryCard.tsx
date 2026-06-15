@@ -157,7 +157,7 @@ const VoiceCallSummaryCard: React.FC<VoiceCallSummaryCardProps> = ({ message }) 
 
     return (
         <div
-            className="w-full max-w-[280px] bg-white/90 backdrop-blur-sm rounded-2xl overflow-hidden shadow-sm border border-slate-100 cursor-pointer active:scale-[0.98] transition-transform select-none"
+            className="sully-card-container sully-voice-call-card w-full max-w-[280px] bg-white/90 backdrop-blur-sm rounded-2xl overflow-hidden shadow-sm border border-slate-100 cursor-pointer active:scale-[0.98] transition-transform select-none"
             onClick={() => setExpanded(!expanded)}
         >
             {/* 折叠态头部 */}

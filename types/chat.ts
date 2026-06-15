@@ -95,6 +95,117 @@ export interface BubbleStyle {
     avatarDecorationRotate?: number;
 }
 
+export type ChatThemeRole = 'user' | 'ai';
+export type ChatThemeMotionScale = 'off' | 'lite' | 'normal';
+
+export interface ThemeGradient {
+    from: string;
+    to: string;
+    direction: number;
+}
+
+export interface ThemePaint {
+    background?: string;
+    gradient?: ThemeGradient;
+    backgroundImage?: string;
+    backgroundImageOpacity?: number;
+    color?: string;
+    mutedColor?: string;
+    borderColor?: string;
+    borderWidth?: number;
+    radius?: number;
+    shadow?: string;
+    blur?: number;
+    opacity?: number;
+}
+
+export interface ThemeTypography {
+    fontSize?: number;
+    fontWeight?: number;
+    lineHeight?: number;
+    letterSpacing?: number;
+    textShadow?: string;
+}
+
+export interface ThemeBox {
+    paddingX?: number;
+    paddingY?: number;
+    gap?: number;
+    width?: number;
+    height?: number;
+    maxWidth?: number;
+}
+
+export interface ChatThemeTokens {
+    accent?: string;
+    accentText?: string;
+    pageBackground?: string;
+    surface?: string;
+    text?: string;
+    mutedText?: string;
+    border?: string;
+    radius?: number;
+    shadow?: string;
+    motionScale?: ChatThemeMotionScale;
+}
+
+export interface ChatThemeSurfaces {
+    container?: ThemePaint & ThemeBox;
+    messageList?: ThemeBox & { density?: 'compact' | 'normal' | 'spacious' };
+    header?: {
+        shell?: ThemePaint & ThemeBox;
+        avatar?: ThemePaint & ThemeBox;
+        title?: ThemeTypography & ThemePaint;
+        subtitle?: ThemeTypography & ThemePaint & { visible?: boolean };
+        buttons?: ThemePaint & ThemeBox;
+        summarizingBar?: ThemePaint & ThemeTypography;
+    };
+    bubbles?: Partial<Record<ChatThemeRole, BubbleStyle>>;
+    voice?: Partial<Record<ChatThemeRole, ThemePaint & ThemeBox & ThemeTypography>>;
+    image?: ThemePaint & ThemeBox;
+    emoji?: ThemePaint & ThemeBox;
+    timestamp?: ThemePaint & ThemeBox & ThemeTypography & { visible?: boolean; intervalMs?: number };
+    systemPill?: ThemePaint & ThemeBox & ThemeTypography;
+    interactionPill?: ThemePaint & ThemeBox & ThemeTypography;
+    transferCard?: ThemePaint & ThemeBox;
+    card?: ThemePaint & ThemeBox & ThemeTypography & { followBrandColor?: boolean };
+    input?: {
+        shell?: ThemePaint & ThemeBox;
+        textBox?: ThemePaint & ThemeTypography;
+        iconButton?: ThemePaint & ThemeBox;
+        sendButton?: ThemePaint & ThemeBox & ThemeTypography;
+        panels?: ThemePaint & ThemeBox;
+        panelTabs?: ThemePaint & ThemeBox & ThemeTypography;
+        panelItem?: ThemePaint & ThemeBox & ThemeTypography;
+        suggestionPanel?: ThemePaint & ThemeBox & ThemeTypography;
+        recordingOverlay?: ThemePaint & ThemeBox & ThemeTypography;
+        selectionBar?: ThemePaint & ThemeBox;
+        selectionButton?: ThemePaint & ThemeBox & ThemeTypography;
+        dangerButton?: ThemePaint & ThemeBox & ThemeTypography;
+    };
+    overlays?: {
+        backdrop?: ThemePaint;
+        modal?: ThemePaint & ThemeBox;
+        primaryButton?: ThemePaint & ThemeTypography;
+        secondaryButton?: ThemePaint & ThemeTypography;
+    };
+}
+
+export type ChatThemePreviewPage =
+    | 'overview'
+    | 'text'
+    | 'media'
+    | 'notices'
+    | 'cards'
+    | 'input'
+    | 'overlays'
+    | 'stress';
+
+export interface ChatThemePreviewSettings {
+    activePage?: ChatThemePreviewPage;
+    cardPage?: number;
+}
+
 export interface ChatTheme {
     id: string;
     name: string;
@@ -103,6 +214,11 @@ export interface ChatTheme {
     user: BubbleStyle;
     ai: BubbleStyle;
     customCss?: string;
+    generatedCss?: string;
+    version?: 2;
+    tokens?: ChatThemeTokens;
+    surfaces?: ChatThemeSurfaces;
+    previewSettings?: ChatThemePreviewSettings;
     /** Theme-level: force-enable timestamp separators (e.g. WeChat). undefined/false = off */
     showTimestamp?: boolean;
     /** Minimum ms gap between messages to show a timestamp separator (default 180000 = 3min) */

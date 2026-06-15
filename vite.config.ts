@@ -227,6 +227,11 @@ export default defineConfig(({ mode, command }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/minimax-music-api/, ''),
         },
+        '/llm-api': {
+          target: 'https://integrate.api.nvidia.com',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/llm-api/, '/v1'),
+        },
         '/elevenlabs-token': {
           target: 'https://api.elevenlabs.io',
           changeOrigin: true,

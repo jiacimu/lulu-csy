@@ -29,7 +29,7 @@ const ForwardCard: React.FC<ForwardCardProps> = ({ forwardData, commonLayout, se
         <>
             {commonLayout(
                 <div
-                    className="sully-card-container w-64 rounded-2xl overflow-hidden shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
+                    className="sully-card-container sully-forward-card w-64 rounded-2xl overflow-hidden shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
                     style={{
                         backgroundColor: 'var(--card-bg, #ffffff)',
                         border: '1px solid var(--card-border, #f1f5f9)',

@@ -68,8 +68,8 @@ const RoomPlanCard: React.FC<RoomPlanCardProps> = ({ message }) => {
     // --- Loading skeleton ---
     if (loading) {
         return (
-            <div className="room-plan-card w-[85%] max-w-[300px] mx-auto">
-                <div className="bg-amber-50/80 rounded-lg p-5 shadow-sm border border-amber-100/60 animate-pulse">
+            <div className="sully-room-plan-card room-plan-card w-[85%] max-w-[300px] mx-auto">
+                <div className="sully-card-container sully-room-plan-body bg-amber-50/80 rounded-lg p-5 shadow-sm border border-amber-100/60 animate-pulse">
                     <div className="h-3 bg-amber-200/50 rounded w-2/3 mb-3"></div>
                     <div className="h-2.5 bg-amber-200/40 rounded w-full mb-2"></div>
                     <div className="h-2.5 bg-amber-200/40 rounded w-5/6 mb-2"></div>
@@ -82,9 +82,9 @@ const RoomPlanCard: React.FC<RoomPlanCardProps> = ({ message }) => {
     // --- Empty / no data ---
     if (!todo || todo.items.length === 0) {
         return (
-            <div className="room-plan-card w-[85%] max-w-[300px] mx-auto">
+            <div className="sully-room-plan-card room-plan-card w-[85%] max-w-[300px] mx-auto">
                 <div
-                    className="relative bg-[#fffef5] rounded-lg p-5 shadow-md border border-amber-100/60"
+                    className="sully-card-container sully-room-plan-body relative bg-[#fffef5] rounded-lg p-5 shadow-md border border-amber-100/60"
                     style={{
                         backgroundImage: 'radial-gradient(circle, #e8e4d8 0.5px, transparent 0.5px)',
                         backgroundSize: '12px 12px',
@@ -111,7 +111,7 @@ const RoomPlanCard: React.FC<RoomPlanCardProps> = ({ message }) => {
     const weekDay = weekDays[dateObj.getDay()];
 
     return (
-        <div className="room-plan-card w-[85%] max-w-[300px] mx-auto select-none">
+        <div className="sully-room-plan-card room-plan-card w-[85%] max-w-[300px] mx-auto select-none">
             {/* Outer paper card with subtle tilt */}
             <div
                 className="relative"
@@ -129,7 +129,7 @@ const RoomPlanCard: React.FC<RoomPlanCardProps> = ({ message }) => {
 
                 {/* Main card body */}
                 <div
-                    className="relative bg-[#fffef5] rounded-lg pt-6 pb-4 px-5 shadow-[0_2px_12px_rgba(0,0,0,0.08)] border border-amber-100/50 overflow-hidden"
+                    className="sully-card-container sully-room-plan-body relative bg-[#fffef5] rounded-lg pt-6 pb-4 px-5 shadow-[0_2px_12px_rgba(0,0,0,0.08)] border border-amber-100/50 overflow-hidden"
                     style={{
                         backgroundImage: `
                             linear-gradient(transparent 23px, #e8dcc8 24px),

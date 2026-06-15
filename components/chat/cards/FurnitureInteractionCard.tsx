@@ -91,13 +91,13 @@ const FurnitureInteractionCard: React.FC<FurnitureInteractionCardProps> = ({ mes
 
     return (
         <div
-            className="furniture-interaction-card w-[88%] max-w-[320px] mx-auto select-none my-1.5"
+            className="sully-furniture-interaction-card furniture-interaction-card w-[88%] max-w-[320px] mx-auto select-none my-1.5"
             style={{
                 animation: 'fi-float-in 0.7s ease-out both',
             }}
         >
             <div
-                className="relative overflow-hidden"
+                className="sully-card-container sully-furniture-interaction-body relative overflow-hidden"
                 style={{
                     borderRadius: '20px',
                     background: MACARON.gradientBg,

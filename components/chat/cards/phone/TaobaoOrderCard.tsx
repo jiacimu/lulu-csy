@@ -28,7 +28,7 @@ const TaobaoOrderCard: React.FC<TaobaoOrderCardProps> = ({ title, detail, value,
                 : 'text-slate-500';
 
     return (
-        <div className="w-64 bg-white rounded-lg overflow-hidden shadow-sm" style={{ border: '1px solid #f0f0f0' }}>
+        <div className="sully-card-container sully-phone-card sully-phone-taobao-card w-64 bg-white rounded-lg overflow-hidden shadow-sm" style={{ border: '1px solid #f0f0f0' }}>
             {/* ── Header: Taobao branding ── */}
             <div className="flex items-center gap-1.5 px-3 py-1.5" style={{ borderBottom: '1px solid #f5f5f5' }}>
                 <div className="w-4 h-4 rounded flex items-center justify-center text-[8px] font-black text-white shrink-0"

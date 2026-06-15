@@ -15,7 +15,7 @@ const WeChatSpyCard: React.FC<WeChatSpyCardProps> = ({ title, detail, charName }
     const lines = detail.split(/\\n|\n/).filter(l => l.trim());
 
     return (
-        <div className="w-64 bg-white rounded-xl overflow-hidden shadow-sm border border-slate-100">
+        <div className="sully-card-container sully-phone-card sully-phone-wechat-card w-64 bg-white rounded-xl overflow-hidden shadow-sm border border-slate-100">
             {/* Header */}
             <div className="px-3 py-2 bg-gradient-to-r from-green-600 to-emerald-600 flex items-center gap-2">
                 <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] text-white font-bold">💬</div>

@@ -1,5 +1,5 @@
 
-import React,{ useEffect,useRef,useState,useMemo } from 'react';
+import React,{ forwardRef,useCallback,useEffect,useImperativeHandle,useLayoutEffect,useMemo,useRef,useState } from 'react';
 import { ShareNetwork,Trash,Plus,Smiley,PaperPlaneTilt,Money,BookOpenText,GearSix,Image,Lock,ArrowsClockwise,Sparkle,CheckSquare,Square,X,VinylRecord } from '@phosphor-icons/react';
 import { CharacterProfile,ChatTheme,EmojiCategory,Emoji } from '../../types';
 import { PRESET_THEMES } from './ChatConstants';
@@ -10,9 +10,14 @@ import { isIOSStandaloneWebApp } from '../../utils/iosStandalone';
 // WeChat-specific icons and input bar are now in ./plugins/WeChatInputBar.tsx
 // Loaded via ThemeRegistry at runtime.
 
+export interface ChatInputAreaHandle {
+    getValue: () => string;
+    setValue: (v: string) => void;
+    clear: () => void;
+}
+
 interface ChatInputAreaProps {
-    input: string;
-    setInput: (v: string) => void;
+    draftKey: string;
     isTyping: boolean;
     selectionMode: boolean;
     showPanel: 'none' | 'actions' | 'emojis' | 'chars';
@@ -58,8 +63,21 @@ interface ChatInputAreaProps {
     isSpeaking?: boolean;
 }
 
-const ChatInputArea: React.FC<ChatInputAreaProps> = ({
-    input, setInput, isTyping, selectionMode,
+function readStoredDraft(draftKey: string): string {
+    try {
+        return localStorage.getItem(draftKey) || '';
+    } catch {
+        return '';
+    }
+}
+
+function persistDraftNow(key: string, value: string): void {
+    if (value.trim()) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+}
+
+const ChatInputArea = forwardRef<ChatInputAreaHandle, ChatInputAreaProps>(({
+    draftKey, isTyping, selectionMode,
     showPanel, setShowPanel, onSend, onDeleteSelected, onForwardSelected, onSoulReflection, charName, selectedCount,
     emojis, allVisibleEmojis = [], characters, activeCharacterId, onCharSelect,
     customThemes, onUpdateTheme, onRemoveTheme, activeThemeId,
@@ -71,16 +89,81 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     voiceRecorderError, isVoiceProcessing = false,
     analyserNode,
     isSpeaking = false,
-}) => {
+}, ref) => {
     const chatImageInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const startPos = useRef({ x: 0, y: 0 });
     const isLongPressTriggered = useRef(false); // Track if long press action fired
+    const isComposingRef = useRef(false);
+    const draftPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pendingDraftPersistRef = useRef<{ key: string; value: string } | null>(null);
     const useIOSStandaloneInputFix = isIOSStandaloneWebApp();
+    const [input, setInputState] = useState(() => readStoredDraft(draftKey));
+    const inputRef = useRef(input);
     const [emojiManageMode, setEmojiManageMode] = useState(false);
     const [selectedEmojiNames, setSelectedEmojiNames] = useState<Set<string>>(new Set());
     // WeChat auto-expand ref & useEffect moved to plugins/WeChatInputBar.tsx
+
+    const flushPendingDraftPersist = useCallback(() => {
+        if (draftPersistTimerRef.current) {
+            clearTimeout(draftPersistTimerRef.current);
+            draftPersistTimerRef.current = null;
+        }
+        const pendingDraft = pendingDraftPersistRef.current;
+        if (pendingDraft) {
+            persistDraftNow(pendingDraft.key, pendingDraft.value);
+            pendingDraftPersistRef.current = null;
+        }
+    }, []);
+
+    const clearPendingDraftPersist = useCallback(() => {
+        if (draftPersistTimerRef.current) {
+            clearTimeout(draftPersistTimerRef.current);
+            draftPersistTimerRef.current = null;
+        }
+        pendingDraftPersistRef.current = null;
+    }, []);
+
+    const scheduleDraftPersist = useCallback((value: string) => {
+        if (draftPersistTimerRef.current) {
+            clearTimeout(draftPersistTimerRef.current);
+        }
+        pendingDraftPersistRef.current = { key: draftKey, value };
+        draftPersistTimerRef.current = setTimeout(() => {
+            const pendingDraft = pendingDraftPersistRef.current;
+            if (pendingDraft) persistDraftNow(pendingDraft.key, pendingDraft.value);
+            pendingDraftPersistRef.current = null;
+            draftPersistTimerRef.current = null;
+        }, 350);
+    }, [draftKey]);
+
+    const setInput = useCallback((value: string) => {
+        inputRef.current = value;
+        setInputState(value);
+        scheduleDraftPersist(value);
+    }, [scheduleDraftPersist]);
+
+    const clearInput = useCallback(() => {
+        clearPendingDraftPersist();
+        inputRef.current = '';
+        setInputState('');
+        persistDraftNow(draftKey, '');
+    }, [clearPendingDraftPersist, draftKey]);
+
+    useLayoutEffect(() => {
+        flushPendingDraftPersist();
+    }, [draftKey, flushPendingDraftPersist]);
+
+    useEffect(() => () => {
+        flushPendingDraftPersist();
+    }, [flushPendingDraftPersist]);
+
+    useImperativeHandle(ref, () => ({
+        getValue: () => inputRef.current,
+        setValue: setInput,
+        clear: clearInput,
+    }), [clearInput, setInput]);
 
     // Resolve plugin theme ID: custom themes should use default (non-plugin) UI
     // so their styles aren't overridden by WeChat-specific components
@@ -109,11 +192,21 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         };
     }, []);
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {
+            if (isComposingRef.current || e.nativeEvent.isComposing) return;
             e.preventDefault();
             onSend();
         }
+    };
+
+    const handleCompositionStart = () => {
+        isComposingRef.current = true;
+    };
+
+    const handleCompositionEnd = (e: React.CompositionEvent<HTMLTextAreaElement>) => {
+        isComposingRef.current = false;
+        setInput(e.currentTarget.value);
     };
 
     const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -323,15 +416,15 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                 {/* === Auto-Suggest Emoji Floating Panel === */}
                 {suggestEmojis.length > 0 && !selectionMode && (
                     <div className="absolute bottom-full left-0 right-0 z-50 px-3 pb-2 pointer-events-none" style={{ animation: 'popIn 0.2s ease-out' }}>
-                        <div className="pointer-events-auto bg-white/85 backdrop-blur-xl border border-white/50 rounded-2xl shadow-2xl px-3 py-2.5">
+                        <div className="sully-chat-input-suggestion-panel pointer-events-auto bg-white/85 backdrop-blur-xl border border-white/50 rounded-2xl shadow-2xl px-3 py-2.5">
                             <div className="flex gap-2.5 overflow-x-auto no-scrollbar">
                                 {suggestEmojis.map((e, i) => (
                                     <button
                                         key={`${e.name}-${i}`}
                                         onClick={() => handleSuggestClick(e)}
-                                        className="flex flex-col items-center gap-1 shrink-0 active:scale-90 transition-transform"
+                                        className="sully-chat-input-suggestion-item flex flex-col items-center gap-1 shrink-0 active:scale-90 transition-transform"
                                     >
-                                        <div className="w-14 h-14 bg-white rounded-xl p-1.5 shadow-sm border border-slate-100">
+                                        <div className="sully-chat-input-panel-item w-14 h-14 bg-white rounded-xl p-1.5 shadow-sm border border-slate-100">
                                             <img src={e.url} className="w-full h-full object-contain" alt={e.name} />
                                         </div>
                                         <span className="text-[10px] text-slate-500 max-w-14 truncate">{e.name}</span>
@@ -346,12 +439,12 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                 )}
 
                 {selectionMode ? (
-                    <div className="p-3 flex gap-2 bg-white/50 backdrop-blur-md">
+                    <div className="sully-chat-selection-bar p-3 flex gap-2 bg-white/50 backdrop-blur-md">
                         {onForwardSelected && (
                             <button
                                 onClick={onForwardSelected}
                                 disabled={selectedCount === 0}
-                                className={`flex-1 py-3 font-bold rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${selectedCount === 0 ? 'bg-slate-200 text-slate-400 shadow-none' : 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-blue-200'}`}
+                                className={`sully-chat-selection-button sully-chat-selection-forward flex-1 py-3 font-bold rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${selectedCount === 0 ? 'bg-slate-200 text-slate-400 shadow-none' : 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-blue-200'}`}
                             >
                                 <ShareNetwork className="w-5 h-5" weight="bold" />
                                 转发 ({selectedCount})
@@ -363,7 +456,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                 disabled={selectedCount === 0}
                                 title={charName ? `让${charName}回回神` : '回神'}
                                 aria-label={charName ? `让${charName}回回神` : '回神'}
-                                className={`flex-1 py-3 font-bold rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2 ${selectedCount === 0 ? 'bg-slate-200 text-slate-400' : 'bg-neutral-900 text-neutral-400 border border-neutral-700 shadow-sm'}`}
+                                className={`sully-chat-selection-button sully-chat-selection-soul flex-1 py-3 font-bold rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2 ${selectedCount === 0 ? 'bg-slate-200 text-slate-400' : 'bg-neutral-900 text-neutral-400 border border-neutral-700 shadow-sm'}`}
                             >
                                 <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4"><line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><line x1="6" y1="12" x2="18" y2="12" stroke="currentColor" strokeWidth="1" strokeLinecap="round" opacity="0.3" /></svg>
                                 回神
@@ -371,7 +464,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                         )}
                         <button
                             onClick={onDeleteSelected}
-                            className={`${onForwardSelected || onSoulReflection ? 'flex-1' : 'w-full'} py-3 bg-red-500 text-white font-bold rounded-xl shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2`}
+                            className={`sully-chat-selection-button sully-chat-selection-danger ${onForwardSelected || onSoulReflection ? 'flex-1' : 'w-full'} py-3 bg-red-500 text-white font-bold rounded-xl shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2`}
                         >
                             <Trash className="w-5 h-5" weight="bold" />
                             删除 ({selectedCount})
@@ -387,34 +480,36 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                     })
                 ) : (
                     /* ===== Default Pill Layout (all other themes) ===== */
-                    <div className="p-3 px-4 flex gap-3 items-end">
-                        <button onClick={() => setShowPanel(showPanel === 'actions' ? 'none' : 'actions')} className="w-11 h-11 shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors">
+                    <div className="sully-chat-input-main p-3 px-4 flex gap-3 items-end">
+                        <button onClick={() => setShowPanel(showPanel === 'actions' ? 'none' : 'actions')} className="sully-chat-input-icon-button sully-chat-input-plus-button w-11 h-11 shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors">
                             <Plus className="w-6 h-6" weight="bold" />
                         </button>
-                        <div className="flex-1 min-w-0 bg-slate-100 rounded-[24px] flex items-center px-1 border border-transparent focus-within:bg-white focus-within:border-primary/30 transition-all overflow-hidden">
+                        <div className="sully-chat-input-textbox flex-1 min-w-0 bg-slate-100 rounded-[24px] flex items-center px-1 border border-transparent focus-within:bg-white focus-within:border-primary/30 transition-all overflow-hidden">
                             <textarea
                                 ref={textareaRef}
                                 rows={1}
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 onKeyDown={handleKeyDown}
+                                onCompositionStart={handleCompositionStart}
+                                onCompositionEnd={handleCompositionEnd}
                                 onFocus={handleInputFocus}
                                 inputMode="text"
                                 enterKeyHint="send"
                                 autoCorrect="on"
                                 autoCapitalize="sentences"
-                                className={`flex-1 min-w-0 bg-transparent px-4 py-3 ${useIOSStandaloneInputFix ? 'text-[16px]' : 'text-[15px]'} resize-none max-h-24 no-scrollbar`}
+                                className={`sully-chat-input-textarea flex-1 min-w-0 bg-transparent px-4 py-3 ${useIOSStandaloneInputFix ? 'text-[16px]' : 'text-[15px]'} resize-none max-h-24 no-scrollbar`}
                                 placeholder="Message..."
                                 style={{ height: 'auto' }}
                             />
-                            <button onClick={() => setShowPanel(showPanel === 'emojis' ? 'none' : 'emojis')} className="p-2 shrink-0 text-slate-400 hover:text-primary">
+                            <button onClick={() => setShowPanel(showPanel === 'emojis' ? 'none' : 'emojis')} className="sully-chat-input-emoji-button p-2 shrink-0 text-slate-400 hover:text-primary">
                                 <Smiley className="w-6 h-6" weight="regular" />
                             </button>
                         </div>
                         {input.trim() ? (
                             <button
                                 onClick={onSend}
-                                className="w-11 h-11 shrink-0 rounded-full flex items-center justify-center transition-all bg-primary text-white shadow-lg"
+                                className="sully-chat-input-send-button w-11 h-11 shrink-0 rounded-full flex items-center justify-center transition-all bg-primary text-white shadow-lg"
                             >
                                 <PaperPlaneTilt className="w-5 h-5" weight="fill" />
                             </button>
@@ -436,7 +531,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             <button
                                 onClick={onSend}
                                 disabled={!input.trim()}
-                                className="w-11 h-11 shrink-0 rounded-full flex items-center justify-center transition-all bg-slate-200 text-slate-400"
+                                className="sully-chat-input-send-button w-11 h-11 shrink-0 rounded-full flex items-center justify-center transition-all bg-slate-200 text-slate-400"
                             >
                                 <PaperPlaneTilt className="w-5 h-5" weight="fill" />
                             </button>
@@ -446,16 +541,16 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
 
                 {/* Panels */}
                 {showPanel !== 'none' && !selectionMode && (
-                    <div className="bg-slate-50 h-72 border-t border-slate-200/60 overflow-hidden relative z-0 flex flex-col">
+                    <div className="sully-chat-input-panel bg-slate-50 h-72 border-t border-slate-200/60 overflow-hidden relative z-0 flex flex-col">
 
                         {/* Emojis Panel with Categories */}
                         {showPanel === 'emojis' && (
                             <>
                                 {/* Categories Bar */}
-                                <div className="h-10 bg-white border-b border-slate-100 flex items-center px-2 gap-2 overflow-x-auto no-scrollbar shrink-0">
+                                <div className="sully-chat-input-panel-tabs h-10 bg-white border-b border-slate-100 flex items-center px-2 gap-2 overflow-x-auto no-scrollbar shrink-0">
                                     <button
                                         onClick={toggleEmojiManageMode}
-                                        className={`h-7 px-3 rounded-full text-[11px] font-bold shrink-0 transition-colors ${emojiManageMode ? 'bg-red-50 text-red-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                            className={`sully-chat-input-panel-tab h-7 px-3 rounded-full text-[11px] font-bold shrink-0 transition-colors ${emojiManageMode ? 'bg-red-50 text-red-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                                     >
                                         {emojiManageMode ? '完成' : '管理'}
                                     </button>
@@ -472,7 +567,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                             onMouseUp={handleTouchEnd}
                                             onMouseLeave={handleTouchEnd}
                                             onContextMenu={(e) => e.preventDefault()}
-                                            className={`px-3 py-1 text-xs rounded-full whitespace-nowrap transition-all select-none flex items-center gap-1 ${activeCategory === cat.id ? 'bg-primary text-white font-bold shadow-sm' : 'bg-slate-100 text-slate-500'}`}
+                                            className={`sully-chat-input-panel-tab px-3 py-1 text-xs rounded-full whitespace-nowrap transition-all select-none flex items-center gap-1 ${activeCategory === cat.id ? 'bg-primary text-white font-bold shadow-sm' : 'bg-slate-100 text-slate-500'}`}
                                         >
                                             {cat.name}
                                             {cat.allowedCharacterIds && cat.allowedCharacterIds.length > 0 && (
@@ -480,7 +575,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                             )}
                                         </button>
                                     ))}
-                                    <button onClick={() => onPanelAction('add-category')} className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center shrink-0 hover:bg-slate-200">+</button>
+                                    <button onClick={() => onPanelAction('add-category')} className="sully-chat-input-panel-tab w-6 h-6 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center shrink-0 hover:bg-slate-200">+</button>
                                 </div>
 
                                 {emojiManageMode && (
@@ -514,7 +609,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                 <div className="flex-1 overflow-y-auto no-scrollbar p-4">
                                     <div className="grid grid-cols-4 gap-3">
                                         {!emojiManageMode && (
-                                            <button onClick={() => onPanelAction('emoji-import')} className="aspect-square bg-slate-100 rounded-2xl border-2 border-dashed border-slate-300 flex items-center justify-center text-2xl text-slate-400">+</button>
+                                            <button onClick={() => onPanelAction('emoji-import')} className="sully-chat-input-panel-item sully-chat-input-emoji-item aspect-square bg-slate-100 rounded-2xl border-2 border-dashed border-slate-300 flex items-center justify-center text-2xl text-slate-400">+</button>
                                         )}
                                         {emojis.map(e => {
                                             const isSelected = selectedEmojiNames.has(e.name);
@@ -532,7 +627,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                                     onMouseLeave={handleTouchEnd}
                                                     onContextMenu={(ev) => ev.preventDefault()}
                                                     aria-pressed={emojiManageMode ? isSelected : undefined}
-                                                    className={`bg-white rounded-2xl p-2 shadow-sm relative active:scale-95 transition-transform select-none flex flex-col items-center ${emojiManageMode ? 'border border-slate-100' : ''} ${isSelected ? 'ring-2 ring-red-400 ring-offset-2' : ''}`}
+                                                    className={`sully-chat-input-panel-item sully-chat-input-emoji-item bg-white rounded-2xl p-2 shadow-sm relative active:scale-95 transition-transform select-none flex flex-col items-center ${emojiManageMode ? 'border border-slate-100' : ''} ${isSelected ? 'ring-2 ring-red-400 ring-offset-2' : ''}`}
                                                 >
                                                     {emojiManageMode && (
                                                         <div className={`absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center shadow-sm ${isSelected ? 'bg-red-500 text-white' : 'bg-white/90 text-slate-300'}`}>
@@ -566,57 +661,57 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                     })
                                 ) : (
                                     <div className="p-6 grid grid-cols-4 gap-8 overflow-y-auto">
-                                        <button onClick={() => onPanelAction('transfer')} className="flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
-                                            <div className="w-14 h-14 bg-orange-50 rounded-2xl flex items-center justify-center shadow-sm text-orange-400 border border-orange-100">
+                                        <button onClick={() => onPanelAction('transfer')} className="sully-chat-input-panel-action flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
+                                            <div className="sully-chat-input-panel-item sully-chat-input-panel-action-icon w-14 h-14 bg-orange-50 rounded-2xl flex items-center justify-center shadow-sm text-orange-400 border border-orange-100">
                                                 <Money className="w-6 h-6" weight="bold" />
                                             </div>
                                             <span className="text-xs font-bold">转账</span>
                                         </button>
 
-                                        <button onClick={() => onPanelAction('poke')} className="flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
-                                            <div className="w-14 h-14 bg-sky-50 rounded-2xl flex items-center justify-center shadow-sm text-2xl border border-sky-100">👉</div>
+                                        <button onClick={() => onPanelAction('poke')} className="sully-chat-input-panel-action flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
+                                            <div className="sully-chat-input-panel-item sully-chat-input-panel-action-icon w-14 h-14 bg-sky-50 rounded-2xl flex items-center justify-center shadow-sm text-2xl border border-sky-100">👉</div>
                                             <span className="text-xs font-bold">戳一戳</span>
                                         </button>
 
-                                        <button onClick={() => onPanelAction('archive')} className="flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
-                                            <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center shadow-sm text-indigo-400 border border-indigo-100">
+                                        <button onClick={() => onPanelAction('archive')} className="sully-chat-input-panel-action flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
+                                            <div className="sully-chat-input-panel-item sully-chat-input-panel-action-icon w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center shadow-sm text-indigo-400 border border-indigo-100">
                                                 <BookOpenText className="w-6 h-6" weight="bold" />
                                             </div>
                                             <span className="text-xs font-bold">{isSummarizing ? '归档中...' : '记忆归档'}</span>
                                         </button>
 
-                                        <button onClick={() => onPanelAction('settings')} className="flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
-                                            <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center shadow-sm text-slate-500 border border-slate-100">
+                                        <button onClick={() => onPanelAction('settings')} className="sully-chat-input-panel-action flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
+                                            <div className="sully-chat-input-panel-item sully-chat-input-panel-action-icon w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center shadow-sm text-slate-500 border border-slate-100">
                                                 <GearSix className="w-6 h-6" weight="bold" /></div>
                                             <span className="text-xs font-bold">设置</span>
                                         </button>
 
-                                        <button onClick={() => chatImageInputRef.current?.click()} className="flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
-                                            <div className="w-14 h-14 bg-pink-50 rounded-2xl flex items-center justify-center shadow-sm text-pink-400 border border-pink-100">
+                                        <button onClick={() => chatImageInputRef.current?.click()} className="sully-chat-input-panel-action flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
+                                            <div className="sully-chat-input-panel-item sully-chat-input-panel-action-icon w-14 h-14 bg-pink-50 rounded-2xl flex items-center justify-center shadow-sm text-pink-400 border border-pink-100">
                                                 <Image className="w-6 h-6" weight="bold" />
                                             </div>
                                             <span className="text-xs font-bold">相册</span>
                                         </button>
 
                                         {manualPhotoEnabled && (
-                                            <button onClick={() => onPanelAction('manual-photo')} className="flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
-                                                <div className="w-14 h-14 bg-fuchsia-50 rounded-2xl flex items-center justify-center shadow-sm text-fuchsia-400 border border-fuchsia-100">
+                                            <button onClick={() => onPanelAction('manual-photo')} className="sully-chat-input-panel-action flex flex-col items-center gap-2 text-slate-600 active:scale-95 transition-transform">
+                                                <div className="sully-chat-input-panel-item sully-chat-input-panel-action-icon w-14 h-14 bg-fuchsia-50 rounded-2xl flex items-center justify-center shadow-sm text-fuchsia-400 border border-fuchsia-100">
                                                     <Sparkle className="w-6 h-6" weight="bold" />
                                                 </div>
                                                 <span className="text-xs font-bold">生图</span>
                                             </button>
                                         )}
 
-                                        <button onClick={() => onPanelAction('quick-song')} disabled={quickSongGenerating} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${quickSongGenerating ? 'text-slate-300 opacity-60' : 'text-slate-600'}`}>
-                                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${quickSongGenerating ? 'bg-slate-50 text-slate-300 border-slate-100' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                                        <button onClick={() => onPanelAction('quick-song')} disabled={quickSongGenerating} className={`sully-chat-input-panel-action flex flex-col items-center gap-2 active:scale-95 transition-transform ${quickSongGenerating ? 'text-slate-300 opacity-60' : 'text-slate-600'}`}>
+                                            <div className={`sully-chat-input-panel-item sully-chat-input-panel-action-icon w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${quickSongGenerating ? 'bg-slate-50 text-slate-300 border-slate-100' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
                                                 <VinylRecord className="w-6 h-6" weight="bold" />
                                             </div>
                                             <span className="text-xs font-bold">{quickSongGenerating ? '写歌中…' : '主题曲'}</span>
                                         </button>
 
                                         {/* Regenerate Button */}
-                                        <button onClick={onReroll} disabled={!canReroll} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${canReroll ? 'text-slate-600' : 'text-slate-300 opacity-50'}`}>
-                                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${canReroll ? 'bg-emerald-50 text-emerald-400 border-emerald-100' : 'bg-slate-50 text-slate-300 border-slate-100'}`}>
+                                        <button onClick={onReroll} disabled={!canReroll} className={`sully-chat-input-panel-action flex flex-col items-center gap-2 active:scale-95 transition-transform ${canReroll ? 'text-slate-600' : 'text-slate-300 opacity-50'}`}>
+                                            <div className={`sully-chat-input-panel-item sully-chat-input-panel-action-icon w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${canReroll ? 'bg-emerald-50 text-emerald-400 border-emerald-100' : 'bg-slate-50 text-slate-300 border-slate-100'}`}>
                                                 <ArrowsClockwise className="w-6 h-6" weight="bold" />
                                             </div>
                                             <span className="text-xs font-bold">重新生成</span>
@@ -723,6 +818,6 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
             }
         </>
     );
-};
+});
 
 export default React.memo(ChatInputArea);

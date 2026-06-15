@@ -45,7 +45,7 @@ const SystemNoticeCard: React.FC<SystemNoticeCardProps> = ({ message, displayTex
     if (config.dark) {
         return (
             <div
-                className="w-[85%] max-w-xs mx-auto rounded-xl px-4 py-3 shadow-lg"
+                className="sully-card-container sully-system-notice-card sully-system-notice-card-dark w-[85%] max-w-xs mx-auto rounded-xl px-4 py-3 shadow-lg"
                 style={{
                     background: 'linear-gradient(135deg, rgba(30,25,15,0.85) 0%, rgba(45,35,20,0.75) 50%, rgba(30,25,15,0.85) 100%)',
                     border: '1px solid rgba(212,175,55,0.35)',
@@ -80,7 +80,7 @@ const SystemNoticeCard: React.FC<SystemNoticeCardProps> = ({ message, displayTex
 
     // ── 标准浅色卡片 ──
     return (
-        <div className={`w-[85%] max-w-xs mx-auto bg-gradient-to-r ${config.gradient} rounded-xl px-4 py-2.5 shadow-sm border border-white/60 backdrop-blur-sm`}>
+        <div className={`sully-card-container sully-system-notice-card w-[85%] max-w-xs mx-auto bg-gradient-to-r ${config.gradient} rounded-xl px-4 py-2.5 shadow-sm border border-white/60 backdrop-blur-sm`}>
             <div className="flex items-start gap-2.5">
                 <div className="text-lg shrink-0 mt-0.5">{config.icon}</div>
                 <div className="flex-1 min-w-0">

@@ -70,7 +70,7 @@ const StoryPhoneEvidenceCard: React.FC<{ message: Message }> = ({ message }) => 
     const appDef = buildAppDefFromMessage(meta, clue.appId, clue.appName);
 
     return (
-        <div className="mx-auto w-[82vw] max-w-[18.5rem]">
+        <div className="sully-card-container sully-story-phone-card mx-auto w-[82vw] max-w-[18.5rem]">
             <StoryPhoneScreen
                 compact
                 charName={asText(meta.charName, '角色')}

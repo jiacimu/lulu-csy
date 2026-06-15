@@ -13,7 +13,7 @@ interface DefaultAppCardProps {
 }
 
 const DefaultAppCard: React.FC<DefaultAppCardProps> = ({ label, title, detail, value }) => (
-    <div className="w-60 bg-white rounded-xl overflow-hidden shadow-sm border border-slate-100">
+    <div className="sully-card-container sully-phone-card sully-phone-default-card w-60 bg-white rounded-xl overflow-hidden shadow-sm border border-slate-100">
         <div className="px-3 py-2 bg-gradient-to-r from-violet-500 to-purple-600 flex items-center gap-2">
             <span className="text-sm">📱</span>
             <span className="text-[11px] text-white font-medium truncate">{label}</span>

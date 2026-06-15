@@ -18,7 +18,8 @@ import ShiguangCameraCard from './phone/ShiguangCameraCard';
  * Each sub-card lives in its own file under `./phone/` for
  * easy maintenance, independent iteration, and zero cross-contamination.
  *
- * These cards are IMMUTABLE (not affected by chat theme).
+ * These cards keep their default brand styling, while exposing sully-card-container
+ * hooks so Chat Theme Maker can override them when a custom theme is active.
  */
 
 interface PhoneEvidenceCardProps {

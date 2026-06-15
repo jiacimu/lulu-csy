@@ -20,10 +20,10 @@ const Modal: React.FC<ModalProps> = ({ isOpen, title, onClose, children, footer 
                 paddingBottom: 'max(1rem, calc(var(--safe-bottom, env(safe-area-inset-bottom, 0px)) + 0.75rem))',
             }}
         >
-            <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+            <div className="sully-theme-overlay-backdrop absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
             <div
                 data-testid="modal-shell"
-                className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-[2.5rem] border border-white/20 bg-white/90 shadow-2xl backdrop-blur-xl animate-slide-up"
+                className="sully-theme-overlay-modal relative flex w-full max-w-sm flex-col overflow-hidden rounded-[2.5rem] border border-white/20 bg-white/90 shadow-2xl backdrop-blur-xl animate-slide-up"
                 style={{
                     maxHeight: 'calc(var(--visual-viewport-height, 100dvh) - var(--safe-top, env(safe-area-inset-top, 0px)) - var(--safe-bottom, env(safe-area-inset-bottom, 0px)) - 2rem)',
                 }}
@@ -47,9 +47,9 @@ const Modal: React.FC<ModalProps> = ({ isOpen, title, onClose, children, footer 
                     </div>
                 ) : (
                     <div className="shrink-0 px-6 pb-6">
-                        <button 
+                        <button
                             onClick={onClose}
-                            className="w-full py-3 bg-slate-100 text-slate-500 font-bold rounded-2xl active:scale-95 transition-transform"
+                            className="sully-theme-overlay-secondary-button w-full py-3 bg-slate-100 text-slate-500 font-bold rounded-2xl active:scale-95 transition-transform"
                         >
                             关闭
                         </button>

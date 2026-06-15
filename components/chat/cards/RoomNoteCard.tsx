@@ -156,7 +156,7 @@ const RoomNoteCard: React.FC<RoomNoteCardProps> = ({ message }) => {
     const timeStr = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')}`;
 
     return (
-        <div className="room-note-card w-[85%] max-w-[300px] mx-auto select-none my-1">
+        <div className="sully-room-note-card room-note-card w-[85%] max-w-[300px] mx-auto select-none my-1">
             <div
                 className="relative"
                 style={{ transform: `rotate(${cardRotation}deg)` }}
@@ -180,7 +180,7 @@ const RoomNoteCard: React.FC<RoomNoteCardProps> = ({ message }) => {
 
                 {/* === Main card body === */}
                 <div
-                    className="relative rounded-lg pt-5 pb-3.5 px-4 overflow-hidden"
+                    className="sully-card-container sully-room-note-body relative rounded-lg pt-5 pb-3.5 px-4 overflow-hidden"
                     style={{
                         background: style.bgGradient,
                         border: `1px solid ${style.borderColor}`,

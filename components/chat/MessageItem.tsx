@@ -553,9 +553,9 @@ export const AfterglowReaderModal: React.FC<{
 
 // --- Deduplicated Selection Checkbox ---
 const SelectionCheckbox: React.FC<{ isSelected: boolean; onToggle: () => void }> = ({ isSelected, onToggle }) => (
-    <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={onToggle}>
-        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
-            {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+    <div className="sully-message-selection-checkbox-wrap absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={onToggle}>
+        <div className={`sully-message-selection-checkbox w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'is-selected bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+            {isSelected && <svg className="sully-message-selection-check w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
         </div>
     </div>
 );
@@ -933,7 +933,7 @@ const MessageItem = React.memo(({
         const isUserActionAvatar = !isCharAvatar && isUser && !!onUserAvatarAction;
         return (
         <div
-            className={`relative w-9 h-9 shrink-0 z-0 ${(isCharAvatar && canShowCharAvatarBadge && (hasAnyVoice || onOpenStoryPhone || onRequestAfterglow || onRevealSurpriseStatus)) || isUserActionAvatar ? 'cursor-pointer' : ''}`}
+            className={`sully-message-avatar ${isCharAvatar ? 'sully-message-avatar-ai' : 'sully-message-avatar-user'} relative w-9 h-9 shrink-0 z-0 ${(isCharAvatar && canShowCharAvatarBadge && (hasAnyVoice || onOpenStoryPhone || onRequestAfterglow || onRevealSurpriseStatus)) || isUserActionAvatar ? 'cursor-pointer' : ''}`}
             onClick={isCharAvatar ? handleAvatarClick : isUserActionAvatar ? (event) => {
                 event.stopPropagation();
                 if (!selectionMode) onUserAvatarAction?.(m);
@@ -941,7 +941,7 @@ const MessageItem = React.memo(({
         >
             <img
                 src={src}
-                className="w-full h-full rounded-[4px] object-cover bg-slate-200 pointer-events-none select-none"
+                className="sully-message-avatar-image w-full h-full rounded-[4px] object-cover bg-slate-200 pointer-events-none select-none"
                 alt="avatar"
                 loading="lazy"
                 decoding="async"
@@ -949,7 +949,7 @@ const MessageItem = React.memo(({
             {styleConfig.avatarDecoration && (
                 <img
                     src={styleConfig.avatarDecoration}
-                    className="absolute pointer-events-none z-10 max-w-none"
+                    className="sully-message-avatar-decoration absolute pointer-events-none z-10 max-w-none"
                     style={{
                         left: `${styleConfig.avatarDecorationX ?? 50}%`,
                         top: `${styleConfig.avatarDecorationY ?? 50}%`,
@@ -960,11 +960,11 @@ const MessageItem = React.memo(({
                 />
             )}
             {isCharAvatar && canShowCharAvatarBadge && !showInnerVoice && (hasAnyVoice || onRequestAfterglow || onOpenStoryPhone || onRevealSurpriseStatus || (!hasAnyVoice && onRetryInnerVoice)) && (
-                <div className="absolute -top-1.5 -right-1.5 z-20 flex items-center gap-0.5">
+                <div className="sully-message-avatar-badge-wrap absolute -top-1.5 -right-1.5 z-20 flex items-center gap-0.5">
                     {onOpenStoryPhone ? (
                         <button
                             type="button"
-                            className="flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 p-0 text-white shadow-[0_1px_3px_rgba(190,18,60,0.38)] ring-1 ring-white/90 transition-transform active:scale-90"
+                            className="sully-message-avatar-badge sully-message-avatar-badge-story-phone flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 p-0 text-white shadow-[0_1px_3px_rgba(190,18,60,0.38)] ring-1 ring-white/90 transition-transform active:scale-90"
                             aria-label={`查看${charName}的手机`}
                             title={`查看${charName}的手机`}
                             onClick={(e) => {
@@ -977,7 +977,7 @@ const MessageItem = React.memo(({
                     ) : onRequestAfterglow ? (
                         <button
                             type="button"
-                            className="flex h-4 w-4 items-center justify-center bg-transparent p-0 text-amber-300 drop-shadow-[0_1px_1px_rgba(0,0,0,0.55)] transition-transform active:scale-90 disabled:cursor-wait disabled:opacity-80"
+                            className="sully-message-avatar-badge sully-message-avatar-badge-afterglow flex h-4 w-4 items-center justify-center bg-transparent p-0 text-amber-300 drop-shadow-[0_1px_1px_rgba(0,0,0,0.55)] transition-transform active:scale-90 disabled:cursor-wait disabled:opacity-80"
                             aria-label="生成番外篇"
                             title="生成番外篇"
                             disabled={isAfterglowLoading}
@@ -988,7 +988,7 @@ const MessageItem = React.memo(({
                     ) : hasAnyVoice ? (
                         <button
                             type="button"
-                            className="flex h-4 w-4 items-center justify-center bg-transparent p-0 transition-transform active:scale-90"
+                            className="sully-message-avatar-badge sully-message-avatar-badge-inner-voice flex h-4 w-4 items-center justify-center bg-transparent p-0 transition-transform active:scale-90"
                             style={{ filter: statusCardData ? 'drop-shadow(0 1px 2px rgba(100,60,180,0.4))' : 'drop-shadow(0 1px 2px rgba(180,60,60,0.3))' }}
                             aria-label={statusCardData ? '打开状态卡片' : '打开心声卡片'}
                             title={statusCardData ? '打开状态卡片' : '打开心声卡片'}
@@ -1005,7 +1005,7 @@ const MessageItem = React.memo(({
                     ) : onRevealSurpriseStatus ? (
                         <button
                             type="button"
-                            className="flex h-4 w-4 translate-x-1 -translate-y-1 items-center justify-center rounded-full bg-teal-500 p-0 text-[10px] font-black leading-none text-white shadow-[0_1px_3px_rgba(13,148,136,0.42)] ring-1 ring-white/90 transition-transform active:scale-90"
+                            className="sully-message-avatar-badge sully-message-avatar-badge-surprise flex h-4 w-4 translate-x-1 -translate-y-1 items-center justify-center rounded-full bg-teal-500 p-0 text-[10px] font-black leading-none text-white shadow-[0_1px_3px_rgba(13,148,136,0.42)] ring-1 ring-white/90 transition-transform active:scale-90"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 onRevealSurpriseStatus(m);
@@ -1018,7 +1018,7 @@ const MessageItem = React.memo(({
                     ) : !hasAnyVoice && onRetryInnerVoice ? (
                         <button
                             type="button"
-                            className="flex h-4 w-4 items-center justify-center bg-transparent p-0 drop-shadow-[0_1px_1px_rgba(0,0,0,0.55)] transition-transform active:scale-90"
+                            className="sully-message-avatar-badge sully-message-avatar-badge-retry flex h-4 w-4 items-center justify-center bg-transparent p-0 drop-shadow-[0_1px_1px_rgba(0,0,0,0.55)] transition-transform active:scale-90"
                             onClick={(e) => { e.stopPropagation(); onRetryInnerVoice(); }}
                             title="重试生成心声"
                             aria-label="重试生成心声"
@@ -1032,7 +1032,7 @@ const MessageItem = React.memo(({
                 </div>
             )}
             {isUserActionAvatar && isUserAvatarActionLoading && (
-                <span className="absolute -right-1 -top-1 z-20 h-3.5 w-3.5 rounded-full border-2 border-white border-t-[#c47770] bg-white shadow-sm animate-spin" />
+                <span className="sully-message-avatar-loading absolute -right-1 -top-1 z-20 h-3.5 w-3.5 rounded-full border-2 border-white border-t-[#c47770] bg-white shadow-sm animate-spin" />
             )}
         </div>
     );
@@ -1168,7 +1168,7 @@ const MessageItem = React.memo(({
                     {!isUser && showInnerVoice && hasAnyVoice && ReactDOM.createPortal(
                         <div
                             data-testid="inner-voice-backdrop"
-                            className="fixed inset-0 z-[9999] overflow-y-auto px-4 py-6 transition-opacity duration-300 animate-fade-in sm:px-6 sm:py-10"
+                            className="sully-theme-overlay-backdrop sully-inner-voice-backdrop fixed inset-0 z-[9999] overflow-y-auto px-4 py-6 transition-opacity duration-300 animate-fade-in sm:px-6 sm:py-10"
                             style={{
                                 backgroundColor: 'transparent',
                             }}
@@ -1179,7 +1179,7 @@ const MessageItem = React.memo(({
                                 data-testid="inner-voice-close-button"
                                 aria-label="关闭心声卡片"
                                 title="关闭心声卡片"
-                                className="fixed z-[10000] flex h-11 w-11 items-center justify-center rounded-full border border-white/35 bg-slate-950/45 text-white shadow-[0_10px_30px_rgba(15,23,42,0.24)] backdrop-blur-md transition-all duration-200 hover:bg-slate-950/60 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/35"
+                                className="sully-image-preview-action sully-inner-voice-close fixed z-[10000] flex h-11 w-11 items-center justify-center rounded-full border border-white/35 bg-slate-950/45 text-white shadow-[0_10px_30px_rgba(15,23,42,0.24)] backdrop-blur-md transition-all duration-200 hover:bg-slate-950/60 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/35"
                                 style={{
                                     top: 'max(18px, env(safe-area-inset-top))',
                                     right: 'max(18px, env(safe-area-inset-right))',
@@ -1206,7 +1206,7 @@ const MessageItem = React.memo(({
                             <div className="flex min-h-full flex-col items-center">
                                 <div
                                     data-testid={statusCardData ? 'status-card-overlay-shell' : 'inner-voice-overlay-shell'}
-                                    className={`relative my-auto flex w-full flex-col items-center justify-center ${
+                                    className={`sully-inner-voice-shell ${statusCardData ? 'sully-status-card-overlay-shell' : ''} relative my-auto flex w-full flex-col items-center justify-center ${
                                         statusCardData
                                             ? 'animate-status-card-in'
                                             : 'animate-inner-voice-in'
@@ -1227,7 +1227,7 @@ const MessageItem = React.memo(({
                                                 <button
                                                     type="button"
                                                     data-testid="status-card-collection-button"
-                                                    className={`mt-4 flex min-h-9 items-center justify-center gap-2 rounded-full border px-4 text-[12px] font-bold text-white shadow-[0_12px_30px_rgba(15,23,42,0.22)] backdrop-blur-md transition active:scale-95 disabled:cursor-wait disabled:opacity-70 ${
+                                                    className={`sully-theme-overlay-primary-button sully-status-card-collection-button mt-4 flex min-h-9 items-center justify-center gap-2 rounded-full border px-4 text-[12px] font-bold text-white shadow-[0_12px_30px_rgba(15,23,42,0.22)] backdrop-blur-md transition active:scale-95 disabled:cursor-wait disabled:opacity-70 ${
                                                         statusCardCollectionState === 'collected'
                                                             ? 'border-amber-200/55 bg-amber-500/70'
                                                             : 'border-white/35 bg-slate-950/40 hover:bg-slate-950/55'
@@ -1250,7 +1250,7 @@ const MessageItem = React.memo(({
                                         </>
                                     ) : hasClassicInnerVoice ? (
                                         /* ═══ Classic Inner Voice — Premium Art Gallery Card ═══ */
-                                        <div className="relative" style={{
+                                        <div className="sully-inner-voice-card relative" style={{
                                             background: '#F9F8F4',
                                             borderRadius: '3px',
                                             boxShadow: '0 30px 60px -15px rgba(0,0,0,0.5), 0 0 20px rgba(0,0,0,0.1), inset 0 0 0 1px rgba(255,255,255,0.7)',
@@ -1311,9 +1311,9 @@ const MessageItem = React.memo(({
                                                 })()}
                                             </div>
                                             <div className="w-full mt-7 mb-4 flex items-center justify-center relative z-10">
-                                                <div className="text-[10px] tracking-[0.4em] text-[#8C8273] font-serif uppercase">Inner Voice</div>
+                                                <div className="sully-inner-voice-title text-[10px] tracking-[0.4em] text-[#8C8273] font-serif uppercase">Inner Voice</div>
                                             </div>
-                                            <div className="relative z-10 px-2" style={{
+                                            <div className="sully-inner-voice-text relative z-10 px-2" style={{
                                                 color: '#2A2520', fontSize: '16px', lineHeight: '2.0',
                                                 fontFamily: "'ShouXie6', 'HuangHunShouXie', 'Kaiti SC', STKaiti, serif",
                                                 letterSpacing: '1px', textAlign: 'center', whiteSpace: 'pre-wrap',
@@ -1345,7 +1345,7 @@ const MessageItem = React.memo(({
                                                     <button
                                                         type="button"
                                                         data-testid="classic-inner-voice-toggle"
-                                                        className="mt-3 self-center text-[11px] tracking-[0.18em] text-[#8C8273] font-serif uppercase transition-opacity hover:opacity-75"
+                                                        className="sully-inner-voice-toggle mt-3 self-center text-[11px] tracking-[0.18em] text-[#8C8273] font-serif uppercase transition-opacity hover:opacity-75"
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             setIsClassicInnerVoiceExpanded(prev => !prev);
@@ -1377,7 +1377,7 @@ const MessageItem = React.memo(({
                             </div>
                             <div
                                 data-testid="inner-voice-close-hint"
-                                className="pointer-events-none fixed inset-x-0 bottom-8 flex justify-center opacity-60 sm:bottom-10"
+                                className="sully-inner-voice-close-hint pointer-events-none fixed inset-x-0 bottom-8 flex justify-center opacity-60 sm:bottom-10"
                             >
                                 <div className="text-[10px] text-white/90 font-serif tracking-widest px-3 py-1 rounded-full border border-white/20 bg-black/20 backdrop-blur-sm">
                                     TAP ANYWHERE TO CLOSE
@@ -1399,7 +1399,7 @@ const MessageItem = React.memo(({
                     {!isUser && showAfterglowComposer && ReactDOM.createPortal(
                         <div
                             data-testid="afterglow-composer-backdrop"
-                            className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/35 px-3 pb-4 pt-12 backdrop-blur-sm sm:items-center sm:p-6"
+                            className="sully-theme-overlay-backdrop sully-afterglow-composer-backdrop fixed inset-0 z-[9999] flex items-end justify-center bg-black/35 px-3 pb-4 pt-12 backdrop-blur-sm sm:items-center sm:p-6"
                             onClick={() => setShowAfterglowComposer(false)}
                         >
                             <div
@@ -1407,7 +1407,7 @@ const MessageItem = React.memo(({
                                 role="dialog"
                                 aria-modal="true"
                                 aria-label="番外篇命题"
-                                className="w-full max-w-md overflow-hidden rounded-2xl border border-white/70 bg-[#fffaf2] shadow-2xl"
+                                className="sully-theme-overlay-modal sully-afterglow-composer-dialog w-full max-w-md overflow-hidden rounded-2xl border border-white/70 bg-[#fffaf2] shadow-2xl"
                                 onClick={(event) => event.stopPropagation()}
                             >
                                 <div className="flex items-center justify-between border-b border-[#eadcc8] px-4 py-3">
@@ -1428,15 +1428,15 @@ const MessageItem = React.memo(({
                                 <div className="space-y-3 px-4 py-4">
                                     <div className="grid grid-cols-2 rounded-xl border border-[#e3d1bb] bg-white/65 p-1">
                                         <button
-                                            type="button"
-                                            className={`min-h-8 rounded-lg px-2 text-[12px] font-bold transition ${!isAfterglowHeartTalkMode ? 'bg-[#2d2118] text-[#ffe4bb] shadow-sm' : 'text-[#81552f] hover:bg-[#fff4e4]'}`}
+                                        type="button"
+                                        className={`sully-afterglow-composer-button min-h-8 rounded-lg px-2 text-[12px] font-bold transition ${!isAfterglowHeartTalkMode ? 'sully-theme-overlay-primary-button bg-[#2d2118] text-[#ffe4bb] shadow-sm' : 'sully-theme-overlay-secondary-button text-[#81552f] hover:bg-[#fff4e4]'}`}
                                             onClick={() => setAfterglowComposerMode('fanfic')}
                                         >
                                             写番外
                                         </button>
                                         <button
-                                            type="button"
-                                            className={`min-h-8 rounded-lg px-2 text-[12px] font-bold transition ${isAfterglowHeartTalkMode ? 'bg-[#2d2118] text-[#ffe4bb] shadow-sm' : 'text-[#81552f] hover:bg-[#fff4e4]'}`}
+                                        type="button"
+                                        className={`sully-afterglow-composer-button min-h-8 rounded-lg px-2 text-[12px] font-bold transition ${isAfterglowHeartTalkMode ? 'sully-theme-overlay-primary-button bg-[#2d2118] text-[#ffe4bb] shadow-sm' : 'sully-theme-overlay-secondary-button text-[#81552f] hover:bg-[#fff4e4]'}`}
                                             onClick={() => {
                                                 setAfterglowComposerMode('heartTalk');
                                                 setSaveMotifToPool(false);
@@ -1472,7 +1472,7 @@ const MessageItem = React.memo(({
                                         {visibleAfterglowCard && (
                                             <button
                                                 type="button"
-                                                className="flex min-h-10 items-center justify-center rounded-xl border border-[#dbc4a9] bg-white px-2 text-[12px] font-bold text-[#81552f] transition hover:bg-[#fff4e4]"
+                                                className="sully-afterglow-composer-button sully-theme-overlay-secondary-button flex min-h-10 items-center justify-center rounded-xl border border-[#dbc4a9] bg-white px-2 text-[12px] font-bold text-[#81552f] transition hover:bg-[#fff4e4]"
                                                 onClick={() => {
                                                     setShowAfterglowComposer(false);
                                                     setShowAfterglow(true);
@@ -1484,7 +1484,7 @@ const MessageItem = React.memo(({
                                         {!isAfterglowHeartTalkMode && (
                                             <button
                                                 type="button"
-                                                className="flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-[#dbc4a9] bg-white px-2 text-[12px] font-bold text-[#81552f] transition hover:bg-[#fff4e4] disabled:cursor-wait disabled:opacity-60"
+                                                className="sully-afterglow-composer-button sully-theme-overlay-secondary-button flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-[#dbc4a9] bg-white px-2 text-[12px] font-bold text-[#81552f] transition hover:bg-[#fff4e4] disabled:cursor-wait disabled:opacity-60"
                                                 disabled={isAfterglowLoading}
                                                 onClick={handleGenerateRandomAfterglow}
                                             >
@@ -1494,7 +1494,7 @@ const MessageItem = React.memo(({
                                         )}
                                         <button
                                             type="button"
-                                            className="min-h-10 rounded-xl bg-[#2d2118] px-2 text-[12px] font-bold text-[#ffe4bb] transition hover:bg-[#3b2b1f] disabled:cursor-not-allowed disabled:opacity-45"
+                                            className="sully-afterglow-composer-button sully-theme-overlay-primary-button min-h-10 rounded-xl bg-[#2d2118] px-2 text-[12px] font-bold text-[#ffe4bb] transition hover:bg-[#3b2b1f] disabled:cursor-not-allowed disabled:opacity-45"
                                             disabled={isAfterglowLoading || !hasAfterglowMotifDraft}
                                             onClick={handleGenerateWithMotif}
                                         >
@@ -1503,7 +1503,7 @@ const MessageItem = React.memo(({
                                         {!isAfterglowHeartTalkMode && (
                                             <button
                                                 type="button"
-                                                className="min-h-10 rounded-xl border border-dashed border-[#c79f75] bg-[#fff7ea] px-2 text-[12px] font-bold text-[#8f5b2e] transition hover:bg-[#ffedcf] disabled:cursor-not-allowed disabled:opacity-45"
+                                                className="sully-afterglow-composer-button sully-theme-overlay-secondary-button min-h-10 rounded-xl border border-dashed border-[#c79f75] bg-[#fff7ea] px-2 text-[12px] font-bold text-[#8f5b2e] transition hover:bg-[#ffedcf] disabled:cursor-not-allowed disabled:opacity-45"
                                                 disabled={!hasMotifsToAdd}
                                                 onClick={handleAddMotifsToPool}
                                             >
@@ -1663,7 +1663,7 @@ const MessageItem = React.memo(({
             <img
                 src={safeEmoji.src}
                 data-testid="chat-emoji-image"
-                className="max-w-[160px] max-h-[160px] hover:scale-105 transition-transform drop-shadow-md active:scale-95"
+                className="sully-emoji-msg max-w-[160px] max-h-[160px] hover:scale-105 transition-transform drop-shadow-md active:scale-95"
                 loading="lazy"
                 decoding="async"
                 onError={safeEmoji.markFailed}
@@ -1833,15 +1833,17 @@ const MessageItem = React.memo(({
         const rank = Number(md.rank);
         const rankLabel = Number.isFinite(rank) && rank > 0 ? `#${Math.trunc(rank)}` : '热点';
         const dateStr = new Date(m.timestamp).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' });
+        const platformClass = ['bilibili', 'weibo', 'zhihu', 'baidu', 'douyin'].includes(platform) ? platform : 'default';
+        const newsCardClass = `sully-card-container sully-news-card sully-news-card-${platformClass}`;
         const openNews = () => { if (url) window.open(url, '_blank', 'noopener,noreferrer'); };
 
         if (platform === 'bilibili') {
             return commonLayout(
                 <div
-                    className={`w-64 overflow-hidden rounded-lg border border-[#fb2d86]/40 bg-white shadow-[0_4px_14px_rgba(251,45,134,0.18)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
+                    className={`${newsCardClass} w-64 overflow-hidden rounded-lg border border-[#fb2d86]/40 bg-white shadow-[0_4px_14px_rgba(251,45,134,0.18)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
                     onClick={openNews}
                 >
-                    <div className="flex items-center justify-between bg-[#fff0f6] px-3 py-2">
+                    <div className="sully-news-card-header flex items-center justify-between bg-[#fff0f6] px-3 py-2">
                         <div className="flex items-center gap-2 text-[#d91672]">
                             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#fb2d86] text-white">
                                 <PlayCircle className="h-5 w-5" weight="fill" />
@@ -1851,28 +1853,28 @@ const MessageItem = React.memo(({
                                 <p className="text-[9px] font-bold text-[#d91672]/70">BILIBILI 视频热榜</p>
                             </div>
                         </div>
-                        <span className="rounded bg-white/80 px-1.5 py-0.5 text-[10px] font-black text-[#fb2d86]">{rankLabel}</span>
+                        <span className="sully-news-card-rank rounded bg-white/80 px-1.5 py-0.5 text-[10px] font-black text-[#fb2d86]">{rankLabel}</span>
                     </div>
                     <div className="px-3 py-2.5">
                         <p
-                            className="text-[15px] font-black leading-snug text-slate-950"
+                            className="sully-news-card-title text-[15px] font-black leading-snug text-slate-950"
                             style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                         >
                             {title}
                         </p>
                         {desc && (
                             <p
-                                className="mt-1 text-[11px] leading-snug text-slate-500"
+                                className="sully-news-card-desc mt-1 text-[11px] leading-snug text-slate-500"
                                 style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                             >
                                 {desc}
                             </p>
                         )}
                     </div>
-                    <div className="flex items-center justify-between border-t border-[#fb2d86]/20 px-3 py-2">
+                    <div className="sully-news-card-footer flex items-center justify-between border-t border-[#fb2d86]/20 px-3 py-2">
                         <span className="text-[9px] font-bold text-slate-400">{charName || 'Ta'} 转给你看</span>
                         {url ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-[#d91672]">
+                            <span className="sully-news-card-action inline-flex items-center gap-1 text-[10px] font-black text-[#d91672]">
                                 打开视频
                                 <ArrowSquareOut className="h-3 w-3" weight="bold" />
                             </span>
@@ -1887,37 +1889,37 @@ const MessageItem = React.memo(({
         if (platform === 'weibo') {
             return commonLayout(
                 <div
-                    className={`w-64 overflow-hidden rounded-lg border border-[#ff8200]/35 bg-white shadow-[0_4px_14px_rgba(255,130,0,0.16)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
+                    className={`${newsCardClass} w-64 overflow-hidden rounded-lg border border-[#ff8200]/35 bg-white shadow-[0_4px_14px_rgba(255,130,0,0.16)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
                     onClick={openNews}
                 >
-                    <div className="flex items-center justify-between bg-[#ff8200] px-3 py-2 text-white">
+                    <div className="sully-news-card-header flex items-center justify-between bg-[#ff8200] px-3 py-2 text-white">
                         <div className="flex items-center gap-2">
                             <Fire className="h-4 w-4" weight="fill" />
                             <span className="text-[10px] font-black tracking-[0.18em]">Csy-OS</span>
                             <span className="text-[10px] font-bold text-white/80">微博热搜</span>
                         </div>
-                        <span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-black text-[#ff8200]">{rankLabel}</span>
+                        <span className="sully-news-card-rank rounded bg-white px-1.5 py-0.5 text-[10px] font-black text-[#ff8200]">{rankLabel}</span>
                     </div>
                     <div className="px-3 py-2.5">
                         <p
-                            className="text-[16px] font-black leading-snug text-stone-950"
+                            className="sully-news-card-title text-[16px] font-black leading-snug text-stone-950"
                             style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                         >
                             {title}
                         </p>
                         {desc && (
                             <p
-                                className="mt-1 text-[11px] leading-snug text-stone-600"
+                                className="sully-news-card-desc mt-1 text-[11px] leading-snug text-stone-600"
                                 style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                             >
                                 {desc}
                             </p>
                         )}
                     </div>
-                    <div className="flex items-center justify-between border-t border-[#ff8200]/20 px-3 py-2">
+                    <div className="sully-news-card-footer flex items-center justify-between border-t border-[#ff8200]/20 px-3 py-2">
                         <span className="text-[9px] font-bold text-[#ff8200]/70">{dateStr} · {source}</span>
                         {url ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-[#ff8200]">
+                            <span className="sully-news-card-action inline-flex items-center gap-1 text-[10px] font-black text-[#ff8200]">
                                 看热搜
                                 <ArrowSquareOut className="h-3 w-3" weight="bold" />
                             </span>
@@ -1932,10 +1934,10 @@ const MessageItem = React.memo(({
         if (platform === 'zhihu') {
             return commonLayout(
                 <div
-                    className={`w-64 overflow-hidden rounded-lg border border-[#1772f6]/35 bg-white shadow-[0_4px_14px_rgba(23,114,246,0.16)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
+                    className={`${newsCardClass} w-64 overflow-hidden rounded-lg border border-[#1772f6]/35 bg-white shadow-[0_4px_14px_rgba(23,114,246,0.16)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
                     onClick={openNews}
                 >
-                    <div className="bg-[#1772f6] px-3 py-2 text-white">
+                    <div className="sully-news-card-header bg-[#1772f6] px-3 py-2 text-white">
                         <div className="flex items-center justify-between">
                             <span className="text-[10px] font-black tracking-[0.2em]">Csy-OS</span>
                             <span className="text-[9px] font-bold text-white/75">{dateStr} · 号外</span>
@@ -1944,32 +1946,32 @@ const MessageItem = React.memo(({
                     </div>
                     <div className="px-3 pt-2.5">
                         <div className="flex items-center gap-2">
-                            <span className="inline-flex items-center gap-1 rounded bg-[#1772f6] px-2 py-1 text-[10px] font-black text-white shadow-sm">
+                            <span className="sully-news-card-badge inline-flex items-center gap-1 rounded bg-[#1772f6] px-2 py-1 text-[10px] font-black text-white shadow-sm">
                                 知乎热榜
                             </span>
-                            <span className="text-[10px] font-black text-[#1772f6]">{rankLabel}</span>
+                            <span className="sully-news-card-rank text-[10px] font-black text-[#1772f6]">{rankLabel}</span>
                         </div>
                     </div>
                     <div className="px-3 pb-2 pt-2">
                         <p
-                            className="text-[16px] font-black leading-snug text-slate-950"
+                            className="sully-news-card-title text-[16px] font-black leading-snug text-slate-950"
                             style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                         >
                             {title}
                         </p>
                         {desc && (
                             <p
-                                className="mt-1 text-[11px] leading-snug text-slate-500"
+                                className="sully-news-card-desc mt-1 text-[11px] leading-snug text-slate-500"
                                 style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                             >
                                 {desc}
                             </p>
                         )}
                     </div>
-                    <div className="flex items-center justify-between border-t border-[#1772f6]/15 px-3 py-2">
+                    <div className="sully-news-card-footer flex items-center justify-between border-t border-[#1772f6]/15 px-3 py-2">
                         <span className="text-[9px] font-bold text-slate-400">{charName || 'Ta'} 转给你看</span>
                         {url ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-[#1772f6]">
+                            <span className="sully-news-card-action inline-flex items-center gap-1 text-[10px] font-black text-[#1772f6]">
                                 打开知乎
                                 <ArrowSquareOut className="h-3 w-3" weight="bold" />
                             </span>
@@ -1984,10 +1986,10 @@ const MessageItem = React.memo(({
         if (platform === 'baidu') {
             return commonLayout(
                 <div
-                    className={`w-64 overflow-hidden rounded-lg border border-[#2932e1]/35 bg-white shadow-[0_4px_14px_rgba(41,50,225,0.16)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
+                    className={`${newsCardClass} w-64 overflow-hidden rounded-lg border border-[#2932e1]/35 bg-white shadow-[0_4px_14px_rgba(41,50,225,0.16)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
                     onClick={openNews}
                 >
-                    <div className="px-3 py-2">
+                    <div className="sully-news-card-header px-3 py-2">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 <span className="relative flex h-7 w-7 items-center justify-center rounded bg-[#2932e1] text-[14px] font-black text-white shadow-sm">
@@ -2002,32 +2004,32 @@ const MessageItem = React.memo(({
                     </div>
                     <div className="px-3 pt-2">
                         <div className="flex items-center gap-2">
-                            <span className="inline-flex items-center gap-1 rounded bg-[#2932e1] px-2 py-1 text-[10px] font-black text-white shadow-sm">
+                            <span className="sully-news-card-badge inline-flex items-center gap-1 rounded bg-[#2932e1] px-2 py-1 text-[10px] font-black text-white shadow-sm">
                                 百度热榜
                             </span>
-                            <span className="text-[10px] font-black text-[#de0f17]">{rankLabel}</span>
+                            <span className="sully-news-card-rank text-[10px] font-black text-[#de0f17]">{rankLabel}</span>
                         </div>
                     </div>
                     <div className="px-3 pb-2 pt-2">
                         <p
-                            className="text-[16px] font-black leading-snug text-slate-950"
+                            className="sully-news-card-title text-[16px] font-black leading-snug text-slate-950"
                             style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                         >
                             {title}
                         </p>
                         {desc && (
                             <p
-                                className="mt-1 text-[11px] leading-snug text-slate-500"
+                                className="sully-news-card-desc mt-1 text-[11px] leading-snug text-slate-500"
                                 style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                             >
                                 {desc}
                             </p>
                         )}
                     </div>
-                    <div className="flex items-center justify-between border-t border-[#2932e1]/15 px-3 py-2">
+                    <div className="sully-news-card-footer flex items-center justify-between border-t border-[#2932e1]/15 px-3 py-2">
                         <span className="text-[9px] font-bold text-slate-400">{charName || 'Ta'} 转给你看</span>
                         {url ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-[#2932e1]">
+                            <span className="sully-news-card-action inline-flex items-center gap-1 text-[10px] font-black text-[#2932e1]">
                                 打开百度
                                 <ArrowSquareOut className="h-3 w-3 text-[#de0f17]" weight="bold" />
                             </span>
@@ -2042,10 +2044,10 @@ const MessageItem = React.memo(({
         if (platform === 'douyin') {
             return commonLayout(
                 <div
-                    className={`w-64 overflow-hidden rounded-lg border border-black bg-white shadow-[0_5px_16px_rgba(254,44,85,0.18),-2px_2px_0_rgba(37,244,238,0.75)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
+                    className={`${newsCardClass} w-64 overflow-hidden rounded-lg border border-black bg-white shadow-[0_5px_16px_rgba(254,44,85,0.18),-2px_2px_0_rgba(37,244,238,0.75)] transition-transform active:scale-[0.98] ${url ? 'cursor-pointer' : ''}`}
                     onClick={openNews}
                 >
-                    <div className="bg-[#0f0f0f] px-3 py-2 text-white">
+                    <div className="sully-news-card-header bg-[#0f0f0f] px-3 py-2 text-white">
                         <div className="flex items-center justify-between">
                             <span className="text-[10px] font-black tracking-[0.22em]">Csy-OS</span>
                             <span className="text-[9px] font-bold text-white/70">{dateStr} · 号外</span>
@@ -2054,33 +2056,33 @@ const MessageItem = React.memo(({
                     </div>
                     <div className="px-3 pt-2.5">
                         <div className="flex items-center gap-2">
-                            <span className="inline-flex items-center gap-1 rounded bg-[#0f0f0f] px-2 py-1 text-[10px] font-black text-white shadow-[2px_0_0_#fe2c55,-2px_0_0_#25f4ee]">
+                            <span className="sully-news-card-badge inline-flex items-center gap-1 rounded bg-[#0f0f0f] px-2 py-1 text-[10px] font-black text-white shadow-[2px_0_0_#fe2c55,-2px_0_0_#25f4ee]">
                                 <PlayCircle className="h-3 w-3 text-[#25f4ee]" weight="fill" />
                                 抖音热榜
                             </span>
-                            <span className="text-[10px] font-black text-[#fe2c55]">{rankLabel}</span>
+                            <span className="sully-news-card-rank text-[10px] font-black text-[#fe2c55]">{rankLabel}</span>
                         </div>
                     </div>
                     <div className="px-3 pb-2 pt-2">
                         <p
-                            className="text-[16px] font-black leading-snug text-[#0f0f0f]"
+                            className="sully-news-card-title text-[16px] font-black leading-snug text-[#0f0f0f]"
                             style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                         >
                             {title}
                         </p>
                         {desc && (
                             <p
-                                className="mt-1 text-[11px] leading-snug text-slate-500"
+                                className="sully-news-card-desc mt-1 text-[11px] leading-snug text-slate-500"
                                 style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                             >
                                 {desc}
                             </p>
                         )}
                     </div>
-                    <div className="flex items-center justify-between border-t border-black/10 px-3 py-2">
+                    <div className="sully-news-card-footer flex items-center justify-between border-t border-black/10 px-3 py-2">
                         <span className="text-[9px] font-bold text-slate-400">{charName || 'Ta'} 刷到的热点</span>
                         {url ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-[#fe2c55]">
+                            <span className="sully-news-card-action inline-flex items-center gap-1 text-[10px] font-black text-[#fe2c55]">
                                 打开抖音
                                 <ArrowSquareOut className="h-3 w-3 text-[#25f4ee]" weight="bold" />
                             </span>
@@ -2094,11 +2096,11 @@ const MessageItem = React.memo(({
 
         return commonLayout(
             <div
-                className={`w-64 active:scale-[0.98] transition-transform ${url ? 'cursor-pointer' : ''}`}
+                className={`${newsCardClass} w-64 active:scale-[0.98] transition-transform ${url ? 'cursor-pointer' : ''}`}
                 onClick={openNews}
             >
                 <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.10)]">
-                    <div className="px-3 py-2">
+                    <div className="sully-news-card-header px-3 py-2">
                         <div className="flex items-center justify-between">
                             <span className="text-[10px] font-black tracking-[0.22em] text-slate-950">Csy-OS</span>
                             <span className="text-[9px] font-bold text-slate-400">{dateStr} · MAG</span>
@@ -2106,31 +2108,31 @@ const MessageItem = React.memo(({
                         <div className="mt-2 h-[2px] bg-gradient-to-r from-slate-950 via-slate-300 to-transparent" />
                     </div>
                     <div className="px-3 pt-1">
-                        <span className="inline-flex items-center gap-1 rounded bg-slate-950 px-2 py-1 text-[10px] font-black tracking-wide text-white shadow-sm">
+                        <span className="sully-news-card-badge inline-flex items-center gap-1 rounded bg-slate-950 px-2 py-1 text-[10px] font-black tracking-wide text-white shadow-sm">
                             {source}
                         </span>
-                        <span className="ml-1.5 text-[10px] font-black text-slate-400">{rankLabel}</span>
+                        <span className="sully-news-card-rank ml-1.5 text-[10px] font-black text-slate-400">{rankLabel}</span>
                     </div>
                     <div className="px-3 pb-2 pt-2">
                         <p
-                            className="text-[16px] font-black leading-snug text-slate-950"
+                            className="sully-news-card-title text-[16px] font-black leading-snug text-slate-950"
                             style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                         >
                             {title}
                         </p>
                         {desc && (
                             <p
-                                className="mt-1 text-[11px] leading-snug text-slate-500"
+                                className="sully-news-card-desc mt-1 text-[11px] leading-snug text-slate-500"
                                 style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                             >
                                 {desc}
                             </p>
                         )}
                     </div>
-                    <div className="flex items-center justify-between border-t border-slate-200 px-3 py-2">
+                    <div className="sully-news-card-footer flex items-center justify-between border-t border-slate-200 px-3 py-2">
                         <span className="text-[9px] font-bold text-slate-400">{charName || 'Ta'} 转给你看</span>
                         {url
-                            ? <span className="inline-flex items-center gap-1 text-[10px] font-black text-slate-950">查看原文<ArrowSquareOut className="h-3 w-3" weight="bold" /></span>
+                            ? <span className="sully-news-card-action inline-flex items-center gap-1 text-[10px] font-black text-slate-950">查看原文<ArrowSquareOut className="h-3 w-3" weight="bold" /></span>
                             : <span className="text-[9px] text-slate-300">热点速读</span>}
                     </div>
                 </div>

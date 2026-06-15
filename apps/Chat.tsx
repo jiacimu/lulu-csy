@@ -12,7 +12,7 @@ import { PRESET_THEMES } from '../components/chat/ChatConstants';
 import { DEFAULT_ARCHIVE_PROMPTS } from '../constants/archivePrompts';
 import { THINKING_CHAIN_UI_ENABLED } from '../constants';
 import ChatHeader from '../components/chat/ChatHeader';
-import ChatInputArea from '../components/chat/ChatInputArea';
+import ChatInputArea,{ type ChatInputAreaHandle } from '../components/chat/ChatInputArea';
 import ChatModals from '../components/chat/ChatModals';
 import {
     YesterdayNewspaperDeliveryStack,
@@ -703,7 +703,6 @@ const Chat: React.FC = () => {
         innerVoice: '',
     });
     const [visibleCount, setVisibleCount] = useState(30);
-    const [input, setInput] = useState('');
     const [showPanel, setShowPanel] = useState<'none' | 'actions' | 'emojis' | 'chars'>('none');
 
     // Emoji State
@@ -735,8 +734,7 @@ const Chat: React.FC = () => {
     const todayLifeHideTimerRef = useRef<number | null>(null);
     const lastTodayLifeEnsureKeyRef = useRef('');
     const yesterdayNewspaperSeqRef = useRef(0);
-    const draftPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const pendingDraftPersistRef = useRef<{ key: string; value: string } | null>(null);
+    const inputApiRef = useRef<ChatInputAreaHandle>(null);
     const openingStoryPhoneMsgIdsRef = useRef<Set<number>>(new Set());
     const userActionSelectorControllerRef = useRef<AbortController | null>(null);
     const photoHintHandlerRef = useRef<((payload: PhotoHintTrigger) => void) | null>(null);
@@ -911,6 +909,16 @@ const Chat: React.FC = () => {
         ? characters.find(c => matchesCharacterId(c, activeCharacterId))
         : undefined;
     const char = matchedChar || (isDataLoaded ? characters[0] : undefined);
+    const messageFiltersRef = useRef({
+        hideBeforeMessageId: char?.hideBeforeMessageId,
+        hideSystemLogs: char?.hideSystemLogs,
+    });
+    messageFiltersRef.current = {
+        hideBeforeMessageId: char?.hideBeforeMessageId,
+        hideSystemLogs: char?.hideSystemLogs,
+    };
+    const lastFilterLoadRef = useRef<{ charId: string; key: string } | null>(null);
+    const lastSeenMsgTsRef = useRef(lastMsgTimestamp);
     currentChatCharIdRef.current = char?.id;
     const currentThemeId = char?.bubbleStyle || 'default';
     const effectiveImageGenerationConfig = getImageGenerationDraftConfig() || imageGenerationConfig || DEFAULT_IMAGE_GENERATION_CONFIG;
@@ -1696,14 +1704,15 @@ const Chat: React.FC = () => {
     const reloadMessages = useCallback(async (requestedVisibleCount: number) => {
         if (!activeCharacterId) return;
 
+        const { hideBeforeMessageId, hideSystemLogs } = messageFiltersRef.current;
         const charIdAtStart = activeCharacterId;
         try {
             setIsHistoryLoading(true);
             let rawLimit = Math.max(requestedVisibleCount, LOAD_BATCH_SIZE);
             let recentWindow = await DB.getRecentMessageWindow(activeCharacterId, rawLimit);
             let visibleCandidateCount = getDisplayableMainChatMessages(recentWindow.messages, {
-                hideBeforeMessageId: char?.hideBeforeMessageId,
-                hideSystemLogs: char?.hideSystemLogs,
+                hideBeforeMessageId,
+                hideSystemLogs,
             }).length;
 
             while (
@@ -1714,8 +1723,8 @@ const Chat: React.FC = () => {
                 rawLimit = Math.min(CHAT_HISTORY_RAW_WINDOW_MAX, Math.max(rawLimit + LOAD_BATCH_SIZE, rawLimit * 2));
                 recentWindow = await DB.getRecentMessageWindow(activeCharacterId, rawLimit);
                 visibleCandidateCount = getDisplayableMainChatMessages(recentWindow.messages, {
-                    hideBeforeMessageId: char?.hideBeforeMessageId,
-                    hideSystemLogs: char?.hideSystemLogs,
+                    hideBeforeMessageId,
+                    hideSystemLogs,
                 }).length;
             }
 
@@ -1744,7 +1753,7 @@ const Chat: React.FC = () => {
                 setIsHistoryLoading(false);
             }
         }
-    }, [activeCharacterId, char?.hideBeforeMessageId, char?.hideSystemLogs, mergePendingGeneratedImageMessages]);
+    }, [activeCharacterId, mergePendingGeneratedImageMessages]);
 
     const handleRevealSurpriseStatus = useCallback(async (message: Message) => {
         try {
@@ -1868,7 +1877,7 @@ const Chat: React.FC = () => {
             }
             loadEmojiData();
             const savedDraft = localStorage.getItem(draftKey);
-            setInput(savedDraft || '');
+            inputApiRef.current?.setValue(savedDraft || '');
             if (char) {
                 setSettingsContextLimit(char.contextLimit || 500);
                 setSettingsHideSysLogs(char.hideSystemLogs || false);
@@ -1915,22 +1924,15 @@ const Chat: React.FC = () => {
     }, [activeCharacterId, appParams?.targetCharId, appParams?.targetMessageId, appParams?.targetRequestId, reloadMessages]);
 
     useEffect(() => {
-        if (activeCharacterId) {
-            const rawTargetMessageId = appParams?.targetMessageId;
-            const targetMessageId = typeof rawTargetMessageId === 'number'
-                ? rawTargetMessageId
-                : Number(rawTargetMessageId);
-            const targetCharId = typeof appParams?.targetCharId === 'string'
-                ? appParams.targetCharId.trim()
-                : '';
-            const hasTargetForActiveChar = Number.isFinite(targetMessageId)
-                && targetMessageId > 0
-                && (!targetCharId || targetCharId === activeCharacterId);
-            if (hasTargetForActiveChar && pendingTargetScrollRef.current) return;
+        if (!activeCharacterId) return;
 
-            reloadMessages(visibleCountRef.current);
-        }
-    }, [activeCharacterId, appParams?.targetCharId, appParams?.targetMessageId, appParams?.targetRequestId, reloadMessages]);
+        const key = `${char?.hideBeforeMessageId ?? ''}:${char?.hideSystemLogs ? 1 : 0}`;
+        const prev = lastFilterLoadRef.current;
+        lastFilterLoadRef.current = { charId: activeCharacterId, key };
+        if (!prev || prev.charId !== activeCharacterId || prev.key === key) return;
+
+        void reloadMessages(visibleCountRef.current);
+    }, [activeCharacterId, char?.hideBeforeMessageId, char?.hideSystemLogs, reloadMessages]);
 
     // Load all messages when history-manager modal opens
     useEffect(() => {
@@ -1960,7 +1962,10 @@ const Chat: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        if (activeCharacterId && lastMsgTimestamp > 0) {
+        if (!activeCharacterId) return;
+        if (lastMsgTimestamp === lastSeenMsgTsRef.current) return;
+        lastSeenMsgTsRef.current = lastMsgTimestamp;
+        if (lastMsgTimestamp > 0) {
             reloadMessages(visibleCountRef.current);
             clearUnread(activeCharacterId);
         }
@@ -1984,45 +1989,6 @@ const Chat: React.FC = () => {
     useEffect(() => {
         visibleCountRef.current = visibleCount;
     }, [visibleCount]);
-
-    const persistDraftNow = useCallback((key: string, value: string) => {
-        if (value.trim()) localStorage.setItem(key, value);
-        else localStorage.removeItem(key);
-    }, []);
-
-    const clearPendingDraftPersist = useCallback(() => {
-        if (draftPersistTimerRef.current) {
-            clearTimeout(draftPersistTimerRef.current);
-            draftPersistTimerRef.current = null;
-        }
-        pendingDraftPersistRef.current = null;
-    }, []);
-
-    useEffect(() => () => {
-        if (draftPersistTimerRef.current) {
-            clearTimeout(draftPersistTimerRef.current);
-            draftPersistTimerRef.current = null;
-        }
-        const pendingDraft = pendingDraftPersistRef.current;
-        if (pendingDraft) {
-            persistDraftNow(pendingDraft.key, pendingDraft.value);
-            pendingDraftPersistRef.current = null;
-        }
-    }, [persistDraftNow]);
-
-    const handleInputChange = (val: string) => {
-        setInput(val);
-        if (draftPersistTimerRef.current) {
-            clearTimeout(draftPersistTimerRef.current);
-        }
-        pendingDraftPersistRef.current = { key: draftKey, value: val };
-        draftPersistTimerRef.current = setTimeout(() => {
-            const pendingDraft = pendingDraftPersistRef.current;
-            if (pendingDraft) persistDraftNow(pendingDraft.key, pendingDraft.value);
-            pendingDraftPersistRef.current = null;
-            draftPersistTimerRef.current = null;
-        }, 350);
-    };
 
     useLayoutEffect(() => {
         if (!scrollRef.current || selectionMode) return;
@@ -2062,25 +2028,21 @@ const Chat: React.FC = () => {
 
     // --- Actions ---
 
-    const handleSendText = async (customContent?: string, customType?: MessageType, metadata?: any) => {
-        if (!char || (!input.trim() && !customContent)) return;
+    const handleSendText = useCallback(async (customContent?: string, customType?: MessageType, metadata?: any) => {
+        const inputText = (inputApiRef.current?.getValue() ?? '').trim();
+        if (!char || (!inputText && !customContent)) return;
         const isPlainTextSend = !customContent && !customType;
         if (isPlainTextSend && sendTextInFlightRef.current) return;
         if (isPlainTextSend) sendTextInFlightRef.current = true;
-        const text = customContent || input.trim();
+        const text = customContent || inputText;
         const type = customType || 'text';
         const timestamp = Date.now();
         const optimisticId = -timestamp;
 
-        if (!customContent) {
-            setInput('');
-            clearPendingDraftPersist();
-            localStorage.removeItem(draftKey);
-        }
         setShowPanel('none');
 
         if (type === 'image') {
-            const recentChat = messages.slice(-10).map(m => {
+            const recentChat = messagesRef.current.slice(-10).map(m => {
                 const sender = m.role === 'user' ? userProfile.name : char.name;
                 return `${sender}: ${m.content.substring(0, 100)}`;
             });
@@ -2132,6 +2094,9 @@ const Chat: React.FC = () => {
             if (isPlainTextSend) sendTextInFlightRef.current = false;
             return;
         }
+        if (!customContent) {
+            inputApiRef.current?.clear();
+        }
         setMessages(prev => {
             const next = prev.map(m => m.id === optimisticId ? { ...m, id: savedMessageId } : m);
             messagesRef.current = next;
@@ -2173,9 +2138,17 @@ const Chat: React.FC = () => {
 
         // Manual trigger only: Removed auto triggerAI call
         if (isPlainTextSend) sendTextInFlightRef.current = false;
-    };
+    }, [
+        addToast,
+        char,
+        realtimeConfig?.xhsMcpConfig?.enabled,
+        realtimeConfig?.xhsMcpConfig?.serverUrl,
+        reloadMessages,
+        replyTarget,
+        userProfile.name,
+    ]);
 
-    const handleReroll = async () => {
+    const handleReroll = useCallback(async () => {
         const rerollableMessages = messages.filter(isMainChatVisibleMessage);
         if (isTyping || rerollableMessages.length === 0) return;
 
@@ -2198,7 +2171,7 @@ const Chat: React.FC = () => {
         addToast('回溯对话中...', 'info');
 
         triggerAI(newHistory);
-    };
+    }, [addToast, isTyping, markGeneratedImageMessagesDeleted, messages, triggerAI]);
 
     const handleWorldlineStartDiscussion = useCallback(() => {
         if (!char) return;
@@ -2221,7 +2194,7 @@ const Chat: React.FC = () => {
         });
     }, [char, openApp]);
 
-    const handleImageSelect = async (file: File) => {
+    const handleImageSelect = useCallback(async (file: File) => {
         try {
             const base64 = await processImage(file, { maxWidth: 600, quality: 0.6, forceJpeg: true });
             setShowPanel('none');
@@ -2229,7 +2202,7 @@ const Chat: React.FC = () => {
         } catch (err: any) {
             addToast(err.message || '图片处理失败', 'error');
         }
-    };
+    }, [addToast, handleSendText]);
 
     const saveGeneratedPhoto = useCallback(async (
         charId: string,
@@ -3359,7 +3332,7 @@ const Chat: React.FC = () => {
         haptic.light();
     }, [addToast, quickSongRecord]);
 
-    const handlePanelAction = (type: string, payload?: any) => {
+    const handlePanelAction = useCallback((type: string, payload?: any) => {
         switch (type) {
             case 'transfer': setModalType('transfer'); break;
             case 'manual-photo': setModalType('manual-photo'); break;
@@ -3402,7 +3375,7 @@ const Chat: React.FC = () => {
                 break;
             case 'voice-call': unlockAudio(); openApp(AppID.VoiceCall, { direction: 'outgoing' }); break;
         }
-    };
+    }, [addToast, handleOpenQuickSong, handleSendText, openApp, pendingUserActionDraft]);
 
     const handleSoulReflection = async () => {
         if (!char || !apiConfig.apiKey || selectedMsgIds.size === 0) return;
@@ -4530,7 +4503,7 @@ const Chat: React.FC = () => {
         }
     };
 
-    const handleBatchDelete = async () => {
+    const handleBatchDelete = useCallback(async () => {
         if (selectedMsgIds.size === 0) return;
         const deleteCount = selectedMsgIds.size;
         // P7: Clean up voice audio blobs for any voice messages being deleted
@@ -4545,15 +4518,15 @@ const Chat: React.FC = () => {
         addToast(`已删除 ${deleteCount} 条消息`, 'success');
         setSelectionMode(false);
         setSelectedMsgIds(new Set());
-    };
+    }, [addToast, markGeneratedImageMessagesDeleted, messages, removeDeletedPhoneRecordLinks, selectedMsgIds]);
 
     // --- Forward Chat Records ---
     const [showForwardModal, setShowForwardModal] = useState(false);
 
-    const handleForwardSelected = () => {
+    const handleForwardSelected = useCallback(() => {
         if (selectedMsgIds.size === 0) return;
         setShowForwardModal(true);
-    };
+    }, [selectedMsgIds]);
 
     const handleForwardToCharacter = async (targetCharId: string) => {
         if (!char) return;
@@ -4902,7 +4875,7 @@ const Chat: React.FC = () => {
         });
         closeUserActionSelector();
         setReplyTarget(null);
-        handleInputChange('');
+        inputApiRef.current?.clear();
         setShowPanel('none');
         haptic.light();
     }, [closeUserActionSelector, resolveUserActionEmoji, userActionSelectorMessageId]);
@@ -5017,13 +4990,23 @@ const Chat: React.FC = () => {
             return;
         }
         handleSendText();
-    }, [char, handleSendPendingUserActionDraft, input, pendingUserActionDraft, replyTarget]);
+    }, [handleSendPendingUserActionDraft, handleSendText, pendingUserActionDraft]);
     const handleCharSelectCallback = useCallback((id: string) => {
         closeUserActionSelector();
         setPendingUserActionDraft(null);
         setActiveCharacterId(id);
         setShowPanel('none');
     }, [closeUserActionSelector]);
+
+    const handleOpenSoulReflection = useCallback(() => {
+        setShowSoulReflectionPanel(true);
+    }, []);
+
+    const themeUpdateCharacterId = char?.id;
+    const handleUpdateTheme = useCallback((id: string) => {
+        if (!themeUpdateCharacterId) return;
+        updateCharacter(themeUpdateCharacterId, { bubbleStyle: id });
+    }, [themeUpdateCharacterId, updateCharacter]);
 
     // --- Voice Recording → STT → AI Handler ---
     const handleVoiceRecordMessage = useCallback(async (blob: Blob, duration: number) => {
@@ -5135,6 +5118,7 @@ const Chat: React.FC = () => {
                 backgroundPosition: 'center',
             }}
         >
+            {activeTheme.generatedCss && <style>{activeTheme.generatedCss}</style>}
             {activeTheme.customCss && <style>{activeTheme.customCss}</style>}
 
             <ChatModals
@@ -5865,20 +5849,21 @@ const Chat: React.FC = () => {
                 )}
 
                 <ChatInputArea
-                    input={input} setInput={handleInputChange}
+                    ref={inputApiRef}
+                    draftKey={draftKey}
                     isTyping={isTyping} selectionMode={selectionMode}
                     showPanel={showPanel} setShowPanel={setShowPanel}
                     onSend={handleSendCallback}
                     onDeleteSelected={handleBatchDelete}
                     onForwardSelected={handleForwardSelected}
-                    onSoulReflection={() => setShowSoulReflectionPanel(true)}
+                    onSoulReflection={handleOpenSoulReflection}
                     charName={activeCharName}
                     selectedCount={selectedMsgIds.size}
                     emojis={filteredEmojis}
                     allVisibleEmojis={allVisibleEmojis}
                     characters={characters} activeCharacterId={activeCharacterId}
                     onCharSelect={handleCharSelectCallback}
-                    customThemes={customThemes} onUpdateTheme={(id) => updateCharacter(char.id, { bubbleStyle: id })}
+                    customThemes={customThemes} onUpdateTheme={handleUpdateTheme}
                     onRemoveTheme={removeCustomTheme} activeThemeId={currentThemeId}
                     onPanelAction={handlePanelAction}
                     onImageSelect={handleImageSelect}

@@ -237,7 +237,7 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
                 onMouseUp={handlePointerUp}
                 onContextMenu={(e) => e.preventDefault()}
                 disabled={disabled || isProcessing}
-                className={`w-11 h-11 shrink-0 rounded-full flex items-center justify-center transition-all select-none
+                className={`sully-chat-input-send-button sully-voice-record-button w-11 h-11 shrink-0 rounded-full flex items-center justify-center transition-all select-none
                     ${isRecording
                         ? 'bg-red-500 text-white scale-110 shadow-lg shadow-red-200'
                         : isProcessing
@@ -262,7 +262,7 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
             {/* Recording Overlay */}
             {showOverlay && (
                 <div
-                    className="fixed inset-0 z-[999] flex flex-col items-center justify-end pb-32 pointer-events-none"
+                    className="sully-recording-overlay fixed inset-0 z-[999] flex flex-col items-center justify-end pb-32 pointer-events-none"
                     style={{ background: 'transparent' }}
                 >
                     {/* Transparent touch catcher for gestures — pointer events on */}
@@ -277,12 +277,12 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
                     />
 
                     {/* Recording indicator card */}
-                    <div className={`relative pointer-events-none px-8 py-5 rounded-3xl backdrop-blur-2xl shadow-2xl border transition-all duration-200 ${isOverCancel
+                    <div className={`sully-recording-bubble relative pointer-events-none px-8 py-5 rounded-3xl backdrop-blur-2xl shadow-2xl border transition-all duration-200 ${isOverCancel
                         ? 'bg-red-500/90 border-red-400/50 scale-105'
                         : 'bg-black/70 border-white/10'
                         }`}>
                         {/* Cancel hint */}
-                        <div className={`text-center text-xs font-bold mb-3 transition-colors ${isOverCancel ? 'text-white' : 'text-white/50'
+                        <div className={`sully-recording-cancel-label text-center text-xs font-bold mb-3 transition-colors ${isOverCancel ? 'text-white' : 'text-white/50'
                             }`}>
                             {isOverCancel ? '松开取消' : '↑ 上滑取消'}
                         </div>
@@ -302,7 +302,7 @@ const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
                         </div>
 
                         {/* Duration */}
-                        <div className="text-center text-white text-lg font-mono font-bold tracking-wider">
+                        <div className="sully-recording-duration text-center text-white text-lg font-mono font-bold tracking-wider">
                             {formatDuration(recordingDuration)}
                         </div>
                     </div>

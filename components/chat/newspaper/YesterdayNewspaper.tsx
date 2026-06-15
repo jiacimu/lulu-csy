@@ -178,7 +178,7 @@ export const NewspaperCard: React.FC<NewspaperCardProps> = ({
 
     return (
         <article
-            className={`yn-newspaper-card ${exportMode ? 'yn-newspaper-card--export' : ''} ${isLongEdition ? 'yn-newspaper-card--long' : ''}`}
+            className={`sully-card-container sully-newspaper-card yn-newspaper-card ${exportMode ? 'yn-newspaper-card--export' : ''} ${isLongEdition ? 'yn-newspaper-card--long' : ''}`}
             data-layout={layout}
             data-period={meta.key}
             data-yesterday-newspaper-card
@@ -330,8 +330,8 @@ export const YesterdayNewspaperModal: React.FC<NewspaperModalProps> = ({
     };
 
     return (
-        <div className="yn-modal" role="dialog" aria-modal="true" onClick={onClose}>
-            <div className="yn-modal__sheet" onClick={event => event.stopPropagation()}>
+        <div className="sully-theme-overlay-backdrop sully-newspaper-modal yn-modal" role="dialog" aria-modal="true" onClick={onClose}>
+            <div className="sully-theme-overlay-modal sully-newspaper-modal-sheet yn-modal__sheet" onClick={event => event.stopPropagation()}>
                 <div className="yn-modal__bar">
                     <div>
                         <h3 className="yn-modal__heading">{meta.name}存档</h3>
@@ -341,7 +341,7 @@ export const YesterdayNewspaperModal: React.FC<NewspaperModalProps> = ({
                         {onRefresh && (
                             <button
                                 type="button"
-                                className="yn-modal__button"
+                                className="sully-theme-overlay-secondary-button sully-newspaper-modal-button yn-modal__button"
                                 onClick={onRefresh}
                                 disabled={isRefreshing}
                                 title="重新生成"
@@ -352,7 +352,7 @@ export const YesterdayNewspaperModal: React.FC<NewspaperModalProps> = ({
                         )}
                         <button
                             type="button"
-                            className="yn-modal__button yn-modal__button--primary"
+                            className="sully-theme-overlay-primary-button sully-newspaper-modal-button yn-modal__button yn-modal__button--primary"
                             onClick={handleExport}
                             disabled={isExporting}
                         >
@@ -360,7 +360,7 @@ export const YesterdayNewspaperModal: React.FC<NewspaperModalProps> = ({
                         </button>
                         <button
                             type="button"
-                            className="yn-modal__close"
+                            className="sully-theme-overlay-secondary-button sully-newspaper-modal-button yn-modal__close"
                             onClick={onClose}
                             aria-label={`关闭${meta.name}`}
                         >
@@ -400,11 +400,11 @@ export const YesterdayNewspaperDeliveryNotice: React.FC<DeliveryNoticeProps> = (
 
     const notice = (
         <div
-            className={`yn-delivery ${record.status === 'generating' ? 'yn-delivery--generating' : ''}`}
+            className={`sully-card-container sully-newspaper-delivery yn-delivery ${record.status === 'generating' ? 'yn-delivery--generating' : ''}`}
             data-status={record.status}
             role="status"
         >
-            <div className="yn-delivery__mark" aria-hidden="true">
+            <div className="sully-newspaper-delivery-mark yn-delivery__mark" aria-hidden="true">
                 <span className="yn-delivery__dot" />
             </div>
             <div className="yn-delivery__text">
@@ -412,11 +412,11 @@ export const YesterdayNewspaperDeliveryNotice: React.FC<DeliveryNoticeProps> = (
                 <p className="yn-delivery__body">{body}</p>
             </div>
             {isReady ? (
-                <button type="button" className="yn-delivery__action" onClick={onOpen}>
+                <button type="button" className="sully-theme-overlay-primary-button sully-newspaper-delivery-action yn-delivery__action" onClick={onOpen}>
                     打开
                 </button>
             ) : record.status === 'failed' ? (
-                <button type="button" className="yn-delivery__action" onClick={onRetry}>
+                <button type="button" className="sully-theme-overlay-primary-button sully-newspaper-delivery-action yn-delivery__action" onClick={onRetry}>
                     重试
                 </button>
             ) : null}
@@ -425,7 +425,7 @@ export const YesterdayNewspaperDeliveryNotice: React.FC<DeliveryNoticeProps> = (
 
     if (record.status === 'generating') {
         return (
-            <div className="yn-delivery-modal" aria-live="polite">
+            <div className="sully-theme-overlay-backdrop sully-newspaper-delivery-modal yn-delivery-modal" aria-live="polite">
                 {notice}
             </div>
         );
@@ -449,9 +449,9 @@ export const YesterdayNewspaperDeliveryStack: React.FC<DeliveryStackProps> = ({
         const names = generatingRecords.map(record => getPublicationMeta(record.content, record).name);
         const uniqueNames = Array.from(new Set(names));
         return (
-            <div className="yn-delivery-modal" aria-live="polite">
-                <div className="yn-delivery yn-delivery--generating" data-status="generating" role="status">
-                    <div className="yn-delivery__mark" aria-hidden="true">
+            <div className="sully-theme-overlay-backdrop sully-newspaper-delivery-modal yn-delivery-modal" aria-live="polite">
+                <div className="sully-card-container sully-newspaper-delivery yn-delivery yn-delivery--generating" data-status="generating" role="status">
+                    <div className="sully-newspaper-delivery-mark yn-delivery__mark" aria-hidden="true">
                         <span className="yn-delivery__dot" />
                     </div>
                     <div className="yn-delivery__text">
@@ -469,7 +469,7 @@ export const YesterdayNewspaperDeliveryStack: React.FC<DeliveryStackProps> = ({
         <>
             {generatingModal}
             {settledRecords.length > 0 && (
-                <div className="yn-delivery-stack">
+                <div className="sully-newspaper-delivery-stack yn-delivery-stack">
                     {settledRecords.map(record => (
                         <YesterdayNewspaperDeliveryNotice
                             key={record.id}

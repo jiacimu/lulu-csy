@@ -428,6 +428,94 @@ const GroupMessageItem = React.memo(({
 
 // --- Main Component ---
 
+const GROUP_SETTINGS_CSS = `
+.gcset-root{
+  --paper:#FFFFFF;
+  --paper-2:#FAFAFA;
+  --ink:#1B1A18;
+  --ink-soft:#3B3A37;
+  --graphite:#7C7A75;
+  --ash:#E6E4E0;
+  --ash-2:#EFEEEB;
+  --recv:#F2F1EF;
+  --serif:"Fraunces",Georgia,serif;
+  --sans:"Archivo",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  margin:-1rem -1.5rem;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;
+}
+.gcset-root *{ box-sizing:border-box; }
+.gcset-root button,.gcset-root input,.gcset-root textarea,.gcset-root select{ font-family:inherit; }
+.gcset-sec{ padding:22px 22px 18px; }
+.gcset-sec + .gcset-sec{ border-top:1px solid var(--ash); }
+.gcset-eye{ display:flex;align-items:baseline;gap:10px;margin-bottom:16px; }
+.gcset-eye .n{ font-family:var(--serif);font-style:italic;font-size:13px;color:var(--ink); }
+.gcset-eye .e{ font-size:9px;letter-spacing:.26em;text-transform:uppercase;color:var(--graphite);font-weight:700; }
+.gcset-label{ font-size:12.5px;color:var(--ink);font-weight:600; }
+.gcset-help{ font-size:11px;color:var(--graphite);line-height:1.6;margin-top:5px; }
+.gcset-rule{ height:1px;background:var(--ash);border:0;margin:0; }
+.gcset-input{ width:100%;border:0;border-bottom:1px solid var(--ash);background:transparent;padding:8px 0;font-family:var(--serif);font-size:19px;color:var(--ink);outline:0; }
+.gcset-input:focus{ border-color:var(--ink); }
+.gcset-avatile{ width:78px;height:78px;border:1px solid var(--ash);border-radius:3px;overflow:hidden;cursor:pointer;flex:none;background:var(--paper-2); }
+.gcset-avatile img{ width:100%;height:100%;object-fit:cover; }
+.gcset-avatile .ph{ width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:9px;letter-spacing:.1em;color:var(--graphite);text-align:center;padding:4px; }
+.gcset-vstack{ display:flex;flex-direction:column;gap:22px; }
+.gcset-between{ display:flex;align-items:flex-start;justify-content:space-between;gap:16px; }
+.gcset-toggle{ width:42px;height:24px;border-radius:40px;border:1px solid var(--ash);background:var(--paper-2);position:relative;cursor:pointer;flex:none;transition:.18s; }
+.gcset-toggle .knob{ position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--graphite);transition:.18s; }
+.gcset-toggle.on{ background:var(--ink);border-color:var(--ink); }
+.gcset-toggle.on .knob{ left:21px;background:var(--paper); }
+.gcset-slider{ -webkit-appearance:none;appearance:none;width:100%;height:1px;background:var(--ash);margin:18px 0 8px; }
+.gcset-slider::-webkit-slider-thumb{ -webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--ink);cursor:pointer;border:2px solid var(--paper);box-shadow:0 0 0 1px var(--ink); }
+.gcset-slider::-moz-range-thumb{ width:15px;height:15px;border-radius:50%;background:var(--ink);cursor:pointer;border:2px solid var(--paper); }
+.gcset-scale{ display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite); }
+.gcset-bigval{ font-family:var(--serif);font-style:italic;font-size:16px;color:var(--ink);letter-spacing:0;text-transform:none;white-space:nowrap; }
+.gcset-stepper{ display:inline-flex;align-items:center;border:1px solid var(--ash);border-radius:3px;overflow:hidden;background:var(--paper); }
+.gcset-stepper button{ width:30px;height:30px;border:0;background:transparent;color:var(--ink);font-size:15px;cursor:pointer; }
+.gcset-stepper button:hover{ background:rgba(25,23,20,.05); }
+.gcset-stepper .v{ min-width:34px;text-align:center;font-family:var(--serif);font-size:15px;border-left:1px solid var(--ash);border-right:1px solid var(--ash);padding:5px 0; }
+.gcset-two{ display:flex;gap:26px;flex-wrap:wrap;margin-top:16px; }
+.gcset-two .lab,.gcset-subeyebrow{ font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite);margin-bottom:7px; }
+.gcset-voicerow{ display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--ash-2); }
+.gcset-voicerow:last-child{ border-bottom:0; }
+.gcset-voicerow .va{ width:36px;height:36px;border-radius:50%;object-fit:cover;box-shadow:0 0 0 1px var(--ash);flex:none; }
+.gcset-voicerow .vn{ font-family:var(--serif);font-style:italic;font-size:14px;color:var(--ink); }
+.gcset-select{ position:relative;margin-top:3px; }
+.gcset-select select{ -webkit-appearance:none;appearance:none;width:100%;border:0;border-bottom:1px solid var(--ash);background:transparent;font-family:var(--sans);font-size:11.5px;color:var(--ink-soft);padding:5px 18px 5px 0;outline:0;cursor:pointer; }
+.gcset-select select:focus{ border-color:var(--ink); }
+.gcset-select::after{ content:"";position:absolute;right:2px;top:9px;width:6px;height:6px;border-right:1px solid var(--graphite);border-bottom:1px solid var(--graphite);transform:rotate(45deg);pointer-events:none; }
+.gcset-select .cur{ font-size:9px;letter-spacing:.04em;color:var(--graphite);margin-top:5px; }
+.gcset-maxtok{ font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite);flex:none;white-space:nowrap; }
+.gcset-lens{ border:1px solid var(--ash);border-radius:3px;padding:12px 13px;margin-top:11px; }
+.gcset-lens .t{ font-family:var(--serif);font-style:italic;font-size:13px;color:var(--ink); }
+.gcset-lens textarea{ width:100%;margin-top:8px;border:0;outline:0;resize:none;background:transparent;font-family:var(--sans);font-size:12.5px;color:var(--ink-soft);line-height:1.6;min-height:46px; }
+.gcset-lens textarea::placeholder{ color:var(--graphite); }
+.gcset-scroll{ max-height:240px;overflow-y:auto;scrollbar-width:none; }
+.gcset-scroll::-webkit-scrollbar{ width:0; }
+.gcset-promptrow{ width:100%;text-align:left;border:1px solid var(--ash);border-radius:3px;background:transparent;padding:11px 13px;cursor:pointer;font-family:var(--sans);font-size:12.5px;color:var(--ink-soft);transition:.15s;margin-bottom:8px; }
+.gcset-promptrow:hover{ border-color:var(--graphite); }
+.gcset-promptrow.sel{ border-color:var(--ink);color:var(--ink);font-weight:700; }
+.gcset-btn{ width:100%;padding:13px;border:1px solid var(--ink);border-radius:3px;background:transparent;color:var(--ink);font-family:var(--sans);font-weight:700;font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;transition:.15s; }
+.gcset-btn:hover{ background:var(--ink);color:var(--paper); }
+.gcset-btn:disabled{ opacity:.5;cursor:default; }
+.gcset-btn:disabled:hover{ background:transparent;color:var(--ink); }
+.gcset-spin{ width:14px;height:14px;border:2px solid var(--ash);border-top-color:var(--ink);border-radius:50%;animation:gcset-spin 1s linear infinite; }
+@keyframes gcset-spin{ to{ transform:rotate(360deg); } }
+.gcset-check{ display:flex;align-items:center;gap:11px;cursor:pointer;margin-bottom:16px; }
+.gcset-check .box{ width:18px;height:18px;border:1px solid var(--ash);border-radius:3px;display:flex;align-items:center;justify-content:center;flex:none;transition:.15s; }
+.gcset-check .box.on{ background:var(--ink);border-color:var(--ink); }
+.gcset-check .box svg{ width:11px;height:11px;color:var(--paper); }
+.gcset-check span{ font-size:12px;color:var(--ink-soft); }
+.gcset-danger-btns{ display:flex;gap:11px; }
+.gcset-danger-btns button{ flex:1;padding:13px;border-radius:3px;font-family:var(--sans);font-weight:700;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;cursor:pointer;transition:.15s; }
+.gcset-danger-btns .ghost{ border:1px solid var(--ink);background:transparent;color:var(--ink); }
+.gcset-danger-btns .ghost:hover{ background:rgba(25,23,20,.05); }
+.gcset-danger-btns .solid{ border:1px solid var(--ink);background:var(--ink);color:var(--paper); }
+.gcset-danger-btns .solid:hover{ background:#2c2820; }
+`;
+
 const GroupChat: React.FC = () => {
     const { closeApp, groups, setGroups, createGroup, deleteGroup, characters, updateCharacter, apiConfig, apiPresets, addToast, userProfile, realtimeConfig } = useOS();
     const virtualTime = useVirtualTime();
@@ -513,11 +601,13 @@ const GroupChat: React.FC = () => {
         }
 
         const memberCharacters = getGroupMemberCharacters(activeGroup, characters);
-        const nextSelections: Record<string, string> = {};
-        for (const member of memberCharacters) {
-            nextSelections[member.id] = readGroupLiveRoleplayApiSelection(activeGroup.id, member.id);
-        }
-        setLiveRoleplayApiSelections(nextSelections);
+        setLiveRoleplayApiSelections(prev => {
+            const next: Record<string, string> = {};
+            for (const member of memberCharacters) {
+                next[member.id] = prev[member.id] || readGroupLiveRoleplayApiSelection(activeGroup.id, member.id);
+            }
+            return next;
+        });
         setCognitionEditorSpeakerId(prev => memberCharacters.some(member => member.id === prev) ? prev : (memberCharacters[0]?.id || ''));
     }, [activeGroup?.id, activeGroup?.members, characters, liveApiSelectionRevision]);
 
@@ -2297,10 +2387,9 @@ ${attachedImagesNote}
                         <button onClick={handleBackToGroupList} className="p-2 -ml-2 rounded-full hover:bg-slate-100 active:bg-slate-200 transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-slate-600"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                         </button>
-                        <div className="flex-1 min-w-0" onClick={() => { setTempGroupName(activeGroup?.name || ''); setModalType('settings'); }}>
+                        <div className="flex-1 min-w-0">
                             <h1 className="text-base font-bold text-slate-800 truncate flex items-center gap-1">
                                 {activeGroup?.name}
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-slate-400"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
                             </h1>
                             <p className="text-[10px] text-slate-500 font-medium">{activeGroup?.members.length} 成员</p>
                         </div>
@@ -2461,6 +2550,13 @@ ${attachedImagesNote}
                                 </div>
                                 <span className="text-xs text-slate-500">红包</span>
                             </button>
+
+                            <button onClick={() => { setTempGroupName(activeGroup?.name || ''); setModalType('settings'); setShowActions(false); }} className="flex flex-col items-center gap-2 group">
+                                <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-200 group-active:scale-95 transition-transform">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-slate-600"><path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.24-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.751-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.752.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
+                                </div>
+                                <span className="text-xs text-slate-500">群设置</span>
+                            </button>
                         </div>
                     </div>
                 )}
@@ -2482,227 +2578,257 @@ ${attachedImagesNote}
             {/* --- Modals --- */}
 
             {/* Group Settings Modal */}
-            <Modal isOpen={modalType === 'settings'} title="群组设置" onClose={() => setModalType('none')} footer={<button onClick={handleUpdateGroupInfo} className="w-full py-3 bg-violet-500 text-white font-bold rounded-2xl shadow-lg shadow-violet-200">保存修改</button>}>
-                <div className="space-y-6">
-                    {/* Header Info */}
-                    <div className="flex justify-center">
-                        <div onClick={() => groupAvatarInputRef.current?.click()} className="w-24 h-24 rounded-3xl bg-slate-100 border-2 border-dashed border-slate-300 flex items-center justify-center cursor-pointer overflow-hidden relative group hover:border-violet-400">
-                            {activeGroup?.avatar ? <img src={activeGroup.avatar} className="w-full h-full object-cover opacity-90 group-hover:opacity-100" /> : <span className="text-xs text-slate-400 font-bold">更换头像</span>}
-                            <div className="absolute inset-0 bg-black/20 hidden group-hover:flex items-center justify-center text-white"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" /><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" /></svg></div>
-                        </div>
-                        <input type="file" ref={groupAvatarInputRef} className="hidden" accept="image/*" onChange={handleGroupAvatarUpload} />
-                    </div>
-                    <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">群名称</label>
-                        <input value={tempGroupName} onChange={e => setTempGroupName(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:bg-white focus:border-violet-300 transition-all" />
-                    </div>
+            <Modal
+                isOpen={modalType === 'settings'}
+                title="群组设置"
+                onClose={() => setModalType('none')}
+                footer={(
+                    <button
+                        onClick={handleUpdateGroupInfo}
+                        className="w-full rounded-[3px] bg-[#1B1A18] py-3 text-[11px] font-bold uppercase tracking-[0.26em] text-white transition-colors active:scale-[0.99]"
+                        style={{ fontFamily: '"Archivo", system-ui, sans-serif' }}
+                    >
+                        保存修改
+                    </button>
+                )}
+            >
+                <div className="gcset-root">
+                    <style>{GROUP_SETTINGS_CSS}</style>
 
-                    {/* Context Limit */}
-                    <div className="pt-2 border-t border-slate-100">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI 上下文条数 ({contextLimit})</label>
-                        <input type="range" min={GROUP_CHAT_CONTEXT_MIN} max={GROUP_CHAT_CONTEXT_MAX} step="10" value={contextLimit} onChange={e => handleGroupContextLimitChange(parseInt(e.target.value, 10))} className="w-full h-2 bg-slate-200 rounded-full appearance-none accent-violet-500" />
-                        <div className="flex justify-between text-[10px] text-slate-400 mt-1"><span>20 (省流)</span><span>5000 (超长记忆)</span></div>
-                        <p className="text-[9px] text-slate-400 mt-1 leading-tight">控制每次触发AI导演时发送的群聊历史消息数量。越多上下文越丰富，但消耗更多token。</p>
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-100">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">群像 Beta</label>
-                        <div className="flex items-center justify-between gap-3 mb-3">
-                            <div className="min-w-0">
-                                <div className="text-xs font-bold text-slate-700">真实多角色生成</div>
-                                <p className="text-[9px] text-slate-400 mt-1 leading-tight">每个被导演点到的成员各自发起一次真实回复，旧导演模式保留。</p>
+                    <section className="gcset-sec">
+                        <div className="gcset-eye"><span className="n">档案</span><span className="e">Profile</span></div>
+                        <div className="flex items-center gap-[18px]">
+                            <div className="gcset-avatile" onClick={() => groupAvatarInputRef.current?.click()}>
+                                {activeGroup?.avatar ? <img src={activeGroup.avatar} alt="" /> : <div className="ph">更换头像</div>}
                             </div>
-                            <button
-                                onClick={() => {
-                                    const next = !liveGroupModeEnabled;
-                                    setLiveGroupModeEnabled(next);
-                                    localStorage.setItem('groupchat_live_mode_enabled', String(next));
-                                }}
-                                className={`w-11 h-6 rounded-full p-0.5 transition-colors shrink-0 ${liveGroupModeEnabled ? 'bg-violet-500' : 'bg-slate-200'}`}
-                            >
-                                <span className={`block w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${liveGroupModeEnabled ? 'translate-x-5' : 'translate-x-0'}`}></span>
-                            </button>
+                            <input type="file" ref={groupAvatarInputRef} className="hidden" accept="image/*" onChange={handleGroupAvatarUpload} />
+                            <div className="min-w-0 flex-1">
+                                <div className="gcset-label">群名称</div>
+                                <input className="gcset-input" value={tempGroupName} onChange={e => setTempGroupName(e.target.value)} />
+                                <div className="gcset-help">{activeGroup?.members.length || 0} 位成员 · 点头像可更换</div>
+                            </div>
                         </div>
-                        <div className="mt-4 rounded-xl border border-slate-100 bg-white px-3 py-3">
-                            <div className="flex items-center justify-between gap-3">
+                    </section>
+
+                    <section className="gcset-sec">
+                        <div className="gcset-eye"><span className="n">记忆</span><span className="e">Memory</span></div>
+                        <div className="gcset-label">回看多少条消息</div>
+                        <div className="gcset-help">角色接话前，会参考最近的聊天记录。条数越多，前后越连贯，每次也消耗得越多。</div>
+                        <input
+                            className="gcset-slider"
+                            type="range"
+                            min={GROUP_CHAT_CONTEXT_MIN}
+                            max={GROUP_CHAT_CONTEXT_MAX}
+                            step="10"
+                            value={contextLimit}
+                            onChange={e => handleGroupContextLimitChange(parseInt(e.target.value, 10))}
+                        />
+                        <div className="gcset-scale">
+                            <span>少 · {GROUP_CHAT_CONTEXT_MIN}</span>
+                            <span className="gcset-bigval">约 {contextLimit} 条</span>
+                            <span>多 · {GROUP_CHAT_CONTEXT_MAX}</span>
+                        </div>
+                    </section>
+
+                    <section className="gcset-sec">
+                        <div className="gcset-eye"><span className="n">怎么生成回复</span><span className="e">Generation</span></div>
+                        <div className="gcset-vstack">
+                            <div className="gcset-between">
                                 <div className="min-w-0">
-                                    <div className="text-xs font-bold text-slate-700">自主交谈</div>
-                                    <p className="text-[9px] text-slate-400 mt-1 leading-tight">不需要你发言，角色们自己聊；你一发言就会打断。</p>
+                                    <div className="gcset-label">每个角色各自回复</div>
+                                    <div className="gcset-help">开启后，被点到的角色各自生成自己的发言；关闭则由系统统一代写所有人的话。</div>
                                 </div>
                                 <button
-                                    onClick={() => autonomousChatActive ? stopAutonomousChat() : startAutonomousChat()}
-                                    className={`w-11 h-6 rounded-full p-0.5 transition-colors shrink-0 ${autonomousChatActive ? 'bg-emerald-500' : 'bg-slate-200'}`}
+                                    className={`gcset-toggle ${liveGroupModeEnabled ? 'on' : ''}`}
+                                    aria-pressed={liveGroupModeEnabled}
+                                    onClick={() => {
+                                        const next = !liveGroupModeEnabled;
+                                        setLiveGroupModeEnabled(next);
+                                        localStorage.setItem('groupchat_live_mode_enabled', String(next));
+                                    }}
                                 >
-                                    <span className={`block w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${autonomousChatActive ? 'translate-x-5' : 'translate-x-0'}`}></span>
+                                    <span className="knob"></span>
                                 </button>
                             </div>
-                            <div className="grid grid-cols-2 gap-2 mt-3">
-                                <label className="block">
-                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">轮数上限</span>
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        max={20}
-                                        value={autonomousRoundLimit}
-                                        onChange={event => {
-                                            const next = Math.max(1, Math.min(20, parseInt(event.target.value || '1', 10)));
-                                            setAutonomousRoundLimit(next);
-                                            localStorage.setItem(GROUP_LIVE_AUTONOMOUS_ROUND_LIMIT_KEY, String(next));
-                                            if (autonomousChatActive) setAutonomousRoundsRemaining(next);
-                                        }}
-                                        className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-violet-300 focus:bg-white"
-                                    />
-                                </label>
-                                <label className="block">
-                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">间隔秒数</span>
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        max={60}
-                                        value={autonomousDelaySeconds}
-                                        onChange={event => {
-                                            const next = Math.max(1, Math.min(60, parseInt(event.target.value || '1', 10)));
-                                            setAutonomousDelaySeconds(next);
-                                            localStorage.setItem(GROUP_LIVE_AUTONOMOUS_DELAY_KEY, String(next));
-                                        }}
-                                        className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-violet-300 focus:bg-white"
-                                    />
-                                </label>
-                            </div>
-                            <div className="mt-2 text-[9px] text-slate-400 leading-tight">
-                                {autonomousChatActive
-                                    ? `运行中：还会自动聊 ${autonomousRoundsRemaining} 轮。`
-                                    : '关闭中：只会在你点闪电时接话。'}
+                            <hr className="gcset-rule" />
+                            <div>
+                                <div className="gcset-between">
+                                    <div className="min-w-0">
+                                        <div className="gcset-label">让角色自动接话</div>
+                                        <div className="gcset-help">开启后，群里会自己接着聊几轮，不必每次手动点闪电；你一发言就会打断。</div>
+                                    </div>
+                                    <button
+                                        className={`gcset-toggle ${autonomousChatActive ? 'on' : ''}`}
+                                        aria-pressed={autonomousChatActive}
+                                        onClick={() => autonomousChatActive ? stopAutonomousChat() : startAutonomousChat()}
+                                    >
+                                        <span className="knob"></span>
+                                    </button>
+                                </div>
+                                <div className="gcset-two">
+                                    <div>
+                                        <div className="lab">连续几轮</div>
+                                        <div className="gcset-stepper">
+                                            <button onClick={() => {
+                                                const next = Math.max(1, Math.min(20, autonomousRoundLimit - 1));
+                                                setAutonomousRoundLimit(next);
+                                                localStorage.setItem(GROUP_LIVE_AUTONOMOUS_ROUND_LIMIT_KEY, String(next));
+                                                if (autonomousChatActive) setAutonomousRoundsRemaining(next);
+                                            }}>−</button>
+                                            <span className="v">{autonomousRoundLimit}</span>
+                                            <button onClick={() => {
+                                                const next = Math.max(1, Math.min(20, autonomousRoundLimit + 1));
+                                                setAutonomousRoundLimit(next);
+                                                localStorage.setItem(GROUP_LIVE_AUTONOMOUS_ROUND_LIMIT_KEY, String(next));
+                                                if (autonomousChatActive) setAutonomousRoundsRemaining(next);
+                                            }}>+</button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="lab">间隔几秒</div>
+                                        <div className="gcset-stepper">
+                                            <button onClick={() => {
+                                                const next = Math.max(1, Math.min(60, autonomousDelaySeconds - 1));
+                                                setAutonomousDelaySeconds(next);
+                                                localStorage.setItem(GROUP_LIVE_AUTONOMOUS_DELAY_KEY, String(next));
+                                            }}>−</button>
+                                            <span className="v">{autonomousDelaySeconds}</span>
+                                            <button onClick={() => {
+                                                const next = Math.max(1, Math.min(60, autonomousDelaySeconds + 1));
+                                                setAutonomousDelaySeconds(next);
+                                                localStorage.setItem(GROUP_LIVE_AUTONOMOUS_DELAY_KEY, String(next));
+                                            }}>+</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="gcset-help mt-[14px]">
+                                    {autonomousChatActive
+                                        ? `已开启 · 还会自动聊 ${autonomousRoundsRemaining} 轮。`
+                                        : '关闭中 · 只在你点闪电时接话。'}
+                                </div>
                             </div>
                         </div>
-                        {activeGroupMemberCharacters.length > 0 && (
-                            <div className="mt-4 space-y-2">
-                                <div className="flex items-center justify-between gap-2">
-                                    <div>
-                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">成员扮演 API</div>
-                                        <p className="text-[9px] text-slate-400 mt-0.5 leading-tight">只影响群像 Beta 的角色发言；总结固定走副 API 池。</p>
-                                    </div>
-                                    <span className="text-[9px] text-slate-400 shrink-0">max_tokens {GROUP_CHAT_MAX_TOKENS}</span>
-                                </div>
-                                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                                    {activeGroupMemberCharacters.map(member => {
-                                        const selectedValue = liveRoleplayApiSelections[member.id]
-                                            || (activeGroup
-                                                ? readGroupLiveRoleplayApiSelection(activeGroup.id, member.id)
-                                                : GROUP_LIVE_ROLEPLAY_DEFAULT_API_VALUE);
-                                        const value = liveRoleplayApiOptions.some(option => option.value === selectedValue)
-                                            ? selectedValue
-                                            : GROUP_LIVE_ROLEPLAY_DEFAULT_API_VALUE;
-                                        const selectedOption = liveRoleplayApiOptions.find(option => option.value === value);
-                                        return (
-                                            <div key={member.id} className="flex items-center gap-2 rounded-xl border border-slate-100 bg-white px-2.5 py-2">
-                                                <img src={member.avatar} className="w-8 h-8 rounded-full object-cover shrink-0" />
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="text-xs font-bold text-slate-700 truncate">{member.name}</div>
+                    </section>
+
+                    {activeGroupMemberCharacters.length > 0 && (
+                        <section className="gcset-sec">
+                            <div className="gcset-eye"><span className="n">每个角色用哪个模型</span><span className="e">Voices</span></div>
+                            <div className="gcset-between mb-1.5">
+                                <div className="gcset-help mt-0">为每个角色单独选择回复使用的模型。群聊小结固定走备用模型。</div>
+                                <span className="gcset-maxtok">max_tokens {GROUP_CHAT_MAX_TOKENS}</span>
+                            </div>
+                            <div className="gcset-scroll">
+                                {activeGroupMemberCharacters.map(member => {
+                                    const selectedValue = liveRoleplayApiSelections[member.id]
+                                        || (activeGroup
+                                            ? readGroupLiveRoleplayApiSelection(activeGroup.id, member.id)
+                                            : GROUP_LIVE_ROLEPLAY_DEFAULT_API_VALUE);
+                                    const optionExists = liveRoleplayApiOptions.some(option => option.value === selectedValue);
+                                    const value = selectedValue || GROUP_LIVE_ROLEPLAY_DEFAULT_API_VALUE;
+                                    const selectedOption = liveRoleplayApiOptions.find(option => option.value === value);
+                                    return (
+                                        <div key={member.id} className="gcset-voicerow">
+                                            <img className="va" src={member.avatar} alt="" />
+                                            <div className="min-w-0 flex-1">
+                                                <div className="vn">{member.name}</div>
+                                                <div className="gcset-select">
                                                     <select
                                                         value={value}
                                                         onChange={event => {
                                                             handleLiveRoleplayApiSelectionChange(member.id, event.target.value);
                                                         }}
-                                                        className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600 outline-none focus:border-violet-300 focus:bg-white"
                                                     >
+                                                        {!optionExists && value && (
+                                                            <option value={value}>当前选择 · 载入中…</option>
+                                                        )}
                                                         {liveRoleplayApiOptions.map(option => (
                                                             <option key={option.value} value={option.value} disabled={option.disabled}>
                                                                 {option.label} · {option.detail}
                                                             </option>
                                                         ))}
                                                     </select>
-                                                    {selectedOption && (
-                                                        <div className="mt-1 text-[9px] text-violet-500 truncate">
-                                                            当前：{selectedOption.label} · {selectedOption.detail}
-                                                        </div>
+                                                    {selectedOption ? (
+                                                        <div className="cur">当前：{selectedOption.label} · {selectedOption.detail}</div>
+                                                    ) : (
+                                                        <div className="cur">当前选择正在载入…（不会丢失）</div>
                                                     )}
                                                 </div>
                                             </div>
-                                        );
-                                    })}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </section>
+                    )}
+
+                    {activeGroupMemberCharacters.length > 1 && cognitionEditorSpeaker && (
+                        <section className="gcset-sec" data-cognition-revision={cognitionRevision}>
+                            <div className="gcset-eye"><span className="n">角色之间的关系</span><span className="e">Lens</span></div>
+                            <div className="gcset-help">设定「在某个角色眼里，谁是谁、彼此什么关系、有没有过节」。这些只用于该角色自己的发言，不会写进群聊记录。</div>
+                            <div className="mt-[14px]">
+                                <div className="gcset-subeyebrow">从谁的视角写</div>
+                                <div className="gcset-select max-w-[220px]">
+                                    <select
+                                        value={cognitionEditorSpeaker.id}
+                                        onChange={event => setCognitionEditorSpeakerId(event.target.value)}
+                                    >
+                                        {activeGroupMemberCharacters.map(member => (
+                                            <option key={member.id} value={member.id}>{member.name} 看其他人</option>
+                                        ))}
+                                    </select>
                                 </div>
                             </div>
-                        )}
-                        {activeGroupMemberCharacters.length > 1 && cognitionEditorSpeaker && (
-                            <div className="mt-4 space-y-2" data-cognition-revision={cognitionRevision}>
-                                <div>
-                                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">轻量认知 / 交互层</div>
-                                    <p className="text-[9px] text-slate-400 mt-0.5 leading-tight">写“某个角色视角里，他认识谁、什么关系、有没有旧账”。只进该角色群像提示词，不进共享群记录。</p>
-                                </div>
-                                <select
-                                    value={cognitionEditorSpeaker.id}
-                                    onChange={event => setCognitionEditorSpeakerId(event.target.value)}
-                                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-700 outline-none focus:border-violet-300 focus:bg-white"
-                                >
-                                    {activeGroupMemberCharacters.map(member => (
-                                        <option key={member.id} value={member.id}>{member.name} 的视角</option>
-                                    ))}
-                                </select>
-                                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                                    {cognitionEditorTargets.map(member => (
-                                        <label key={`${cognitionEditorSpeaker.id}-${member.id}`} className="block rounded-xl border border-slate-100 bg-white px-2.5 py-2">
-                                            <span className="text-[10px] font-bold text-slate-600">{cognitionEditorSpeaker.name} 对 {member.name}</span>
-                                            <textarea
-                                                value={readGroupLiveCognition(cognitionEditorSpeaker.id, member.id)}
-                                                onChange={event => writeGroupLiveCognition(cognitionEditorSpeaker.id, member.id, event.target.value)}
-                                                rows={2}
-                                                placeholder="例：以前合作过，嘴上互怼但彼此认可；或：刚进群，还不熟。"
-                                                className="mt-1 w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] leading-relaxed text-slate-700 outline-none focus:border-violet-300 focus:bg-white"
-                                            />
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Memory & Context Management */}
-                    <div className="pt-2 border-t border-slate-100">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">群聊记忆 (Neural Link)</label>
-
-                        {/* Prompt Selection */}
-                        <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100 mb-3">
-                            <label className="text-[9px] font-bold text-indigo-400 uppercase mb-2 block">选择总结提示词</label>
-                            <div className="flex flex-col gap-1.5">
-                                {archivePrompts.map(p => (
-                                    <div key={p.id} onClick={() => setSelectedPromptId(p.id)} className={`px-3 py-2 rounded-lg border cursor-pointer text-xs font-bold transition-all ${selectedPromptId === p.id ? 'bg-white border-indigo-400 text-indigo-700 shadow-sm' : 'bg-white/50 border-indigo-100 text-slate-500 hover:bg-white'}`}>
-                                        {p.name}
+                            <div className="gcset-scroll mt-1">
+                                {cognitionEditorTargets.map(member => (
+                                    <div key={`${cognitionEditorSpeaker.id}-${member.id}`} className="gcset-lens">
+                                        <div className="t">{cognitionEditorSpeaker.name} 眼里的 {member.name}</div>
+                                        <textarea
+                                            value={readGroupLiveCognition(cognitionEditorSpeaker.id, member.id)}
+                                            onChange={event => writeGroupLiveCognition(cognitionEditorSpeaker.id, member.id, event.target.value)}
+                                            rows={2}
+                                            placeholder="例：以前合作过，嘴上互怼但彼此认可；或：刚进群，还不熟。"
+                                        />
                                     </div>
                                 ))}
                             </div>
-                            <p className="text-[8px] text-indigo-300 mt-2 leading-tight">提示词与聊天-归档共享，可在聊天设置中自定义。</p>
-                        </div>
+                        </section>
+                    )}
 
-                        <button onClick={handleGroupSummary} disabled={isSummarizing} className="w-full py-3 bg-indigo-50 text-indigo-600 font-bold rounded-2xl border border-indigo-100 active:scale-95 transition-transform flex items-center justify-center gap-2 mb-2">
+                    <section className="gcset-sec">
+                        <div className="gcset-eye"><span className="n">总结与记忆</span><span className="e">Summary</span></div>
+                        <div className="gcset-help mb-3">用选中的风格生成一份群聊总结，并作为记忆同步给所有成员。提示词与「聊天-归档」共享，可在聊天设置里改。</div>
+                        <div className="gcset-scroll mb-3">
+                            {archivePrompts.map(prompt => (
+                                <button
+                                    key={prompt.id}
+                                    className={`gcset-promptrow ${selectedPromptId === prompt.id ? 'sel' : ''}`}
+                                    onClick={() => setSelectedPromptId(prompt.id)}
+                                >
+                                    {prompt.name}
+                                </button>
+                            ))}
+                        </div>
+                        <button className="gcset-btn" onClick={handleGroupSummary} disabled={isSummarizing}>
                             {isSummarizing ? (
-                                <><div className="w-4 h-4 border-2 border-indigo-200 border-t-indigo-500 rounded-full animate-spin"></div><span className="text-xs">{summaryProgress || '处理中...'}</span></>
-                            ) : (
-                                <><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" /></svg> 生成总结并同步到全员记忆</>
-                            )}
+                                <><span className="gcset-spin"></span>{summaryProgress || '处理中…'}</>
+                            ) : '生成总结并同步到全员记忆'}
                         </button>
-                        <p className="text-[9px] text-slate-400 leading-tight px-1">使用选中的提示词风格生成群聊总结，并作为记忆植入到所有群成员的大脑中。</p>
-                    </div>
+                    </section>
 
-                    {/* Danger Zone */}
-                    <div className="pt-2 border-t border-slate-100">
-                        <label className="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-3 block">危险区域</label>
-
-                        <div className="flex items-center gap-2 mb-3 cursor-pointer" onClick={() => setPreserveContext(!preserveContext)}>
-                            <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${preserveContext ? 'bg-violet-500 border-violet-500' : 'bg-slate-100 border-slate-300'}`}>
-                                {preserveContext && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                    <section className="gcset-sec">
+                        <div className="gcset-eye"><span className="n">危险操作</span><span className="e">Danger</span></div>
+                        <div className="gcset-check" onClick={() => setPreserveContext(!preserveContext)}>
+                            <div className={`box ${preserveContext ? 'on' : ''}`}>
+                                {preserveContext && <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
                             </div>
-                            <span className="text-xs text-slate-600">清空时保留最后10条记录 (维持语境)</span>
+                            <span>清空时保留最后 10 条（维持语境）</span>
                         </div>
-
-                        <div className="flex gap-2">
-                            <button onClick={handleClearHistory} className="flex-1 py-3 bg-red-50 text-red-500 font-bold rounded-2xl border border-red-100 active:scale-95 transition-transform flex items-center justify-center gap-2 text-xs">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg>
-                                清空聊天
-                            </button>
-                            <button onClick={() => { if (activeGroup) handleDeleteGroup(activeGroup.id); }} className="flex-1 py-3 text-white bg-red-500 hover:bg-red-600 rounded-2xl text-xs font-bold transition-colors shadow-lg shadow-red-200">解散群聊</button>
+                        <div className="gcset-danger-btns">
+                            <button className="ghost" onClick={handleClearHistory}>清空聊天</button>
+                            <button className="solid" onClick={() => { if (activeGroup) handleDeleteGroup(activeGroup.id); }}>解散群聊</button>
                         </div>
-                    </div>
+                        <div className="gcset-help mt-2.5">解散后不可恢复。</div>
+                    </section>
                 </div>
             </Modal>
 
