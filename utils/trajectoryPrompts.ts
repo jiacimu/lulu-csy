@@ -9,8 +9,55 @@
  * 5. 梦境回响 — 时空乱流后角色在主聊天中提及「做梦」
  */
 
-import type { CharacterProfile } from '../types';
+import type { CharacterProfile, UserProfile } from '../types';
 import type { TrajectoryNode } from '../types/trajectory';
+import { ContextBuilder } from './context';
+
+export type TrajectoryUserContext = UserProfile | string | undefined;
+
+export function getTrajectoryUserName(user: TrajectoryUserContext): string {
+    if (typeof user === 'string') return user.trim() || '用户';
+    return user?.name?.trim() || '用户';
+}
+
+function toTrajectoryUserProfile(user: TrajectoryUserContext): UserProfile {
+    if (typeof user === 'object' && user) {
+        return {
+            ...user,
+            name: user.name?.trim() || '用户',
+            avatar: user.avatar || '',
+            bio: user.bio || '',
+        };
+    }
+    return {
+        name: getTrajectoryUserName(user),
+        avatar: '',
+        bio: '',
+    };
+}
+
+function resolveTrajectoryMemoryMode(char: CharacterProfile): 'traditional' | 'hybrid' | 'vector' {
+    if (!char.vectorMemoryEnabled) return 'traditional';
+    if (char.vectorMemoryMode) return char.vectorMemoryMode;
+    if (char.vectorMemoryTakeover === true) return 'vector';
+    return 'hybrid';
+}
+
+function buildAfterMeetingCoreContext(char: CharacterProfile, user: TrajectoryUserContext): string {
+    return ContextBuilder.buildCoreContext(
+        char,
+        toTrajectoryUserProfile(user),
+        true,
+        resolveTrajectoryMemoryMode(char),
+    );
+}
+
+function buildAfterMeetingContextBlock(char: CharacterProfile, user: TrajectoryUserContext): string {
+    return `【相遇后完整上下文】
+以下内容是角色在“遇见用户之后”的轨迹生成必须读取的原始上下文，包含角色人设、世界观、挂载世界书、互动对象(User)、角色眼中的User印象、传统记忆与当前内部状态。不要只读取名字，必须把User设定、性别/身体信息、气质、世界书和记忆一起作为关系判断依据。
+
+${buildAfterMeetingCoreContext(char, user)}`;
+}
 
 /**
  * 1. 节点提取 Prompt
@@ -107,7 +154,7 @@ export function buildWhisperResponsePrompt(
     char: CharacterProfile,
     node: TrajectoryNode,
     userWhisper: string,
-    userName?: string,
+    userName?: TrajectoryUserContext,
 ): string {
     const worldview = char.worldview?.trim() || '';
     const worldviewBlock = worldview
@@ -118,12 +165,11 @@ export function buildWhisperResponsePrompt(
 
     if (isAfterMeeting) {
         // ── 遇到之后：角色认出 user，但认知限定在此刻 ──
-        const displayName = userName || '那个人';
+        const displayName = getTrajectoryUserName(userName) || '那个人';
         return `你是${char.name}，正在经历「${node.title}」。这段时光和${displayName}有关。
 
-你的性格：
-${char.systemPrompt || '（未设定）'}
-${worldviewBlock}
+${buildAfterMeetingContextBlock(char, userName)}
+
 你只知道到现在为止的事。未来你不知道。
 
 ${displayName}跟你说了一句：
@@ -172,20 +218,20 @@ ${worldviewBlock}
 export function buildAfterMeetingMonologuePrompt(
     char: CharacterProfile,
     node: TrajectoryNode,
-    userName: string,
+    userName: TrajectoryUserContext,
     memories: string,
 ): string {
     const keywordsStr = node.memoryKeywords || node.keywords.join('、');
+    const displayName = getTrajectoryUserName(userName);
 
-    return `你是${char.name}。此刻你正在经历和${userName}相关的一段时光。
+    return `你是${char.name}。此刻你正在经历和${displayName}相关的一段时光。
 
-你的核心性格：
-${char.systemPrompt || '（无详细设定）'}
+${buildAfterMeetingContextBlock(char, userName)}
 
 此刻你正在经历的事：「${node.title}」
 关键词：${keywordsStr}
 ${memories
-        ? `\n以下是你目前拥有的、和${userName}在这段时期的记忆片段（你只知道这些，不知道之后会发生什么）：\n${memories}\n`
+        ? `\n以下是你目前拥有的、和${displayName}在这段时期的记忆片段（你只知道这些，不知道之后会发生什么）：\n${memories}\n`
         : ''
     }
 请以第一人称写一段内心独白。
@@ -197,7 +243,7 @@ ${memories
 - 不要预知任何还没发生的事，不要用"后来""现在回想起来"这类回顾视角
 - 可以有碎片化的思绪、未完成的念头、情绪的起伏
 - 如果有提供记忆片段，自然地融入此刻的感受中
-- 如果只有关键词，根据你的性格和与${userName}的关系去感受这个当下
+- 如果只有关键词，根据你的性格和与${displayName}的关系去感受这个当下
 - 不要写成文学作品，要像真实的内心活动
 - 直接输出独白正文，不要加标题或解释`;
 }
@@ -263,18 +309,16 @@ mood 可选值：nostalgic, melancholy, hopeful, rebellious, peaceful, painful, 
  */
 export function buildAfterMeetingNodeExtractionPrompt(
     char: CharacterProfile,
-    userName: string,
+    userName: TrajectoryUserContext,
     memorySummaries: string,
 ): string {
-    return `你是一个叙事设计师。基于以下角色与用户「${userName}」的真实记忆片段，提炼出他们相遇之后最重要的 3-5 个人生节点。
+    const displayName = getTrajectoryUserName(userName);
+
+    return `你是一个叙事设计师。基于以下角色与用户「${displayName}」的真实记忆片段，提炼出他们相遇之后最重要的 3-5 个人生节点。
 
 每个节点代表一个关键时刻——可以是初遇、信任建立、冲突、和解、深入了解、重要约定，或任何改变了他们关系走向的事件。
 
-角色名：${char.name}
-核心设定：
-${char.systemPrompt || '（无详细设定）'}
-
-用户名：${userName}
+${buildAfterMeetingContextBlock(char, userName)}
 
 记忆片段（按重要性排序）：
 ${memorySummaries}
@@ -350,23 +394,26 @@ export const SIGNAL_DECAY_HINT = `[你感觉到和对方之间的连接正在变
 export function buildDreamEchoPrompt(
     char: CharacterProfile,
     node: TrajectoryNode,
-    userName: string,
+    userName: TrajectoryUserContext,
 ): string {
+    const displayName = getTrajectoryUserName(userName);
     const history = node.whisperHistory || [];
     const historySnippet = history
-        .map(h => `${userName}: "${h.userWhisper}"\n${char.name}: "${h.charResponse}"`)
+        .map(h => `${displayName}: "${h.userWhisper}"\n${char.name}: "${h.charResponse}"`)
         .join('\n---\n');
 
     const isAfterMeeting = node.era === 'after_meeting';
 
     if (isAfterMeeting) {
         return `你是${char.name}，你刚做了一个梦。
-梦里你和${userName}在「${node.title}」的情境里说了一些话。
+梦里你和${displayName}在「${node.title}」的情境里说了一些话。
+
+${buildAfterMeetingContextBlock(char, userName)}
 
 你记得的对话片段（有些清晰有些模糊）：
 ${historySnippet}
 
-现在你醒了，给${userName}发消息。
+现在你醒了，给${displayName}发消息。
 
 格式要求——你在发手机消息，不是写文章：
 - 短是默认，大多数消息 20 字以内
@@ -386,7 +433,7 @@ ${historySnippet}
 你记得的梦境片段（有些清晰有些已经忘了）：
 ${historySnippet}
 
-现在你醒了，给${userName}发消息。
+现在你醒了，给${displayName}发消息。
 
 格式要求——你在发手机消息，不是写文章：
 - 短是默认，大多数消息 20 字以内
@@ -394,7 +441,7 @@ ${historySnippet}
 - 一到三条消息就够了
 - 口语化，像突然想起来随口一提
 - 不要写引号、不要写身份前缀、不要写文学段落
-- 你不知道梦里那个存在就是${userName}
+- 你不知道梦里那个存在就是${displayName}
 - 可以说“我小时候好像做过一个梦…” 或 “突然想起来，我 ${node.age} 岁那会儿…”
 - 记忆是模糊的，说不清也正常
 - 直接输出消息内容`;

@@ -12,7 +12,7 @@ import { getTrajectoryNodes, saveTrajectoryNode, deleteTrajectoryNode } from '..
 import {
     hasAnyMessages, initTrajectory, regenTrajectory, continueTrajectory, generateMonologue,
     generateAfterMonologue, generateWhisperResponse, createManualAfterNode, generateDreamEcho,
-    WHISPER_MAX_ROUNDS,
+    WHISPER_MAX_ROUNDS, buildTrajectoryAfterContextExport,
 } from '../utils/trajectoryEngine';
 import { DB } from '../utils/db';
 import { MinimaxTts } from '../utils/minimaxTts';
@@ -73,7 +73,7 @@ const TrajectoryApp: React.FC = () => {
             let existing = getTrajectoryNodes(c.id);
             if (existing.length === 0) {
                 setLoadingPhase('before');
-                existing = await initTrajectory(c, api, userProfile.name);
+                existing = await initTrajectory(c, api, userProfile);
             }
             setNodes(existing);
         } catch (e: any) {
@@ -84,7 +84,7 @@ const TrajectoryApp: React.FC = () => {
             setIsLoading(false);
             setLoadingPhase('');
         }
-    }, [api, addToast]);
+    }, [api, addToast, userProfile]);
 
     // ── Open Node ──
     const handleOpenNode = useCallback(async (node: TrajectoryNode) => {
@@ -104,7 +104,7 @@ const TrajectoryApp: React.FC = () => {
         try {
             const text = node.era === 'before_meeting'
                 ? await generateMonologue(char, node, api)
-                : await generateAfterMonologue(char, node, userProfile.name, api);
+                : await generateAfterMonologue(char, node, userProfile, api);
             setMonoText(text);
             const updated = { ...node, monologue: text, monologueGeneratedAt: Date.now() };
             saveTrajectoryNode(updated);
@@ -131,7 +131,7 @@ const TrajectoryApp: React.FC = () => {
 
         setIsWhisperGen(true);
         try {
-            const resp = await generateWhisperResponse(char, activeNode, whisperInput.trim(), api, userProfile.name, currentHistory);
+            const resp = await generateWhisperResponse(char, activeNode, whisperInput.trim(), api, userProfile, currentHistory);
             setWhisperResp(resp);
             const record = { userWhisper: whisperInput.trim(), charResponse: resp, timestamp: Date.now() };
             const newHistory = [...currentHistory, record];
@@ -160,7 +160,7 @@ const TrajectoryApp: React.FC = () => {
                     // Generate dream echo and save to main chat
                     void (async () => {
                         try {
-                            const dreamText = await generateDreamEcho(char, updated, api, userProfile.name);
+                            const dreamText = await generateDreamEcho(char, updated, api, userProfile);
                             await DB.saveMessage({
                                 charId: char.id,
                                 role: 'assistant',
@@ -194,7 +194,7 @@ const TrajectoryApp: React.FC = () => {
         setIsLoading(true);
         setLoadingPhase('before');
         try {
-            const fresh = await regenTrajectory(char, api, userProfile.name);
+            const fresh = await regenTrajectory(char, api, userProfile);
             setNodes(fresh);
             addToast('已重新生成轨迹节点（手动记忆已保留）', 'success');
         } catch (e: any) {
@@ -203,7 +203,7 @@ const TrajectoryApp: React.FC = () => {
             setIsLoading(false);
             setLoadingPhase('');
         }
-    }, [char, api, addToast, userProfile.name]);
+    }, [char, api, addToast, userProfile]);
 
     // ── Continue (append new nodes) ──
     const handleContinue = useCallback(async () => {
@@ -211,7 +211,7 @@ const TrajectoryApp: React.FC = () => {
         setIsLoading(true);
         setLoadingPhase('before');
         try {
-            const updated = await continueTrajectory(char, api, userProfile.name);
+            const updated = await continueTrajectory(char, api, userProfile);
             setNodes(updated);
             const newCount = updated.length - nodes.length;
             addToast(newCount > 0 ? `已补充 ${newCount} 个新节点` : '暂时没有新的轨迹可以补充', newCount > 0 ? 'success' : 'info');
@@ -221,7 +221,29 @@ const TrajectoryApp: React.FC = () => {
             setIsLoading(false);
             setLoadingPhase('');
         }
-    }, [char, api, addToast, userProfile.name, nodes.length]);
+    }, [char, api, addToast, userProfile, nodes.length]);
+
+    const handleExportAfterContext = useCallback(async () => {
+        if (!char) return;
+        try {
+            const text = await buildTrajectoryAfterContextExport(char, userProfile, nodes);
+            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const safeName = (char.name || 'character').replace(/[\\/:*?"<>|]+/g, '_');
+            const date = new Date().toISOString().slice(0, 10);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `trajectory-after-context-${safeName}-${date}.txt`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            addToast('已导出相遇后上下文原文', 'success');
+        } catch (e) {
+            console.error('[Trajectory] context export failed:', e);
+            addToast('上下文导出失败', 'error');
+        }
+    }, [char, userProfile, nodes, addToast]);
 
     // ── Add Manual Node ──
     const handleAddNode = useCallback(() => {
@@ -292,7 +314,7 @@ const TrajectoryApp: React.FC = () => {
         try {
             const text = activeNode.era === 'before_meeting'
                 ? await generateMonologue(char, activeNode, api)
-                : await generateAfterMonologue(char, activeNode, userProfile.name, api);
+                : await generateAfterMonologue(char, activeNode, userProfile, api);
             setMonoText(text);
             const updated = { ...activeNode, monologue: text, monologueGeneratedAt: Date.now() };
             saveTrajectoryNode(updated);
@@ -611,6 +633,9 @@ const TrajectoryApp: React.FC = () => {
                                     </button>
                                     <button className="traj-profile-action traj-profile-action--secondary" onClick={() => setShowRegenConfirm(true)}>
                                         重新追溯
+                                    </button>
+                                    <button className="traj-profile-action traj-profile-action--secondary" onClick={handleExportAfterContext} hidden>
+                                        导出相遇后
                                     </button>
                                 </div>
                             </div>

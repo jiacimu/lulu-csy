@@ -3,9 +3,9 @@
  * LLM 调用、节点生成、独白生成、窃语回应
  */
 
-import type { CharacterProfile } from '../types';
+import type { CharacterProfile, UserProfile } from '../types';
 import type { TrajectoryNode, TrajectoryMood } from '../types/trajectory';
-import { buildNodeExtractionPrompt, buildContinueNodeExtractionPrompt, buildMonologuePrompt, buildWhisperResponsePrompt, buildAfterMeetingMonologuePrompt, parseNodeExtractionResponse, buildAfterMeetingNodeExtractionPrompt, parseAfterNodeExtractionResponse, SIGNAL_DECAY_HINT, buildDreamEchoPrompt } from './trajectoryPrompts';
+import { buildNodeExtractionPrompt, buildContinueNodeExtractionPrompt, buildMonologuePrompt, buildWhisperResponsePrompt, buildAfterMeetingMonologuePrompt, parseNodeExtractionResponse, buildAfterMeetingNodeExtractionPrompt, parseAfterNodeExtractionResponse, SIGNAL_DECAY_HINT, buildDreamEchoPrompt, getTrajectoryUserName, type TrajectoryUserContext } from './trajectoryPrompts';
 import type { WhisperRecord } from '../types/trajectory';
 import { safeResponseJson } from './safeApi';
 import { extractThinking } from './thinkingExtractor';
@@ -72,6 +72,104 @@ export async function getFirstMessageTimestamp(charId: string): Promise<number |
     return sorted[0]?.timestamp;
 }
 
+type VectorMemoryHeader = {
+    id: string;
+    importance?: number;
+    content?: string;
+    title?: string;
+    createdAt?: number;
+    deprecated?: boolean;
+};
+
+function formatVectorMemoryList(memories: any[]): string {
+    return memories
+        .map((m: any, i: number) => {
+            const title = m.title ? ` ${m.title}` : '';
+            const content = m.content || m.summary || '';
+            const emotionalJourney = m.emotionalJourney ? `\n当时的感受：${m.emotionalJourney}` : '';
+            return `[${i + 1}]${title}\n${content}${emotionalJourney}`;
+        })
+        .filter((s: string) => s.trim().length > 5)
+        .join('\n---\n');
+}
+
+function getAfterNodeTerms(node: TrajectoryNode): string[] {
+    const raw = [
+        node.title,
+        node.memoryKeywords || '',
+        ...(node.keywords || []),
+    ].join(' ');
+    return raw
+        .split(/[\s,，、。；;：:"'“”‘’（）()【】[\]{}<>《》|/\\]+/)
+        .map(term => term.trim())
+        .filter(term => term.length >= 2);
+}
+
+function scoreMemoryForNode(header: VectorMemoryHeader, terms: string[]): number {
+    const text = `${header.title || ''}\n${header.content || ''}`;
+    const hitScore = terms.reduce((score, term) => score + (text.includes(term) ? 3 : 0), 0);
+    return hitScore + (header.importance || 0) * 0.35;
+}
+
+async function collectAfterNodeSeedMemories(charId: string, limit = 20): Promise<{ headers: VectorMemoryHeader[]; memorySummaries: string }> {
+    const headers = await DB.getVectorMemoryHeaders(charId) as VectorMemoryHeader[];
+    const sorted = headers
+        .filter((h: VectorMemoryHeader) => !h.deprecated && (h.importance ?? 0) > 0)
+        .sort((a: VectorMemoryHeader, b: VectorMemoryHeader) => (b.importance || 0) - (a.importance || 0))
+        .slice(0, limit);
+
+    if (sorted.length === 0) return { headers: [], memorySummaries: '' };
+
+    const full = await DB.getVectorMemoriesByIds(sorted.map(h => h.id));
+    const byId = new Map(full.map((m: any) => [m.id, m]));
+    const ordered = sorted.map(h => byId.get(h.id)).filter(Boolean);
+
+    return {
+        headers: sorted,
+        memorySummaries: formatVectorMemoryList(ordered),
+    };
+}
+
+async function loadAfterNodeMemoryContext(char: CharacterProfile, node: TrajectoryNode): Promise<string> {
+    if (node.memorySource !== 'vector') return '';
+
+    try {
+        const headers = await DB.getVectorMemoryHeaders(char.id) as VectorMemoryHeader[];
+        let candidates: VectorMemoryHeader[] = [];
+
+        if (node.memoryTimeRange) {
+            candidates = headers
+                .filter((h: VectorMemoryHeader) =>
+                    !h.deprecated
+                    && (h.createdAt || 0) >= node.memoryTimeRange!.start
+                    && (h.createdAt || 0) <= node.memoryTimeRange!.end
+                )
+                .sort((a: VectorMemoryHeader, b: VectorMemoryHeader) => (b.importance || 0) - (a.importance || 0))
+                .slice(0, 6);
+        }
+
+        if (candidates.length === 0) {
+            const terms = getAfterNodeTerms(node);
+            candidates = headers
+                .filter((h: VectorMemoryHeader) => !h.deprecated && (h.importance ?? 0) > 0)
+                .map((h: VectorMemoryHeader) => ({ header: h, score: scoreMemoryForNode(h, terms) }))
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 6)
+                .map(item => item.header);
+        }
+
+        if (candidates.length === 0) return '';
+
+        const full = await DB.getVectorMemoriesByIds(candidates.map(h => h.id));
+        const byId = new Map(full.map((m: any) => [m.id, m]));
+        const ordered = candidates.map(h => byId.get(h.id)).filter(Boolean);
+        return formatVectorMemoryList(ordered);
+    } catch (e) {
+        console.warn('[Trajectory] vector memory retrieval failed:', e);
+        return '';
+    }
+}
+
 /** Generate "before meeting" nodes from character profile */
 export async function generateBeforeNodes(char: CharacterProfile, api: ApiConfig): Promise<TrajectoryNode[]> {
     const prompt = buildNodeExtractionPrompt(char);
@@ -117,21 +215,9 @@ export async function generateMonologue(char: CharacterProfile, node: Trajectory
 
 /** Generate monologue for an "after meeting" node */
 export async function generateAfterMonologue(
-    char: CharacterProfile, node: TrajectoryNode, userName: string, api: ApiConfig,
+    char: CharacterProfile, node: TrajectoryNode, userName: TrajectoryUserContext, api: ApiConfig,
 ): Promise<string> {
-    let memories = '';
-    if (node.memorySource === 'vector' && node.memoryTimeRange) {
-        try {
-            const headers = await DB.getVectorMemoryHeaders(char.id);
-            const inRange = headers.filter((h: any) =>
-                h.createdAt >= node.memoryTimeRange!.start && h.createdAt <= node.memoryTimeRange!.end
-            ).sort((a: any, b: any) => (b.importance || 0) - (a.importance || 0)).slice(0, 5);
-            if (inRange.length > 0) {
-                const full = await DB.getVectorMemoriesByIds(inRange.map((h: any) => h.id));
-                memories = full.map((m: any) => m.content || m.summary || '').filter(Boolean).join('\n---\n');
-            }
-        } catch (e) { console.warn('[Trajectory] vector memory retrieval failed:', e); }
-    }
+    const memories = await loadAfterNodeMemoryContext(char, node);
     const prompt = buildAfterMeetingMonologuePrompt(char, node, userName, memories);
     return callLLM(api, MONOLOGUE_SYSTEM, prompt, 0.85);
 }
@@ -141,7 +227,7 @@ export const WHISPER_MAX_ROUNDS = 10;
 
 /** Generate whisper response with multi-turn context */
 export async function generateWhisperResponse(
-    char: CharacterProfile, node: TrajectoryNode, whisper: string, api: ApiConfig, userName?: string,
+    char: CharacterProfile, node: TrajectoryNode, whisper: string, api: ApiConfig, userName?: TrajectoryUserContext,
     history?: WhisperRecord[],
 ): Promise<string> {
     const messages: { role: string; content: string }[] = [{ role: 'system', content: WHISPER_SYSTEM }];
@@ -171,7 +257,7 @@ export async function generateWhisperResponse(
 
 /** Generate dream echo message for main chat after time-space turbulence */
 export async function generateDreamEcho(
-    char: CharacterProfile, node: TrajectoryNode, api: ApiConfig, userName: string,
+    char: CharacterProfile, node: TrajectoryNode, api: ApiConfig, userName: TrajectoryUserContext,
 ): Promise<string> {
     const prompt = buildDreamEchoPrompt(char, node, userName);
     return callLLM(api, WHISPER_SYSTEM, prompt, 0.85);
@@ -182,38 +268,22 @@ const AFTER_NODE_MEMORY_THRESHOLD = 5;
 
 /** Generate "after meeting" nodes from vector memories */
 export async function generateAfterNodes(
-    char: CharacterProfile, userName: string, beforeNodeCount: number, api: ApiConfig,
+    char: CharacterProfile, userName: TrajectoryUserContext, beforeNodeCount: number, api: ApiConfig,
 ): Promise<TrajectoryNode[]> {
     // Phase 1: Collect top-importance memories
-    let headers: { id: string; importance: number; content?: string; title?: string }[] = [];
+    let selectedHeaders: VectorMemoryHeader[] = [];
+    let memorySummaries = '';
     try {
-        headers = await DB.getVectorMemoryHeaders(char.id);
+        const seed = await collectAfterNodeSeedMemories(char.id);
+        selectedHeaders = seed.headers;
+        memorySummaries = seed.memorySummaries;
     } catch (e) {
         console.warn('[Trajectory] Failed to get vector memory headers:', e);
         return [];
     }
 
-    // Sort by importance, take top 15-20
-    const sorted = headers
-        .filter((h: any) => (h.importance ?? 0) > 0)
-        .sort((a: any, b: any) => (b.importance || 0) - (a.importance || 0))
-        .slice(0, 20);
-
-    if (sorted.length < AFTER_NODE_MEMORY_THRESHOLD) {
-        console.log(`[Trajectory] Only ${sorted.length} memories, below threshold ${AFTER_NODE_MEMORY_THRESHOLD}. Skipping after-node generation.`);
-        return [];
-    }
-
-    // Phase 1b: Get full content
-    let memorySummaries = '';
-    try {
-        const full = await DB.getVectorMemoriesByIds(sorted.map((h: any) => h.id));
-        memorySummaries = full
-            .map((m: any, i: number) => `[${i + 1}] ${m.content || m.summary || m.title || ''}`)
-            .filter((s: string) => s.length > 5)
-            .join('\n---\n');
-    } catch (e) {
-        console.warn('[Trajectory] Failed to get full memories:', e);
+    if (selectedHeaders.length < AFTER_NODE_MEMORY_THRESHOLD) {
+        console.log(`[Trajectory] Only ${selectedHeaders.length} memories, below threshold ${AFTER_NODE_MEMORY_THRESHOLD}. Skipping after-node generation.`);
         return [];
     }
 
@@ -224,8 +294,13 @@ export async function generateAfterNodes(
     const raw = await callLLM(api, NARRATOR_SYSTEM, prompt, 0.7);
     const parsed = parseAfterNodeExtractionResponse(raw, char.id, beforeNodeCount);
     const now = Date.now();
+    const timestamps = selectedHeaders.map(h => h.createdAt || 0).filter(Boolean);
+    const memoryTimeRange = timestamps.length > 0
+        ? { start: Math.min(...timestamps), end: Math.max(...timestamps) }
+        : undefined;
     return parsed.map((p, i) => ({
         ...p,
+        ...(memoryTimeRange ? { memoryTimeRange } : {}),
         id: safeUUID(),
         createdAt: now,
         updatedAt: now,
@@ -238,7 +313,7 @@ export async function generateAfterNodes(
  * Also auto-generates after_meeting nodes if enough vector memories exist.
  */
 export async function initTrajectory(
-    char: CharacterProfile, api: ApiConfig, userName?: string,
+    char: CharacterProfile, api: ApiConfig, userName?: TrajectoryUserContext,
 ): Promise<TrajectoryNode[]> {
     const beforeNodes = await generateBeforeNodes(char, api);
 
@@ -269,7 +344,7 @@ export async function initTrajectory(
  * but preserve user's manually-added after nodes.
  */
 export async function regenTrajectory(
-    char: CharacterProfile, api: ApiConfig, userName?: string,
+    char: CharacterProfile, api: ApiConfig, userName?: TrajectoryUserContext,
 ): Promise<TrajectoryNode[]> {
     // Preserve manual after nodes
     const existing = getTrajectoryNodes(char.id);
@@ -312,7 +387,7 @@ export async function regenTrajectory(
  * - after_meeting: extract from vector memories created after lastGeneratedAt
  */
 export async function continueTrajectory(
-    char: CharacterProfile, api: ApiConfig, userName?: string,
+    char: CharacterProfile, api: ApiConfig, userName?: TrajectoryUserContext,
 ): Promise<TrajectoryNode[]> {
     const existing = getTrajectoryNodes(char.id);
     const existingBefore = existing.filter(n => n.era === 'before_meeting');
@@ -334,32 +409,36 @@ export async function continueTrajectory(
 
         try {
             // Get vector memories newer than last generation
-            let headers: { id: string; importance: number; createdAt?: number }[] = [];
+            let headers: VectorMemoryHeader[] = [];
             try { headers = await DB.getVectorMemoryHeaders(char.id); } catch { /* ignore */ }
 
             const newHeaders = headers
-                .filter((h: any) => (h.importance ?? 0) > 0 && (h.createdAt ?? 0) > sinceTs)
-                .sort((a: any, b: any) => (b.importance || 0) - (a.importance || 0))
+                .filter((h: VectorMemoryHeader) => !h.deprecated && (h.importance ?? 0) > 0 && (h.createdAt ?? 0) > sinceTs)
+                .sort((a: VectorMemoryHeader, b: VectorMemoryHeader) => (b.importance || 0) - (a.importance || 0))
                 .slice(0, 15);
 
             if (newHeaders.length >= 3) {
-                const full = await DB.getVectorMemoriesByIds(newHeaders.map((h: any) => h.id));
-                const memorySummaries = full
-                    .map((m: any, i: number) => `[${i + 1}] ${m.content || m.summary || m.title || ''}`)
-                    .filter((s: string) => s.length > 5)
-                    .join('\n---\n');
+                const full = await DB.getVectorMemoriesByIds(newHeaders.map((h: VectorMemoryHeader) => h.id));
+                const byId = new Map(full.map((m: any) => [m.id, m]));
+                const ordered = newHeaders.map(h => byId.get(h.id)).filter(Boolean);
+                const memorySummaries = formatVectorMemoryList(ordered);
 
                 if (memorySummaries.trim()) {
                     const prompt = buildAfterMeetingNodeExtractionPrompt(char, userName, memorySummaries);
                     const raw = await callLLM(api, NARRATOR_SYSTEM, prompt, 0.7);
                     const parsed = parseAfterNodeExtractionResponse(raw, char.id, existingBefore.length + newBeforeNodes.length);
                     const now = Date.now();
+                    const timestamps = newHeaders.map(h => h.createdAt || 0).filter(Boolean);
+                    const memoryTimeRange = timestamps.length > 0
+                        ? { start: Math.min(...timestamps), end: Math.max(...timestamps) }
+                        : undefined;
                     // Deduplicate against existing after-node titles
                     const existingTitles = new Set(existingAfter.map(n => n.title));
                     newAfterNodes = parsed
                         .filter(p => !existingTitles.has(p.title))
                         .map((p) => ({
                             ...p,
+                            ...(memoryTimeRange ? { memoryTimeRange } : {}),
                             id: safeUUID(),
                             createdAt: now,
                             updatedAt: now,
@@ -413,4 +492,75 @@ export function createManualAfterNode(
     };
     saveTrajectoryNode(node);
     return node;
+}
+
+function formatDebugMessages(label: string, messages: { role: string; content: string }[]): string {
+    const body = messages
+        .map(message => `--- ${message.role.toUpperCase()} ---\n${message.content}`)
+        .join('\n\n');
+    return `==============================\n${label}\n==============================\n${body}`;
+}
+
+/** Build a downloadable raw-text snapshot of the after-meeting trajectory prompts. */
+export async function buildTrajectoryAfterContextExport(
+    char: CharacterProfile,
+    userProfile: UserProfile,
+    nodes: TrajectoryNode[],
+): Promise<string> {
+    const userName = getTrajectoryUserName(userProfile);
+    const sections: string[] = [
+        `轨迹生成 · 相遇后上下文原文导出
+角色：${char.name}
+用户：${userName}
+导出时间：${new Date().toLocaleString()}
+
+说明：以下内容按实际请求的 messages 结构导出。若某类请求当前没有真实用户输入（例如尚未发送的新窃语），会标明占位文本；角色/user/世界书/记忆上下文仍为真实组装原文。`,
+    ];
+
+    try {
+        const seed = await collectAfterNodeSeedMemories(char.id);
+        sections.push(formatDebugMessages('AFTER NODE EXTRACTION / 相遇后节点提取', [
+            { role: 'system', content: NARRATOR_SYSTEM },
+            {
+                role: 'user',
+                content: buildAfterMeetingNodeExtractionPrompt(
+                    char,
+                    userProfile,
+                    seed.memorySummaries || '（当前没有可用向量记忆片段）',
+                ),
+            },
+        ]));
+    } catch (e) {
+        sections.push(`AFTER NODE EXTRACTION / 相遇后节点提取\n导出失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    const afterNodes = nodes.filter(node => node.era === 'after_meeting');
+    if (afterNodes.length === 0) {
+        sections.push('当前没有 after_meeting 节点，因此没有可导出的相遇后独白/窃语/梦境回响请求。');
+        return sections.join('\n\n');
+    }
+
+    for (const node of afterNodes) {
+        const memories = await loadAfterNodeMemoryContext(char, node);
+        sections.push(formatDebugMessages(`AFTER MONOLOGUE / 相遇后独白 / ${node.title}`, [
+            { role: 'system', content: MONOLOGUE_SYSTEM },
+            { role: 'user', content: buildAfterMeetingMonologuePrompt(char, node, userProfile, memories) },
+        ]));
+    }
+
+    const sampleNode = afterNodes[0];
+    const sampleWhisper = sampleNode.whisperHistory?.[0]?.userWhisper || '（这里是用户本轮窃语原文；当前导出时没有新的待发送窃语）';
+    sections.push(formatDebugMessages(`AFTER WHISPER / 相遇后窃语首轮 / ${sampleNode.title}`, [
+        { role: 'system', content: WHISPER_SYSTEM },
+        { role: 'user', content: buildWhisperResponsePrompt(char, sampleNode, sampleWhisper, userProfile) },
+    ]));
+
+    if (sampleNode.whisperHistory && sampleNode.whisperHistory.length > 0) {
+        sections.push(formatDebugMessages(`DREAM ECHO / 梦境回响 / ${sampleNode.title}`, [
+            { role: 'system', content: WHISPER_SYSTEM },
+            { role: 'user', content: buildDreamEchoPrompt(char, sampleNode, userProfile) },
+        ]));
+    }
+
+    return sections.join('\n\n');
 }
