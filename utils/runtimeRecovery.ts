@@ -21,6 +21,9 @@ const CHUNK_ERROR_PATTERNS = [
 let versionProbePromise: Promise<boolean> | null = null;
 let lastVersionProbeAt = 0;
 let reloadQueued = false;
+let autoReloadSuspendCount = 0;
+let pendingBuildInfo: BuildInfo | null = null;
+let lastAutoReloadSuspendReason: string | null = null;
 
 function defaultReload(): void {
   window.location.reload();
@@ -141,6 +144,41 @@ export function reloadApplication(
   return true;
 }
 
+export function suspendAutoReload(reason = 'critical-work'): string {
+  autoReloadSuspendCount += 1;
+  lastAutoReloadSuspendReason = reason;
+  return `${reason}:${Date.now()}:${autoReloadSuspendCount}`;
+}
+
+export function resumeAutoReload(_token?: string): void {
+  autoReloadSuspendCount = Math.max(0, autoReloadSuspendCount - 1);
+  if (autoReloadSuspendCount === 0) {
+    lastAutoReloadSuspendReason = null;
+  }
+}
+
+export function isAutoReloadSuspended(): boolean {
+  return autoReloadSuspendCount > 0;
+}
+
+export function getRuntimeRecoveryDiagnostics(): {
+  buildProbePaused: boolean;
+  autoReloadSuspendCount: number;
+  autoReloadSuspendReason: string | null;
+  pendingBuildId: string | null;
+  pendingBuiltAt: string | null;
+  reloadQueued: boolean;
+} {
+  return {
+    buildProbePaused: isAutoReloadSuspended(),
+    autoReloadSuspendCount,
+    autoReloadSuspendReason: lastAutoReloadSuspendReason,
+    pendingBuildId: pendingBuildInfo?.buildId || null,
+    pendingBuiltAt: pendingBuildInfo?.builtAt || null,
+    reloadQueued,
+  };
+}
+
 export function attemptChunkAutoReload(error: unknown, reload: ReloadFn = defaultReload): boolean {
   if (!isChunkLoadError(error) || hasAttemptedChunkReload()) {
     return false;
@@ -211,6 +249,12 @@ export async function probeForUpdatedBuild(
       return false;
     }
 
+    if (isAutoReloadSuspended()) {
+      pendingBuildInfo = remoteBuildInfo;
+      return false;
+    }
+
+    pendingBuildInfo = null;
     return reloadApplication('检测到新版本，正在刷新…', DEFAULT_RELOAD_DELAY_MS, reload);
   })();
 
@@ -225,6 +269,9 @@ export function resetRuntimeRecoveryStateForTests(): void {
   versionProbePromise = null;
   lastVersionProbeAt = 0;
   reloadQueued = false;
+  autoReloadSuspendCount = 0;
+  pendingBuildInfo = null;
+  lastAutoReloadSuspendReason = null;
 
   try {
     sessionStorage.removeItem(CHUNK_RELOAD_SESSION_KEY);

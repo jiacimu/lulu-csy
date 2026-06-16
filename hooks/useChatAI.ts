@@ -58,6 +58,9 @@ import { formatNotificationBody } from '../utils/notificationPreview';
 import { consumeCollectionWallPendingContext } from '../utils/collectionWallContext';
 import { pickMixedStatusMode } from '../utils/statusMode';
 import type { MixedStatusMode, StatusBarMode, StatusCardData } from '../types/statusCard';
+import { runtimeHealthProbe } from '../utils/runtimeHealthProbe';
+import { resumeAutoReload, suspendAutoReload } from '../utils/runtimeRecovery';
+import { scheduleRuntimeBackgroundTask } from '../utils/runtimeTaskQueue';
 
 interface UseChatAIProps {
     char: CharacterProfile | undefined;
@@ -441,34 +444,32 @@ export const useChatAI = ({
             .filter((id): id is number => typeof id === 'number')
             .map(String);
 
-        setTimeout(() => {
-            (async () => {
-                try {
-                    const freshChar = await DB.getCharacterById(char.id) || char;
-                    const contextSnapshot = await buildContextSnapshot(char.id, freshChar);
-                    const cleanApiConfig = {
-                        baseUrl: apiConfig.baseUrl,
-                        apiKey: apiConfig.apiKey || 'sk-none',
-                        model: apiConfig.model,
-                    };
-                    const result = await generateAgentScheduleRevision(char.id, {
-                        contextSnapshot,
-                        mainApiConfig: cleanApiConfig,
-                        scheduleSignal: signal,
-                        scheduleReason: reason || '',
-                        assistantReply: aiContent.slice(0, 2000),
-                        sourceMessageIds,
-                    });
-                    if (result.rewritten && typeof window !== 'undefined') {
-                        window.dispatchEvent(new CustomEvent(TODAY_SCHEDULE_UPDATED_EVENT_NAME, {
-                            detail: { charId: char.id, revision: result.revision },
-                        }));
-                    }
-                } catch (error) {
-                    console.warn('[TodaySchedule] revision generation skipped:', error instanceof Error ? error.message : error);
+        scheduleRuntimeBackgroundTask('schedule-revision', async () => {
+            try {
+                const freshChar = await DB.getCharacterById(char.id) || char;
+                const contextSnapshot = await buildContextSnapshot(char.id, freshChar);
+                const cleanApiConfig = {
+                    baseUrl: apiConfig.baseUrl,
+                    apiKey: apiConfig.apiKey || 'sk-none',
+                    model: apiConfig.model,
+                };
+                const result = await generateAgentScheduleRevision(char.id, {
+                    contextSnapshot,
+                    mainApiConfig: cleanApiConfig,
+                    scheduleSignal: signal,
+                    scheduleReason: reason || '',
+                    assistantReply: aiContent.slice(0, 2000),
+                    sourceMessageIds,
+                });
+                if (result.rewritten && typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent(TODAY_SCHEDULE_UPDATED_EVENT_NAME, {
+                        detail: { charId: char.id, revision: result.revision },
+                    }));
                 }
-            })();
-        }, 800);
+            } catch (error) {
+                console.warn('[TodaySchedule] revision generation skipped:', error instanceof Error ? error.message : error);
+            }
+        }, { delayMs: 800 });
     };
 
     const triggerAI = async (currentMsgs: Message[], options: TriggerAIOptions = {}) => {
@@ -495,6 +496,11 @@ export const useChatAI = ({
         isTypingRef.current = true;
         setIsTyping(true);
         setRecallStatus('');
+        const autoReloadToken = suspendAutoReload('chat-reply');
+        runtimeHealthProbe.reportCustom({
+            chatPhase: 'replying',
+            buildProbePaused: true,
+        });
 
         try {
             const baseUrl = apiConfig.baseUrl.replace(/\/+$/, '');
@@ -1082,7 +1088,7 @@ export const useChatAI = ({
                 aiContent = '嗯...';
             }
 
-            await saveChatContextMirror({
+            const chatContextMirrorPayload = {
                 charId: char.id,
                 contextLimit: limit,
                 historyMsgCount,
@@ -1090,9 +1096,7 @@ export const useChatAI = ({
                 messages: contextMirrorMessages,
                 assistantReply: aiContent,
                 thinking: thinkingContent,
-            }).catch(error => {
-                console.warn('[ChatContextMirror] save skipped:', error instanceof Error ? error.message : error);
-            });
+            };
 
             const secondaryFullContextOptions: SecondaryFullContextOptions = {
                 userProfile,
@@ -1559,6 +1563,12 @@ export const useChatAI = ({
                 });
             }
 
+            scheduleRuntimeBackgroundTask('chat-context-mirror', async () => {
+                await saveChatContextMirror(chatContextMirrorPayload).catch(error => {
+                    console.warn('[ChatContextMirror] save skipped:', error instanceof Error ? error.message : error);
+                });
+            }, { delayMs: 400 });
+
             if (photoHint && autoPhoto && onPhotoHint) {
                 const payload: PhotoHintTrigger = {
                     char: { ...char },
@@ -1570,9 +1580,11 @@ export const useChatAI = ({
                     sourceMessageId: firstSavedMsgId || undefined,
                     contextOptions: secondaryFullContextOptions,
                 };
-                window.setTimeout(() => onPhotoHint(payload), 800);
+                scheduleRuntimeBackgroundTask('photo-hint', () => onPhotoHint(payload), { delayMs: 800 });
             }
-            void BackendAgentManager.refreshCharacterContext(char.id, char);
+            scheduleRuntimeBackgroundTask('agent-context-refresh', async () => {
+                await BackendAgentManager.refreshCharacterContext(char.id, char);
+            }, { delayMs: 600 });
 
             // ====== Vector Memory Extraction — fire-and-forget (success path only) ======
             const vectorSecondaryConfig = selectSecondaryApiConfig();
@@ -1580,8 +1592,10 @@ export const useChatAI = ({
                 const emKey = embeddingApiKey;
                 if (emKey) {
                     const charSnapshot = { ...char };
-                    VectorMemoryExtractor.maybeExtract(charSnapshot, vectorSecondaryConfig, emKey)
-                        .catch(e => console.error('🧠 [VectorExtract] Background:', e));
+                    scheduleRuntimeBackgroundTask('vector-memory-extract', async () => {
+                        await VectorMemoryExtractor.maybeExtract(charSnapshot, vectorSecondaryConfig, emKey)
+                            .catch(e => console.error('🧠 [VectorExtract] Background:', e));
+                    }, { delayMs: 1000 });
                 }
             }
 
@@ -1594,29 +1608,34 @@ export const useChatAI = ({
                 // Skip card generation for modes that do not need a background status task.
                 if (statusMode === 'off' || statusMode === 'story_phone' || statusMode === 'afterglow' || statusMode === 'mixed') { /* noop — bionic engine still runs */ }
                 else {
-                // Delay 2s to reduce resource contention on mobile
-                setTimeout(() => {
-                    if (statusMode === 'classic') {
-                        // ── Classic inner voice ──
-                        MindSnapshotExtractor.generateInnerVoice(charSnapshot, aiContent, promptContextMsgs, mindSecondaryConfig,
-                            (reason) => addToast(reason, 'error'),
-                            true, goalListStr, secondaryFullContextOptions
-                        )
-                            .then(newState => {
+                    // Delay 2s to reduce resource contention on mobile
+                    scheduleRuntimeBackgroundTask('status-card', async () => {
+                        if (statusMode === 'classic') {
+                            // ── Classic inner voice ──
+                            const newState = await MindSnapshotExtractor.generateInnerVoice(charSnapshot, aiContent, promptContextMsgs, mindSecondaryConfig,
+                                (reason) => addToast(reason, 'error'),
+                                true, goalListStr, secondaryFullContextOptions
+                            ).catch(e => {
+                                console.error('💭 [InnerVoice] Background:', e);
+                                return null;
+                            });
+                            if (newState) {
                                 if (newState && char && onMoodUpdate) {
                                     onMoodUpdate(char.id, newState);
                                 } else {
                                     console.warn('💭 [InnerVoice] Generation returned null — retry available via avatar button');
                                 }
-                            })
-                            .catch(e => console.error('💭 [InnerVoice] Background:', e));
-                    } else if (statusMode === 'freeform') {
-                        // ── Freeform HTML card ──
-                        MindSnapshotExtractor.generateFreeformCard(charSnapshot, aiContent, promptContextMsgs, mindSecondaryConfig,
-                            (reason) => addToast(reason, 'error'),
-                            secondaryFullContextOptions,
-                        )
-                            .then(cardData => {
+                            }
+                        } else if (statusMode === 'freeform') {
+                            // ── Freeform HTML card ──
+                            const cardData = await MindSnapshotExtractor.generateFreeformCard(charSnapshot, aiContent, promptContextMsgs, mindSecondaryConfig,
+                                (reason) => addToast(reason, 'error'),
+                                secondaryFullContextOptions,
+                            ).catch(e => {
+                                console.error('✨ [FreeformCard] Background:', e);
+                                return null;
+                            });
+                            if (cardData) {
                                 if (cardData && char) {
                                     void attachStatusCardToFirstMessage(cardData, 'freeform')
                                         .catch(e => console.error('✨ [FreeformCard] Attach metadata:', e));
@@ -1624,51 +1643,50 @@ export const useChatAI = ({
                                 } else {
                                     console.warn('✨ [FreeformCard] Generation returned null');
                                 }
-                            })
-                            .catch(e => console.error('✨ [FreeformCard] Background:', e));
-                    } else if (statusMode === 'custom') {
-                        // ── Custom user-defined template ──
-                        const template = charSnapshot.customStatusTemplates?.find(
-                            t => t.id === charSnapshot.activeCustomTemplateId,
-                        ) || charSnapshot.customStatusTemplates?.[0];
-                        if (template?.systemPrompt) {
-                            MindSnapshotExtractor.generateCustomCard(charSnapshot, aiContent, promptContextMsgs, mindSecondaryConfig,
-                                template,
-                                (reason) => addToast(reason, 'error'),
-                                secondaryFullContextOptions,
-                            )
-                                .then(cardData => {
-                                    if (cardData && char) {
-                                        void attachStatusCardToFirstMessage(cardData, 'custom')
-                                            .catch(e => console.error('🎨 [CustomCard] Attach metadata:', e));
-                                        onMoodUpdate?.(char.id, { ...(charSnapshot.moodState || {}), innerVoice: cardData.body }, cardData);
-                                    } else {
-                                        console.warn('🎨 [CustomCard] Generation returned null');
-                                    }
-                                })
-                                .catch(e => console.error('🎨 [CustomCard] Background:', e));
-                        } else {
-                            console.warn('🎨 [CustomCard] No template configured, skipping');
-                        }
-                    } else {
-                        // ── Creative card ──
-                        MindSnapshotExtractor.generateCreativeCard(charSnapshot, aiContent, promptContextMsgs, mindSecondaryConfig,
-                            (reason) => addToast(reason, 'error'),
-                            undefined,
-                            secondaryFullContextOptions,
-                        )
-                            .then(cardData => {
+                            }
+                        } else if (statusMode === 'custom') {
+                            // ── Custom user-defined template ──
+                            const template = charSnapshot.customStatusTemplates?.find(
+                                t => t.id === charSnapshot.activeCustomTemplateId,
+                            ) || charSnapshot.customStatusTemplates?.[0];
+                            if (template?.systemPrompt) {
+                                const cardData = await MindSnapshotExtractor.generateCustomCard(charSnapshot, aiContent, promptContextMsgs, mindSecondaryConfig,
+                                    template,
+                                    (reason) => addToast(reason, 'error'),
+                                    secondaryFullContextOptions,
+                                ).catch(e => {
+                                    console.error('🎨 [CustomCard] Background:', e);
+                                    return null;
+                                });
                                 if (cardData && char) {
-                                    void attachStatusCardToFirstMessage(cardData, 'creative')
-                                        .catch(e => console.error('🎴 [CreativeCard] Attach metadata:', e));
+                                    void attachStatusCardToFirstMessage(cardData, 'custom')
+                                        .catch(e => console.error('🎨 [CustomCard] Attach metadata:', e));
                                     onMoodUpdate?.(char.id, { ...(charSnapshot.moodState || {}), innerVoice: cardData.body }, cardData);
                                 } else {
-                                    console.warn('🎴 [CreativeCard] Generation returned null');
+                                    console.warn('🎨 [CustomCard] Generation returned null');
                                 }
-                            })
-                            .catch(e => console.error('🎴 [CreativeCard] Background:', e));
-                    }
-                }, 2000);
+                            } else {
+                                console.warn('🎨 [CustomCard] No template configured, skipping');
+                            }
+                        } else {
+                            // ── Creative card ──
+                            const cardData = await MindSnapshotExtractor.generateCreativeCard(charSnapshot, aiContent, promptContextMsgs, mindSecondaryConfig,
+                                (reason) => addToast(reason, 'error'),
+                                undefined,
+                                secondaryFullContextOptions,
+                            ).catch(e => {
+                                console.error('🎴 [CreativeCard] Background:', e);
+                                return null;
+                            });
+                            if (cardData && char) {
+                                void attachStatusCardToFirstMessage(cardData, 'creative')
+                                    .catch(e => console.error('🎴 [CreativeCard] Attach metadata:', e));
+                                onMoodUpdate?.(char.id, { ...(charSnapshot.moodState || {}), innerVoice: cardData.body }, cardData);
+                            } else {
+                                console.warn('🎴 [CreativeCard] Generation returned null');
+                            }
+                        }
+                    }, { delayMs: 2000 });
                 } // end else (statusMode needs background generation)
             }
 
@@ -1677,8 +1695,10 @@ export const useChatAI = ({
             if (eventSecondaryConfig?.apiKey) {
                 const lastUserMsg = currentMsgs.filter(m => m.role === 'user').pop();
                 if (lastUserMsg && lastUserMsg.content) {
-                    EventExtractor.extract(char.id, lastUserMsg.content, eventSecondaryConfig)
-                        .catch(e => console.error('⏰ [EventExtractor] Background:', e));
+                    scheduleRuntimeBackgroundTask('event-extractor', async () => {
+                        await EventExtractor.extract(char.id, lastUserMsg.content, eventSecondaryConfig)
+                            .catch(e => console.error('⏰ [EventExtractor] Background:', e));
+                    }, { delayMs: 1200 });
                 }
             }
 
@@ -1698,6 +1718,11 @@ export const useChatAI = ({
             setSearchStatus('');
             setDiaryStatus('');
             setXhsStatus('');
+            runtimeHealthProbe.reportCustom({
+                chatPhase: null,
+                buildProbePaused: false,
+            });
+            resumeAutoReload(autoReloadToken);
         }
     };
 

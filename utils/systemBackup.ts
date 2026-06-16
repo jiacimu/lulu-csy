@@ -35,6 +35,8 @@ import {
 } from './runtimeConfig';
 import { safeTimeoutSignal } from './safeTimeout';
 import { loadSparkCharHandles, saveSparkCharHandles } from './socialHandlesStorage';
+import { runtimeHealthProbe } from './runtimeHealthProbe';
+import { resumeAutoReload, suspendAutoReload } from './runtimeRecovery';
 
 // ─── JSZip Dynamic Loader ───────────────────────────────────────────────
 
@@ -63,6 +65,11 @@ export interface ImportRecoveryMarker {
     source?: string;
     sourceSize?: number;
     current?: string;
+    storeName?: string;
+    itemDone?: number;
+    itemTotal?: number;
+    currentFile?: string;
+    currentFileSize?: number;
     error?: string;
 }
 
@@ -333,6 +340,10 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
 async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
     const response = await fetch(dataUrl);
     return response.blob();
+}
+
+function yieldToBrowser(ms = 0): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function isBlobLike(value: unknown): value is Blob {
@@ -859,13 +870,17 @@ async function restoreAssetsFromZip(obj: any, zip: JSZipLike | null): Promise<an
 
     if (Array.isArray(obj)) {
         const arr = [];
+        let index = 0;
         for (const item of obj) {
             arr.push(await restoreAssetsFromZip(item, zip));
+            index += 1;
+            if (index % 50 === 0) await yieldToBrowser();
         }
         return arr;
     }
 
     const newObj: any = {};
+    let fieldCount = 0;
     for (const key in obj) {
         if (Object.prototype.hasOwnProperty.call(obj, key)) {
             let value = obj[key];
@@ -887,6 +902,8 @@ async function restoreAssetsFromZip(obj: any, zip: JSZipLike | null): Promise<an
                 value = await restoreAssetsFromZip(value, zip);
             }
             newObj[key] = value;
+            fieldCount += 1;
+            if (fieldCount % 50 === 0) await yieldToBrowser();
         }
     }
     return newObj;
@@ -1513,6 +1530,7 @@ export async function importSystemData(
     callbacks: ImportCallbacks
 ): Promise<void> {
     const deviceIdentitySnapshot = captureDeviceIdentitySnapshot();
+    const autoReloadToken = suspendAutoReload('import-system-data');
     const sourceName = typeof fileOrJson === 'string' ? 'JSON 文本' : fileOrJson.name;
     const sourceSize = typeof fileOrJson === 'string' ? undefined : fileOrJson.size;
     const reportImportProgress = (
@@ -1522,6 +1540,14 @@ export async function importSystemData(
         update: Omit<ImportRecoveryMarker, 'startedAt' | 'updatedAt' | 'phase' | 'source'> = {},
     ) => {
         writeImportRecoveryMarker(phase, sourceName, { sourceSize, current: message, ...update });
+        runtimeHealthProbe.reportCustom({
+            importPhase: phase,
+            importCurrent: update.current || message,
+            importItemDone: update.itemDone ?? null,
+            importItemTotal: update.itemTotal ?? null,
+            importStoreName: update.storeName ?? null,
+            buildProbePaused: true,
+        });
         onProgress(message, progress);
     };
 
@@ -1542,27 +1568,55 @@ export async function importSystemData(
             zip = loadedZip;
             const dataFile = loadedZip.file("data.json");
             if (!dataFile) throw new Error("损坏的备份包: 缺少 data.json");
-            const jsonStr = await dataFile.async("string");
+            let jsonStr = await dataFile.async("string");
             data = JSON.parse(jsonStr);
+            jsonStr = '';
+            await yieldToBrowser();
         }
 
         reportImportProgress('assets', '正在恢复数据与素材...', 50);
 
         if (zip) {
             data = await restoreAssetsFromZip(data, zip);
+            zip = null;
+            await yieldToBrowser();
         }
 
         data = stripImportedDeviceIdentity(data);
 
         reportImportProgress('database', '正在写入本地数据库...', 64);
-        await DB.importFullData(data);
+        await DB.importFullData(data, {
+            onProgress: progress => {
+                const sectionRatio = progress.sectionTotal > 0
+                    ? progress.sectionDone / progress.sectionTotal
+                    : 0;
+                const itemRatio = progress.itemTotal && progress.sectionTotal > 0
+                    ? ((progress.itemDone || 0) / progress.itemTotal) / progress.sectionTotal
+                    : 0;
+                const dbProgress = 64 + Math.floor(Math.min(1, sectionRatio + itemRatio) * 16);
+                const itemText = progress.itemTotal
+                    ? ` ${progress.itemDone || 0}/${progress.itemTotal}`
+                    : '';
+                reportImportProgress(
+                    'database',
+                    `正在写入本地数据库：${progress.label}${itemText}`,
+                    dbProgress,
+                    {
+                        current: progress.label,
+                        itemDone: progress.itemDone,
+                        itemTotal: progress.itemTotal,
+                        storeName: progress.storeName,
+                    },
+                );
+            },
+        });
         await restoreHalfSugarDataFromBackup(data.halfSugarData);
         await restoreThemeAssetsFromBackup(data.theme);
         await restoreAssetBackedAppearanceFields(data);
 
         if (data.musicAssets) {
             try {
-                reportImportProgress('assets', '正在恢复音乐素材...', 72);
+                reportImportProgress('assets', '正在恢复音乐素材...', 80);
                 await restoreMusicAssetsFromBackup(data.musicAssets);
             } catch (e: any) {
                 console.warn('📦 [Import] Music assets restore failed (non-critical):', e.message);
@@ -1577,7 +1631,7 @@ export async function importSystemData(
         // (insertBefore error) because the UI re-renders with potentially incompatible data
         // right before reload.
 
-        reportImportProgress('settings', '正在恢复系统设置...', 82);
+        reportImportProgress('settings', '正在恢复系统设置...', 84);
 
         if (data.theme) {
             const cleanTheme = { ...data.theme } as any;
@@ -1632,7 +1686,7 @@ export async function importSystemData(
             try {
                 const backendUrl = getBackendUrl();
                 if (backendUrl) {
-                    reportImportProgress('settings', '正在恢复认知网络数据...', 90);
+                    reportImportProgress('settings', '正在恢复认知网络数据...', 92);
                     const graphData = data.graphData;
                     const importResp = await fetch(`${backendUrl}/api/graph/import`, {
                         method: 'POST',
@@ -1654,6 +1708,13 @@ export async function importSystemData(
         }
 
         clearImportRecoveryMarker();
+        runtimeHealthProbe.reportCustom({
+            importPhase: null,
+            importCurrent: null,
+            importItemDone: null,
+            importItemTotal: null,
+            importStoreName: null,
+        });
         callbacks.addToast('恢复成功，系统即将重启...', 'success');
         setTimeout(() => window.location.reload(), 1500);
     } catch (error: any) {
@@ -1662,8 +1723,15 @@ export async function importSystemData(
             current: '导入失败',
             error: error?.stack || error?.message || String(error || '未知错误'),
         });
+        runtimeHealthProbe.reportCustom({
+            importPhase: 'error',
+            importCurrent: '导入失败',
+            importError: error?.message || String(error || '未知错误'),
+        });
         throw error;
     } finally {
+        runtimeHealthProbe.reportCustom({ buildProbePaused: false });
+        resumeAutoReload(autoReloadToken);
         restoreDeviceIdentitySnapshot(deviceIdentitySnapshot);
     }
 }

@@ -1,3 +1,5 @@
+import { getRuntimeRecoveryDiagnostics } from './runtimeRecovery';
+
 type RuntimeHealthContext = {
     route?: string | null;
     charId?: string | null;
@@ -26,6 +28,7 @@ const FALLBACK_OVERLAY_ID = 'csyos-runtime-health-fallback';
 const MAX_SNAPSHOTS = 32;
 const DEFAULT_INTERVAL_MS = 15000;
 const INVASIVE_FLAG_KEY = 'csyos_runtime_probe_invasive';
+const IMPORT_RECOVERY_KEY = 'sullyos_import_in_progress_v1';
 
 let started = false;
 let enabled = false;
@@ -168,6 +171,48 @@ function getDomSnapshot(): RuntimeHealthCustom {
     };
 }
 
+function getImportRecoveryHealth(): RuntimeHealthCustom {
+    try {
+        const raw = readStorage(IMPORT_RECOVERY_KEY);
+        if (!raw) {
+            return {
+                importPhase: null,
+                importCurrent: null,
+                importItemDone: null,
+                importItemTotal: null,
+            };
+        }
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        return {
+            importPhase: parsed.phase ?? null,
+            importCurrent: parsed.current ?? null,
+            importItemDone: parsed.itemDone ?? null,
+            importItemTotal: parsed.itemTotal ?? null,
+        };
+    } catch {
+        return {
+            importPhase: 'unreadable',
+            importCurrent: null,
+            importItemDone: null,
+            importItemTotal: null,
+        };
+    }
+}
+
+function getRuntimeHealthFields(): RuntimeHealthCustom {
+    const recovery = getRuntimeRecoveryDiagnostics();
+    return {
+        ...getImportRecoveryHealth(),
+        chatPhase: custom.chatPhase ?? null,
+        backgroundTask: custom.backgroundTask ?? null,
+        buildProbePaused: recovery.buildProbePaused,
+        autoReloadSuspendCount: recovery.autoReloadSuspendCount,
+        autoReloadSuspendReason: recovery.autoReloadSuspendReason,
+        pendingBuildId: recovery.pendingBuildId,
+        reloadQueued: recovery.reloadQueued,
+    };
+}
+
 function persistSnapshot(payload: RuntimeHealthCustom): void {
     const previous = (() => {
         try {
@@ -226,6 +271,7 @@ function buildDiagnosticExport(): string {
         current: {
             uptimeMs: Math.round(performance.now() - startedAt),
             visibility: document.visibilityState,
+            ...getRuntimeHealthFields(),
             context: { ...context },
             custom: { ...custom },
             counters: { ...counters },
@@ -374,6 +420,7 @@ async function tick(reason = 'interval'): Promise<void> {
         deviceMemoryGB: (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null,
         route: context.route ?? null,
         charId: context.charId ?? null,
+        ...getRuntimeHealthFields(),
         memory: getMemorySnapshot(),
         longTasks: {
             count: longTaskCount,

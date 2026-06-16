@@ -113,12 +113,15 @@ const deserializeMemoryRecordAudio = async (items?: SerializedMemoryRecordAudio[
     if (!Array.isArray(items)) return [];
 
     const restored: MemoryRecordAudio[] = [];
+    let index = 0;
     for (const item of items) {
         if (!item.dataUrl) continue;
         restored.push({
             ...item,
             blob: await dataUrlToBlob(item.dataUrl),
         });
+        index += 1;
+        if (index % 10 === 0) await waitForBrowserTurn();
     }
     return restored;
 };
@@ -127,6 +130,7 @@ const deserializeVoiceAudio = async (items?: SerializedVoiceAudio[]): Promise<Vo
     if (!Array.isArray(items)) return [];
 
     const restored: VoiceAudioRecord[] = [];
+    let index = 0;
     for (const item of items) {
         if (!item.dataUrl) continue;
         const blob = await dataUrlToBlob(item.dataUrl);
@@ -136,6 +140,8 @@ const deserializeVoiceAudio = async (items?: SerializedVoiceAudio[]): Promise<Vo
             mimeType: item.mimeType || blob.type,
             blob,
         });
+        index += 1;
+        if (index % 10 === 0) await waitForBrowserTurn();
     }
     return restored;
 };
@@ -144,6 +150,7 @@ const deserializeCollectionWallAssets = async (items?: SerializedCollectionWallA
     if (!Array.isArray(items)) return [];
 
     const restored: CollectionWallAsset[] = [];
+    let index = 0;
     for (const item of items) {
         if (!item.dataUrl) continue;
         const blob = await dataUrlToBlob(item.dataUrl);
@@ -153,6 +160,8 @@ const deserializeCollectionWallAssets = async (items?: SerializedCollectionWallA
             mime: item.mime || blob.type || 'application/octet-stream',
             bytes: item.bytes || blob.size,
         });
+        index += 1;
+        if (index % 10 === 0) await waitForBrowserTurn();
     }
     return restored;
 };
@@ -263,11 +272,49 @@ export const exportFullData = async (): Promise<Partial<FullBackupData>> => {
     };
 };
 
-export const importFullData = async (data: FullBackupData): Promise<void> => {
+export type ImportFullDataProgress = {
+    label: string;
+    stage: 'start' | 'items' | 'done';
+    sectionDone: number;
+    sectionTotal: number;
+    itemDone?: number;
+    itemTotal?: number;
+    storeName?: string;
+};
+
+export type ImportFullDataOptions = {
+    onProgress?: (progress: ImportFullDataProgress) => void;
+    batchSize?: number;
+    yieldMs?: number;
+};
+
+const DEFAULT_IMPORT_BATCH_SIZE = 50;
+
+const waitForBrowserTurn = (ms = 0): Promise<void> => (
+    new Promise(resolve => setTimeout(resolve, ms))
+);
+
+const waitForTransaction = (tx: IDBTransaction): Promise<void> => (
+    new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
+        tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
+    })
+);
+
+export const importFullData = async (
+    data: FullBackupData,
+    options: ImportFullDataOptions = {},
+): Promise<void> => {
     const db = await openDB();
+    const batchSize = Math.max(1, Math.floor(options.batchSize || DEFAULT_IMPORT_BATCH_SIZE));
+    const yieldMs = Math.max(0, Math.floor(options.yieldMs || 0));
     const importedMemoryRecordAudio = await deserializeMemoryRecordAudio(data.memoryRecordAudio);
+    await waitForBrowserTurn(yieldMs);
     const importedVoiceAudio = await deserializeVoiceAudio(data.voiceAudio);
+    await waitForBrowserTurn(yieldMs);
     const importedCollectionWallAssets = await deserializeCollectionWallAssets(data.collectionWallAssets);
+    await waitForBrowserTurn(yieldMs);
     hydrateMountedWorldbooksFromBackupLibrary(data);
 
     const availableStores = [
@@ -284,162 +331,373 @@ export const importFullData = async (data: FullBackupData): Promise<void> => {
         STORE_COLLECTION_WALL_ASSETS
     ].filter(name => db.objectStoreNames.contains(name));
 
-    const tx = db.transaction(availableStores, 'readwrite');
+    const hasStore = (storeName: string): boolean => availableStores.includes(storeName);
 
-    const clearAndAdd = (storeName: string, items: any[]) => {
-        if (!availableStores.includes(storeName) || !Array.isArray(items)) return;
-        const store = tx.objectStore(storeName);
-        store.clear();
-        items.forEach(item => store.put(item));
+    const plannedSections = [
+        data.characters !== undefined || data.mediaAssets !== undefined,
+        data.messages !== undefined,
+        data.customThemes !== undefined,
+        data.savedEmojis !== undefined,
+        data.emojiCategories !== undefined,
+        data.assets !== undefined,
+        data.savedJournalStickers !== undefined,
+        data.galleryImages !== undefined,
+        data.diaries !== undefined,
+        data.tasks !== undefined,
+        data.anniversaries !== undefined,
+        data.roomTodos !== undefined,
+        data.roomNotes !== undefined,
+        data.groups !== undefined,
+        data.socialPosts !== undefined,
+        data.courses !== undefined,
+        data.games !== undefined,
+        data.worldbooks !== undefined,
+        data.novels !== undefined,
+        data.bankTransactions !== undefined,
+        data.xhsActivities !== undefined,
+        data.xhsStockImages !== undefined,
+        data.vectorMemories !== undefined || data.characters !== undefined,
+        data.memoryRecords !== undefined || data.characters !== undefined,
+        data.memoryRecordAudio !== undefined,
+        data.voiceAudio !== undefined,
+        data.yesterdayNewspapers !== undefined,
+        data.vibeReferences !== undefined,
+        data.nianNianSessions !== undefined,
+        data.collectionBooks !== undefined,
+        data.collectionWalls !== undefined,
+        data.collectionWallItems !== undefined,
+        data.collectionWallAssets !== undefined,
+        data.scheduledMessages !== undefined,
+        data.letters !== undefined,
+        data.userProfile !== undefined,
+        data.bankState !== undefined || data.bankDollhouse !== undefined,
+    ];
+    const sectionTotal = Math.max(1, plannedSections.filter(Boolean).length);
+    let sectionDone = 0;
+
+    const report = (
+        label: string,
+        stage: ImportFullDataProgress['stage'],
+        itemDone?: number,
+        itemTotal?: number,
+        storeName?: string,
+    ) => {
+        options.onProgress?.({
+            label,
+            stage,
+            sectionDone,
+            sectionTotal,
+            itemDone,
+            itemTotal,
+            storeName,
+        });
     };
 
-    const mergeStore = (storeName: string, items: any[]) => {
-        if (!availableStores.includes(storeName) || !items || items.length === 0) return;
-        items.forEach(item => tx.objectStore(storeName).put(item));
+    const runSection = async (
+        label: string,
+        present: boolean,
+        work: () => Promise<void>,
+        itemTotal?: number,
+        storeName?: string,
+    ) => {
+        if (!present) return;
+        report(label, 'start', 0, itemTotal, storeName);
+        await work();
+        sectionDone += 1;
+        report(label, 'done', itemTotal, itemTotal, storeName);
+        await waitForBrowserTurn(yieldMs);
     };
 
-    const replaceStore = (storeName: string, items: any[]) => {
-        if (!availableStores.includes(storeName) || !Array.isArray(items)) return;
-        const store = tx.objectStore(storeName);
-        store.clear();
-        items.forEach(item => store.put(item));
+    const withStore = async (storeName: string, writer: (store: IDBObjectStore) => void): Promise<void> => {
+        if (!hasStore(storeName)) return;
+        const tx = db.transaction(storeName, 'readwrite');
+        try {
+            writer(tx.objectStore(storeName));
+        } catch (error) {
+            try { tx.abort(); } catch { /* ignore */ }
+            throw error;
+        }
+        await waitForTransaction(tx);
     };
 
-    if (data.characters) {
-        if (data.mediaAssets) {
-            data.characters = data.characters.map(c => {
-                const media = data.mediaAssets?.find(m => m.charId === c.id);
-                if (media) {
-                    return {
-                        ...c,
-                        avatar: media.avatar || c.avatar,
-                        sprites: media.sprites || c.sprites,
-                        chatBackground: media.backgrounds?.chat || c.chatBackground,
-                        dateBackground: media.backgrounds?.date || c.dateBackground,
-                        roomConfig: c.roomConfig ? {
-                            ...c.roomConfig,
-                            wallImage: media.backgrounds?.roomWall || c.roomConfig.wallImage,
-                            floorImage: media.backgrounds?.roomFloor || c.roomConfig.floorImage,
-                            items: c.roomConfig.items.map(item => {
-                                const img = media.roomItems?.[item.id];
-                                return img ? { ...item, image: img } : item;
-                            })
-                        } : c.roomConfig
-                    } as CharacterProfile;
-                }
-                return c;
-            });
-        }
-        clearAndAdd(STORE_CHARACTERS, data.characters);
-    } else if (data.mediaAssets && availableStores.includes(STORE_CHARACTERS)) {
-        const charStore = tx.objectStore(STORE_CHARACTERS);
-        const request = charStore.getAll();
-        request.onsuccess = () => {
-            const existingChars = request.result as CharacterProfile[];
-            if (existingChars && existingChars.length > 0) {
-                const updatedChars = existingChars.map(c => {
-                    const media = data.mediaAssets?.find(m => m.charId === c.id);
-                    if (media) {
-                        return {
-                            ...c,
-                            avatar: media.avatar || c.avatar,
-                            sprites: media.sprites || c.sprites,
-                            chatBackground: media.backgrounds?.chat || c.chatBackground,
-                            dateBackground: media.backgrounds?.date || c.dateBackground,
-                            roomConfig: c.roomConfig ? {
-                                ...c.roomConfig,
-                                wallImage: media.backgrounds?.roomWall || c.roomConfig.wallImage,
-                                floorImage: media.backgrounds?.roomFloor || c.roomConfig.floorImage,
-                                items: c.roomConfig.items.map(item => {
-                                    const img = media.roomItems?.[item.id];
-                                    return img ? { ...item, image: img } : item;
-                                })
-                            } : c.roomConfig
-                        } as CharacterProfile;
-                    }
-                    return c;
-                });
-                updatedChars.forEach(c => charStore.put(c));
-            }
-        };
-    }
+    const getAllFromStore = async <T,>(storeName: string): Promise<T[]> => {
+        if (!hasStore(storeName)) return [];
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(storeName, 'readonly');
+            const req = tx.objectStore(storeName).getAll();
+            req.onsuccess = () => resolve(req.result as T[] || []);
+            req.onerror = () => reject(req.error || tx.error);
+            tx.onerror = () => reject(tx.error || new Error('IndexedDB read failed'));
+            tx.onabort = () => reject(tx.error || new Error('IndexedDB read aborted'));
+        });
+    };
 
-    if (data.messages) {
-        if (availableStores.includes(STORE_MESSAGES) && data.messages.length > 0) {
-            const store = tx.objectStore(STORE_MESSAGES);
-            if (data.characters) store.clear();
-            data.messages
-                .filter(m => Boolean(m) && typeof m === 'object')
-                .forEach(m => store.put(m));
-        }
-    }
-
-    if (data.customThemes) mergeStore(STORE_THEMES, data.customThemes);
-    if (data.savedEmojis) mergeStore(STORE_EMOJIS, data.savedEmojis);
-    if (data.emojiCategories) mergeStore(STORE_EMOJI_CATEGORIES, data.emojiCategories);
-    if (data.assets) mergeStore(STORE_ASSETS, data.assets);
-    if (data.savedJournalStickers) mergeStore(STORE_JOURNAL_STICKERS, data.savedJournalStickers);
-
-    if (data.galleryImages) clearAndAdd(STORE_GALLERY, data.galleryImages);
-    if (data.diaries) clearAndAdd(STORE_DIARIES, data.diaries);
-    if (data.tasks) clearAndAdd(STORE_TASKS, data.tasks);
-    if (data.anniversaries) clearAndAdd(STORE_ANNIVERSARIES, data.anniversaries);
-    if (data.roomTodos) clearAndAdd(STORE_ROOM_TODOS, data.roomTodos);
-    if (data.roomNotes) clearAndAdd(STORE_ROOM_NOTES, data.roomNotes);
-    if (data.groups) clearAndAdd(STORE_GROUPS, data.groups);
-    if (data.socialPosts) clearAndAdd(STORE_SOCIAL_POSTS, data.socialPosts);
-    if (data.courses) clearAndAdd(STORE_COURSES, data.courses);
-    if (data.games) clearAndAdd(STORE_GAMES, data.games);
-    if (data.worldbooks) clearAndAdd(STORE_WORLDBOOKS, data.worldbooks);
-    if (data.novels) clearAndAdd(STORE_NOVELS, data.novels);
-    if (data.bankTransactions) clearAndAdd(STORE_BANK_TX, data.bankTransactions);
-    if (data.xhsActivities) clearAndAdd(STORE_XHS_ACTIVITIES, data.xhsActivities);
-    if (data.xhsStockImages) clearAndAdd(STORE_XHS_STOCK, data.xhsStockImages);
-    if (data.vectorMemories) {
-        clearAndAdd(STORE_VECTOR_MEMORIES, data.vectorMemories);
-    } else if (data.characters) {
-        if (availableStores.includes(STORE_VECTOR_MEMORIES)) {
-            tx.objectStore(STORE_VECTOR_MEMORIES).clear();
-        }
-    }
-    if (data.memoryRecords) {
-        clearAndAdd(STORE_MEMORY_RECORDS, data.memoryRecords);
-    } else if (data.characters) {
-        if (availableStores.includes(STORE_MEMORY_RECORDS)) {
-            tx.objectStore(STORE_MEMORY_RECORDS).clear();
-        }
-    }
-    if (importedMemoryRecordAudio.length > 0) clearAndAdd(STORE_MEMORY_RECORD_AUDIO, importedMemoryRecordAudio);
-    if (Array.isArray(data.voiceAudio)) replaceStore(STORE_VOICE_AUDIO, importedVoiceAudio);
-    if (Array.isArray(data.yesterdayNewspapers)) replaceStore(STORE_YESTERDAY_NEWSPAPERS, data.yesterdayNewspapers);
-    if (Array.isArray(data.vibeReferences)) replaceStore(STORE_VIBE_REFERENCES, data.vibeReferences);
-    if (Array.isArray(data.nianNianSessions)) replaceStore(STORE_NIANNIAN_SESSIONS, data.nianNianSessions);
-    if (Array.isArray(data.collectionBooks)) replaceStore(STORE_COLLECTION_BOOKS, data.collectionBooks);
-    if (Array.isArray(data.collectionWalls)) replaceStore(STORE_COLLECTION_WALLS, data.collectionWalls);
-    if (Array.isArray(data.collectionWallItems)) replaceStore(STORE_COLLECTION_WALL_ITEMS, data.collectionWallItems);
-    if (Array.isArray(data.collectionWallAssets)) replaceStore(STORE_COLLECTION_WALL_ASSETS, importedCollectionWallAssets);
-    if (data.scheduledMessages) clearAndAdd(STORE_SCHEDULED, data.scheduledMessages);
-    if (data.letters) clearAndAdd(STORE_LETTERS, data.letters);
-
-    if (data.userProfile) {
-        if (availableStores.includes(STORE_USER)) {
-            const store = tx.objectStore(STORE_USER);
+    const clearStore = async (storeName: string): Promise<void> => {
+        await withStore(storeName, store => {
             store.clear();
-            store.put({ ...data.userProfile, id: 'me' });
-        }
-    }
+        });
+        await waitForBrowserTurn(yieldMs);
+    };
 
-    if (data.bankState || data.bankDollhouse) {
-        if (availableStores.includes(STORE_BANK_DATA)) {
-            const store = tx.objectStore(STORE_BANK_DATA);
+    const putItems = async (
+        storeName: string,
+        items: any[] | undefined | null,
+        label: string,
+    ): Promise<void> => {
+        if (!hasStore(storeName) || !Array.isArray(items) || items.length === 0) return;
+
+        const total = items.length;
+        for (let i = 0; i < total; i += batchSize) {
+            const end = Math.min(i + batchSize, total);
+            const chunk = items.slice(i, end).filter(item => item && typeof item === 'object');
+            if (chunk.length > 0) {
+                await withStore(storeName, store => {
+                    chunk.forEach(item => store.put(item));
+                });
+            }
+            for (let j = i; j < end; j++) {
+                items[j] = undefined;
+            }
+            report(label, 'items', end, total, storeName);
+            await waitForBrowserTurn(yieldMs);
+        }
+    };
+
+    const clearAndAdd = async (
+        storeName: string,
+        items: any[] | undefined | null,
+        label: string,
+    ): Promise<void> => {
+        if (!hasStore(storeName) || items === undefined || items === null) return;
+        await clearStore(storeName);
+        await putItems(storeName, items, label);
+    };
+
+    const mergeStore = async (
+        storeName: string,
+        items: any[] | undefined | null,
+        label: string,
+    ): Promise<void> => {
+        if (!hasStore(storeName) || !Array.isArray(items) || items.length === 0) return;
+        await putItems(storeName, items, label);
+    };
+
+    const applyMediaToChar = (
+        character: CharacterProfile,
+        mediaByCharId: Map<string, NonNullable<FullBackupData['mediaAssets']>[number]>,
+    ): CharacterProfile => {
+        const media = mediaByCharId.get(character.id);
+        if (!media) return character;
+        return {
+            ...character,
+            avatar: media.avatar || character.avatar,
+            sprites: media.sprites || character.sprites,
+            chatBackground: media.backgrounds?.chat || character.chatBackground,
+            dateBackground: media.backgrounds?.date || character.dateBackground,
+            roomConfig: character.roomConfig ? {
+                ...character.roomConfig,
+                wallImage: media.backgrounds?.roomWall || character.roomConfig.wallImage,
+                floorImage: media.backgrounds?.roomFloor || character.roomConfig.floorImage,
+                items: character.roomConfig.items.map(item => {
+                    const img = media.roomItems?.[item.id];
+                    return img ? { ...item, image: img } : item;
+                })
+            } : character.roomConfig
+        } as CharacterProfile;
+    };
+
+    const hasCharacterBackup = Array.isArray(data.characters);
+
+    await runSection('角色资料', data.characters !== undefined || data.mediaAssets !== undefined, async () => {
+        if (data.characters) {
+            if (data.mediaAssets) {
+                const mediaByCharId = new Map(data.mediaAssets.map(media => [media.charId, media]));
+                data.characters = data.characters.map(character => applyMediaToChar(character, mediaByCharId));
+            }
+            await clearAndAdd(STORE_CHARACTERS, data.characters, '角色资料');
+        } else if (data.mediaAssets && hasStore(STORE_CHARACTERS)) {
+            const mediaByCharId = new Map(data.mediaAssets.map(media => [media.charId, media]));
+            const existingChars = await getAllFromStore<CharacterProfile>(STORE_CHARACTERS);
+            if (existingChars.length > 0) {
+                const updatedChars = existingChars.map(character => applyMediaToChar(character, mediaByCharId));
+                await putItems(STORE_CHARACTERS, updatedChars, '角色资料');
+            }
+        }
+        data.characters = undefined as any;
+        data.mediaAssets = undefined as any;
+    }, data.characters?.length || data.mediaAssets?.length || 0, STORE_CHARACTERS);
+
+    await runSection('聊天记录', data.messages !== undefined, async () => {
+        if (!hasStore(STORE_MESSAGES)) return;
+        if (hasCharacterBackup) {
+            await clearStore(STORE_MESSAGES);
+        }
+        await putItems(STORE_MESSAGES, data.messages || [], '聊天记录');
+        data.messages = undefined as any;
+    }, data.messages?.length || 0, STORE_MESSAGES);
+
+    await runSection('聊天主题', data.customThemes !== undefined, async () => {
+        await mergeStore(STORE_THEMES, data.customThemes, '聊天主题');
+        data.customThemes = undefined as any;
+    }, data.customThemes?.length || 0, STORE_THEMES);
+    await runSection('表情包', data.savedEmojis !== undefined, async () => {
+        await mergeStore(STORE_EMOJIS, data.savedEmojis, '表情包');
+        data.savedEmojis = undefined as any;
+    }, data.savedEmojis?.length || 0, STORE_EMOJIS);
+    await runSection('表情分类', data.emojiCategories !== undefined, async () => {
+        await mergeStore(STORE_EMOJI_CATEGORIES, data.emojiCategories, '表情分类');
+        data.emojiCategories = undefined as any;
+    }, data.emojiCategories?.length || 0, STORE_EMOJI_CATEGORIES);
+    await runSection('系统资源', data.assets !== undefined, async () => {
+        await mergeStore(STORE_ASSETS, data.assets, '系统资源');
+        data.assets = undefined as any;
+    }, data.assets?.length || 0, STORE_ASSETS);
+    await runSection('日记贴纸', data.savedJournalStickers !== undefined, async () => {
+        await mergeStore(STORE_JOURNAL_STICKERS, data.savedJournalStickers, '日记贴纸');
+        data.savedJournalStickers = undefined as any;
+    }, data.savedJournalStickers?.length || 0, STORE_JOURNAL_STICKERS);
+
+    await runSection('相册图片', data.galleryImages !== undefined, async () => {
+        await clearAndAdd(STORE_GALLERY, data.galleryImages, '相册图片');
+        data.galleryImages = undefined as any;
+    }, data.galleryImages?.length || 0, STORE_GALLERY);
+    await runSection('日记', data.diaries !== undefined, async () => {
+        await clearAndAdd(STORE_DIARIES, data.diaries, '日记');
+        data.diaries = undefined as any;
+    }, data.diaries?.length || 0, STORE_DIARIES);
+    await runSection('任务', data.tasks !== undefined, async () => {
+        await clearAndAdd(STORE_TASKS, data.tasks, '任务');
+        data.tasks = undefined as any;
+    }, data.tasks?.length || 0, STORE_TASKS);
+    await runSection('纪念日', data.anniversaries !== undefined, async () => {
+        await clearAndAdd(STORE_ANNIVERSARIES, data.anniversaries, '纪念日');
+        data.anniversaries = undefined as any;
+    }, data.anniversaries?.length || 0, STORE_ANNIVERSARIES);
+    await runSection('房间待办', data.roomTodos !== undefined, async () => {
+        await clearAndAdd(STORE_ROOM_TODOS, data.roomTodos, '房间待办');
+        data.roomTodos = undefined as any;
+    }, data.roomTodos?.length || 0, STORE_ROOM_TODOS);
+    await runSection('房间便签', data.roomNotes !== undefined, async () => {
+        await clearAndAdd(STORE_ROOM_NOTES, data.roomNotes, '房间便签');
+        data.roomNotes = undefined as any;
+    }, data.roomNotes?.length || 0, STORE_ROOM_NOTES);
+    await runSection('群聊资料', data.groups !== undefined, async () => {
+        await clearAndAdd(STORE_GROUPS, data.groups, '群聊资料');
+        data.groups = undefined as any;
+    }, data.groups?.length || 0, STORE_GROUPS);
+    await runSection('动态帖子', data.socialPosts !== undefined, async () => {
+        await clearAndAdd(STORE_SOCIAL_POSTS, data.socialPosts, '动态帖子');
+        data.socialPosts = undefined as any;
+    }, data.socialPosts?.length || 0, STORE_SOCIAL_POSTS);
+    await runSection('学习课程', data.courses !== undefined, async () => {
+        await clearAndAdd(STORE_COURSES, data.courses, '学习课程');
+        data.courses = undefined as any;
+    }, data.courses?.length || 0, STORE_COURSES);
+    await runSection('游戏记录', data.games !== undefined, async () => {
+        await clearAndAdd(STORE_GAMES, data.games, '游戏记录');
+        data.games = undefined as any;
+    }, data.games?.length || 0, STORE_GAMES);
+    await runSection('世界书', data.worldbooks !== undefined, async () => {
+        await clearAndAdd(STORE_WORLDBOOKS, data.worldbooks, '世界书');
+        data.worldbooks = undefined as any;
+    }, data.worldbooks?.length || 0, STORE_WORLDBOOKS);
+    await runSection('小说', data.novels !== undefined, async () => {
+        await clearAndAdd(STORE_NOVELS, data.novels, '小说');
+        data.novels = undefined as any;
+    }, data.novels?.length || 0, STORE_NOVELS);
+    await runSection('银行流水', data.bankTransactions !== undefined, async () => {
+        await clearAndAdd(STORE_BANK_TX, data.bankTransactions, '银行流水');
+        data.bankTransactions = undefined as any;
+    }, data.bankTransactions?.length || 0, STORE_BANK_TX);
+    await runSection('小红书活动', data.xhsActivities !== undefined, async () => {
+        await clearAndAdd(STORE_XHS_ACTIVITIES, data.xhsActivities, '小红书活动');
+        data.xhsActivities = undefined as any;
+    }, data.xhsActivities?.length || 0, STORE_XHS_ACTIVITIES);
+    await runSection('小红书图库', data.xhsStockImages !== undefined, async () => {
+        await clearAndAdd(STORE_XHS_STOCK, data.xhsStockImages, '小红书图库');
+        data.xhsStockImages = undefined as any;
+    }, data.xhsStockImages?.length || 0, STORE_XHS_STOCK);
+
+    await runSection('向量记忆', data.vectorMemories !== undefined || hasCharacterBackup, async () => {
+        if (data.vectorMemories) {
+            await clearAndAdd(STORE_VECTOR_MEMORIES, data.vectorMemories, '向量记忆');
+        } else if (hasCharacterBackup) {
+            await clearStore(STORE_VECTOR_MEMORIES);
+        }
+        data.vectorMemories = undefined as any;
+    }, data.vectorMemories?.length || 0, STORE_VECTOR_MEMORIES);
+    await runSection('记忆记录', data.memoryRecords !== undefined || hasCharacterBackup, async () => {
+        if (data.memoryRecords) {
+            await clearAndAdd(STORE_MEMORY_RECORDS, data.memoryRecords, '记忆记录');
+        } else if (hasCharacterBackup) {
+            await clearStore(STORE_MEMORY_RECORDS);
+        }
+        data.memoryRecords = undefined as any;
+    }, data.memoryRecords?.length || 0, STORE_MEMORY_RECORDS);
+    await runSection('记忆音频', data.memoryRecordAudio !== undefined, async () => {
+        await clearAndAdd(STORE_MEMORY_RECORD_AUDIO, importedMemoryRecordAudio, '记忆音频');
+        data.memoryRecordAudio = undefined as any;
+        importedMemoryRecordAudio.length = 0;
+    }, importedMemoryRecordAudio.length, STORE_MEMORY_RECORD_AUDIO);
+    await runSection('语音消息音频', data.voiceAudio !== undefined, async () => {
+        await clearAndAdd(STORE_VOICE_AUDIO, importedVoiceAudio, '语音消息音频');
+        data.voiceAudio = undefined as any;
+        importedVoiceAudio.length = 0;
+    }, importedVoiceAudio.length, STORE_VOICE_AUDIO);
+    await runSection('昨日小报', data.yesterdayNewspapers !== undefined, async () => {
+        await clearAndAdd(STORE_YESTERDAY_NEWSPAPERS, data.yesterdayNewspapers, '昨日小报');
+        data.yesterdayNewspapers = undefined as any;
+    }, data.yesterdayNewspapers?.length || 0, STORE_YESTERDAY_NEWSPAPERS);
+    await runSection('Vibe 参考图', data.vibeReferences !== undefined, async () => {
+        await clearAndAdd(STORE_VIBE_REFERENCES, data.vibeReferences, 'Vibe 参考图');
+        data.vibeReferences = undefined as any;
+    }, data.vibeReferences?.length || 0, STORE_VIBE_REFERENCES);
+    await runSection('念念浮生', data.nianNianSessions !== undefined, async () => {
+        await clearAndAdd(STORE_NIANNIAN_SESSIONS, data.nianNianSessions, '念念浮生');
+        data.nianNianSessions = undefined as any;
+    }, data.nianNianSessions?.length || 0, STORE_NIANNIAN_SESSIONS);
+    await runSection('典藏书籍', data.collectionBooks !== undefined, async () => {
+        await clearAndAdd(STORE_COLLECTION_BOOKS, data.collectionBooks, '典藏书籍');
+        data.collectionBooks = undefined as any;
+    }, data.collectionBooks?.length || 0, STORE_COLLECTION_BOOKS);
+    await runSection('典藏墙', data.collectionWalls !== undefined, async () => {
+        await clearAndAdd(STORE_COLLECTION_WALLS, data.collectionWalls, '典藏墙');
+        data.collectionWalls = undefined as any;
+    }, data.collectionWalls?.length || 0, STORE_COLLECTION_WALLS);
+    await runSection('典藏墙项目', data.collectionWallItems !== undefined, async () => {
+        await clearAndAdd(STORE_COLLECTION_WALL_ITEMS, data.collectionWallItems, '典藏墙项目');
+        data.collectionWallItems = undefined as any;
+    }, data.collectionWallItems?.length || 0, STORE_COLLECTION_WALL_ITEMS);
+    await runSection('典藏墙素材', data.collectionWallAssets !== undefined, async () => {
+        await clearAndAdd(STORE_COLLECTION_WALL_ASSETS, importedCollectionWallAssets, '典藏墙素材');
+        data.collectionWallAssets = undefined as any;
+        importedCollectionWallAssets.length = 0;
+    }, importedCollectionWallAssets.length, STORE_COLLECTION_WALL_ASSETS);
+    await runSection('定时消息', data.scheduledMessages !== undefined, async () => {
+        await clearAndAdd(STORE_SCHEDULED, data.scheduledMessages, '定时消息');
+        data.scheduledMessages = undefined as any;
+    }, data.scheduledMessages?.length || 0, STORE_SCHEDULED);
+    await runSection('信件', data.letters !== undefined, async () => {
+        await clearAndAdd(STORE_LETTERS, data.letters, '信件');
+        data.letters = undefined as any;
+    }, data.letters?.length || 0, STORE_LETTERS);
+
+    await runSection('用户资料', data.userProfile !== undefined, async () => {
+        if (!hasStore(STORE_USER)) return;
+        await withStore(STORE_USER, store => {
+            store.clear();
+            if (data.userProfile) store.put({ ...data.userProfile, id: 'me' });
+        });
+    }, data.userProfile ? 1 : 0, STORE_USER);
+
+    await runSection('银行状态', data.bankState !== undefined || data.bankDollhouse !== undefined, async () => {
+        if (!hasStore(STORE_BANK_DATA)) return;
+        await withStore(STORE_BANK_DATA, store => {
             store.clear();
             if (data.bankState) store.put({ ...data.bankState, id: 'main_state' });
             if (data.bankDollhouse) store.put({ id: 'dollhouse_state', data: data.bankDollhouse });
-        }
-    }
-
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+        });
+        data.bankState = undefined as any;
+        data.bankDollhouse = undefined as any;
+    }, (data.bankState ? 1 : 0) + (data.bankDollhouse ? 1 : 0), STORE_BANK_DATA);
 };

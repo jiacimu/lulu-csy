@@ -1,10 +1,13 @@
 import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import {
   attemptChunkAutoReload,
+  getRuntimeRecoveryDiagnostics,
   isChunkLoadError,
   probeForUpdatedBuild,
   resetRuntimeRecoveryStateForTests,
+  resumeAutoReload,
   shouldRefreshForBuild,
+  suspendAutoReload,
 } from '../utils/runtimeRecovery';
 
 describe('runtimeRecovery', () => {
@@ -55,5 +58,28 @@ describe('runtimeRecovery', () => {
     await expect(probeForUpdatedBuild(fetchMock as any, reload)).resolves.toBe(true);
     vi.runAllTimers();
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('records changed builds without reloading while auto reload is suspended', async () => {
+    const reload = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ buildId: 'next-build', builtAt: '2026-04-07T00:00:00.000Z' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const token = suspendAutoReload('import-system-data');
+    await expect(probeForUpdatedBuild(fetchMock as any, reload)).resolves.toBe(false);
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(getRuntimeRecoveryDiagnostics()).toMatchObject({
+      buildProbePaused: true,
+      pendingBuildId: 'next-build',
+      autoReloadSuspendReason: 'import-system-data',
+    });
+
+    resumeAutoReload(token);
+    expect(getRuntimeRecoveryDiagnostics().buildProbePaused).toBe(false);
   });
 });
