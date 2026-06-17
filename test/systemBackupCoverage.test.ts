@@ -344,6 +344,40 @@ describe('system backup coverage', () => {
         expect(prompt).toContain('这段世界书正文必须进入模型上下文。');
     });
 
+    it('restores zip assets lazily during chunked DB import instead of before import starts', async () => {
+        const zip = new JSZip();
+        zip.file('assets/avatar.png', 'YXZhdGFy', { base64: true });
+        zip.file('data.json', JSON.stringify({
+            timestamp: Date.now(),
+            version: 1,
+            characters: [{
+                id: 'char-asset',
+                name: '素材角色',
+                avatar: 'assets/avatar.png',
+                description: '',
+                systemPrompt: '',
+                memories: [],
+            }],
+        }));
+        const backupBlob = await zip.generateAsync({ type: 'blob' });
+
+        const originalImportFullData = DB.importFullData;
+        const importSpy = vi.spyOn(DB, 'importFullData').mockImplementation(async (data: FullBackupData, options?: any) => {
+            expect(data.characters?.[0]?.avatar).toBe('assets/avatar.png');
+            expect(typeof options?.beforeWrite).toBe('function');
+            await originalImportFullData(data, { ...options, batchSize: 1 });
+        });
+
+        try {
+            await importWithoutReload(new File([backupBlob], 'lazy-assets.zip', { type: 'application/zip' }));
+        } finally {
+            importSpy.mockRestore();
+        }
+
+        const restoredChars = await DB.getAllCharacters();
+        expect(restoredChars[0].avatar).toBe('data:image/png;base64,YXZhdGFy');
+    });
+
     it('roundtrips image generation settings, saved image references, newspapers, and HalfSugar data', async () => {
         await DB.saveCharacter({
             id: 'char-a',

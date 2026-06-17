@@ -68,6 +68,8 @@ export interface ImportRecoveryMarker {
     storeName?: string;
     itemDone?: number;
     itemTotal?: number;
+    assetDone?: number;
+    assetTotal?: number;
     currentFile?: string;
     currentFileSize?: number;
     error?: string;
@@ -343,7 +345,21 @@ async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
 }
 
 function yieldToBrowser(ms = 0): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    if (ms > 0) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    if (typeof MessageChannel !== 'undefined') {
+        return new Promise(resolve => {
+            const channel = new MessageChannel();
+            channel.port1.onmessage = () => {
+                channel.port1.close();
+                channel.port2.close();
+                resolve();
+            };
+            channel.port2.postMessage(undefined);
+        });
+    }
+    return Promise.resolve();
 }
 
 function isBlobLike(value: unknown): value is Blob {
@@ -864,49 +880,104 @@ async function restoreMusicAssetsFromBackup(musicAssets?: BackupMusicAssets): Pr
     );
 }
 
-/** Restore ZIP asset references back to base64 data URIs */
-async function restoreAssetsFromZip(obj: any, zip: JSZipLike | null): Promise<any> {
-    if (obj === null || typeof obj !== 'object') return obj;
+type RestoreAssetsProgress = {
+    label: string;
+    currentFile?: string;
+    currentFileSize?: number;
+    assetDone: number;
+    assetTotal?: number;
+    itemDone?: number;
+    itemTotal?: number;
+    storeName?: string;
+};
+
+function countZipAssetFiles(zip: JSZipLike | null): number {
+    if (!zip) return 0;
+    const files = Object.values((zip as any).files || {}) as Array<{ dir?: boolean; name?: string }>;
+    return files.filter(file => file && !file.dir && typeof file.name === 'string' && file.name.startsWith('assets/')).length;
+}
+
+function getZipEntrySize(fileInZip: any): number | undefined {
+    return fileInZip?._data?.uncompressedSize || fileInZip?._data?.compressedSize;
+}
+
+async function restoreAssetsFromZipInPlace(
+    obj: any,
+    zip: JSZipLike | null,
+    options: {
+        label: string;
+        assetDone: () => number;
+        markAssetDone: (filename: string) => number;
+        assetTotal?: number;
+        itemDone?: number;
+        itemTotal?: number;
+        storeName?: string;
+        onProgress?: (progress: RestoreAssetsProgress) => void;
+    },
+    batchCache = new Map<string, string>(),
+): Promise<void> {
+    if (!zip || obj === null || typeof obj !== 'object') return;
 
     if (Array.isArray(obj)) {
-        const arr = [];
-        let index = 0;
-        for (const item of obj) {
-            arr.push(await restoreAssetsFromZip(item, zip));
-            index += 1;
-            if (index % 50 === 0) await yieldToBrowser();
+        for (let index = 0; index < obj.length; index += 1) {
+            await restoreAssetsFromZipInPlace(obj[index], zip, options, batchCache);
+            if ((index + 1) % 25 === 0) await yieldToBrowser();
         }
-        return arr;
+        return;
     }
 
-    const newObj: any = {};
     let fieldCount = 0;
     for (const key in obj) {
-        if (Object.prototype.hasOwnProperty.call(obj, key)) {
-            let value = obj[key];
-            if (typeof value === 'string' && value.startsWith('assets/') && zip) {
-                try {
-                    const filename = value.split('/')[1];
-                    const fileInZip = zip.file(`assets/${filename}`);
+        if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+
+        const value = obj[key];
+        if (typeof value === 'string' && value.startsWith('assets/')) {
+            const filename = value.replace(/^assets\//, '');
+            try {
+                let dataUri = batchCache.get(filename);
+                if (!dataUri) {
+                    const fileInZip = zip.file(`assets/${filename}`) || zip.file(value);
                     if (fileInZip) {
+                        const hintedSize = getZipEntrySize(fileInZip);
+                        options.onProgress?.({
+                            label: options.label,
+                            currentFile: filename,
+                            currentFileSize: hintedSize,
+                            assetDone: options.assetDone(),
+                            assetTotal: options.assetTotal,
+                            itemDone: options.itemDone,
+                            itemTotal: options.itemTotal,
+                            storeName: options.storeName,
+                        });
                         const base64 = await (fileInZip as any).async("base64");
                         const ext = filename.split('.').pop() || 'png';
                         const mime = assetExtensionToMime(ext);
-
-                        value = `data:${mime};base64,${base64}`;
+                        dataUri = `data:${mime};base64,${base64}`;
+                        batchCache.set(filename, dataUri);
+                        const done = options.markAssetDone(filename);
+                        options.onProgress?.({
+                            label: options.label,
+                            currentFile: filename,
+                            currentFileSize: Math.max(0, Math.floor(base64.length * 3 / 4)),
+                            assetDone: done,
+                            assetTotal: options.assetTotal,
+                            itemDone: options.itemDone,
+                            itemTotal: options.itemTotal,
+                            storeName: options.storeName,
+                        });
                     }
-                } catch (e) {
-                    console.warn(`Failed to restore asset: ${value}`);
                 }
-            } else {
-                value = await restoreAssetsFromZip(value, zip);
+                if (dataUri) obj[key] = dataUri;
+            } catch {
+                console.warn(`Failed to restore asset: ${value}`);
             }
-            newObj[key] = value;
-            fieldCount += 1;
-            if (fieldCount % 50 === 0) await yieldToBrowser();
+        } else if (value && typeof value === 'object') {
+            await restoreAssetsFromZipInPlace(value, zip, options, batchCache);
         }
+
+        fieldCount += 1;
+        if (fieldCount % 25 === 0) await yieldToBrowser();
     }
-    return newObj;
 }
 
 // ─── Store Definitions ──────────────────────────────────────────────────
@@ -1533,6 +1604,9 @@ export async function importSystemData(
     const autoReloadToken = suspendAutoReload('import-system-data');
     const sourceName = typeof fileOrJson === 'string' ? 'JSON 文本' : fileOrJson.name;
     const sourceSize = typeof fileOrJson === 'string' ? undefined : fileOrJson.size;
+    let zip: JSZipLike | null = null;
+    let totalAssetFiles = 0;
+    const restoredAssetFiles = new Set<string>();
     const reportImportProgress = (
         phase: ImportRecoveryPhase,
         message: string,
@@ -1546,15 +1620,81 @@ export async function importSystemData(
             importItemDone: update.itemDone ?? null,
             importItemTotal: update.itemTotal ?? null,
             importStoreName: update.storeName ?? null,
+            importCurrentFile: update.currentFile ?? null,
+            importCurrentFileSize: update.currentFileSize ?? null,
+            importAssetDone: update.assetDone ?? null,
+            importAssetTotal: update.assetTotal ?? null,
             buildProbePaused: true,
         });
         onProgress(message, progress);
     };
 
+    const restoreBackupAssets = async (
+        root: any,
+        label: string,
+        progress: { itemDone?: number; itemTotal?: number; storeName?: string } = {},
+    ): Promise<void> => {
+        if (!zip || root === undefined || root === null) return;
+
+        await restoreAssetsFromZipInPlace(root, zip, {
+            label,
+            assetDone: () => restoredAssetFiles.size,
+            markAssetDone: filename => {
+                restoredAssetFiles.add(filename);
+                return restoredAssetFiles.size;
+            },
+            assetTotal: totalAssetFiles || undefined,
+            itemDone: progress.itemDone,
+            itemTotal: progress.itemTotal,
+            storeName: progress.storeName,
+            onProgress: assetProgress => {
+                const ratio = assetProgress.assetTotal
+                    ? assetProgress.assetDone / Math.max(1, assetProgress.assetTotal)
+                    : 0;
+                const assetPhaseProgress = 50 + Math.floor(Math.min(1, ratio) * 14);
+                reportImportProgress(
+                    'assets',
+                    `正在恢复备份素材：${assetProgress.label}`,
+                    assetPhaseProgress,
+                    {
+                        current: assetProgress.label,
+                        currentFile: assetProgress.currentFile,
+                        currentFileSize: assetProgress.currentFileSize,
+                        assetDone: assetProgress.assetDone,
+                        assetTotal: assetProgress.assetTotal,
+                        itemDone: assetProgress.itemDone,
+                        itemTotal: assetProgress.itemTotal,
+                        storeName: assetProgress.storeName,
+                    },
+                );
+            },
+        });
+    };
+
+    const restoreBackupAssetsInSmallBatches = async (root: any, label: string): Promise<void> => {
+        if (!Array.isArray(root)) {
+            await restoreBackupAssets(root, label);
+            return;
+        }
+
+        const batchSize = 50;
+        const total = root.length;
+        for (let i = 0; i < total; i += batchSize) {
+            const end = Math.min(i + batchSize, total);
+            const chunk = root.slice(i, end).filter(item => item && typeof item === 'object');
+            if (chunk.length > 0) {
+                await restoreBackupAssets(chunk, label, {
+                    itemDone: end,
+                    itemTotal: total,
+                });
+            }
+            await yieldToBrowser();
+        }
+    };
+
     try {
         reportImportProgress('parsing', '正在解析备份文件...', 0);
         let data: FullBackupData;
-        let zip: JSZipLike | null = null;
 
         if (typeof fileOrJson === 'string') {
             data = JSON.parse(fileOrJson);
@@ -1566,6 +1706,7 @@ export async function importSystemData(
             const JSZip = await loadJSZip();
             const loadedZip = await JSZip.loadAsync(fileOrJson);
             zip = loadedZip;
+            totalAssetFiles = countZipAssetFiles(loadedZip);
             const dataFile = loadedZip.file("data.json");
             if (!dataFile) throw new Error("损坏的备份包: 缺少 data.json");
             let jsonStr = await dataFile.async("string");
@@ -1574,18 +1715,16 @@ export async function importSystemData(
             await yieldToBrowser();
         }
 
-        reportImportProgress('assets', '正在恢复数据与素材...', 50);
-
-        if (zip) {
-            data = await restoreAssetsFromZip(data, zip);
-            zip = null;
-            await yieldToBrowser();
-        }
+        reportImportProgress('assets', '准备按批恢复备份素材...', 50, {
+            assetDone: restoredAssetFiles.size,
+            assetTotal: totalAssetFiles || undefined,
+        });
 
         data = stripImportedDeviceIdentity(data);
 
         reportImportProgress('database', '正在写入本地数据库...', 64);
         await DB.importFullData(data, {
+            beforeWrite: restoreBackupAssets,
             onProgress: progress => {
                 const sectionRatio = progress.sectionTotal > 0
                     ? progress.sectionDone / progress.sectionTotal
@@ -1610,13 +1749,18 @@ export async function importSystemData(
                 );
             },
         });
+        await restoreBackupAssetsInSmallBatches(data.halfSugarData, '半糖数据');
         await restoreHalfSugarDataFromBackup(data.halfSugarData);
+        await restoreBackupAssetsInSmallBatches(data.theme, '系统主题');
         await restoreThemeAssetsFromBackup(data.theme);
+        await restoreBackupAssetsInSmallBatches(data.customIcons, '应用图标');
+        await restoreBackupAssetsInSmallBatches(data.appearancePresets, '外观预设');
         await restoreAssetBackedAppearanceFields(data);
 
         if (data.musicAssets) {
             try {
                 reportImportProgress('assets', '正在恢复音乐素材...', 80);
+                await restoreBackupAssetsInSmallBatches(data.musicAssets, '音乐素材');
                 await restoreMusicAssetsFromBackup(data.musicAssets);
             } catch (e: any) {
                 console.warn('📦 [Import] Music assets restore failed (non-critical):', e.message);
@@ -1663,6 +1807,7 @@ export async function importSystemData(
         if (data.photoStylePresets) localStorage.setItem(PHOTO_STYLE_PRESETS_KEY, JSON.stringify(data.photoStylePresets));
 
         if (data.socialAppData) {
+            await restoreBackupAssetsInSmallBatches(data.socialAppData, '动态设置');
             if (data.socialAppData.charHandles) await saveSparkCharHandles(data.socialAppData.charHandles);
             if (data.socialAppData.userId) localStorage.setItem('spark_user_id', data.socialAppData.userId);
             if (data.socialAppData.userProfile) await DB.saveAsset('spark_social_profile', JSON.stringify(data.socialAppData.userProfile));
@@ -1670,6 +1815,7 @@ export async function importSystemData(
         }
 
         if (data.roomCustomAssets) {
+            await restoreBackupAssetsInSmallBatches(data.roomCustomAssets, '房间自定义素材');
             await DB.saveAsset('room_custom_assets_list', JSON.stringify(data.roomCustomAssets));
         }
 
@@ -1708,12 +1854,17 @@ export async function importSystemData(
         }
 
         clearImportRecoveryMarker();
+        zip = null;
         runtimeHealthProbe.reportCustom({
             importPhase: null,
             importCurrent: null,
             importItemDone: null,
             importItemTotal: null,
             importStoreName: null,
+            importCurrentFile: null,
+            importCurrentFileSize: null,
+            importAssetDone: null,
+            importAssetTotal: null,
         });
         callbacks.addToast('恢复成功，系统即将重启...', 'success');
         setTimeout(() => window.location.reload(), 1500);

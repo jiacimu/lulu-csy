@@ -283,6 +283,11 @@ export type ImportFullDataProgress = {
 };
 
 export type ImportFullDataOptions = {
+    beforeWrite?: (
+        root: any,
+        label: string,
+        progress?: Pick<ImportFullDataProgress, 'itemDone' | 'itemTotal' | 'storeName'>,
+    ) => Promise<void>;
     onProgress?: (progress: ImportFullDataProgress) => void;
     batchSize?: number;
     yieldMs?: number;
@@ -290,9 +295,23 @@ export type ImportFullDataOptions = {
 
 const DEFAULT_IMPORT_BATCH_SIZE = 50;
 
-const waitForBrowserTurn = (ms = 0): Promise<void> => (
-    new Promise(resolve => setTimeout(resolve, ms))
-);
+const waitForBrowserTurn = (ms = 0): Promise<void> => {
+    if (ms > 0) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    if (typeof MessageChannel !== 'undefined') {
+        return new Promise(resolve => {
+            const channel = new MessageChannel();
+            channel.port1.onmessage = () => {
+                channel.port1.close();
+                channel.port2.close();
+                resolve();
+            };
+            channel.port2.postMessage(undefined);
+        });
+    }
+    return Promise.resolve();
+};
 
 const waitForTransaction = (tx: IDBTransaction): Promise<void> => (
     new Promise((resolve, reject) => {
@@ -309,12 +328,6 @@ export const importFullData = async (
     const db = await openDB();
     const batchSize = Math.max(1, Math.floor(options.batchSize || DEFAULT_IMPORT_BATCH_SIZE));
     const yieldMs = Math.max(0, Math.floor(options.yieldMs || 0));
-    const importedMemoryRecordAudio = await deserializeMemoryRecordAudio(data.memoryRecordAudio);
-    await waitForBrowserTurn(yieldMs);
-    const importedVoiceAudio = await deserializeVoiceAudio(data.voiceAudio);
-    await waitForBrowserTurn(yieldMs);
-    const importedCollectionWallAssets = await deserializeCollectionWallAssets(data.collectionWallAssets);
-    await waitForBrowserTurn(yieldMs);
     hydrateMountedWorldbooksFromBackupLibrary(data);
 
     const availableStores = [
@@ -443,6 +456,7 @@ export const importFullData = async (
         storeName: string,
         items: any[] | undefined | null,
         label: string,
+        transformChunk?: (chunk: any[]) => Promise<any[]>,
     ): Promise<void> => {
         if (!hasStore(storeName) || !Array.isArray(items) || items.length === 0) return;
 
@@ -451,9 +465,18 @@ export const importFullData = async (
             const end = Math.min(i + batchSize, total);
             const chunk = items.slice(i, end).filter(item => item && typeof item === 'object');
             if (chunk.length > 0) {
+                if (options.beforeWrite) {
+                    await options.beforeWrite(chunk, label, {
+                        itemDone: end,
+                        itemTotal: total,
+                        storeName,
+                    });
+                }
+                const itemsToWrite = transformChunk ? await transformChunk(chunk) : chunk;
                 await withStore(storeName, store => {
-                    chunk.forEach(item => store.put(item));
+                    itemsToWrite.forEach(item => store.put(item));
                 });
+                if (itemsToWrite !== chunk) itemsToWrite.length = 0;
             }
             for (let j = i; j < end; j++) {
                 items[j] = undefined;
@@ -635,15 +658,15 @@ export const importFullData = async (
         data.memoryRecords = undefined as any;
     }, data.memoryRecords?.length || 0, STORE_MEMORY_RECORDS);
     await runSection('记忆音频', data.memoryRecordAudio !== undefined, async () => {
-        await clearAndAdd(STORE_MEMORY_RECORD_AUDIO, importedMemoryRecordAudio, '记忆音频');
+        await clearStore(STORE_MEMORY_RECORD_AUDIO);
+        await putItems(STORE_MEMORY_RECORD_AUDIO, data.memoryRecordAudio, '记忆音频', deserializeMemoryRecordAudio);
         data.memoryRecordAudio = undefined as any;
-        importedMemoryRecordAudio.length = 0;
-    }, importedMemoryRecordAudio.length, STORE_MEMORY_RECORD_AUDIO);
+    }, data.memoryRecordAudio?.length || 0, STORE_MEMORY_RECORD_AUDIO);
     await runSection('语音消息音频', data.voiceAudio !== undefined, async () => {
-        await clearAndAdd(STORE_VOICE_AUDIO, importedVoiceAudio, '语音消息音频');
+        await clearStore(STORE_VOICE_AUDIO);
+        await putItems(STORE_VOICE_AUDIO, data.voiceAudio, '语音消息音频', deserializeVoiceAudio);
         data.voiceAudio = undefined as any;
-        importedVoiceAudio.length = 0;
-    }, importedVoiceAudio.length, STORE_VOICE_AUDIO);
+    }, data.voiceAudio?.length || 0, STORE_VOICE_AUDIO);
     await runSection('昨日小报', data.yesterdayNewspapers !== undefined, async () => {
         await clearAndAdd(STORE_YESTERDAY_NEWSPAPERS, data.yesterdayNewspapers, '昨日小报');
         data.yesterdayNewspapers = undefined as any;
@@ -669,10 +692,10 @@ export const importFullData = async (
         data.collectionWallItems = undefined as any;
     }, data.collectionWallItems?.length || 0, STORE_COLLECTION_WALL_ITEMS);
     await runSection('典藏墙素材', data.collectionWallAssets !== undefined, async () => {
-        await clearAndAdd(STORE_COLLECTION_WALL_ASSETS, importedCollectionWallAssets, '典藏墙素材');
+        await clearStore(STORE_COLLECTION_WALL_ASSETS);
+        await putItems(STORE_COLLECTION_WALL_ASSETS, data.collectionWallAssets, '典藏墙素材', deserializeCollectionWallAssets);
         data.collectionWallAssets = undefined as any;
-        importedCollectionWallAssets.length = 0;
-    }, importedCollectionWallAssets.length, STORE_COLLECTION_WALL_ASSETS);
+    }, data.collectionWallAssets?.length || 0, STORE_COLLECTION_WALL_ASSETS);
     await runSection('定时消息', data.scheduledMessages !== undefined, async () => {
         await clearAndAdd(STORE_SCHEDULED, data.scheduledMessages, '定时消息');
         data.scheduledMessages = undefined as any;
@@ -684,6 +707,13 @@ export const importFullData = async (
 
     await runSection('用户资料', data.userProfile !== undefined, async () => {
         if (!hasStore(STORE_USER)) return;
+        if (data.userProfile && options.beforeWrite) {
+            await options.beforeWrite(data.userProfile, '用户资料', {
+                itemDone: 1,
+                itemTotal: 1,
+                storeName: STORE_USER,
+            });
+        }
         await withStore(STORE_USER, store => {
             store.clear();
             if (data.userProfile) store.put({ ...data.userProfile, id: 'me' });
@@ -692,6 +722,13 @@ export const importFullData = async (
 
     await runSection('银行状态', data.bankState !== undefined || data.bankDollhouse !== undefined, async () => {
         if (!hasStore(STORE_BANK_DATA)) return;
+        if (options.beforeWrite) {
+            await options.beforeWrite([data.bankState, data.bankDollhouse], '银行状态', {
+                itemDone: (data.bankState ? 1 : 0) + (data.bankDollhouse ? 1 : 0),
+                itemTotal: (data.bankState ? 1 : 0) + (data.bankDollhouse ? 1 : 0),
+                storeName: STORE_BANK_DATA,
+            });
+        }
         await withStore(STORE_BANK_DATA, store => {
             store.clear();
             if (data.bankState) store.put({ ...data.bankState, id: 'main_state' });

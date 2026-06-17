@@ -268,6 +268,15 @@ const ImportRecoveryPopup: React.FC<{
           <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[12px] text-amber-700 leading-relaxed">
             <div>阶段：{getImportPhaseLabel(marker.phase)}</div>
             {marker.current && <div>进度：{marker.current}</div>}
+            {typeof marker.itemTotal === 'number' && marker.itemTotal > 0 && (
+              <div>条目：{marker.itemDone || 0}/{marker.itemTotal}</div>
+            )}
+            {typeof marker.assetTotal === 'number' && marker.assetTotal > 0 && (
+              <div>素材：{marker.assetDone || 0}/{marker.assetTotal}</div>
+            )}
+            {marker.currentFile && (
+              <div className="break-all">当前文件：{marker.currentFile}{formatImportBytes(marker.currentFileSize) ? ` · ${formatImportBytes(marker.currentFileSize)}` : ''}</div>
+            )}
             {startedAt && <div>开始：{startedAt}</div>}
             {updatedAt && <div>最后更新：{updatedAt}</div>}
             {marker.source && <div className="break-all">文件：{marker.source}{sourceSize ? ` · ${sourceSize}` : ''}</div>}

@@ -180,6 +180,10 @@ function getImportRecoveryHealth(): RuntimeHealthCustom {
                 importCurrent: null,
                 importItemDone: null,
                 importItemTotal: null,
+                importCurrentFile: null,
+                importCurrentFileSize: null,
+                importAssetDone: null,
+                importAssetTotal: null,
             };
         }
         const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -188,6 +192,10 @@ function getImportRecoveryHealth(): RuntimeHealthCustom {
             importCurrent: parsed.current ?? null,
             importItemDone: parsed.itemDone ?? null,
             importItemTotal: parsed.itemTotal ?? null,
+            importCurrentFile: parsed.currentFile ?? null,
+            importCurrentFileSize: parsed.currentFileSize ?? null,
+            importAssetDone: parsed.assetDone ?? null,
+            importAssetTotal: parsed.assetTotal ?? null,
         };
     } catch {
         return {
@@ -195,6 +203,10 @@ function getImportRecoveryHealth(): RuntimeHealthCustom {
             importCurrent: null,
             importItemDone: null,
             importItemTotal: null,
+            importCurrentFile: null,
+            importCurrentFileSize: null,
+            importAssetDone: null,
+            importAssetTotal: null,
         };
     }
 }

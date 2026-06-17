@@ -65,4 +65,35 @@ describe('backupStore importFullData', () => {
 
         await expect(DB.getMessagesByCharId('old-char')).resolves.toHaveLength(0);
     });
+
+    it('runs beforeWrite for each chunk before writing items', async () => {
+        const calls: Array<{ label: string; itemDone?: number; itemTotal?: number; storeName?: string }> = [];
+        const data = {
+            timestamp: Date.now(),
+            version: 1,
+            characters: [{ id: 'char-a', name: 'A' }],
+            messages: Array.from({ length: 3 }, (_, index) => makeMessage(index + 1)),
+        } as FullBackupData;
+
+        await DB.importFullData(data, {
+            batchSize: 2,
+            beforeWrite: async (root, label, progress) => {
+                calls.push({ label, ...progress });
+                if (label !== '聊天记录' || !Array.isArray(root)) return;
+                for (const item of root) {
+                    item.content = `${item.content} restored`;
+                }
+            },
+        });
+
+        const messageCalls = calls.filter(item => item.label === '聊天记录');
+        expect(messageCalls.map(item => item.itemDone)).toEqual([2, 3]);
+
+        const saved = await DB.getMessagesByCharId('char-a');
+        expect(saved.map(item => item.content)).toEqual([
+            'message 1 restored',
+            'message 2 restored',
+            'message 3 restored',
+        ]);
+    });
 });
