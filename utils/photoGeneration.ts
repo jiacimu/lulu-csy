@@ -1651,12 +1651,17 @@ function isGeminiOpenAICompatibleImageModel(
     }) === 'gemini';
 }
 
-function buildGeminiCompatibleImageRequestBody(model: string, prompt: unknown): Record<string, unknown> {
+function buildGeminiCompatibleImageRequestBody(
+    provider: OpenAICompatibleImageProviderConfig,
+    meta: PhotoMeta,
+    model: string,
+    prompt: unknown,
+): Record<string, unknown> {
     const body: Record<string, unknown> = {
         model,
         prompt,
     };
-    const size = String(GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS.size || '').trim();
+    const size = String(meta.size || provider.size || GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS.size || '').trim();
     if (size) body.size = normalizeOpenAIImageSize(size);
     const responseFormat = GEMINI_OPENAI_COMPATIBLE_IMAGE_DEFAULTS.responseFormat || 'b64_json';
     if (responseFormat && responseFormat !== 'auto') {
@@ -1677,7 +1682,7 @@ function buildOpenAICompatibleImageRequestBody(
     const model = normalizeOpenAICompatibleModelId(provider.model);
     const prompt = meta.finalPrompt || meta.positivePrompt;
     if (isGeminiOpenAICompatibleImageModel(provider, model)) {
-        return buildGeminiCompatibleImageRequestBody(model, prompt);
+        return buildGeminiCompatibleImageRequestBody(provider, meta, model, prompt);
     }
     const body: Record<string, unknown> = {
         model,
