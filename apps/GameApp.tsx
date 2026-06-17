@@ -78,6 +78,12 @@ type GameTimelineItem =
     | { type: 'summary'; summary: GameSummaryChunk; index: number }
     | { type: 'log'; log: GameLog; index: number; round: number };
 
+type GameLogRoundGroup = {
+    round: number;
+    label: string;
+    items: GameLogRoundItem[];
+};
+
 const isRoundStarter = (log: GameLog) => log.role === 'player' || log.role === 'system';
 
 const getLogRoundItems = (logs: GameLog[]): GameLogRoundItem[] => {
@@ -126,20 +132,89 @@ const getLogsForSummaryRange = (logs: GameLog[], startRound: number, endRound: n
         (item.round >= startRound && item.round <= endRound)
     ));
 
+const getRoundLabel = (round: number) => round > 0 ? `第${round}轮` : '序章';
+
+const getGameLogSpeakerLabel = (log: GameLog) => log.role === 'gm'
+    ? 'GM'
+    : log.role === 'system'
+        ? 'System'
+        : (log.speakerName || 'Player');
+
+const formatDiceForPrompt = (diceRoll?: GameLog['diceRoll']) =>
+    diceRoll ? ` [D20=${diceRoll.result}/${diceRoll.max}]` : '';
+
+const formatDiceForDisplay = (diceRoll?: GameLog['diceRoll']) => {
+    if (!diceRoll) return '';
+    const parts = [`D20 ${diceRoll.result}/${diceRoll.max}`];
+    if (diceRoll.check) parts.push(diceRoll.check);
+    if (typeof diceRoll.success === 'boolean') parts.push(diceRoll.success ? '成功' : '失败');
+    return parts.join(' · ');
+};
+
 const formatGameLogForPrompt = (item: GameLogRoundItem) => {
     const { log, round } = item;
-    const speaker = log.role === 'gm'
-        ? 'GM'
-        : log.role === 'system'
-            ? 'System'
-            : (log.speakerName || 'Player');
-    const roundLabel = round > 0 ? `第${round}轮` : '序章';
-    const dice = log.diceRoll ? ` [D20=${log.diceRoll.result}/${log.diceRoll.max}]` : '';
+    const speaker = getGameLogSpeakerLabel(log);
+    const roundLabel = getRoundLabel(round);
+    const dice = formatDiceForPrompt(log.diceRoll);
     return `[${roundLabel} | ${speaker}${dice}]: ${log.content}`;
 };
 
 const formatSummaryForPrompt = (summary: GameSummaryChunk, index: number) =>
     `总结${index + 1}（第${summary.startRound}-${summary.endRound}轮）:\n${summary.content}`;
+
+const groupLogItemsByRound = (items: GameLogRoundItem[]): GameLogRoundGroup[] => {
+    const groups: GameLogRoundGroup[] = [];
+    for (const item of items) {
+        const lastGroup = groups[groups.length - 1];
+        if (!lastGroup || lastGroup.round !== item.round) {
+            groups.push({
+                round: item.round,
+                label: getRoundLabel(item.round),
+                items: [item]
+            });
+        } else {
+            lastGroup.items.push(item);
+        }
+    }
+    return groups;
+};
+
+const buildSummaryOriginalCopyText = (game: GameSession, summary: GameSummaryChunk) => {
+    const items = getLogsForSummaryRange(game.logs, summary.startRound, summary.endRound);
+    const body = items.map(formatGameLogForPrompt).join('\n') || '暂无原文记录';
+    return `《${game.title}》隐藏原文\n第 ${summary.startRound}-${summary.endRound} 轮\n\n${body}`;
+};
+
+const writeTextToClipboard = async (text: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch {
+            // Fall through to the DOM fallback for non-secure contexts.
+        }
+    }
+
+    if (typeof document === 'undefined') return false;
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.style.left = '-9999px';
+    textarea.style.opacity = '0';
+
+    document.body.appendChild(textarea);
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+
+    try {
+        return document.execCommand('copy');
+    } finally {
+        document.body.removeChild(textarea);
+    }
+};
 
 const buildCompressedLogContext = (game: GameSession) => {
     const summaries = getValidSummaries(game);
@@ -253,6 +328,55 @@ const GameMarkdown: React.FC<{ content: string, theme: any, customStyle?: { font
     );
 };
 
+const SummaryOriginalLogPanel: React.FC<{
+    groups: GameLogRoundGroup[];
+    theme: any;
+    customStyle: { fontSize: number, color: string };
+}> = ({ groups, theme, customStyle }) => {
+    if (groups.length === 0) {
+        return (
+            <div className={`mt-4 border-t ${theme.border} pt-4 text-xs opacity-60`}>
+                暂无可回看的原文记录
+            </div>
+        );
+    }
+
+    return (
+        <div className={`mt-4 space-y-4 border-t ${theme.border} pt-4`}>
+            {groups.map(group => (
+                <section key={group.round} className={`border-l-2 ${theme.border} pl-3`}>
+                    <div className={`mb-2 font-sans text-[10px] font-bold tracking-wider ${theme.accent}`}>
+                        {group.label}
+                    </div>
+                    <div className="space-y-3">
+                        {group.items.map(item => {
+                            const speaker = getGameLogSpeakerLabel(item.log);
+                            const dice = formatDiceForDisplay(item.log.diceRoll);
+                            const isPlayer = item.log.role === 'player';
+
+                            return (
+                                <article key={item.log.id || item.index} className="border-b border-current/10 pb-3 last:border-b-0 last:pb-0">
+                                    <div className="mb-1.5 flex flex-wrap items-center gap-1.5 font-sans text-[10px] opacity-70">
+                                        <span className={`font-bold ${isPlayer ? 'text-orange-300' : theme.accent}`}>{speaker}</span>
+                                        {dice && (
+                                            <span className="rounded bg-white/10 px-1.5 py-0.5 text-yellow-300">
+                                                {dice}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className={`break-words text-sm ${isPlayer ? 'rounded-xl bg-orange-600/20 px-3 py-2 text-white' : ''}`}>
+                                        <GameMarkdown content={item.log.content} theme={theme} customStyle={customStyle} />
+                                    </div>
+                                </article>
+                            );
+                        })}
+                    </div>
+                </section>
+            ))}
+        </div>
+    );
+};
+
 const GameApp: React.FC = () => {
     const { closeApp, characters, userProfile, apiConfig, addToast, updateCharacter } = useOS();
     const [view, setView] = useState<'lobby' | 'create' | 'play'>('lobby');
@@ -282,12 +406,17 @@ const GameApp: React.FC = () => {
     const [isArchiving, setIsArchiving] = useState(false);
     const [showTools, setShowTools] = useState(false); // Default hidden
     const [showParty, setShowParty] = useState(true);  // Default visible
+    const [expandedSummaryId, setExpandedSummaryId] = useState<string | null>(null);
     const [uiSettings, setUiSettings] = useState<{fontSize: number, color: string}>({ fontSize: 14, color: '' });
 
     // SAN Lock: Sync from activeGame on load
     const [sanityLocked, setSanityLocked] = useState(false);
     useEffect(() => {
         if (activeGame) setSanityLocked(!!activeGame.sanityLocked);
+    }, [activeGame?.id]);
+
+    useEffect(() => {
+        setExpandedSummaryId(null);
     }, [activeGame?.id]);
 
     useEffect(() => {
@@ -312,6 +441,17 @@ const GameApp: React.FC = () => {
     const loadGames = async () => {
         const list = await DB.getAllGames();
         setGames(list.sort((a,b) => b.lastPlayedAt - a.lastPlayedAt));
+    };
+
+    const handleCopySummaryOriginal = async (summary: GameSummaryChunk) => {
+        if (!activeGame) return;
+
+        const copied = await writeTextToClipboard(buildSummaryOriginalCopyText(activeGame, summary));
+        if (copied) {
+            addToast(`第 ${summary.startRound}-${summary.endRound} 轮原文已复制`, 'success');
+        } else {
+            addToast('复制失败，请手动选择原文', 'error');
+        }
     };
 
     // --- Helper: Robust API Call ---
@@ -1275,14 +1415,46 @@ Output: A concise but complete Chinese final summary in 1-3 sentences. Include k
                 {timeline.map((item) => {
                     if (item.type === 'summary') {
                         const { summary } = item;
+                        const isExpanded = expandedSummaryId === summary.id;
+                        const originalGroups = isExpanded
+                            ? groupLogItemsByRound(getLogsForSummaryRange(activeGame.logs, summary.startRound, summary.endRound))
+                            : [];
+
                         return (
                             <div key={summary.id} className="animate-fade-in my-4 relative">
                                 <div className={`p-5 rounded-lg border-2 ${theme.border} ${theme.cardBg} shadow-sm relative mx-auto w-full text-sm`}>
                                     <div className="absolute -top-3 left-4 bg-inherit px-2 text-[10px] font-bold uppercase tracking-widest opacity-80 border border-inherit rounded">Auto Summary</div>
-                                    <div className={`mb-3 text-[10px] font-sans ${theme.accent} opacity-80`}>
-                                        总结 {item.index + 1} · 第 {summary.startRound}-{summary.endRound} 轮原文已隐藏
+                                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 font-sans">
+                                        <div className={`text-[10px] ${theme.accent} opacity-80`}>
+                                            总结 {item.index + 1} · 第 {summary.startRound}-{summary.endRound} 轮原文已隐藏
+                                        </div>
+                                        <div className="flex shrink-0 items-center gap-1.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => setExpandedSummaryId(isExpanded ? null : summary.id)}
+                                                className={`rounded border ${theme.border} bg-black/15 px-2 py-1 text-[10px] font-bold opacity-80 transition-all hover:bg-white/10 hover:opacity-100 active:scale-95`}
+                                            >
+                                                {isExpanded ? '收起原文' : '查看原文'}
+                                            </button>
+                                            {isExpanded && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleCopySummaryOriginal(summary)}
+                                                    className={`rounded border ${theme.border} bg-black/15 px-2 py-1 text-[10px] font-bold opacity-80 transition-all hover:bg-white/10 hover:opacity-100 active:scale-95`}
+                                                >
+                                                    复制原文
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                     <GameMarkdown content={summary.content} theme={theme} customStyle={uiSettings} />
+                                    {isExpanded && (
+                                        <SummaryOriginalLogPanel
+                                            groups={originalGroups}
+                                            theme={theme}
+                                            customStyle={uiSettings}
+                                        />
+                                    )}
                                 </div>
                             </div>
                         );
