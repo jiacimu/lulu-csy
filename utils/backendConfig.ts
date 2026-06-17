@@ -1,10 +1,13 @@
 /**
  * Shared backend config and auth helpers.
  *
- * Resolution order for backend URL/token is intentionally fixed:
- *   1. localStorage override (debug-only)
+ * Resolution order for backend URL is intentionally fixed:
+ *   1. localStorage override for local debug backends only
  *   2. Vite environment variables
  *   3. code fallback defaults
+ *
+ * Backend token is stricter: build env wins unless the active backend URL is a
+ * real local debug override. This prevents stale beta tokens from breaking prod.
  */
 
 import {
@@ -32,6 +35,9 @@ export type SetUserIdOptions = {
 };
 
 type EnvMap = Record<string, string | undefined>;
+type RuntimeGlobal = typeof globalThis & {
+    process?: { env?: EnvMap };
+};
 type BackendQueryValue = string | number | boolean | null | undefined;
 export type BackendConfigSource = 'local_override' | 'build_env' | 'default_fallback' | 'missing';
 export interface BackendResolutionDebug {
@@ -48,7 +54,11 @@ function getViteEnv(): EnvMap {
 }
 
 function readEnvString(key: string): string | null {
-    const raw = getViteEnv()[key];
+    const viteEnv = getViteEnv();
+    const processEnv = (globalThis as RuntimeGlobal).process?.env;
+    const raw = viteEnv.MODE === 'test'
+        ? processEnv?.[key] ?? viteEnv[key]
+        : viteEnv[key] ?? processEnv?.[key];
     if (typeof raw !== 'string') return null;
     const trimmed = raw.trim();
     return trimmed || null;
@@ -106,11 +116,22 @@ function warnDefaultBackendFallback(): void {
     );
 }
 
-function isLocalDebugBackendHost(hostname: string): boolean {
+export function isLocalDebugBackendHost(hostname: string): boolean {
     return hostname === 'localhost'
         || hostname === '127.0.0.1'
         || hostname === '[::1]'
         || hostname.endsWith('.local');
+}
+
+export function isLocalDebugBackendUrl(value: string | null | undefined): boolean {
+    const resolved = resolveConfiguredBackendUrl(value);
+    if (!resolved) return false;
+
+    try {
+        return isLocalDebugBackendHost(new URL(resolved).hostname);
+    } catch {
+        return false;
+    }
 }
 
 function shouldUseStoredBackendOverride(storedUrl: string, envUrl: string | null): boolean {
@@ -119,11 +140,11 @@ function shouldUseStoredBackendOverride(storedUrl: string, envUrl: string | null
     try {
         const stored = new URL(storedUrl);
         const env = new URL(envUrl);
-        if (stored.host === env.host) {
-            return true;
-        }
         if (isLocalDebugBackendHost(stored.hostname)) {
             return true;
+        }
+        if (stored.host === env.host) {
+            return false;
         }
 
         console.warn(
@@ -141,6 +162,12 @@ export function sanitizeBackendHeader(value: string): string {
 
 export function clearBackendHealthCache(): void {
     safeLocalStorageRemove(HEALTH_CACHE_KEY);
+}
+
+export function clearBackendConfigOverride(): void {
+    safeLocalStorageRemove(BACKEND_URL_KEY);
+    safeLocalStorageRemove(BACKEND_TOKEN_KEY);
+    clearBackendHealthCache();
 }
 
 export function setBackendHealthCache(alive: boolean): void {
@@ -184,22 +211,24 @@ function resolveBackendUrlWithSource(): { value: string | null; source: BackendC
 
 function resolveBackendTokenWithSource(): { value: string | null; source: BackendConfigSource } {
     const storedToken = normalizeConfiguredValue(safeLocalStorageGet(BACKEND_TOKEN_KEY));
-    if (storedToken) {
-        const storedConfigured = normalizeConfiguredValue(safeLocalStorageGet(BACKEND_URL_KEY));
-        if (!storedConfigured) {
-            return { value: storedToken, source: 'local_override' };
-        }
+    const envToken = normalizeConfiguredValue(readEnvString('VITE_CSYOS_BACKEND_TOKEN'));
+    const storedConfigured = normalizeConfiguredValue(safeLocalStorageGet(BACKEND_URL_KEY));
+    const resolvedStored = resolveConfiguredBackendUrl(storedConfigured);
+    const resolvedEnv = resolveConfiguredBackendUrl(readEnvString('VITE_CSYOS_BACKEND_URL'));
+    const storedUrlIsActiveOverride = Boolean(
+        resolvedStored && shouldUseStoredBackendOverride(resolvedStored, resolvedEnv),
+    );
 
-        const resolvedStored = resolveConfiguredBackendUrl(storedConfigured);
-        const resolvedEnv = resolveConfiguredBackendUrl(readEnvString('VITE_CSYOS_BACKEND_URL'));
-        if (resolvedStored && shouldUseStoredBackendOverride(resolvedStored, resolvedEnv)) {
-            return { value: storedToken, source: 'local_override' };
-        }
+    if (storedToken && storedUrlIsActiveOverride) {
+        return { value: storedToken, source: 'local_override' };
     }
 
-    const envToken = normalizeConfiguredValue(readEnvString('VITE_CSYOS_BACKEND_TOKEN'));
     if (envToken) {
         return { value: envToken, source: 'build_env' };
+    }
+
+    if (storedToken) {
+        return { value: storedToken, source: 'local_override' };
     }
 
     const fallbackToken = normalizeConfiguredValue(DEFAULT_BACKEND_TOKEN);

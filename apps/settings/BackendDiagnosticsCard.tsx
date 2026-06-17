@@ -1,6 +1,8 @@
 import React,{ useEffect,useState } from 'react';
 import { useOS } from '../../context/OSContext';
 import {
+  clearBackendConfigOverride,
+  isLocalDebugBackendUrl,
   readBackendRuntimeDebugSnapshot,
   runBackendDiagnostics,
   subscribeBackendRuntimeDebug,
@@ -105,6 +107,7 @@ const BackendDiagnosticsCard: React.FC = () => {
     const { addToast } = useOS();
     const [snapshot, setSnapshot] = useState<BackendRuntimeDebugSnapshot>(() => readBackendRuntimeDebugSnapshot());
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [isClearingOverride, setIsClearingOverride] = useState(false);
     const [remoteBuildInfo, setRemoteBuildInfo] = useState<BuildInfo | null>(null);
     const [buildInfoCheckedAt, setBuildInfoCheckedAt] = useState<number | null>(null);
     const [buildInfoError, setBuildInfoError] = useState<string | null>(null);
@@ -174,28 +177,54 @@ const BackendDiagnosticsCard: React.FC = () => {
         }
     };
 
+    const handleClearBackendOverride = async () => {
+        setIsClearingOverride(true);
+        try {
+            clearBackendConfigOverride();
+            const nextSnapshot = await runBackendDiagnostics();
+            setSnapshot(nextSnapshot);
+            addToast('本地后端覆盖已清除', 'success');
+        } catch (err: any) {
+            addToast(err?.message || '清除本地后端覆盖失败', 'error');
+        } finally {
+            setIsClearingOverride(false);
+        }
+    };
+
     const isBuildStale = shouldRefreshForBuild(remoteBuildInfo, currentBuildId);
     const buildInfoUrl = typeof window !== 'undefined'
         ? new URL('build-info.json', window.location.href).toString()
         : 'build-info.json';
+    const hasNonDebugLocalTokenOverride = snapshot.backendTokenSource === 'local_override'
+        && !isLocalDebugBackendUrl(snapshot.backendUrl);
 
     return (
         <section className="bg-[#fff9f2]/75 backdrop-blur-sm p-5 rounded-3xl border border-[#ecdcc8]/70 space-y-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-start justify-between gap-3">
                 <div>
                     <div className="text-sm font-bold text-[#806a55]">连接诊断</div>
                     <p className="text-[10px] text-[#a7917b] mt-1">
                         这里会直接显示当前页面实际解析到的 backend 配置，不需要再靠控制台猜。
                     </p>
                 </div>
-                <button
-                    type="button"
-                    onClick={() => void handleRefresh()}
-                    disabled={isRefreshing}
-                    className="px-3 py-2 rounded-2xl text-[11px] font-bold bg-white/80 border border-[#ecdcc8] text-[#806a55] active:scale-95 transition-all disabled:opacity-60"
-                >
-                    {isRefreshing ? '检查中...' : '刷新诊断'}
-                </button>
+                <div className="flex shrink-0 flex-col gap-2">
+                    <button
+                        type="button"
+                        onClick={() => void handleRefresh()}
+                        disabled={isRefreshing}
+                        className="px-3 py-2 rounded-2xl text-[11px] font-bold bg-white/80 border border-[#ecdcc8] text-[#806a55] active:scale-95 transition-all disabled:opacity-60"
+                    >
+                        {isRefreshing ? '检查中...' : '刷新诊断'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => void handleClearBackendOverride()}
+                        disabled={isClearingOverride}
+                        className="px-3 py-2 rounded-2xl text-[11px] font-bold bg-[#fdf3e8] border border-[#ecc9a6] text-[#9a6c3e] active:scale-95 transition-all disabled:opacity-60"
+                    >
+                        {isClearingOverride ? '清除中...' : '清除本地覆盖'}
+                    </button>
+                </div>
             </div>
 
             <div className="rounded-2xl bg-white/70 border border-[#efe5d8] p-4 text-[11px] text-[#7b6959] leading-relaxed">
@@ -207,6 +236,13 @@ const BackendDiagnosticsCard: React.FC = () => {
                 <div className="rounded-2xl bg-[#fde7e7] border border-[#f2b6b6] px-4 py-3 text-[11px] text-[#a95353] leading-relaxed">
                     当前页面的构建版本和线上 `build-info.json` 不一致，这通常表示你命中了旧缓存包。
                     先清缓存或强刷，再判断正式环境是否还在报旧问题。
+                </div>
+            )}
+
+            {hasNonDebugLocalTokenOverride && (
+                <div className="rounded-2xl bg-[#fde7e7] border border-[#f2b6b6] px-4 py-3 text-[11px] text-[#a95353] leading-relaxed">
+                    当前 Backend Token 来自本地覆盖，但 Backend URL 不是本地调试地址。
+                    这可能让正式环境继续使用旧 token；点击“清除本地覆盖”后再重新初始化推送。
                 </div>
             )}
 
